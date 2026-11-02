@@ -114,4 +114,18 @@ describe('buildModelListing execution_status (#1100)', () => {
     seedKey('groq', 'healthy');
     expect(statusFor('turso-model')).toBe('ready');
   });
+
+  it('reports ready when FREEAPI_DB_DRIVER is set to turso', () => {
+    const original = process.env.FREEAPI_DB_DRIVER;
+    try {
+      process.env.FREEAPI_DB_DRIVER = 'turso';
+      initDb(':memory:');
+      seedModel('groq', 'env-turso-model');
+      seedKey('groq', 'healthy');
+      expect(statusFor('env-turso-model')).toBe('ready');
+    } finally {
+      if (original === undefined) delete process.env.FREEAPI_DB_DRIVER;
+      else process.env.FREEAPI_DB_DRIVER = original;
+    }
+  });
 });

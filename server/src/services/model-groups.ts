@@ -95,8 +95,14 @@ export function isUnifyEnabled(): boolean {
   return true;
 }
 
+let onModelGroupsChangeCb: (() => void) | null = null;
+export function setOnModelGroupsChange(cb: () => void): void {
+  onModelGroupsChangeCb = cb;
+}
+
 export function setUnifyEnabled(on: boolean): void {
   setSetting(UNIFY_ENABLED_KEY, on ? '1' : '0');
+  onModelGroupsChangeCb?.();
 }
 
 export function getUnifyOverrides(): UnifyOverrides {
@@ -112,6 +118,7 @@ export function getUnifyOverrides(): UnifyOverrides {
 export function setUnifyOverrides(input: unknown): UnifyOverrides {
   const norm = unifyOverridesSchema.parse(input);
   setSetting(UNIFY_OVERRIDES_KEY, JSON.stringify(norm));
+  onModelGroupsChangeCb?.();
   return norm;
 }
 

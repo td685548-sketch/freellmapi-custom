@@ -1,7 +1,7 @@
 import type { ModelListRow } from '@freellmapi/shared/types.js';
 import { getDb } from '../db/index.js';
-import { isTursoDatabase } from '../db/turso.js';
-import { isUnifyEnabled, getModelGroups } from './model-groups.js';
+import { isTursoDatabase, tursoEnabled } from '../db/turso.js';
+import { isUnifyEnabled, getModelGroups, setOnModelGroupsChange } from './model-groups.js';
 import { hasUsableKeyForModel } from './router.js';
 
 // Shared catalog-listing logic behind both the OpenAI `GET /v1/models` and the
@@ -55,7 +55,7 @@ function executionStatusFor(modelDbIds: number[], available: number): 'ready' | 
   // On remote Turso libSQL, executing per-model rate limit probes for hundreds of catalog
   // rows generates thousands of sequential HTTP round-trips (>60s), causing 502 Bad Gateway
   // timeouts on Render. When an enabled key is available, report 'ready' directly.
-  if (isTursoDatabase(getDb())) return 'ready';
+  if (tursoEnabled() || isTursoDatabase(getDb())) return 'ready';
   return modelDbIds.some(id => hasUsableKeyForModel(id)) ? 'ready' : 'exhausted';
 }
 
@@ -81,11 +81,21 @@ interface CacheEntry {
   expiresAt: number;
 }
 let cachedListing: CacheEntry | null = null;
-const CACHE_TTL_MS = 15_000;
+const CACHE_TTL_MS = 30_000;
+const invalidateHooks: Array<() => void> = [];
+
+export function onInvalidateModelListing(fn: () => void): void {
+  invalidateHooks.push(fn);
+}
 
 export function invalidateModelListingCache(): void {
   cachedListing = null;
+  for (const fn of invalidateHooks) {
+    try { fn(); } catch { /* ignore hook error */ }
+  }
 }
+
+setOnModelGroupsChange(invalidateModelListingCache);
 
 export function buildModelListing(): ModelListing {
   const db = getDb();
