@@ -114,4 +114,46 @@ describe('Granular permissions UI', () => {
     expect(JSON.parse(String(call[1]?.body))).toEqual({ enabled: true })
     expect(container.textContent).not.toContain('Clear cached responses')
   })
+  it('shows the requested cache state while a slow save is pending', async () => {
+    actor.permissions = ['edit_cache']
+    const preferences = { enabled: false, persist: false, ttlSeconds: 3600, maxEntries: 5000 }
+    let finishSave!: () => void
+    const saved = new Promise<void>(resolve => { finishSave = resolve })
+    vi.mocked(apiFetch).mockImplementation(async (_path, options) => {
+      if (options?.method === 'PUT') {
+        await saved
+        Object.assign(preferences, JSON.parse(String(options.body)))
+      }
+      return { ...preferences }
+    })
+    await render(<CacheSettingsSection />)
+    await until(() => expect(container.querySelector('[role="switch"]')).not.toBeNull())
+    await act(async () => { container.querySelector<HTMLElement>('[role="switch"]')!.click() })
+    await until(() => {
+      expect(container.querySelector('[role="switch"]')!.getAttribute('aria-checked')).toBe('true')
+      expect(container.textContent).toContain('Saving cache settings')
+    })
+    await act(async () => { finishSave(); await saved })
+    await until(() => expect(container.textContent).toContain('Cache settings saved'))
+    expect(container.querySelector('[role="switch"]')!.getAttribute('aria-checked')).toBe('true')
+  })
+  it('restores the saved cache state and reports a failed update', async () => {
+    actor.permissions = ['edit_cache']
+    const preferences = { enabled: false, persist: true, ttlSeconds: 3600, maxEntries: 5000 }
+    let failSave!: (error: Error) => void
+    const saved = new Promise<never>((_resolve, reject) => { failSave = reject })
+    vi.mocked(apiFetch).mockImplementation(async (_path, options) => {
+      if (options?.method === 'PUT') return saved
+      return { ...preferences }
+    })
+    await render(<CacheSettingsSection />)
+    await until(() => expect(container.querySelector('[role="switch"]')).not.toBeNull())
+    await act(async () => { container.querySelector<HTMLElement>('[role="switch"]')!.click() })
+    await until(() => expect(container.querySelector('[role="switch"]')!.getAttribute('aria-checked')).toBe('true'))
+    await act(async () => { failSave(new Error('Could not save cache settings')) })
+    await until(() => {
+      expect(container.querySelector('[role="switch"]')!.getAttribute('aria-checked')).toBe('false')
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain('Could not save cache settings')
+    })
+  })
 });
