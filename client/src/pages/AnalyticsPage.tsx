@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { ProviderTiersPanel } from '@/custom/ProviderTiersPanel'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   LineChart, Line, Legend,
@@ -755,6 +756,7 @@ export default function AnalyticsPage() {
       />
 
       <div className="space-y-6">
+        <ProviderTiersPanel range={range} />
         {/* Summary stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-4 gap-3">
           {summaryLoading ? (
