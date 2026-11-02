@@ -33,8 +33,8 @@ export function readTursoConfig(env: NodeJS.ProcessEnv = process.env): { url: st
   return { url, authToken };
 }
 
-export function isTursoDatabase(db: Db): boolean {
-  return remoteDatabases.has(db);
+export function isTursoDatabase(db?: Db): boolean {
+  return tursoEnabled() || (db ? remoteDatabases.has(db) : false);
 }
 
 function sanitizedDriverError(error: unknown, secrets: readonly string[]): Error {

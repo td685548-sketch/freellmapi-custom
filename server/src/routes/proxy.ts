@@ -37,7 +37,7 @@ import { enforceJsonContent } from '../lib/structured-output.js';
 import type { Platform } from '@freellmapi/shared/types.js';
 import { inferQuotaPoolKey, type QuotaObservationContext } from '../services/provider-quota.js';
 import { isUnifyEnabled, getModelGroups, resolveRequestedIdForDispatch } from '../services/model-groups.js';
-import { buildModelListing, servableContextWindow, type NormalizedModel } from '../services/model-listing.js';
+import { buildModelListing, servableContextWindow, type NormalizedModel, onInvalidateModelListing } from '../services/model-listing.js';
 import { claudeFamilyDiscoveryEntries, resolveListedClaudeAlias } from '../services/anthropic-map.js';
 import { compressRequest, formatCompressionHeader } from '../services/compression/pipeline.js';
 import { applyDecisionRouting, routingStrategyHeader } from '../services/routing-decision.js';
@@ -384,7 +384,25 @@ proxyRouter.get(['/models/:id', '/models/*rest'], (req: Request, res: Response) 
 // The `?available=` / `?execution_status=` filters narrow only the catalog
 // rows — `auto`, `fusion` and the named chains are router entries, not models
 // with keys of their own.
+interface CatalogCacheEntry {
+  data: Array<Record<string, unknown>>;
+  expiresAt: number;
+}
+const catalogEntriesCache = new Map<string, CatalogCacheEntry>();
+const CATALOG_ENTRIES_CACHE_TTL_MS = 30_000;
+
+onInvalidateModelListing(() => {
+  catalogEntriesCache.clear();
+});
+
 function buildCatalogEntries(filters: { onlyAvailable?: boolean; executionStatus?: NormalizedModel['executionStatus'] } = {}): Array<Record<string, unknown>> {
+  const cacheKey = `${filters.onlyAvailable ? '1' : '0'}:${filters.executionStatus ?? ''}`;
+  const now = Date.now();
+  const cached = catalogEntriesCache.get(cacheKey);
+  if (cached && now < cached.expiresAt) {
+    return cached.data;
+  }
+
   const { models: allListed, autoContextWindow } = buildModelListing();
   const listed = filters.onlyAvailable ? allListed.filter(m => m.available === 1) : allListed;
 
@@ -458,7 +476,7 @@ function buildCatalogEntries(filters: { onlyAvailable?: boolean; executionStatus
     ? listed.filter(m => m.executionStatus === filters.executionStatus)
     : listed;
 
-  return [
+  const result: Array<Record<string, unknown>> = [
     {
       id: AUTO_MODEL_ID,
       object: 'model',
@@ -522,6 +540,8 @@ function buildCatalogEntries(filters: { onlyAvailable?: boolean; executionStatus
       supported_parameters: supportedParametersForPlatforms(m.platforms, { tools: m.supportsTools }),
     })),
   ];
+  catalogEntriesCache.set(cacheKey, { data: result, expiresAt: now + CATALOG_ENTRIES_CACHE_TTL_MS });
+  return result;
 }
 
 
