@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import Database from 'better-sqlite3';
 import { initDb, getDb } from '../../db/index.js';
+import { wrapTursoDatabase } from '../../db/turso.js';
+import type { Db } from '../../db/types.js';
 import { buildModelListing } from '../../services/model-listing.js';
 import { setCooldown } from '../../services/ratelimit.js';
 
@@ -103,5 +106,12 @@ describe('buildModelListing execution_status (#1100)', () => {
     seedModel('groq', 'scoped-in-model');
     seedKey('groq', 'healthy', 1, ['scoped-in-model']);
     expect(statusFor('scoped-in-model')).toBe('ready');
+  });
+
+  it('reports ready without blocking N+1 probes on Turso databases', () => {
+    initDb(':memory:', { factory: () => wrapTursoDatabase(new Database(':memory:') as unknown as Db, true) });
+    seedModel('groq', 'turso-model');
+    seedKey('groq', 'healthy');
+    expect(statusFor('turso-model')).toBe('ready');
   });
 });

@@ -1,5 +1,6 @@
 import type { ModelListRow } from '@freellmapi/shared/types.js';
 import { getDb } from '../db/index.js';
+import { isTursoDatabase } from '../db/turso.js';
 import { isUnifyEnabled, getModelGroups } from './model-groups.js';
 import { hasUsableKeyForModel } from './router.js';
 
@@ -51,6 +52,10 @@ export interface ModelListing {
 // status alone reports a cooling-down model as ready.
 function executionStatusFor(modelDbIds: number[], available: number): 'ready' | 'needsKey' | 'exhausted' {
   if (available !== 1) return 'needsKey';
+  // On remote Turso libSQL, executing per-model rate limit probes for hundreds of catalog
+  // rows generates thousands of sequential HTTP round-trips (>60s), causing 502 Bad Gateway
+  // timeouts on Render. When an enabled key is available, report 'ready' directly.
+  if (isTursoDatabase(getDb())) return 'ready';
   return modelDbIds.some(id => hasUsableKeyForModel(id)) ? 'ready' : 'exhausted';
 }
 
@@ -70,7 +75,24 @@ export function servableContextWindow(windows: readonly (number | null | undefin
   return known[Math.floor(known.length / 2)]!;
 }
 
+interface CacheEntry {
+  db: unknown;
+  data: ModelListing;
+  expiresAt: number;
+}
+let cachedListing: CacheEntry | null = null;
+const CACHE_TTL_MS = 15_000;
+
+export function invalidateModelListingCache(): void {
+  cachedListing = null;
+}
+
 export function buildModelListing(): ModelListing {
+  const db = getDb();
+  const now = Date.now();
+  if (cachedListing && cachedListing.db === db && now < cachedListing.expiresAt) {
+    return cachedListing.data;
+  }
   const availableExpr = `
     (CASE WHEN m.enabled = 1 AND EXISTS (
         SELECT 1 FROM api_keys k
@@ -78,7 +100,6 @@ export function buildModelListing(): ModelListing {
           AND k.enabled = 1
           AND (m.key_id IS NULL OR k.id = m.key_id)
       ) THEN 1 ELSE 0 END)`;
-  const db = getDb();
 
   let allListed: NormalizedModel[];
 
@@ -145,5 +166,7 @@ export function buildModelListing(): ModelListing {
     allListed.filter(m => m.available === 1).map(m => m.contextWindow),
   );
 
-  return { models: allListed, autoContextWindow };
+  const result: ModelListing = { models: allListed, autoContextWindow };
+  cachedListing = { db, data: result, expiresAt: now + CACHE_TTL_MS };
+  return result;
 }
