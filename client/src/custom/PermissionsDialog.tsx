@@ -1,231 +1,73 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import {
-  Shield,
-  Key,
-  Users,
-  Ticket,
-  FileCheck,
-  ScrollText,
-  Settings,
-  Database,
-  Crown,
-} from 'lucide-react'
+import { Shield, Crown } from 'lucide-react'
 import { Dialog, DialogPopup, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { apiFetch } from '@/lib/api'
 import { toast } from '@/lib/toast'
 import type { AdminUser, Permission } from '../../../shared/user-access'
-import { SYSTEM_PERMISSIONS } from '../../../shared/user-access'
+import { PERMISSION_GROUPS, permissionGranted } from '../../../shared/permissions'
+import { useUserSession } from './use-session'
+import { togglePermissionSelection } from './permission-selection'
 
-interface PermissionMeta {
-  key: Permission
-  name: string
-  description: string
-  icon: typeof Key
+interface PermissionDialogProps {
+  user: AdminUser | null; open: boolean; onOpenChange: (open: boolean) => void; onSuccess: () => void
 }
-
-export const PERMISSION_DEFINITIONS: PermissionMeta[] = [
-  {
-    key: 'manage_keys',
-    name: 'Manage Provider Keys',
-    description: 'Add, edit, test health, and manage upstream provider keys (OpenAI, Gemini, Groq, etc).',
-    icon: Key,
-  },
-  {
-    key: 'manage_users',
-    name: 'Manage Users & Roles',
-    description: 'Manage accounts, promote/demote members, adjust quotas, and assign permissions (except Primary Admin).',
-    icon: Users,
-  },
-  {
-    key: 'manage_invites',
-    name: 'Manage Invites',
-    description: 'Generate, share, and revoke registration invite codes.',
-    icon: Ticket,
-  },
-  {
-    key: 'manage_requests',
-    name: 'Review Registration Requests',
-    description: 'Approve or reject pending registration requests.',
-    icon: FileCheck,
-  },
-  {
-    key: 'view_logs',
-    name: 'View Server Logs',
-    description: 'Inspect live server logs and debug inference errors.',
-    icon: ScrollText,
-  },
-  {
-    key: 'manage_settings',
-    name: 'System Settings',
-    description: 'Configure proxy routes, system parameters, and client profiles.',
-    icon: Settings,
-  },
-  {
-    key: 'manage_backups',
-    name: 'Manage Backups',
-    description: 'Create and restore full database backups.',
-    icon: Database,
-  },
-]
-
-export function PermissionsDialog({
-  user,
-  open,
-  onOpenChange,
-  onSuccess,
-}: {
-  user: AdminUser | null
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  onSuccess: () => void
-}) {
-  const [selected, setSelected] = useState<Set<string>>(new Set())
-
-  useEffect(() => {
-    if (user) {
-      if (user.isPrimary || user.permissions?.includes('*')) {
-        setSelected(new Set(SYSTEM_PERMISSIONS))
-      } else {
-        setSelected(new Set(user.permissions || []))
-      }
-    }
-  }, [user, open])
-
+export function PermissionsDialog(props: PermissionDialogProps) {
+  if (!props.user || !props.open) return null
+  return <PermissionEditor key={`${props.user.id}:${JSON.stringify(props.user.permissions)}`} {...props} user={props.user} />
+}
+function PermissionEditor({ user, open, onOpenChange, onSuccess }: Omit<PermissionDialogProps, 'user'> & { user: AdminUser }) {
+  const { hasPermission } = useUserSession()
+  const [selected, setSelected] = useState<Set<Permission>>(() => new Set(user.isPrimary ? ['*'] : user.permissions || []))
   const mutation = useMutation({
-    mutationFn: (perms: string[]) =>
-      apiFetch<{ success: boolean }>(`/api/admin/users/${user?.id}/permissions`, {
-        method: 'PUT',
-        body: JSON.stringify({ permissions: perms }),
-      }),
-    onSuccess: () => {
-      toast.success('Permissions updated successfully')
-      onSuccess()
-      onOpenChange(false)
-    },
-    onError: (err: any) => {
-      toast.error(err.message || 'Failed to update permissions')
-    },
+    mutationFn: (permissions: Permission[]) => apiFetch(`/api/admin/users/${user?.id}/permissions`, {
+      method: 'PUT', body: JSON.stringify({ permissions }),
+    }),
+    onSuccess: () => { toast.success('Permissions updated successfully'); onSuccess(); onOpenChange(false) },
   })
-
-  if (!user) return null
-
-  const isPrimary = user.isPrimary
-  const isAllSelected = SYSTEM_PERMISSIONS.every(p => selected.has(p))
-
-  const toggle = (key: string) => {
-    if (isPrimary) return
-    setSelected(prev => {
-      const next = new Set(prev)
-      if (next.has(key)) {
-        next.delete(key)
-      } else {
-        next.add(key)
-      }
-      return next
-    })
-  }
-
-  const selectAll = () => {
-    if (isPrimary) return
-    setSelected(new Set(SYSTEM_PERMISSIONS))
-  }
-
-  const clearAll = () => {
-    if (isPrimary) return
-    setSelected(new Set())
-  }
-
-  const handleSave = () => {
-    if (isPrimary) {
-      onOpenChange(false)
-      return
-    }
-    mutation.mutate(Array.from(selected))
-  }
-
+  const locked = user.isPrimary || user.isSelf || !hasPermission('edit_user_permissions')
+  const subject = { permissions: [...selected] }
+  const toggle = (key: Permission) => { if (!locked) setSelected(prev => togglePermissionSelection(prev, key)) }
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogPopup maxWidth="max-w-xl">
+      <DialogPopup maxWidth="max-w-2xl">
         <div className="space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-primary/10 text-primary">
-              <Shield className="size-5" />
-            </div>
-            <div>
-              <DialogTitle className="text-lg">User Permissions</DialogTitle>
-              <DialogDescription>
-                Assign granular access privileges for <strong className="text-foreground">{user.email}</strong>
-              </DialogDescription>
-            </div>
+          <div className="flex items-center gap-3"><Shield className="size-5" /><div>
+            <DialogTitle>User Permissions</DialogTitle>
+            <DialogDescription>Assign actions for <strong>{user.email}</strong></DialogDescription>
+          </div></div>
+          {user.isPrimary ? <p className="flex items-center gap-2 rounded-xl border p-3 text-xs"><Crown className="size-4" />Primary Admin always has full access. Its authority cannot be changed.</p>
+            : user.isSelf ? <p className="text-xs text-muted-foreground">You cannot change your own permissions.</p>
+            : <p className="text-xs text-muted-foreground">Secondary Admins and Members both obey these grants. Each group grants all its child actions. Uncheck a child to narrow a group. You can grant only authority you hold. Combine View with edit/delete permissions to use list-based controls; custom model registration needs Add keys and Manage provider models.</p>}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={selected.has('*')} disabled={locked || !hasPermission('*')} onChange={() => toggle('*')} />Full administrative access</label>
+            <div className="flex gap-2"><Button size="xs" variant="ghost" disabled={locked} onClick={() => setSelected(new Set<Permission>(PERMISSION_GROUPS.flatMap(g => hasPermission(g.key) ? [g.key] : g.children.filter(c => hasPermission(c.key)).map(c => c.key))))}>Select all available</Button>
+              <Button size="xs" variant="ghost" disabled={locked} onClick={() => setSelected(new Set())}>Clear all</Button></div>
           </div>
-
-          {isPrimary && (
-            <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3.5 flex items-center gap-2.5 text-xs text-amber-700 dark:text-amber-400">
-              <Crown className="size-4 shrink-0" />
-              <span>
-                <strong>Primary Admin:</strong> This account holds immutable root authority. Permissions cannot be modified.
-              </span>
-            </div>
-          )}
-
-          {!isPrimary && (
-            <div className="flex justify-end gap-2 text-xs">
-              <Button type="button" variant="ghost" size="xs" onClick={selectAll} disabled={isAllSelected}>
-                Select all
-              </Button>
-              <Button type="button" variant="ghost" size="xs" onClick={clearAll} disabled={selected.size === 0}>
-                Clear all
-              </Button>
-            </div>
-          )}
-
-          <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
-            {PERMISSION_DEFINITIONS.map(({ key, name, description, icon: Icon }) => {
-              const active = isPrimary || selected.has(key)
-              return (
-                <label
-                  key={key}
-                  onClick={() => !isPrimary && toggle(key)}
-                  className={`flex items-start gap-3 p-3 rounded-xl border transition-all cursor-pointer ${
-                    active
-                      ? 'border-primary/40 bg-primary/5 dark:bg-primary/10'
-                      : 'border-border hover:bg-muted/40'
-                  } ${isPrimary ? 'cursor-not-allowed opacity-80' : ''}`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={active}
-                    disabled={isPrimary}
-                    onChange={() => toggle(key)}
-                    className="mt-1 size-4 rounded border-muted-foreground/30 text-primary focus:ring-primary shrink-0"
-                  />
-                  <div className="space-y-0.5 flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <Icon className="size-3.5 text-muted-foreground" />
-                      <span className="text-xs font-semibold text-foreground">{name}</span>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground leading-relaxed">{description}</p>
-                  </div>
+          <div className="max-h-[50vh] space-y-3 overflow-y-auto pr-1">
+            {PERMISSION_GROUPS.map(group => (
+              <fieldset key={group.key} className="rounded-2xl border p-3">
+                <legend className="px-1 text-sm font-semibold">{group.title}</legend>
+                <label className="flex items-start gap-2 border-b pb-3 text-sm">
+                  <input type="checkbox" checked={permissionGranted(subject, group.key) || group.children.every(c => permissionGranted(subject, c.key))} disabled={locked || !hasPermission(group.key)} onChange={() => toggle(group.key)} />
+                  <span>All actions in this group<span className="block text-xs text-muted-foreground">{group.description}</span></span>
                 </label>
-              )
-            })}
+                <div className="grid gap-3 pt-3 sm:grid-cols-2">
+                  {group.children.map(child => <label key={child.key} className="flex items-start gap-2 text-xs">
+                    <input type="checkbox" checked={permissionGranted(subject, child.key)} disabled={locked || !hasPermission(child.key)} onChange={() => toggle(child.key)} />
+                    <span><span className="font-medium">{child.title}</span><span className="mt-0.5 block text-muted-foreground">{child.description}</span></span>
+                  </label>)}
+                </div>
+              </fieldset>
+            ))}
           </div>
-
-          <div className="flex justify-end gap-2 pt-2 border-t">
-            <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            {!isPrimary && (
-              <Button size="sm" onClick={handleSave} disabled={mutation.isPending}>
-                {mutation.isPending ? 'Saving…' : 'Save Permissions'}
-              </Button>
-            )}
+          {mutation.isError && <p role="alert" className="text-xs text-destructive">{mutation.error.message}</p>}
+          <div className="flex justify-end gap-2 border-t pt-3"><Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>Cancel</Button>
+            {!locked && <Button size="sm" disabled={mutation.isPending} onClick={() => mutation.mutate([...selected])}>{mutation.isPending ? 'Saving…' : 'Save Permissions'}</Button>}
           </div>
         </div>
       </DialogPopup>
     </Dialog>
   )
 }
-

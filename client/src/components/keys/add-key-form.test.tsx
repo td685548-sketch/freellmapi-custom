@@ -52,6 +52,15 @@ function posted() {
   return call ? JSON.parse(String(call[1]!.body)) : undefined
 }
 
+it('does not fetch existing credentials for an add-only operator', async () => {
+  mount(<AddKeyForm onSuccess={onSuccess} initialPlatform="groq" canViewKeys={false} />)
+  await act(async () => { await Promise.resolve() })
+  expect(vi.mocked(apiFetch).mock.calls.some(([path]) => path === '/api/keys')).toBe(false)
+  enter(keyInput(), 'gsk_local_test')
+  await submit()
+  expect(posted()).toEqual({ platform: 'groq', key: 'gsk_local_test' })
+});
+
 describe.each<Platform>(['kilo', 'ovh', 'aihorde'])('adding a %s key (key optional)', platform => {
   it('keeps the key field enabled with an Optional placeholder and the Get API key link', () => {
     mount(<AddKeyForm onSuccess={onSuccess} initialPlatform={platform} />)

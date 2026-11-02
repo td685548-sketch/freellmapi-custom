@@ -24,7 +24,7 @@ type ProfileWithKey = ClientProfile & { key: string }
 // Per-client API keys with a server-enforced system prompt (#411). Deliberately
 // a collapsed accordion under the unified-key card — the unified key stays the
 // first-class flow; this is the power-user add-on.
-export function ClientProfilesSection() {
+export function ClientProfilesSection({ canView = true, canEdit = true }: { canView?: boolean; canEdit?: boolean } = {}) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
@@ -34,12 +34,13 @@ export function ClientProfilesSection() {
   const [newKey, setNewKey] = useState<{ id: number; key: string } | null>(null)
   const [copied, setCopied] = useState(false)
 
-  const { data: profiles = [] } = useQuery<ClientProfile[]>({
+  const { data: storedProfiles = [] } = useQuery<ClientProfile[]>({
     queryKey: ['client-profiles'],
     queryFn: () => apiFetch('/api/client-profiles'),
-    enabled: open,
+    enabled: open && canView,
   })
 
+  const profiles = canView ? storedProfiles : []
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['client-profiles'] })
 
   const create = useMutation({
@@ -137,10 +138,12 @@ export function ClientProfilesSection() {
                   <Switch
                     size="sm"
                     checked={p.enabled}
+                    disabled={!canEdit}
                     onCheckedChange={(enabled) => update.mutate({ id: p.id, enabled })}
                     aria-label={t('keys.cpEnabledAria')}
                   />
                   <ConfirmButton
+                    disabled={!canEdit}
                     onConfirm={() => rotate.mutate(p.id)}
                     size="icon-xs"
                     armedSize="xs"
@@ -151,6 +154,7 @@ export function ClientProfilesSection() {
                     <RotateCw className="size-3.5" />
                   </ConfirmButton>
                   <ConfirmButton
+                    disabled={!canEdit}
                     onConfirm={() => remove.mutate(p.id)}
                     size="icon-xs"
                     armedSize="xs"
@@ -167,7 +171,7 @@ export function ClientProfilesSection() {
 
           <form
             className="space-y-2 border-t pt-4"
-            onSubmit={(e) => { e.preventDefault(); if (name.trim()) create.mutate() }}
+            onSubmit={(e) => { e.preventDefault(); if (canEdit && name.trim()) create.mutate() }}
           >
             <Input
               value={name}
@@ -183,7 +187,7 @@ export function ClientProfilesSection() {
               aria-label={t('keys.cpPromptLabel')}
               rows={3}
             />
-            <Button type="submit" size="sm" disabled={!name.trim() || create.isPending}>
+            <Button type="submit" size="sm" disabled={!name.trim() || create.isPending || !canEdit}>
               {t('keys.cpCreate')}
             </Button>
           </form>

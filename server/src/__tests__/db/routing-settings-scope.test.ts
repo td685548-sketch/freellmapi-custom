@@ -69,6 +69,8 @@ describe('Turso routing configuration round trips', () => {
       expect(read('routing_strategy')).toBe('speed');
       expect(read('routing_explore_enabled')).toBe('1');
       expect(read('routing_peak_timezone')).toBeUndefined();
+      expect(read('response_cache_enabled')).toBeUndefined();
+      expect(read('response_cache_persist')).toBeUndefined();
       expect(prepare).toHaveBeenCalledTimes(1);
       expect(read('unified_api_key')).toBe('secret');
       expect(prepare).toHaveBeenCalledTimes(2);

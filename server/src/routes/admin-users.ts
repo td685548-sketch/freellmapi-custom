@@ -9,6 +9,7 @@ import {
   revokeSessionsForUser,
   revokeApiKeysForUser,
   userExists,
+  isPrimaryAdmin,
 } from '../services/users.js';
 import { listAllUsersUsage, setUserRpmLimit } from '../services/user-quotas.js';
 import type { SessionUser } from '../services/auth.js';
@@ -181,6 +182,10 @@ const quotaSchema = z.object({
 adminUsersRouter.put('/:id/quota', (req: Request, res: Response) => {
   const id = parseId(req.params.id, res);
   if (id === null) return;
+  if (isPrimaryAdmin(id)) {
+    res.status(403).json({ error: { message: 'The primary admin account is protected.', type: 'primary_admin_protected' } });
+    return;
+  }
   if (!userExists(id)) {
     res.status(404).json({ error: { message: 'No such account.', type: 'user_not_found' } });
     return;

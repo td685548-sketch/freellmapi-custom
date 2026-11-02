@@ -26,6 +26,8 @@ import { Tooltip } from '@/components/tooltip'
 import { SUPPORTED_LOCALES, type Locale, useI18n } from '@/i18n'
 import { type Theme, useTheme } from '@/theme-context'
 import { apiFetch } from '@/lib/api'
+import { CacheSettingsSection } from '@/custom/CacheSettingsSection'
+import { useUserSession } from '@/custom/use-session'
 
 // Small info affordance used next to labels a first-time user can't be expected
 // to understand. It's a real <button> so it reaches the tooltip by keyboard
@@ -572,6 +574,7 @@ function GeneralSection() {
           />
         )}
       />
+      <CacheSettingsSection />
     </>
   )
 }
@@ -584,8 +587,9 @@ export function SettingsDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const { t } = useI18n()
+  const { hasPermission } = useUserSession()
   const [section, setSection] = useState<SectionId>('general')
-  const state = useCompressionSettings(open)
+  const state = useCompressionSettings(open && hasPermission('view_settings'))
   const { config, busy, error, save } = state
   const compressionSection = section !== 'general'
   const loading = compressionSection && !config && busy === 'load'
@@ -610,7 +614,7 @@ export function SettingsDialog({
             aria-label={t('settings.sections')}
             className="flex shrink-0 gap-1 overflow-x-auto border-b p-2 sm:w-48 sm:flex-col sm:overflow-x-visible sm:border-b-0 sm:border-e sm:p-3"
           >
-            {SECTIONS.map(item => {
+            {SECTIONS.filter(item => item.id === 'general' || (hasPermission('view_settings') && (item.id !== 'preview' || hasPermission('manage_compression')))).map(item => {
               const Icon = item.icon
               const selected = section === item.id
               return (
@@ -660,7 +664,7 @@ export function SettingsDialog({
             <button
               type="button"
               onClick={save}
-              disabled={busy !== null}
+              disabled={busy !== null || !hasPermission('manage_compression')}
               className="rounded-lg bg-foreground px-4 py-2 text-xs font-medium text-background transition-opacity outline-none hover:opacity-90 focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50"
             >
               {busy === 'save' ? t('common.saving') : t('common.saveChanges')}

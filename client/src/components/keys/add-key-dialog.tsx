@@ -10,16 +10,18 @@ import { CustomProviderSection } from './custom-provider-section'
 import { ModelSelectDialog } from './model-select-dialog'
 
 type Pane = 'provider' | 'import' | 'custom'
+export interface KeyDialogCapabilities { view: boolean; edit: boolean; import: boolean; models: boolean }
 
 // The single "Add key" surface: one dialog, three panes (paste a provider key,
 // import a file, or point at a custom OpenAI-compatible endpoint). Each pane
 // keeps its own mutation and asks the dialog to close on success.
 // `initialPlatform` preselects a provider in the "Provider key" pane, for
 // entry points like the checklist chips that already name the provider.
-export function AddKeyDialog({ open, onOpenChange, initialPlatform }: {
+export function AddKeyDialog({ open, onOpenChange, initialPlatform, capabilities }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   initialPlatform?: Platform
+  capabilities?: KeyDialogCapabilities
 }) {
   const { t } = useI18n()
   const [pane, setPane] = useState<Pane>('provider')
@@ -32,7 +34,7 @@ export function AddKeyDialog({ open, onOpenChange, initialPlatform }: {
   const [scopeOffer, setScopeOffer] = useState<AddedKeyScopeOffer | null>(null)
   const finishAdd = (offer?: AddedKeyScopeOffer) => {
     close()
-    setScopeOffer(offer ?? null)
+    setScopeOffer(capabilities?.edit === false ? null : offer ?? null)
   }
 
   // The pane sticks across opens (reopening to import twice should not reset
@@ -62,16 +64,16 @@ export function AddKeyDialog({ open, onOpenChange, initialPlatform }: {
           <SegmentedControl
             value={pane}
             onValueChange={setPane}
-            options={[
+            options={([
               { value: 'provider', label: t('keys.paneProviderKey') },
               { value: 'import', label: t('keys.paneImportFile') },
               { value: 'custom', label: t('keys.paneCustomEndpoint') },
-            ]}
+            ] as { value: Pane; label: string }[]).filter(option => option.value === 'provider' || (option.value === 'import' ? capabilities?.import !== false : capabilities?.models !== false))}
             ariaLabel={t('keys.addKey')}
             className="mb-5"
           />
 
-          {pane === 'provider' && <AddKeyForm onSuccess={finishAdd} initialPlatform={initialPlatform} />}
+          {pane === 'provider' && <AddKeyForm onSuccess={finishAdd} initialPlatform={initialPlatform} canViewKeys={capabilities?.view} canImportKeys={capabilities?.import} />}
           {pane === 'import' && <ImportKeysSection onImported={close} />}
           {pane === 'custom' && <CustomProviderSection onAdded={close} />}
         </DialogPopup>

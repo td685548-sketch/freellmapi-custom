@@ -87,7 +87,13 @@ export function isCacheEnabled(): boolean {
  * a privacy decision an operator may want to decline while still caching.
  */
 export function cachePersistenceEnabled(): boolean {
-  return isCacheEnabled() && envFlag('RESPONSE_CACHE_PERSIST', true);
+  return isCacheEnabled() && cachePersistencePreference();
+}
+
+export function cachePersistencePreference(): boolean {
+  const stored = readSetting('response_cache_persist');
+  return stored !== undefined && stored.trim() !== ''
+    ? /^(1|true|on|yes)$/i.test(stored.trim()) : envFlag('RESPONSE_CACHE_PERSIST', true);
 }
 
 /** Entry lifetime. Default 1h: long enough to absorb retries and agent re-runs,

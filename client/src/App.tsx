@@ -42,14 +42,11 @@ import SearchPage from '@/pages/SearchPage'
 import DecisionPage from '@/pages/DecisionPage'
 import MediaDetailPage from '@/pages/MediaDetailPage'
 import EmbeddingDetailPage from '@/pages/EmbeddingDetailPage'
-import AnalyticsPage from '@/pages/AnalyticsPage'
-import LogsPage from '@/pages/LogsPage'
+import { useAdministrativeAccess } from '@/custom/use-administrative-access'
+import { AnalyticsAccessPage, InvitesAccessPage, LogsAccessPage, UsersAccessPage } from '@/custom/ScopedAdministrativePages'
 import PremiumPage from '@/pages/PremiumPage'
 import NotFoundPage from '@/pages/NotFoundPage'
 import AgentsPage from '@/pages/AgentsPage'
-import InvitesPage from '@/custom/InvitesPage'
-import UsersPage from '@/custom/UsersPage'
-import { useUserSession } from '@/custom/use-session'
 
 // Every failed mutation surfaces as an error toast, so no action fails
 // silently. A page that already shows the failure inline can opt out with
@@ -178,6 +175,7 @@ if (isDesktopApp) {
 function AccountMenuItems({
   showUpgrade,
   canManageSettings = true,
+  canManageUpdates = canManageSettings,
   upgradeLabel,
   settingsLabel,
   updatesLabel,
@@ -192,6 +190,7 @@ function AccountMenuItems({
 }: {
   showUpgrade: boolean
   canManageSettings?: boolean
+  canManageUpdates?: boolean
   upgradeLabel: string
   settingsLabel: string
   updatesLabel: string
@@ -218,10 +217,10 @@ function AccountMenuItems({
             <Settings />
             {settingsLabel}
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={onOpenUpdates}>
+          {canManageUpdates && <DropdownMenuItem onClick={onOpenUpdates}>
             <RefreshCw />
             {updatesLabel}
-          </DropdownMenuItem>
+          </DropdownMenuItem>}
         </>
       )}
       {/* Desktop signs in with a hidden local account, so it has no credentials
@@ -251,7 +250,7 @@ function Navbar() {
   const { t } = useI18n()
   const location = useLocation()
   const navigate = useNavigate()
-  const { isMember, isAdmin, hasPermission } = useUserSession()
+  const { isMember, isAdmin, hasPermission, group } = useAdministrativeAccess()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [updatesOpen, setUpdatesOpen] = useState(false)
   // The update pill lives outside the navbar; it asks for this dialog by event.
@@ -264,20 +263,20 @@ function Navbar() {
   const { data: premium, licensed, isLoading: premiumLoading, isError: premiumError } = usePremium()
   const showUpgrade = Boolean(premium) && !licensed && !premiumLoading && !premiumError
 
-  const canManageInvites = typeof hasPermission === 'function' ? hasPermission('manage_invites') : isAdmin
-  const canManageUsers = typeof hasPermission === 'function' ? hasPermission('manage_users') : isAdmin
-  const canManageSettings = typeof hasPermission === 'function' ? hasPermission('manage_settings') : isAdmin
-  const canManageKeys = typeof hasPermission === 'function' ? hasPermission('manage_keys') : isAdmin
+  const canManageInvites = typeof hasPermission === 'function' ? group('manage_invites') : isAdmin
+  const canManageUsers = typeof hasPermission === 'function' ? (group('manage_users') || group('manage_requests')) : isAdmin
+  const canManageSettings = typeof hasPermission === 'function' ? group('manage_settings') : isAdmin
+  const canManageKeys = typeof hasPermission === 'function' ? (group('manage_keys') || group('manage_backups') || group('manage_settings')) : isAdmin
 
   const visibleNavItems: Array<{ to: string; labelKey: string; customLabel?: string }> = [
     ...navItems.filter((i) => {
-      if (i.to === '/analytics' && isMember && (typeof hasPermission !== 'function' || !hasPermission('view_logs'))) return false
+      if (i.to === '/analytics' && !group('view_logs')) return false
       // The Keys page reads /api/health and /api/keys, both gated, so leaving
       // the tab up for an account without manage_keys opens a wall of 403s.
       if (i.to === '/keys' && isMember && !canManageKeys) return false
-      if (i.to === '/premium' && isMember) return false
+      if (i.to === '/premium' && !hasPermission('manage_routing')) return false
       return true
-    }),
+    }).map(i => i.to === '/analytics' && !hasPermission('view_analytics') ? { ...i, to: '/logs', labelKey: 'nav.logs' } : i),
     ...(canManageInvites ? [{ to: '/invites', labelKey: 'nav.invites', customLabel: 'Invites' }] : []),
     ...(canManageUsers ? [{ to: '/users', labelKey: 'nav.users', customLabel: 'Users' }] : []),
   ]
@@ -356,6 +355,7 @@ function Navbar() {
                 <AccountMenuItems
                   showUpgrade={showUpgrade}
                   canManageSettings={canManageSettings}
+                  canManageUpdates={hasPermission('manage_updates')}
                   upgradeLabel={t('nav.upgrade')}
                   settingsLabel={t('nav.settings')}
                   updatesLabel={t('settings.checkForUpdates')}
@@ -413,6 +413,7 @@ function Navbar() {
                 <AccountMenuItems
                   showUpgrade={showUpgrade}
                   canManageSettings={canManageSettings}
+                  canManageUpdates={hasPermission('manage_updates')}
                   upgradeLabel={t('nav.upgrade')}
                   settingsLabel={t('nav.settings')}
                   updatesLabel={t('settings.checkForUpdates')}
@@ -525,12 +526,12 @@ function App() {
                       <Route path="/models/decision" element={<DecisionPage />} />
                       <Route path="/playground" element={<PlaygroundPage />} />
                       <Route path="/keys" element={<KeysPage />} />
-                      <Route path="/invites" element={<InvitesPage />} />
-                      <Route path="/users" element={<UsersPage />} />
+                      <Route path="/invites" element={<InvitesAccessPage />} />
+                      <Route path="/users" element={<UsersAccessPage />} />
                       <Route path="/agents" element={<AgentsPage />} />
                       <Route path="/fallback" element={<Navigate to="/models/chat" replace />} />
-                      <Route path="/analytics" element={<AnalyticsPage />} />
-                      <Route path="/logs" element={<LogsPage />} />
+                      <Route path="/analytics" element={<AnalyticsAccessPage />} />
+                      <Route path="/logs" element={<LogsAccessPage />} />
                       <Route path="/premium" element={<PremiumPage />} />
                       <Route path="/test" element={<Navigate to="/playground" replace />} />
                       <Route path="/health" element={<Navigate to="/keys" replace />} />

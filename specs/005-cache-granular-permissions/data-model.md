@@ -1,0 +1,2 @@
+# Data model
+No schema changes. users.permissions remains a JSON array of known parent/leaf names or wildcard. Primary grants always wildcard. Existing secondary admin wildcard remains full; an explicit empty/list is restrictive, absent legacy admin JSON is full and corrupt JSON denies. settings response_cache_enabled and response_cache_persist use 1/0 with env fallback on absence. No provider credentials in the new cache DTO.

@@ -12,7 +12,8 @@ import { toast } from '@/lib/toast'
 import type { InviteCode } from '../../../shared/user-access'
 export type { InviteCode } from '../../../shared/user-access'
 
-export function InvitesPage() {
+export function InvitesPage({ capabilities }: { capabilities?: { view: boolean; create: boolean; revoke: boolean } } = {}) {
+  const can = (action: 'view' | 'create' | 'revoke') => capabilities?.[action] !== false
   const queryClient = useQueryClient()
   const [createOpen, setCreateOpen] = useState(false)
   const [code, setCode] = useState('')
@@ -24,9 +25,10 @@ export function InvitesPage() {
   const { data, isLoading } = useQuery<{ invites: InviteCode[] }>({
     queryKey: ['invites'],
     queryFn: () => apiFetch<{ invites: InviteCode[] }>('/api/invites'),
+    enabled: can('view'),
   })
 
-  const invites = data?.invites ?? []
+  const invites = can('view') ? data?.invites ?? [] : []
 
   const createInviteMutation = useMutation({
     mutationFn: (payload: { code?: string; maxUses?: number; expiresInDays?: number | null; note?: string }) =>
@@ -43,7 +45,7 @@ export function InvitesPage() {
       setMaxUses('1')
       toast.success('Invite code created successfully')
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       toast.error(err.message || 'Failed to create invite code')
     },
   })
@@ -57,7 +59,7 @@ export function InvitesPage() {
       queryClient.invalidateQueries({ queryKey: ['invites'] })
       toast.success('Invite code revoked')
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       toast.error(err.message || 'Failed to revoke invite code')
     },
   })
@@ -92,7 +94,7 @@ export function InvitesPage() {
         title="Invite Codes"
         description="Generate and manage invitation codes to grant members access to your FreeLLMAPI instance."
         actions={
-          <Button onClick={() => { setCreatedInvite(null); setCreateOpen(true) }}>
+          <Button disabled={!can('create')} onClick={() => { setCreatedInvite(null); setCreateOpen(true) }}>
             <Plus className="mr-1.5 size-4" />
             Create Invite Code
           </Button>
@@ -189,7 +191,7 @@ export function InvitesPage() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleRevoke(inv.id, inv.code)}
+                        disabled={!can('revoke')} onClick={() => handleRevoke(inv.id, inv.code)}
                         className="text-destructive hover:bg-destructive/10 hover:text-destructive text-xs h-8"
                       >
                         <Trash2 className="size-3.5 mr-1" />

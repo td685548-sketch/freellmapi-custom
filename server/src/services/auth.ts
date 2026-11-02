@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { getDb } from '../db/index.js';
 import { hashPassword, verifyPassword } from '../lib/password.js';
+import { parseStoredPermissions } from '@freellmapi/shared/permissions.js';
 
 // Dashboard authentication: email + password accounts with opaque session
 // tokens. Distinct from the unified API key, which authenticates the /v1 proxy
@@ -38,12 +39,7 @@ export function userCount(): number {
 }
 
 function parsePermissions(raw: string | null | undefined, role: string, isPrimary: boolean): Permission[] {
-  if (isPrimary || role === 'admin') return ['*'];
-  try {
-    return JSON.parse(raw || '[]');
-  } catch {
-    return [];
-  }
+  return parseStoredPermissions(raw, role, isPrimary);
 }
 
 /** Create a user. Throws { code: 'email_taken' } if the email already exists. */

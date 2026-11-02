@@ -4,6 +4,7 @@ import { apiFetch } from '@/lib/api'
 import type { UserSession, Permission } from '../../../shared/user-access'
 export type { UserSession, Permission } from '../../../shared/user-access'
 import { useSessionRevision } from './session-state'
+import { permissionGranted, permissionGroupVisible, type ParentPermission } from '../../../shared/permissions'
 
 export function useUserSession() {
   const revision = useSessionRevision()
@@ -21,9 +22,7 @@ export function useUserSession() {
   const permissions = session?.permissions ?? []
 
   const hasPermission = (permission: Permission): boolean => {
-    if (isPrimary || isAdmin) return true
-    if (permissions.includes('*')) return true
-    return permissions.includes(permission)
+    return permissionGranted(session, permission)
   }
 
   return {
@@ -34,5 +33,6 @@ export function useUserSession() {
     isMember,
     permissions,
     hasPermission,
+    hasPermissionGroup: (parent: ParentPermission) => permissionGroupVisible(session, parent),
   }
 }

@@ -1,6 +1,7 @@
 import { getDb } from '../db/index.js';
 import type { UserRole } from './auth.js';
 import type { AdminUser as AdminUserRow, Permission } from '@freellmapi/shared/user-access.js';
+import { parseStoredPermissions, permissionGranted } from '@freellmapi/shared/permissions.js';
 
 // Admin-side account management. Deliberately its own service file so upstream's
 // services/auth.ts stays the self-scoped authentication path it has always been.
@@ -13,17 +14,11 @@ interface PermissionRow {
 
 /**
  * The permission set a row holds. `['*']` is full administrative access, and an
- * admin or primary account holds it whether or not the column says so. Corrupt
- * JSON fails closed: an unknown grant is treated as no grant.
+ * primary account always holds it. Explicit secondary-admin lists are enforced;
+ * absent legacy admin data retains full access. Corrupt JSON fails closed.
  */
 function grantedPermissions(row: PermissionRow): Permission[] {
-  if (row.is_primary || row.role === 'admin') return ['*'];
-  try {
-    const parsed: unknown = JSON.parse(row.permissions || '[]');
-    return Array.isArray(parsed) ? (parsed as Permission[]) : [];
-  } catch {
-    return [];
-  }
+  return parseStoredPermissions(row.permissions, row.role, Boolean(row.is_primary));
 }
 
 /** Every account with the counts an operator needs to decide what to do with it. */
@@ -73,42 +68,33 @@ export function listUsers(actorUserId: number): AdminUserRow[] {
  *
  * Throws `{ code }`: 'self_role_change' | 'user_not_found' | 'primary_admin_protected'.
  */
+function deny(code: string, message: string): never {
+  throw Object.assign(new Error(message), { code });
+}
+function subject(row: PermissionRow) {
+  return { role: row.role, isPrimary: Boolean(row.is_primary), permissions: grantedPermissions(row) };
+}
+function noBroaderThan(actor: PermissionRow, permissions: Permission[]): boolean {
+  return permissions.every(p => permissionGranted(subject(actor), p));
+}
+
 export function setUserRole(userId: number, role: UserRole, actorUserId: number): void {
-  // Changing your own role is the self-lockout path
-  if (userId === actorUserId) {
-    const err = new Error('You cannot change your own role') as any;
-    err.code = 'self_role_change';
-    throw err;
-  }
-
+  if (userId === actorUserId) deny('self_role_change', 'You cannot change your own role');
   const db = getDb();
-
-  // Actor check: Only full administrators can change user roles
-  const actor = db.prepare('SELECT id, role, is_primary FROM users WHERE id = ?').get(actorUserId) as { id: number; role: string; is_primary: number } | undefined;
-  if (!actor || (actor.role !== 'admin' && !actor.is_primary)) {
-    const err = new Error('Only administrators can change account roles') as any;
-    err.code = 'insufficient_privileges';
-    throw err;
-  }
-
-  const target = db.prepare('SELECT id, is_primary FROM users WHERE id = ?').get(userId) as { id: number; is_primary: number } | undefined;
-  if (!target) {
-    const err = new Error('No such account') as any;
-    err.code = 'user_not_found';
-    throw err;
-  }
-
-  if (target.is_primary) {
-    const err = new Error('The primary admin account is protected and cannot be modified') as any;
-    err.code = 'primary_admin_protected';
-    throw err;
-  }
-
-  if (role === 'admin') {
-    db.prepare('UPDATE users SET role = ?, permissions = ? WHERE id = ?').run(role, '["*"]', userId);
-  } else {
-    db.prepare('UPDATE users SET role = ?, permissions = ? WHERE id = ?').run(role, '[]', userId);
-  }
+  db.transaction(() => {
+    const actor = db.prepare('SELECT role, is_primary, permissions FROM users WHERE id = ?').get(actorUserId) as PermissionRow | undefined;
+    if (!actor || (actor.role !== 'admin' && !actor.is_primary) || !permissionGranted(subject(actor), 'edit_user_roles')) deny('insufficient_privileges', 'Administrator role and role management permission required');
+    const target = db.prepare('SELECT role, is_primary, permissions FROM users WHERE id = ?').get(userId) as PermissionRow | undefined;
+    if (!target) deny('user_not_found', 'No such account');
+    if (target.is_primary) deny('primary_admin_protected', 'The primary admin account is protected');
+    const full = permissionGranted(subject(actor), '*');
+    const held = grantedPermissions(target);
+    if (!full && !noBroaderThan(actor, held)) deny('insufficient_privileges', 'Cannot alter an account with broader authority');
+    // A role label never becomes a route around the grant hierarchy. Only a
+    // full-access actor can mint wildcard authority on promotion.
+    const next = role === 'member' ? [] : full ? ['*'] : held;
+    db.prepare('UPDATE users SET role = ?, permissions = ? WHERE id = ?').run(role, JSON.stringify(next), userId);
+  })();
 }
 
 /**
@@ -127,63 +113,20 @@ export function setUserRole(userId: number, role: UserRole, actorUserId: number)
  * 'primary_admin_protected' | 'insufficient_privileges'.
  */
 export function setUserPermissions(userId: number, permissions: Permission[], actorUserId: number): void {
-  if (userId === actorUserId) {
-    const err = new Error('You cannot change your own permissions') as any;
-    err.code = 'self_permission_change';
-    throw err;
-  }
-
+  if (userId === actorUserId) deny('self_permission_change', 'You cannot change your own permissions');
   const db = getDb();
-  const save = (): void => {
+  db.transaction(() => {
+    const target = db.prepare('SELECT role, is_primary, permissions FROM users WHERE id = ?').get(userId) as PermissionRow | undefined;
+    if (!target) deny('user_not_found', 'No such account');
+    if (target.is_primary) deny('primary_admin_protected', 'The primary admin account is protected');
+    const actor = db.prepare('SELECT role, is_primary, permissions FROM users WHERE id = ?').get(actorUserId) as PermissionRow | undefined;
+    if (!actor || !permissionGranted(subject(actor), 'edit_user_permissions')) deny('insufficient_privileges', 'Permission assignment access required');
+    if (!permissionGranted(subject(actor), '*')) {
+      if (!noBroaderThan(actor, grantedPermissions(target))) deny('insufficient_privileges', 'Cannot alter an account with broader authority');
+      if (!noBroaderThan(actor, permissions)) deny('insufficient_privileges', 'Cannot grant permissions you do not hold');
+    }
     db.prepare('UPDATE users SET permissions = ? WHERE id = ?').run(JSON.stringify(permissions), userId);
-  };
-
-  const target = db.prepare('SELECT id, role, is_primary FROM users WHERE id = ?').get(userId) as { id: number; role: string; is_primary: number } | undefined;
-  if (!target) {
-    const err = new Error('No such account') as any;
-    err.code = 'user_not_found';
-    throw err;
-  }
-
-  if (target.is_primary) {
-    const err = new Error('The primary admin account is protected and cannot be modified') as any;
-    err.code = 'primary_admin_protected';
-    throw err;
-  }
-
-  const actor = db.prepare('SELECT id, role, is_primary, permissions FROM users WHERE id = ?').get(actorUserId) as PermissionRow | undefined;
-  if (!actor) {
-    const err = new Error('Only administrators can change account permissions') as any;
-    err.code = 'insufficient_privileges';
-    throw err;
-  }
-
-  const actorHolds = grantedPermissions(actor);
-  if (actorHolds.includes('*')) {
-    save();
-    return;
-  }
-
-  // A delegate cannot rewrite an administrator's access, and cannot mint
-  // full administrative access for anyone.
-  if (target.role === 'admin') {
-    const err = new Error('Only administrators can modify administrator permissions') as any;
-    err.code = 'insufficient_privileges';
-    throw err;
-  }
-  if (permissions.includes('*')) {
-    const err = new Error('Non-administrators cannot grant full administrative access') as any;
-    err.code = 'insufficient_privileges';
-    throw err;
-  }
-  const beyond = permissions.filter(p => !actorHolds.includes(p));
-  if (beyond.length > 0) {
-    const err = new Error(`Cannot grant permissions you do not hold: ${beyond.join(', ')}`) as any;
-    err.code = 'insufficient_privileges';
-    throw err;
-  }
-
-  save();
+  })();
 }
 
 /** Ends every dashboard session an account holds, including other devices' tabs. */
