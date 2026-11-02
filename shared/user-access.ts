@@ -1,16 +1,8 @@
 /** Public multi-user API contracts. Never include plaintext secrets in list DTOs. */
 
-export const SYSTEM_PERMISSIONS = [
-  'manage_keys',
-  'manage_users',
-  'manage_invites',
-  'manage_requests',
-  'manage_settings',
-  'manage_backups',
-  'view_logs',
-] as const;
-
-export type Permission = typeof SYSTEM_PERMISSIONS[number] | '*';
+import type { Permission } from './permissions.js';
+export { SYSTEM_PERMISSIONS } from './permissions.js';
+export type { Permission } from './permissions.js';
 
 export interface UserSession {
   userId: number

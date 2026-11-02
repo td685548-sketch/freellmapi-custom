@@ -117,7 +117,7 @@ function LogRow({
   )
 }
 
-export default function LogsPage() {
+export default function LogsPage({ canClear = true }: { canClear?: boolean } = {}) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
 
@@ -294,7 +294,7 @@ export default function LogsPage() {
             <ConfirmButton
               variant="outline"
               size="sm"
-              disabled={clearLogs.isPending}
+              disabled={clearLogs.isPending || !canClear}
               onConfirm={() => clearLogs.mutate()}
             >
               <Trash2 />

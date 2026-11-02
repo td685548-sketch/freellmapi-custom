@@ -1,7 +1,6 @@
 import type { Express, NextFunction, Request, Response } from 'express';
-import type { Permission } from '@freellmapi/shared/user-access.js';
+import type { ParentPermission } from '@freellmapi/shared/permissions.js';
 import { requireAuth } from '../middleware/requireAuth.js';
-import { requirePermission } from '../middleware/requirePermission.js';
 import { adminUsersRouter } from '../routes/admin-users.js';
 import { adminRegistrationRequestsRouter } from '../routes/admin-registration-requests.js';
 import { invitesRouter } from '../routes/invites.js';
@@ -11,6 +10,9 @@ import { customAuthRouter } from './auth.js';
 import { userInferenceGate } from '../middleware/user-rate-limit.js';
 import { withRoutingSettingsScope } from '../db/routing-settings-scope.js';
 import { providerTiersRouter } from '../routes/provider-tiers.js';
+import { requireActionPermission } from './permission-actions.js';
+import { guardKeyAddition } from './key-addition-guard.js';
+import { cachePreferencesRouter } from '../routes/cache-preferences.js';
 
 // Everything this fork adds to the HTTP surface is wired here, so upstream's
 // app.ts keeps a handful of added lines instead of edited mount statements.
@@ -27,7 +29,7 @@ export const WRITE_METHODS: readonly HttpMethod[] = ['POST', 'PUT', 'PATCH', 'DE
 export interface PermissionGate {
   /** Mount prefix, matched the way `app.use` matches it. */
   path: string | string[];
-  permission: Permission;
+  permission: ParentPermission;
   /** Restricted to these methods; omitted means every method, reads included. */
   methods?: readonly HttpMethod[];
 }
@@ -64,7 +66,7 @@ export const PERMISSION_GATES: readonly PermissionGate[] = [
   { path: '/api/profiles', permission: 'manage_settings', methods: WRITE_METHODS },
   { path: '/api/models', permission: 'manage_settings', methods: WRITE_METHODS },
   { path: '/api/fallback', permission: 'manage_settings', methods: WRITE_METHODS },
-  { path: '/api/cache', permission: 'manage_settings', methods: WRITE_METHODS },
+  { path: '/api/cache', permission: 'manage_settings' },
   { path: '/api/compression', permission: 'manage_settings', methods: WRITE_METHODS },
   { path: '/api/premium', permission: 'manage_settings', methods: WRITE_METHODS },
 
@@ -74,7 +76,7 @@ export const PERMISSION_GATES: readonly PermissionGate[] = [
 ];
 
 function installGate(app: Express, gate: PermissionGate): void {
-  const enforced = requirePermission(gate.permission);
+  const enforced = requireActionPermission(gate.permission);
   const methods = gate.methods;
   const scoped = (req: Request, res: Response, next: NextFunction): void => {
     if (methods && !methods.includes(req.method as HttpMethod)) {
@@ -91,17 +93,21 @@ export function registerCustomRoutes(app: Express): void {
   app.use('/v1', (_req, _res, next) => withRoutingSettingsScope(next));
   // Rate-limiting and usage tracking gate for member personal API keys (/v1 inference)
   app.use('/v1', userInferenceGate);
+  // Safe preference metadata is usable by cache editors without granting
+  // unrelated system-settings reads. The dedicated router enforces its gates.
+  app.use('/api/cache/preferences', requireAuth, cachePreferencesRouter);
 
   // Granular route-level permission gates for upstream-mounted endpoints
   for (const gate of PERMISSION_GATES) installGate(app, gate);
+  app.use(['/api/keys', '/api/embeddings', '/api/media', '/api/decisions'], guardKeyAddition);
 
   // The /api/analytics gate above enforces auth + view_logs for this mount too.
   app.use('/api/analytics/provider-tiers', providerTiersRouter);
 
   // Custom fork routes with their dedicated permission gates
   app.use('/api/auth', externalAuthRouter, customAuthRouter);
-  app.use('/api/invites', requireAuth, requirePermission('manage_invites'), invitesRouter);
-  app.use('/api/admin/users', requireAuth, requirePermission('manage_users'), adminUsersRouter);
-  app.use('/api/admin/registration-requests', requireAuth, requirePermission('manage_requests'), adminRegistrationRequestsRouter);
+  app.use('/api/invites', requireAuth, requireActionPermission('manage_invites'), invitesRouter);
+  app.use('/api/admin/users', requireAuth, requireActionPermission('manage_users'), adminUsersRouter);
+  app.use('/api/admin/registration-requests', requireAuth, requireActionPermission('manage_requests'), adminRegistrationRequestsRouter);
   app.use('/api/user', requireAuth, userKeysRouter);
 }

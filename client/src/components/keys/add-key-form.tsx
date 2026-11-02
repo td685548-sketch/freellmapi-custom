@@ -34,7 +34,7 @@ export interface AddedKeyScopeOffer {
 //
 // `onSuccess` may carry a scope offer for the key that was just added; the
 // dialog owns that follow-up because this pane unmounts the moment it closes.
-export function AddKeyForm({ onSuccess, initialPlatform }: { onSuccess: (offer?: AddedKeyScopeOffer) => void; initialPlatform?: Platform }) {
+export function AddKeyForm({ onSuccess, initialPlatform, canViewKeys = true, canImportKeys = true }: { onSuccess: (offer?: AddedKeyScopeOffer) => void; initialPlatform?: Platform; canViewKeys?: boolean; canImportKeys?: boolean }) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
   const [platform, setPlatform] = useState<Platform | ''>(initialPlatform ?? '')
@@ -56,11 +56,12 @@ export function AddKeyForm({ onSuccess, initialPlatform }: { onSuccess: (offer?:
   // recommendation, not alphabetically — and the search box handles "find it
   // fast". The added/not-added split reads the same ['keys'] query the
   // Providers tab owns, so it costs no extra request.
-  const { data: keys = [] } = useQuery<ApiKey[]>({
+  const { data: roster = [] } = useQuery<ApiKey[]>({
     queryKey: ['keys'],
     queryFn: () => apiFetch('/api/keys'),
+    enabled: canViewKeys,
   })
-  const addedPlatforms = useMemo(() => new Set<string>(keys.map(k => k.platform)), [keys])
+  const addedPlatforms = useMemo(() => new Set<string>((canViewKeys ? roster : []).map(k => k.platform)), [canViewKeys, roster])
   const [hideAdded, setHideAdded] = useState(false)
 
   // #657 post-add scope picker: the platform's model list. This is the same
@@ -163,7 +164,7 @@ export function AddKeyForm({ onSuccess, initialPlatform }: { onSuccess: (offer?:
   // missing instead of being silently disabled.
   const platformError = !platform ? t('validation.required') : null
   const keyError = severalMode
-    ? (keyList.length === 0 ? t('validation.required') : null)
+    ? (!canImportKeys ? 'Batch entry requires Import keys permission.' : keyList.length === 0 ? t('validation.required') : null)
     : (!isKeyless && !apiKey.trim() ? t('validation.required') : null)
   const accountIdError = needsAccountId && !accountId.trim() ? t('validation.required') : null
   const projectIdError = needsProjectId && !projectId.trim() ? t('validation.required') : null

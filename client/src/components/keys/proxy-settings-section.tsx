@@ -27,7 +27,7 @@ function hostOf(url: string): string {
   try { return new URL(url).host } catch { return url }
 }
 
-export function ProxySettingsSection() {
+export function ProxySettingsSection({ canEdit = true }: { canEdit?: boolean } = {}) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
   const [proxyUrl, setProxyUrl] = useState('')
@@ -125,7 +125,7 @@ export function ProxySettingsSection() {
           <Switch
             checked={enabled}
             onCheckedChange={(checked) => saveProxy.mutate({ enabled: checked })}
-            disabled={saveProxy.isPending || !data}
+            disabled={saveProxy.isPending || !data || !canEdit}
           />
           {active && enabled && (
             <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium">
@@ -178,7 +178,7 @@ export function ProxySettingsSection() {
             type="button"
             size="sm"
             variant="outline"
-            disabled={testProxy.isPending}
+            disabled={testProxy.isPending || !canEdit}
             onClick={() => testProxy.mutate({
               proxyUrl,
               proxyMode,
@@ -187,7 +187,7 @@ export function ProxySettingsSection() {
           >
             {testProxy.isPending ? t('keys.testingProxy') : t('keys.testProxy')}
           </Button>
-          <Button type="submit" size="sm" disabled={saveProxy.isPending}>
+          <Button type="submit" size="sm" disabled={saveProxy.isPending || !canEdit}>
             {saveProxy.isPending ? t('keys.savingProxy') : t('keys.saveProxy')}
           </Button>
         </form>
@@ -228,7 +228,7 @@ export function ProxySettingsSection() {
                 type="button"
                 size="sm"
                 variant="outline"
-                disabled={saveProxy.isPending || !data || everyPlatformBypassed}
+                disabled={saveProxy.isPending || !data || everyPlatformBypassed || !canEdit}
                 onClick={() => setAllProxyRoutes(false)}
               >
                 {t('keys.bulkDisable')}
@@ -237,7 +237,7 @@ export function ProxySettingsSection() {
                 type="button"
                 size="sm"
                 variant="outline"
-                disabled={saveProxy.isPending || !data || everyPlatformRouted}
+                disabled={saveProxy.isPending || !data || everyPlatformRouted || !canEdit}
                 onClick={() => setAllProxyRoutes(true)}
               >
                 {t('keys.bulkEnable')}
@@ -253,7 +253,7 @@ export function ProxySettingsSection() {
                     size="sm"
                     className="shrink-0"
                     checked={routed}
-                    disabled={saveProxy.isPending || !data}
+                    disabled={saveProxy.isPending || !data || !canEdit}
                     onCheckedChange={(checked) => {
                       const next = checked
                         ? (data?.bypassPlatforms ?? []).filter(x => x !== p.value)

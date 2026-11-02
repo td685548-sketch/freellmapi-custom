@@ -7,20 +7,23 @@ import { Button } from '@/components/ui/button'
 import { ConfirmButton } from '@/components/confirm-button'
 import { useI18n } from '@/i18n'
 
-export function UnifiedKeySection() {
+export function UnifiedKeySection({ canView = true, canRotate = true }: { canView?: boolean; canRotate?: boolean } = {}) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
   const [showKey, setShowKey] = useState(false)
+  const [rotatedKey, setRotatedKey] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
   const { data, isError } = useQuery<{ apiKey: string }>({
     queryKey: ['unified-key'],
     queryFn: () => apiFetch('/api/settings/api-key'),
+    enabled: canView,
   })
 
   const regenerate = useMutation({
     mutationFn: () => apiFetch<{ apiKey: string }>('/api/settings/api-key/regenerate', { method: 'POST' }),
     onSuccess: (res) => {
+      setRotatedKey(res.apiKey)
       // Write the fresh key into the cache BEFORE unmasking: invalidating
       // alone would leave the old, now-revoked key in the cache until the
       // refetch lands, and it would flash unmasked in the meantime.
@@ -33,7 +36,7 @@ export function UnifiedKeySection() {
     },
   })
 
-  const apiKey = data?.apiKey ?? ''
+  const apiKey = canView ? data?.apiKey ?? '' : rotatedKey ?? ''
   const masked = apiKey ? apiKey.slice(0, 13) + '•'.repeat(32) : '…'
   const baseUrl = import.meta.env.DEV
     ? `http://${window.location.hostname}:${__SERVER_PORT__}/v1`
@@ -65,7 +68,7 @@ export function UnifiedKeySection() {
           size="sm"
           // Armed label stays the shared "Confirm" — the same destructive
           // idiom every other ConfirmButton on the dashboard uses.
-          disabled={regenerate.isPending || isError}
+          disabled={regenerate.isPending || isError || !canRotate}
           onConfirm={() => regenerate.mutate()}
         >
           {t('keys.regenerate')}
@@ -81,10 +84,10 @@ export function UnifiedKeySection() {
           <code className="flex-1 font-mono text-xs bg-muted px-3 py-2 rounded-lg select-all truncate tabular-nums">
             {showKey ? apiKey : masked}
           </code>
-          <Button variant="outline" size="sm" onClick={() => setShowKey(!showKey)}>
+          <Button variant="outline" size="sm" disabled={!apiKey} onClick={() => setShowKey(!showKey)}>
             {showKey ? t('keys.hideKey') : t('keys.showKey')}
           </Button>
-          <Button variant="outline" size="sm" onClick={() => void copy()}>
+          <Button variant="outline" size="sm" disabled={!apiKey} onClick={() => void copy()}>
             {copied ? t('keys.copiedKey') : t('keys.copyKey')}
           </Button>
         </div>

@@ -10,9 +10,9 @@ import { ProviderTierAddKey } from './ProviderTierAddKey'
 const percent = (value: number | null) => value === null ? '—' : `${Math.round(value * 100)}%`
 
 export function ProviderTiersPanel({ range }: { range: ProviderTierRange }) {
-  const { hasPermission } = useUserSession()
+  const { hasPermission, session } = useUserSession()
   const revision = useSessionRevision()
-  const allowed = hasPermission('view_logs')
+  const allowed = hasPermission('view_analytics')
   const query = useQuery({
     queryKey: ['provider-tiers', revision, range],
     queryFn: ({ signal }) => apiFetch<ProviderTiersResponse>(`/api/analytics/provider-tiers?range=${range}`, { signal }),
@@ -55,7 +55,8 @@ export function ProviderTiersPanel({ range }: { range: ProviderTierRange }) {
                         <Badge variant="outline" title="Stored upstream provider keys, including disabled or unhealthy keys">
                           {row.linkedKeyCount} {row.linkedKeyCount === 1 ? 'key' : 'keys'}
                         </Badge>
-                        <ProviderTierAddKey key={`${revision}:${row.providerId}`} row={row} canManageKeys={hasPermission('manage_keys')} />
+                        <ProviderTierAddKey key={`${revision}:${row.providerId}:${JSON.stringify(session?.permissions ?? [])}`} row={row} canManageKeys={hasPermission('add_keys')}
+                          capabilities={{ view: hasPermission('view_keys'), edit: hasPermission('edit_keys'), import: hasPermission('import_keys'), models: hasPermission('manage_key_models') && hasPermission('test_keys') }} />
                       </span>
                     </th>
                     <td className="px-3 py-3 tabular-nums" title="Enabled with last health healthy/unknown. Does not check quota or cooldown.">

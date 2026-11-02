@@ -54,6 +54,21 @@ async function click(el: HTMLElement) {
   await flush()
 }
 
+it('does not expose a cached old key to a rotate-only operator', async () => {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  queryClient.setQueryData(['unified-key'], { apiKey: 'old-key-from-earlier-authorized-view' })
+  vi.mocked(apiFetch).mockResolvedValue({ apiKey: 'new-key-from-authorized-rotation' })
+  act(() => root.render(<QueryClientProvider client={queryClient}><I18nProvider initialLocale="en"><UnifiedKeySection canView={false} canRotate /></I18nProvider></QueryClientProvider>))
+  await flush()
+  expect(container.textContent).not.toContain('old-key-from-earlier-authorized-view')
+  expect(apiFetch).not.toHaveBeenCalled()
+  expect(findButton('Show')?.disabled ?? findButton('Show key')?.disabled).not.toBe(false)
+  await click(findButton('Regenerate')!)
+  await click(findButton('Confirm')!)
+  expect(container.textContent).toContain('new-key-from-authorized-rotation')
+  expect(vi.mocked(apiFetch).mock.calls.every(([path]) => path !== '/api/settings/api-key')).toBe(true)
+});
+
 it('does not regenerate the key on a single click', async () => {
   vi.mocked(apiFetch).mockImplementation(async path =>
     path === '/api/settings/api-key' ? { apiKey: 'sk-fre…e-key' } : { ok: true })

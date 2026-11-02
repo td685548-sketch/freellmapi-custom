@@ -1,17 +1,15 @@
 import type { Request, Response, NextFunction } from 'express';
 import type { SessionUser } from '../services/auth.js';
 import type { Permission } from '@freellmapi/shared/user-access.js';
+import { permissionGranted } from '@freellmapi/shared/permissions.js';
 
 /**
  * Checks whether a session user holds a specific permission.
- * Primary admins and full admins implicitly hold all permissions.
+ * Primary admins and explicit wildcard grants hold all permissions. Secondary
+ * administrators with explicit grant lists obey the same hierarchy as members.
  */
 export function hasPermission(user: SessionUser | undefined, permission: Permission): boolean {
-  if (!user) return false;
-  if (user.isPrimary) return true;
-  if (user.role === 'admin') return true;
-  if (user.permissions?.includes('*')) return true;
-  return Boolean(user.permissions?.includes(permission));
+  return permissionGranted(user, permission);
 }
 
 /**

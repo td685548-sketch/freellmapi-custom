@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { ApiKey, Platform } from '../../../shared/types'
 import type { ProviderTierRow } from '../../../shared/provider-tiers'
-import { AddKeyDialog } from '@/components/keys/add-key-dialog'
+import { AddKeyDialog, type KeyDialogCapabilities } from '@/components/keys/add-key-dialog'
 import { AddEndpointKeyDialog } from '@/components/keys/add-endpoint-key-dialog'
 import { LISTED_PLATFORMS } from '@/components/keys/shared'
 import { Button } from '@/components/ui/button'
@@ -13,7 +13,7 @@ import { useI18n } from '@/i18n'
 type Target = { platform: Platform } | { baseUrl: string }
 type Row = Pick<ProviderTierRow, 'providerId' | 'platform' | 'name' | 'linkedKeyCount'>
 
-export function ProviderTierAddKey({ row, canManageKeys }: { row: Row; canManageKeys: boolean }) {
+export function ProviderTierAddKey({ row, canManageKeys, capabilities }: { row: Row; canManageKeys: boolean; capabilities?: KeyDialogCapabilities }) {
   const { t } = useI18n()
   const client = useQueryClient()
   const [target, setTarget] = useState<Target | null>(null)
@@ -23,7 +23,7 @@ export function ProviderTierAddKey({ row, canManageKeys }: { row: Row; canManage
   const [error, setError] = useState('')
   if (!canManageKeys) return null
 
-  const supported = row.platform === 'custom' ? row.linkedKeyCount > 0
+  const supported = row.platform === 'custom' ? row.linkedKeyCount > 0 && capabilities?.view !== false
     : [...LISTED_PLATFORMS, ...SEARCH_PROVIDERS].some(p => p.value === row.platform)
   async function show() {
     if (!supported || opening) return
@@ -65,14 +65,14 @@ export function ProviderTierAddKey({ row, canManageKeys }: { row: Row; canManage
     <span className="inline-flex flex-col gap-1">
       <Button size="sm" variant="outline" disabled={!supported || opening}
         aria-label={`${t('keys.addKey')} for ${row.name}`}
-        title={supported ? undefined : 'This provider is no longer offered, or its endpoint has no linked key. Manage it in Keys.'}
+        title={supported ? undefined : row.platform === 'custom' && capabilities?.view === false ? 'View keys permission is required to resolve this custom endpoint.' : 'This provider is no longer offered, or its endpoint has no linked key. Manage it in Keys.'}
         onClick={() => void show()}>
         {opening ? t('auth.loading') : t('keys.addKey')}
       </Button>
       {error && <span role="alert" className="max-w-64 text-xs font-normal text-destructive">{error}</span>}
       {/* Keep the provider dialog mounted after close: it owns the optional
           model-scope follow-up. A fresh open gets a fresh form/credential. */}
-      {target && 'platform' in target && <AddKeyDialog key={cycle} open={open} onOpenChange={changeOpen} initialPlatform={target.platform} />}
+      {target && 'platform' in target && <AddKeyDialog key={cycle} open={open} onOpenChange={changeOpen} initialPlatform={target.platform} capabilities={capabilities} />}
       {target && 'baseUrl' in target && open && <AddEndpointKeyDialog key={cycle} open={open} onOpenChange={changeOpen} baseUrl={target.baseUrl} />}
     </span>
   )

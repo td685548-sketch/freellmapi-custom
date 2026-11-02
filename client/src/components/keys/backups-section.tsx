@@ -64,7 +64,8 @@ async function downloadBackupFile(id: number, filename: string): Promise<void> {
  * operation, and the Keys page belongs to the unified key. Expanding is what
  * loads the list, the table names and the schedule.
  */
-export function BackupsSection() {
+export type BackupCapabilities = Partial<Record<'view' | 'create' | 'download' | 'restore' | 'delete' | 'schedule', boolean>>
+export function BackupsSection({ capabilities }: { capabilities?: BackupCapabilities } = {}) {
   const { t } = useI18n()
   const [expanded, setExpanded] = useState(false)
 
@@ -86,12 +87,13 @@ export function BackupsSection() {
         <ChevronDown className={`mt-1 size-4 shrink-0 text-muted-foreground transition-transform ${expanded ? '' : '-rotate-90'}`} />
       </button>
 
-      {expanded && <BackupsPanel />}
+      {expanded && <BackupsPanel capabilities={capabilities} />}
     </section>
   )
 }
 
-function BackupsPanel() {
+function BackupsPanel({ capabilities }: { capabilities?: BackupCapabilities }) {
+  const can = (action: keyof BackupCapabilities) => capabilities?.[action] !== false
   const { t } = useI18n()
   const queryClient = useQueryClient()
   const [page, setPage] = useState(1)
@@ -101,16 +103,19 @@ function BackupsPanel() {
   const { data: tables = [] } = useQuery<string[]>({
     queryKey: ['backup-tables'],
     queryFn: () => apiFetch<{ tables: string[] }>('/api/backups/tables').then(r => r.tables),
+    enabled: can('view'),
   })
 
   const { data: list } = useQuery<{ items: BackupMeta[]; total: number }>({
     queryKey: ['backups', page],
     queryFn: () => apiFetch(`/api/backups?page=${page}&pageSize=${pageSize}`),
+    enabled: can('view'),
   })
 
   const { data: schedule } = useQuery<{ schedule: BackupSchedule }>({
     queryKey: ['backup-schedule'],
     queryFn: () => apiFetch('/api/backups/schedule'),
+    enabled: can('view'),
   })
 
   const invalidate = () => {
@@ -199,14 +204,14 @@ function BackupsPanel() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" onClick={() => create.mutate([])} disabled={create.isPending}>
+          <Button size="sm" onClick={() => create.mutate([])} disabled={create.isPending || !can('create')}>
             {t('backups.fullBackup')}
           </Button>
           <Button
             variant="outline"
             size="sm"
             onClick={() => create.mutate([...selected])}
-            disabled={create.isPending || selected.size === 0}
+            disabled={create.isPending || selected.size === 0 || !can('create')}
           >
             {t('backups.backupSelected', { count: selected.size })}
           </Button>
@@ -242,6 +247,7 @@ function BackupsPanel() {
                       size="icon-sm"
                       title={t('backups.download')}
                       aria-label={t('backups.download')}
+                      disabled={!can('download')}
                       onClick={() => void downloadBackupFile(item.id, item.filename)}
                     >
                       <Download />
@@ -249,7 +255,7 @@ function BackupsPanel() {
                     <ConfirmButton
                       size="xs"
                       onConfirm={() => restore.mutate(item.id)}
-                      disabled={restore.isPending}
+                      disabled={restore.isPending || !can('restore')}
                       confirmLabel={t('backups.confirmRestore')}
                     >
                       {t('backups.restore')}
@@ -257,6 +263,7 @@ function BackupsPanel() {
                     <ConfirmButton
                       size="icon-sm"
                       armedSize="xs"
+                      disabled={!can('delete')}
                       onConfirm={() => remove.mutate(item.id)}
                       title={t('backups.delete')}
                       aria-label={t('backups.delete')}
@@ -289,6 +296,7 @@ function BackupsPanel() {
       {/* Keyed on the stored schedule so the form re-seeds when it loads or
           changes, rather than copying props into state from an effect. */}
       <AutoBackupForm
+        canSave={can('schedule') && can('view')}
         key={JSON.stringify(schedule?.schedule ?? null)}
         schedule={schedule?.schedule ?? null}
         onSaved={invalidate}
@@ -297,7 +305,7 @@ function BackupsPanel() {
   )
 }
 
-function AutoBackupForm({ schedule, onSaved }: { schedule: BackupSchedule | null; onSaved: () => void }) {
+function AutoBackupForm({ schedule, onSaved, canSave }: { schedule: BackupSchedule | null; onSaved: () => void; canSave: boolean }) {
   const { t } = useI18n()
   const [enabled, setEnabled] = useState(schedule?.enabled ?? false)
   const [time, setTime] = useState(schedule?.time ?? '03:00')
@@ -350,7 +358,7 @@ function AutoBackupForm({ schedule, onSaved }: { schedule: BackupSchedule | null
 
       <Button
         size="sm"
-        disabled={save.isPending}
+        disabled={save.isPending || !canSave}
         onClick={() =>
           save.mutate({
             enabled,

@@ -22,6 +22,8 @@ import { ExportKeysDialog } from '@/components/keys/export-keys-dialog'
 import { AgentCompatibilitySection } from '@/components/keys/agent-compatibility-section'
 import { useUserSession } from '@/custom/use-session'
 import { MemberKeysView } from '@/custom/MemberKeysView'
+import { ScopedKeysPage } from '@/custom/ScopedKeysPage'
+import { permissionGranted, permissionGroupVisible, type Permission } from '../../../shared/permissions'
 
 type KeysTab = 'providers' | 'quotaSignals' | 'apiKey' | 'anthropic' | 'agents'
 const KEYS_TABS: { id: KeysTab; labelKey: string }[] = [
@@ -37,8 +39,11 @@ export default function KeysPage() {
   const { session, hasPermission, isPending, isError, refetch } = useUserSession()
   if (isPending) return <p role="status">{t('auth.loading')}</p>
   if (isError || !session || (session.role !== 'admin' && session.role !== 'member')) return <div role="alert">Unable to load your account. <Button onClick={() => refetch()}>Retry</Button></div>
-  const canManageKeys = session.role === 'admin' || (typeof hasPermission === 'function' && hasPermission('manage_keys'))
-  return canManageKeys ? <AdminKeysPage /> : <MemberKeysView />
+  const can = typeof hasPermission === 'function' ? hasPermission : (p: Permission) => permissionGranted(session, p)
+  const fullPage = can('manage_keys') && can('manage_settings') && can('manage_backups')
+  const scoped = permissionGroupVisible(session, 'manage_keys') || permissionGroupVisible(session, 'manage_backups') || permissionGroupVisible(session, 'manage_settings')
+  const identity = `${session.userId}:${JSON.stringify(session.permissions ?? [])}`
+  return fullPage ? <AdminKeysPage key={identity} /> : scoped ? <ScopedKeysPage key={identity} /> : <MemberKeysView key={identity} />
 }
 
 function AdminKeysPage() {

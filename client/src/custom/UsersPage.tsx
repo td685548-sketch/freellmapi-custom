@@ -12,10 +12,12 @@ import { PermissionsDialog } from './PermissionsDialog'
 import type { AdminUser, RegistrationRequest } from '../../../shared/user-access'
 export type { AdminUser, RegistrationRequest } from '../../../shared/user-access'
 
-export function UsersPage() {
+export interface UserPageCapabilities { viewUsers: boolean; viewRequests: boolean; roles: boolean; permissions: boolean; quotas: boolean; sessions: boolean; keys: boolean; approve: boolean; reject: boolean }
+export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilities } = {}) {
+  const can = (action: keyof UserPageCapabilities) => capabilities?.[action] !== false
   const queryClient = useQueryClient()
   const [filter, setFilter] = useState('')
-  const [activeTab, setActiveTab] = useState<'accounts' | 'requests'>('accounts')
+  const [activeTab, setActiveTab] = useState<'accounts' | 'requests'>(can('viewUsers') ? 'accounts' : 'requests')
   const [permissionsUser, setPermissionsUser] = useState<AdminUser | null>(null)
 
   const {
@@ -23,6 +25,7 @@ export function UsersPage() {
   } = useQuery<{ users: AdminUser[] }>({
     queryKey: ['users'],
     queryFn: () => apiFetch<{ users: AdminUser[] }>('/api/admin/users'),
+    enabled: can('viewUsers'),
   })
 
   const {
@@ -34,10 +37,11 @@ export function UsersPage() {
   } = useQuery<{ requests: RegistrationRequest[] }>({
     queryKey: ['registration-requests'],
     queryFn: () => apiFetch<{ requests: RegistrationRequest[] }>('/api/admin/registration-requests'),
+    enabled: can('viewRequests'),
   })
 
-  const users = data?.users ?? []
-  const requests = requestsData?.requests ?? []
+  const users = can('viewUsers') ? data?.users ?? [] : []
+  const requests = can('viewRequests') ? requestsData?.requests ?? [] : []
 
   const shownUsers = filter.trim()
     ? users.filter(u => u.email.toLowerCase().includes(filter.trim().toLowerCase()))
@@ -61,6 +65,7 @@ export function UsersPage() {
       apiFetch<{
         usage: Array<{ userId: number; email: string; requests: number; tokens: number; rpmLimit: number }>
       }>('/api/admin/users/usage'),
+    enabled: can('viewUsers'),
   })
 
   const usageMap = new Map((usageData?.usage ?? []).map(u => [u.userId, u]))
@@ -75,7 +80,7 @@ export function UsersPage() {
       refreshAll()
       toast.success('RPM quota limit updated')
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       toast.error(err.message || 'Failed to update RPM limit')
     },
   })
@@ -90,7 +95,7 @@ export function UsersPage() {
       refreshAll()
       toast.success(vars.role === 'admin' ? 'Account promoted to admin' : 'Account demoted to member')
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       toast.error(err.message || 'Failed to change role')
     },
   })
@@ -102,7 +107,7 @@ export function UsersPage() {
       refreshAll()
       toast.success(res.revoked === 1 ? 'Session signed out' : `Signed out ${res.revoked} sessions`)
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       toast.error(err.message || 'Failed to sign out sessions')
     },
   })
@@ -114,7 +119,7 @@ export function UsersPage() {
       refreshAll()
       toast.success(res.revoked === 1 ? 'API key revoked' : `Revoked ${res.revoked} API keys`)
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       toast.error(err.message || 'Failed to revoke API keys')
     },
   })
@@ -129,7 +134,7 @@ export function UsersPage() {
       refreshAll()
       toast.success(`Account approved for ${res.user.email}!`)
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       toast.error(err.message || 'Failed to approve registration request')
     },
   })
@@ -141,7 +146,7 @@ export function UsersPage() {
       refreshAll()
       toast.success('Registration request rejected')
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       toast.error(err.message || 'Failed to reject registration request')
     },
   })
@@ -163,6 +168,7 @@ export function UsersPage() {
       <div className="flex items-center gap-2 border-b pb-4">
         <button
           type="button"
+          disabled={!can('viewUsers')}
           onClick={() => setActiveTab('accounts')}
           className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-xl transition-colors ${
             activeTab === 'accounts'
@@ -176,6 +182,7 @@ export function UsersPage() {
 
         <button
           type="button"
+          disabled={!can('viewRequests')}
           onClick={() => setActiveTab('requests')}
           className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-xl transition-colors ${
             activeTab === 'requests'
@@ -284,7 +291,7 @@ export function UsersPage() {
                       <span>This month: <strong className="text-foreground">{usageMap.get(u.id)?.requests ?? 0} reqs</strong> ({usageMap.get(u.id)?.tokens ?? 0} tokens)</span>
                       <span className="flex items-center gap-1">
                         Limit: <strong className="text-foreground">{usageMap.get(u.id)?.rpmLimit ?? 60} RPM</strong>
-                        {!u.isSelf && (
+                        {!u.isSelf && !u.isPrimary && can('quotas') && (
                           <button
                             type="button"
                             onClick={() => {
@@ -312,6 +319,7 @@ export function UsersPage() {
                     <Button
                       variant="outline"
                       size="sm"
+                      disabled={!can('permissions')}
                       onClick={() => setPermissionsUser(u)}
                       className="text-xs h-8"
                       title={u.isPrimary ? 'Primary Admin has full permissions' : 'Manage granular permissions'}
@@ -332,7 +340,7 @@ export function UsersPage() {
                               id: u.id,
                               role: u.role === 'admin' ? 'member' : 'admin',
                             })}
-                            disabled={busy}
+                            disabled={busy || !can('roles')}
                             variant="ghost"
                             size="sm"
                             armedSize="sm"
@@ -340,7 +348,7 @@ export function UsersPage() {
                             className={`text-xs h-8 ${u.role === 'admin' ? 'text-destructive hover:bg-destructive/10 hover:text-destructive' : ''}`}
                             title={u.role === 'admin'
                               ? 'Downgrade to member: their dashboard loses the admin surfaces on the next request.'
-                              : 'Grant admin: full access to keys, settings, logs, backups and this page.'}
+                              : 'Change role. Full-access operators grant full access on promotion; restricted operators cannot widen existing grants.'}
                           >
                             {u.role === 'admin' ? 'Demote to member' : 'Promote to admin'}
                           </ConfirmButton>
@@ -348,7 +356,7 @@ export function UsersPage() {
 
                         <ConfirmButton
                           onConfirm={() => sessionsMutation.mutate(u.id)}
-                          disabled={busy || u.sessions === 0}
+                          disabled={busy || u.sessions === 0 || !can('sessions')}
                           variant="ghost"
                           size="icon"
                           armedSize="xs"
@@ -363,7 +371,7 @@ export function UsersPage() {
 
                         <ConfirmButton
                           onConfirm={() => keysMutation.mutate(u.id)}
-                          disabled={busy || u.activeKeys === 0}
+                          disabled={busy || u.activeKeys === 0 || !can('keys')}
                           variant="ghost"
                           size="icon"
                           armedSize="xs"
@@ -428,8 +436,8 @@ export function UsersPage() {
                   <div className="flex items-center gap-2 shrink-0">
                     <Button
                       size="sm"
+                      disabled={busy || !can('approve')}
                       onClick={() => approveRequestMutation.mutate(r.id)}
-                      disabled={busy}
                       className="text-xs h-8 bg-emerald-600 hover:bg-emerald-700 text-white"
                       title="Approve this account: creates member user and default personal API key"
                     >
@@ -439,7 +447,7 @@ export function UsersPage() {
 
                     <ConfirmButton
                       onConfirm={() => rejectRequestMutation.mutate(r.id)}
-                      disabled={busy}
+                      disabled={busy || !can('reject')}
                       variant="ghost"
                       size="sm"
                       armedSize="sm"
