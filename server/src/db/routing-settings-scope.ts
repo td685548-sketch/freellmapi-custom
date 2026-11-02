@@ -40,8 +40,14 @@ export function readRoutingSetting(db: Db, key: string, fallback: () => string |
   if (!scope?.active || !allowed.has(key) || !isTursoDatabase(db)) return fallback();
   const version = tursoWriteVersion(db);
   if (!scope.values || scope.db !== db || scope.version !== version) {
-    const rows = db.prepare(sql).all(...KEYS) as { key: string; value: string }[];
-    scope.values = new Map(rows.map(row => [row.key, row.value]));
+    const rows = db.prepare(sql).all(...KEYS) as Array<Record<string, unknown>>;
+    scope.values = new Map(
+      rows.map(row => {
+        const k = typeof row.key === 'string' ? row.key : typeof row.KEY === 'string' ? row.KEY : '';
+        const v = typeof row.value === 'string' ? row.value : typeof row.VALUE === 'string' ? row.VALUE : '';
+        return [k, v];
+      }),
+    );
     scope.db = db;
     scope.version = version;
   }
