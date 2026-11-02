@@ -28,3 +28,9 @@ update-hermes.sh
 
 # Monetization planning — private, never committed
 monetization/
+
+# Local backups
+backups/
+
+scripts/backup.mjs
+

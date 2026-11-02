@@ -77,6 +77,23 @@ describe('Turso routing configuration round trips', () => {
     });
   });
 
+  it('handles uppercase column identifiers from remote database drivers (e.g. KEY, VALUE)', () => {
+    const raw = new Database(':memory:');
+    raw.exec("CREATE TABLE settings (KEY TEXT PRIMARY KEY, VALUE TEXT); INSERT INTO settings VALUES ('response_cache_enabled', '1'), ('routing_strategy', 'speed')");
+    const db = wrapTursoDatabase(raw as unknown as Db, true);
+    connections.push(db);
+    const read = (key: string) => readRoutingSetting(db, key, () => {
+      const row = db.prepare('SELECT VALUE FROM settings WHERE KEY = ?').get(key) as { VALUE: string } | undefined;
+      return row?.VALUE;
+    });
+
+    withRoutingSettingsScope(() => {
+      expect(read('response_cache_enabled')).toBe('1');
+      expect(read('routing_strategy')).toBe('speed');
+      expect(read('routing_peak_timezone')).toBeUndefined();
+    });
+  });
+
   it('observes direct writes and transaction rollbacks in the same request', () => {
     const { db, read } = fixture();
     withRoutingSettingsScope(() => {
