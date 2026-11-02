@@ -1,0 +1,2 @@
+# Data model
+No persistent entities/migrations. ProviderTierRow has providerId/name/platform, linkedKeyCount/usableKeyCount (nonnegative integers), samples/successes/modelCount, reliability/speed/intelligence/score (null or [0,1]), tier (S/A/B/C/D or null). Catalog provider identity is platform; custom identity is normalized endpoint scope. Key counts are current; observations are retained and range-limited. Missing metrics are null, never fabricated zeros. tier is null below 20 samples.

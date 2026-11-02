@@ -10,6 +10,7 @@ import { externalAuthRouter } from '../routes/external-auth.js';
 import { customAuthRouter } from './auth.js';
 import { userInferenceGate } from '../middleware/user-rate-limit.js';
 import { withRoutingSettingsScope } from '../db/routing-settings-scope.js';
+import { providerTiersRouter } from '../routes/provider-tiers.js';
 
 // Everything this fork adds to the HTTP surface is wired here, so upstream's
 // app.ts keeps a handful of added lines instead of edited mount statements.
@@ -93,6 +94,9 @@ export function registerCustomRoutes(app: Express): void {
 
   // Granular route-level permission gates for upstream-mounted endpoints
   for (const gate of PERMISSION_GATES) installGate(app, gate);
+
+  // The /api/analytics gate above enforces auth + view_logs for this mount too.
+  app.use('/api/analytics/provider-tiers', providerTiersRouter);
 
   // Custom fork routes with their dedicated permission gates
   app.use('/api/auth', externalAuthRouter, customAuthRouter);
