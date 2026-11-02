@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useUserSession } from './use-session'
 import { useSessionRevision } from './session-state'
+import { ProviderTierAddKey } from './ProviderTierAddKey'
 
 const percent = (value: number | null) => value === null ? '—' : `${Math.round(value * 100)}%`
 
@@ -54,6 +55,7 @@ export function ProviderTiersPanel({ range }: { range: ProviderTierRange }) {
                         <Badge variant="outline" title="Stored upstream provider keys, including disabled or unhealthy keys">
                           {row.linkedKeyCount} {row.linkedKeyCount === 1 ? 'key' : 'keys'}
                         </Badge>
+                        <ProviderTierAddKey key={`${revision}:${row.providerId}`} row={row} canManageKeys={hasPermission('manage_keys')} />
                       </span>
                     </th>
                     <td className="px-3 py-3 tabular-nums" title="Enabled with last health healthy/unknown. Does not check quota or cooldown.">
