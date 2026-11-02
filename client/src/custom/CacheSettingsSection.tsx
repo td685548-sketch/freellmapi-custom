@@ -17,7 +17,15 @@ export function CacheSettingsSection() {
   const invalidate = () => { void client.invalidateQueries({ queryKey: ['cache'] }); void client.invalidateQueries({ queryKey: key }) }
   const update = useMutation({ mutationFn: (body: Partial<Pick<Preferences, 'enabled' | 'persist'>>) =>
     apiFetch<Preferences>('/api/cache/preferences', { method: 'PUT', body: JSON.stringify(body) }),
-    onSuccess: data => { client.setQueryData(key, data); invalidate() },
+    onMutate: async body => {
+      await client.cancelQueries({ queryKey: key, exact: true })
+      const previous = client.getQueryData<Preferences>(key)
+      client.setQueryData<Preferences>(key, current => current ? { ...current, ...body } : current)
+      return previous
+    },
+    onSuccess: data => { client.setQueryData(key, data) },
+    onError: (_error, _body, previous) => { if (previous) client.setQueryData(key, previous) },
+    onSettled: invalidate,
   })
   const clear = useMutation({ mutationFn: () => apiFetch('/api/cache', { method: 'DELETE' }), onSuccess: invalidate })
   if (!canView) return null
@@ -26,6 +34,9 @@ export function CacheSettingsSection() {
     <section className="mt-6 space-y-4 border-t pt-5" aria-labelledby="response-cache-title">
       <h3 id="response-cache-title" className="text-sm font-semibold">AI response cache</h3>
       <p className="text-xs text-muted-foreground">Sets the default for all users. Exact matching requests can reuse a successful response without another provider call. Existing per-request X-FreeLLM-Cache overrides still apply.</p>
+      {update.isPending && <p role="status" className="text-xs text-muted-foreground">Saving cache settings…</p>}
+      {update.isSuccess && <p role="status" className="text-xs text-muted-foreground">Cache settings saved.</p>}
+      {(update.isError || clear.isError) && <p role="alert" className="text-xs text-destructive">{(update.error ?? clear.error)?.message}</p>}
       {query.isPending && <p role="status" className="text-xs">Loading cache settings…</p>}
       {query.isError && <div role="alert" className="text-xs">Could not load cache settings. <Button size="xs" onClick={() => void query.refetch()}>Retry</Button></div>}
       {query.data && <>
@@ -41,7 +52,6 @@ export function CacheSettingsSection() {
         <p className="text-xs text-muted-foreground">TTL: {query.data.ttlSeconds} seconds · Capacity: {query.data.maxEntries} entries. Changes save immediately. Disabling caching does not delete stored entries.</p>
         {hasPermission('clear_cache') && <ConfirmButton size="sm" variant="outline" disabled={busy} onConfirm={() => clear.mutate()} confirmLabel="Confirm clear cache">Clear cached responses</ConfirmButton>}
       </>}
-      {(update.isError || clear.isError) && <p role="alert" className="text-xs text-destructive">{(update.error ?? clear.error)?.message}</p>}
     </section>
   )
 }
