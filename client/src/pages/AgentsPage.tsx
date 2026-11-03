@@ -8,6 +8,8 @@ import { CopyButton } from '@/components/copy-button'
 import { AgentIcon } from '@/components/agent-icons'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { useUserSession } from '@/custom/use-session'
+import { PersonalKeyPanel } from '@/custom/PersonalKeyPanel'
 import {
   Card,
   CardAction,
@@ -66,9 +68,13 @@ function masked(value: string): string {
 export default function AgentsPage() {
   const { t } = useI18n()
   const [revealKey, setRevealKey] = useState(false)
+  // Invited members cannot read the shared gateway key (it 403s); they use a personal key.
+  const { hasPermission } = useUserSession()
+  const canRevealGateway = hasPermission('reveal_gateway_key')
   const { data: keyData } = useQuery<KeyResponse>({
     queryKey: ['api-key'],
     queryFn: () => apiFetch('/api/settings/api-key'),
+    enabled: canRevealGateway,
   })
   const { data: byClient = [] } = useQuery<ClientAnalytics[]>({
     queryKey: ['analytics', 'by-client', '30d'],
@@ -85,18 +91,18 @@ export default function AgentsPage() {
     : window.location.origin
   const shownKey = keyData?.apiKey
     ? (revealKey ? keyData.apiKey : masked(keyData.apiKey))
-    : '…'
+    : canRevealGateway ? '…' : '<your-personal-key>'
 
   return (
     <div>
       <PageHeader
         title={t('agents.title')}
         description={t('agents.description')}
-        actions={
+        actions={canRevealGateway ? (
           <Button variant="outline" size="sm" onClick={() => setRevealKey(value => !value)}>
             {revealKey ? t('common.hide') : t('common.show')} {t('agents.apiKey')}
           </Button>
-        }
+        ) : undefined}
       />
 
       <section className="mb-6 rounded-3xl border bg-card p-5">
@@ -112,10 +118,12 @@ export default function AgentsPage() {
             label={t('common.copy')}
           />
         </div>
-        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-          <span>{t('agents.currentKey')}</span>
-          <code className="font-mono break-all">{shownKey}</code>
-        </div>
+        {canRevealGateway ? (
+          <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+            <span>{t('agents.currentKey')}</span>
+            <code className="font-mono break-all">{shownKey}</code>
+          </div>
+        ) : <PersonalKeyPanel />}
       </section>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -125,7 +133,7 @@ export default function AgentsPage() {
           const endpoint = tool.baseUrlSupport === 'root' ? origin : `${origin}/v1`
           // The copied snippet is pasted into config files — keep it
           // locale-independent.
-          const realConnection = `BASE_URL=${endpoint}\nAPI_KEY=${keyData?.apiKey ?? '<unified-key>'}`
+          const realConnection = `BASE_URL=${endpoint}\nAPI_KEY=${keyData?.apiKey ?? (canRevealGateway ? '<unified-key>' : '<your-personal-key>')}`
           const shownConnection = `BASE_URL=${endpoint}\nAPI_KEY=${shownKey}`
           // What the tool actually is, in one plain sentence. `t` echoes the
           // key back when neither the active locale nor English defines it, so
