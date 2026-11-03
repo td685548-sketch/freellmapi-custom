@@ -1021,25 +1021,33 @@ export function writeObservedSpeedRanks(db: Db): number {
   const rows = db.prepare('SELECT id, platform, model_id, speed_rank, endpoint_scope FROM models')
     .all() as { id: number; platform: string; model_id: string; speed_rank: number; endpoint_scope: string }[];
 
-  const update = db.prepare('UPDATE models SET speed_rank = ? WHERE id = ?');
-  let written = 0;
-  const tx = db.transaction(() => {
-    for (const row of rows) {
-      // Overrides are keyed (platform, model_id) — they only exist for
-      // catalog-managed rows, which are never endpoint-scoped — while the
-      // measured stats are per endpoint, so each relay's copy gets its own
-      // observed rank instead of one shared number (#651).
-      if (pinned.has(`${row.platform}:${row.model_id}`)) continue;
-      const stats = statsCache!.get(modelStatsKey(row.platform, row.model_id, row.endpoint_scope));
-      if (!stats || stats.speedSamples < SPEED_RANK_MIN_SAMPLES) continue;
-      const rank = observedSpeedRank(speedScore(stats.tokPerSec, stats.avgTtfbMs));
-      if (rank === row.speed_rank) continue;
-      update.run(rank, row.id);
-      written++;
-    }
-  });
-  tx();
-  return written;
+  const changes: { id: number; rank: number }[] = [];
+  for (const row of rows) {
+    // Overrides are keyed (platform, model_id) — they only exist for
+    // catalog-managed rows, which are never endpoint-scoped — while the
+    // measured stats are per endpoint, so each relay's copy gets its own
+    // observed rank instead of one shared number (#651).
+    if (pinned.has(`${row.platform}:${row.model_id}`)) continue;
+    const stats = statsCache!.get(modelStatsKey(row.platform, row.model_id, row.endpoint_scope));
+    if (!stats || stats.speedSamples < SPEED_RANK_MIN_SAMPLES) continue;
+    const rank = observedSpeedRank(speedScore(stats.tokPerSec, stats.avgTtfbMs));
+    if (rank === row.speed_rank) continue;
+    changes.push({ id: row.id, rank });
+  }
+
+  // One UPDATE per chunk instead of BEGIN + N updates + COMMIT: on remote Turso
+  // every statement is an HTTP round-trip, and a transaction spanning them is
+  // dropped server-side ("cannot commit - no transaction is active"). A single
+  // statement is atomic on its own and the writeback is idempotent.
+  const CHUNK = 200;
+  for (let i = 0; i < changes.length; i += CHUNK) {
+    const chunk = changes.slice(i, i + CHUNK);
+    const cases = chunk.map(() => 'WHEN ? THEN ?').join(' ');
+    const ids = chunk.map(() => '?').join(',');
+    db.prepare(`UPDATE models SET speed_rank = CASE id ${cases} END WHERE id IN (${ids})`)
+      .run(...chunk.flatMap(c => [c.id, c.rank]), ...chunk.map(c => c.id));
+  }
+  return changes.length;
 }
 
 // Composite intelligence (tier-first, rank-as-tiebreaker) lives in scoring.ts
