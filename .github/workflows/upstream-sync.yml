@@ -1,0 +1,125 @@
+name: Upstream sync
+
+# This fork's history has diverged from tashfeenahmed/freellmapi, so a plain
+# `git merge upstream/main` conflicts on ~125 files. Instead, apply only the
+# upstream diff since the last synced commit (recorded in .upstream-base).
+#
+#  - applies cleanly  -> opens a PR (review, then merge; Render deploys from main)
+#  - does not apply   -> opens an Issue naming the files to port by hand
+#
+# Nothing is ever pushed to main by this workflow.
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPO: tashfeenahmed/freellmapi
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  sync:
+    name: Check upstream for new commits
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch --quiet --tags upstream main
+
+      - name: Compare with last synced commit
+        id: state
+        run: |
+          base=$(tr -d '[:space:]' < .upstream-base)
+          head=$(git rev-parse upstream/main)
+          short=${head:0:7}
+          count=$(git rev-list --count "${base}..${head}")
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+          echo "short=$short" >> "$GITHUB_OUTPUT"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "Upstream is $count commit(s) ahead of ${base:0:7}"
+
+      - name: Skip if already proposed
+        id: dedupe
+        if: steps.state.outputs.count != '0'
+        run: |
+          short='${{ steps.state.outputs.short }}'
+          prs=$(gh pr list --state open --search "upstream-sync $short in:title" --json number --jq length)
+          issues=$(gh issue list --state open --search "upstream-sync $short in:title" --json number --jq length)
+          if [ "$prs" != "0" ] || [ "$issues" != "0" ]; then
+            echo "Already proposed for $short"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Try to apply the upstream diff
+        id: apply
+        if: steps.state.outputs.count != '0' && steps.dedupe.outputs.skip != 'true'
+        env:
+          BASE: ${{ steps.state.outputs.base }}
+          HEAD_SHA: ${{ steps.state.outputs.head }}
+          SHORT: ${{ steps.state.outputs.short }}
+          COUNT: ${{ steps.state.outputs.count }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # GITHUB_TOKEN cannot push workflow-file changes, so leave .github/ out.
+          git diff "$BASE" "$HEAD_SHA" -- . ':(exclude).github' > "$RUNNER_TEMP/upstream.patch"
+          log=$(git log --oneline --no-decorate -n 15 "${BASE}..${HEAD_SHA}")
+          compare="https://github.com/${UPSTREAM_REPO}/compare/${BASE:0:7}...${SHORT}"
+          branch="chore/upstream-sync-${SHORT}"
+
+          if git apply --3way --index "$RUNNER_TEMP/upstream.patch" 2> "$RUNNER_TEMP/apply.err"; then
+            git checkout -q -b "$branch"
+            echo "$HEAD_SHA" > .upstream-base
+            git add .upstream-base
+            git commit -q -m "chore(upstream): sync ${COUNT} commit(s) from ${UPSTREAM_REPO}@${SHORT}"
+            git push -q origin "$branch"
+            gh pr create --base main --head "$branch" \
+              --title "chore(upstream): upstream-sync ${SHORT}" \
+              --body "Applies ${COUNT} upstream commit(s) (${BASE:0:7}...${SHORT}) cleanly.
+
+          ${compare}
+
+          \`\`\`
+          ${log}
+          \`\`\`
+
+          Run \`npm run test\` and \`npm run build\` before merging. Merging this PR updates \`.upstream-base\`."
+          else
+            git reset -q --hard
+            conflicts=$(grep -E 'patch does not apply|with conflicts|error:' "$RUNNER_TEMP/apply.err" | head -30)
+            gh issue create \
+              --title "chore(upstream): upstream-sync ${SHORT} needs manual port" \
+              --body "Upstream has ${COUNT} new commit(s) (${BASE:0:7}...${SHORT}) but the diff does not apply cleanly to \`main\`.
+
+          ${compare}
+
+          \`\`\`
+          ${log}
+          \`\`\`
+
+          Files that did not apply:
+
+          \`\`\`
+          ${conflicts}
+          \`\`\`
+
+          Port by hand: \`git fetch upstream && git diff ${BASE:0:7} ${SHORT} | git apply --3way\`, resolve markers, then set \`.upstream-base\` to ${HEAD_SHA}."
+          fi
