@@ -44,6 +44,7 @@ import MediaDetailPage from '@/pages/MediaDetailPage'
 import EmbeddingDetailPage from '@/pages/EmbeddingDetailPage'
 import { useAdministrativeAccess } from '@/custom/use-administrative-access'
 import { AnalyticsAccessPage, InvitesAccessPage, LogsAccessPage, UsersAccessPage } from '@/custom/ScopedAdministrativePages'
+import { UsersNavBadge } from '@/custom/UsersNavBadge'
 import PremiumPage from '@/pages/PremiumPage'
 import NotFoundPage from '@/pages/NotFoundPage'
 import AgentsPage from '@/pages/AgentsPage'
@@ -327,6 +328,7 @@ function Navbar() {
               ) : (
                 <NavItem key={item.to} to={item.to}>
                   {item.customLabel || t(item.labelKey)}
+                  {item.to === '/users' && <UsersNavBadge />}
                 </NavItem>
               )
             })}
@@ -405,6 +407,7 @@ function Navbar() {
                         className={location.pathname === item.to ? 'bg-accent text-accent-foreground font-medium' : undefined}
                       >
                         {item.customLabel || t(item.labelKey)}
+                        {item.to === '/users' && <UsersNavBadge />}
                       </DropdownMenuItem>
                     )
                   })}
