@@ -8,6 +8,7 @@ import {
   updatePassword,
 } from '../../services/auth.js';
 import { createInviteCode } from '../../services/invites.js';
+import { mintUserApiKey, validateUserApiKey } from '../../services/user-keys.js';
 import {
   issueEmailReset,
   completeEmailReset,
@@ -108,6 +109,21 @@ describe('Google identity and invite isolation', () => {
     expect(validateSession(result.token)?.userId).toBe(user.userId);
     expect(result.apiKey).toBeUndefined();
     expect(consumeGoogleHandoff(ticket)).toBeNull();
+  });
+  it('cuts off a pre-registrant when the real owner links a member account via Google', () => {
+    createUser('admin@gmail.com', 'AdminPassword!');
+    // Someone registered victim@gmail.com through an invite without owning it.
+    const squatted = createUser('victim@gmail.com', 'AttackerKnows123!', 'member');
+    const oldSession = createSession(squatted.userId);
+    const oldKey = mintUserApiKey(squatted.userId, 'attacker');
+    const result = consumeGoogleHandoff(finishGoogleLogin(identity('victim@gmail.com')))!;
+    expect(result.role).toBe('member');
+    expect(validateSession(result.token)?.userId).toBe(squatted.userId);
+    expect(verifyCredentials('victim@gmail.com', 'AttackerKnows123!')).toBeNull();
+    expect(validateSession(oldSession)).toBeNull();
+    expect(validateUserApiKey(oldKey.key)).toBeNull();
+    expect(result.apiKey).toMatch(/^sk-flm-/);
+    expect(validateUserApiKey(result.apiKey!)?.userId).toBe(squatted.userId);
   });
   it('requires an invite for new identities and creates only member accounts', () => {
     const admin = createUser('admin@gmail.com', 'AdminPassword!');

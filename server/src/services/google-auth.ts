@@ -11,6 +11,7 @@ import {
   validateSession,
 } from './auth.js';
 import { claimInviteCode } from './invites.js';
+import { hashPassword } from '../lib/password.js';
 import { mintUserApiKey } from './user-keys.js';
 import {
   digest,
@@ -210,6 +211,19 @@ export function finishGoogleLogin(
           throw new Error(
             'Existing account cannot be linked by this Google email',
           );
+        }
+        // Invite registration never proves ownership of the address, so someone
+        // else may have registered this email and know its password. The first
+        // Google sign-in is the proof of ownership: from here the account is the
+        // Google owner's, so everything the earlier registrant could still use
+        // (password, dashboard sessions, personal keys) is cut off. Members only:
+        // administrator accounts come from first-run setup or deliberate promotion.
+        if (user.role === 'member') {
+          db.prepare('UPDATE users SET password_hash = ? WHERE id = ?')
+            .run(hashPassword(randomSecret()), user.id);
+          db.prepare('DELETE FROM sessions WHERE user_id = ?').run(user.id);
+          db.prepare('UPDATE user_api_keys SET revoked = 1 WHERE user_id = ? AND revoked = 0').run(user.id);
+          apiKey = mintUserApiKey(user.id, 'Default Key').key;
         }
       } else {
         if (!inviteCode || !claimInviteCode(inviteCode))
