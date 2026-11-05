@@ -5,6 +5,7 @@ import { wrapTursoDatabase } from '../../db/turso.js';
 import { createApp } from '../../app.js';
 import { createUser, createSession } from '../../services/auth.js';
 import { getActiveProfileId } from '../../services/profile-models.js';
+import { setKeyCacheTestOverride } from '../../services/key-cache.js';
 
 // On a remote database every statement is a blocking round trip, so the number
 // of statements a dashboard poll makes is its latency. This pins the budget for
@@ -20,6 +21,9 @@ describe('routing read budget on a remote-style connection', () => {
   beforeAll(async () => {
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     vi.stubEnv('FREEAPI_TURSO_READ_CACHE', '0'); // measure real executions, not cache hits
+    // Production keeps the usable-key registry in memory; NODE_ENV=test bypasses it,
+    // which would count a read no deployed server makes.
+    setKeyCacheTestOverride(true);
     const factory = () => {
       const raw = defaultDbFactory()(':memory:');
       const prepare = raw.prepare.bind(raw);
@@ -40,7 +44,7 @@ describe('routing read budget on a remote-style connection', () => {
     await new Promise<void>(resolve => server.once('listening', resolve));
     base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   });
-  afterAll(() => { server?.close(); vi.unstubAllEnvs(); });
+  afterAll(() => { server?.close(); vi.unstubAllEnvs(); setKeyCacheTestOverride(null); });
 
   const get = (path: string) => fetch(base + path, { headers: { Authorization: `Bearer ${token}` } });
 
@@ -57,10 +61,19 @@ describe('routing read budget on a remote-style connection', () => {
     executed.length = 0; counting = true;
     await get('/api/fallback/routing');
     counting = false;
-    // 11 before: 2 session lookups, cooldown ceiling and a two-step profile lookup
-    // were each their own round trip. Raise this only with a measured reason.
-    expect(executed.length).toBeLessThanOrEqual(8);
+    // 7 before this change (production caches on): session, settings prefetch,
+    // profile, chain, then three for decision status. Raise only with a measured reason.
+    expect(executed.length).toBeLessThanOrEqual(5);
     expect(executed.filter(s => /routing_cooldown_ceiling_ms|WHERE key = \?/.test(s) && /settings/.test(s)).length).toBeLessThanOrEqual(1);
+  });
+
+  it('keeps GET /api/analytics/summary within its statement budget', async () => {
+    await get('/api/analytics/summary');
+    executed.length = 0; counting = true;
+    expect((await get('/api/analytics/summary')).status).toBe(200);
+    counting = false;
+    // 10 before: five separate scans of `requests` over the same window.
+    expect(executed.length).toBeLessThanOrEqual(7);
   });
 
   it('resolves the active profile exactly as the two-step lookup did', () => {

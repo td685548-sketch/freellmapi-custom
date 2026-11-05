@@ -1,3 +1,4 @@
+import { getUsableKeysByPlatform } from './key-cache.js';
 import { getDb } from '../db/index.js';
 import { BEATAPI_BASE_URL } from '../providers/beatapi.js';
 import { APINEX_BASE_URL } from '../providers/apinex.js';
@@ -635,6 +636,34 @@ export function listDecisionModels(): DecisionModelView[] {
       decisionsThisMonth: monthCounts.get(`${row.platform}:${row.model_id}`) ?? 0,
     };
   });
+}
+
+export interface DecisionCandidate {
+  id: number;
+  platform: string;
+  modelId: string;
+  priority: number;
+  enabled: boolean;
+  healthyKeyCount: number;
+}
+
+/**
+ * The slice of listDecisionModels() that routing status needs, without the
+ * dashboard-only parts: the per-model monthly count (a scan of decision_requests)
+ * and the all-keys lookup. Healthy keys come from the usable-key registry the
+ * router already maintains, which holds exactly the enabled healthy/unknown rows
+ * the old query filtered for. Two fewer statements on every routing poll.
+ */
+export function listDecisionCandidates(): DecisionCandidate[] {
+  const usable = getUsableKeysByPlatform(getDb());
+  return allDecisionRows().map(row => ({
+    id: row.id,
+    platform: row.platform,
+    modelId: row.model_id,
+    priority: row.priority,
+    enabled: row.enabled === 1,
+    healthyKeyCount: DECISION_PLATFORMS.has(row.platform) ? (usable.get(row.platform)?.length ?? 0) : 0,
+  }));
 }
 
 /** Turn a decision model on or off. False when the id is not a decision model. */
