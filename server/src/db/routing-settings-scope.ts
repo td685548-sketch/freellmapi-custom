@@ -13,6 +13,7 @@ const KEYS = [
   'key_selection_strategy', 'routing_decision_model', 'routing_decision_min_probability',
   'unify_models_enabled', 'min_context_window',
   'response_cache_enabled', 'response_cache_persist',
+  'routing_cooldown_ceiling_ms',
 ] as const;
 const allowed = new Set<string>(KEYS);
 const sql = `SELECT key, value FROM settings WHERE key IN (${KEYS.map(() => '?').join(',')})`;

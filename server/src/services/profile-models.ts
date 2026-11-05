@@ -1,12 +1,14 @@
 import type { Db } from '../db/types.js';
 
 export function getActiveProfileId(db: Db): number | null {
-  const setting = db.prepare("SELECT value FROM settings WHERE key = 'active_profile_id'").get() as { value: string } | undefined;
-  if (!setting) return null;
-  const profileId = parseInt(setting.value, 10);
-  if (!Number.isInteger(profileId)) return null;
-  const profile = db.prepare('SELECT id FROM profiles WHERE id = ?').get(profileId) as { id: number } | undefined;
-  return profile ? profileId : null;
+  // One statement instead of setting-then-profile: each is a blocking network
+  // round trip on a remote database, and this runs on every routed request.
+  // CAST reads the same leading integer parseInt did, and a value that is not
+  // numeric becomes 0, which no profile has.
+  const row = db.prepare(
+    "SELECT p.id AS id FROM settings s JOIN profiles p ON p.id = CAST(s.value AS INTEGER) WHERE s.key = 'active_profile_id'",
+  ).get() as { id: number } | undefined;
+  return row ? row.id : null;
 }
 
 // Only chains that still opt in to the backfill (#895). A chain created with

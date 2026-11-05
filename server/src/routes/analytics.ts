@@ -39,7 +39,7 @@ function firstParam(value: unknown): string | undefined {
 // the full retained history without branching a single query — the same "no
 // cutoff" result searchAnalytics('all') reaches by dropping its WHERE
 // (services/search.ts). The /summary headline totals for `all` come from the
-// unpruned lifetime counters in `settings` instead (see readLifetimeTotals),
+// unpruned lifetime counters in `settings` instead (see readLifetimeAll),
 // so they stay exact even past the raw/hourly prune horizon.
 const ALL_TIME_SINCE = '0000-01-01 00:00:00';
 
@@ -95,30 +95,21 @@ function readAggregateSince(since: string) {
   return rows;
 }
 
-function readLifetimeSettings() {
-  const db = getDb();
-  const row = db.prepare(`
-    SELECT value FROM settings WHERE key = 'first_request_at'
-  `).get() as { value: string } | undefined;
-  return row?.value ?? null;
-}
-
-// Lifetime counters written by lib/request-log.ts on every logged request and
-// never pruned (unlike `requests` and `request_hourly`). They are the only
-// source that stays exact for `range=all`, so the summary headline reads them
-// there. Absent on an install that has not logged since the aggregate migration
-// landed — treat a missing key as 0.
-function readLifetimeTotals() {
-  const db = getDb();
-  const rows = db.prepare(`
+// Lifetime counters are written by lib/request-log.ts on every logged request and
+// never pruned (unlike `requests` and `request_hourly`), so they are the only
+// source that stays exact for `range=all`; a missing key means 0. first_request_at
+// lives in the same table, so the summary reads all four in one statement.
+function readLifetimeAll() {
+  const rows = getDb().prepare(`
     SELECT key, value FROM settings
-    WHERE key IN ('total_requests', 'total_input_tokens', 'total_output_tokens')
+    WHERE key IN ('total_requests', 'total_input_tokens', 'total_output_tokens', 'first_request_at')
   `).all() as Array<{ key: string; value: string }>;
-  const totals = new Map(rows.map(r => [r.key, Number(r.value) || 0]));
+  const values = new Map(rows.map(r => [r.key, r.value]));
   return {
-    requests: totals.get('total_requests') ?? 0,
-    inputTokens: totals.get('total_input_tokens') ?? 0,
-    outputTokens: totals.get('total_output_tokens') ?? 0,
+    requests: Number(values.get('total_requests')) || 0,
+    inputTokens: Number(values.get('total_input_tokens')) || 0,
+    outputTokens: Number(values.get('total_output_tokens')) || 0,
+    firstRequestAt: values.get('first_request_at') ?? null,
   };
 }
 
@@ -146,7 +137,7 @@ analyticsRouter.get('/summary', (req: Request, res: Response) => {
   // only reported for ranges where recent activity still exists. The aggregate
   // is the source of truth for headline numbers.
   const aggregate = readAggregateSince(since);
-  const lifetime = readLifetimeTotals();
+  const lifetime = readLifetimeAll();
   const isAllTime = range === 'all';
   // Headline totals. `range=all` reads the unpruned lifetime counters from
   // `settings` so the numbers stay exact past the raw/hourly prune horizon;
@@ -163,11 +154,29 @@ analyticsRouter.get('/summary', (req: Request, res: Response) => {
   const decidedRequests = (aggregate.success_count ?? 0) + (aggregate.error_count ?? 0);
   const successRate = decidedRequests > 0 ? (aggregate.success_count / decidedRequests) * 100 : 0;
 
+  // Everything below that reads raw rows for the same window (latency, TTFB,
+  // pin-honor, chat/embedding split) shares one scan of `requests`. These were
+  // five statements over the same rows, and each is a blocking round trip on a
+  // remote database as well as a full pass over the window on a large ledger.
   // Avg latency is only meaningful at the raw row level; the hourly bucket
   // doesn't preserve it. Fall back to a 0/null when no recent raw rows exist.
-  const latencyRow = db.prepare(`
-    SELECT AVG(latency_ms) as avg_latency_ms FROM requests WHERE created_at >= ?
-  `).get(since) as { avg_latency_ms: number | null } | undefined;
+  const raw = db.prepare(`
+    SELECT
+      AVG(latency_ms) AS avg_latency_ms,
+      COUNT(latency_ms) AS latency_count,
+      AVG(ttfb_ms) AS avg_ttfb_ms,
+      SUM(CASE WHEN requested_model IS NOT NULL THEN 1 ELSE 0 END) AS pinned_count,
+      SUM(CASE WHEN requested_model = model_id THEN 1 ELSE 0 END) AS pin_honored_count,
+      SUM(CASE WHEN request_type = 'chat' THEN 1 ELSE 0 END) AS chat_count,
+      SUM(CASE WHEN request_type = 'embedding' THEN 1 ELSE 0 END) AS embedding_count
+    FROM requests WHERE created_at >= ?
+  `).get(since) as {
+    avg_latency_ms: number | null; latency_count: number; avg_ttfb_ms: number | null;
+    pinned_count: number | null; pin_honored_count: number | null;
+    chat_count: number | null; embedding_count: number | null;
+  };
+  const latencyRow = { avg_latency_ms: raw.avg_latency_ms };
+  const pinRow = { pinned_count: raw.pinned_count, pin_honored_count: raw.pin_honored_count };
 
   // Estimated savings is a per-request priced value, so it lives on the raw
   // rows. For ranges where the raw table is empty we report 0 (no recent
@@ -184,15 +193,6 @@ analyticsRouter.get('/summary', (req: Request, res: Response) => {
     WHERE r.created_at >= ?
   `).get(FALLBACK_INPUT_PER_M, FALLBACK_OUTPUT_PER_M, since) as { est_savings: number };
 
-  // Pin-honor stats are also raw-row scoped. We still report them when present
-  // (typically 24h/7d) and gracefully drop them when the raw window is empty.
-  const pinRow = db.prepare(`
-    SELECT
-      SUM(CASE WHEN requested_model IS NOT NULL THEN 1 ELSE 0 END) as pinned_count,
-      SUM(CASE WHEN requested_model = model_id THEN 1 ELSE 0 END) as pin_honored_count
-    FROM requests WHERE created_at >= ?
-  `).get(since) as { pinned_count: number | null; pin_honored_count: number | null };
-
   // Latency percentiles, time-to-first-token, and the chat/embedding split all
   // live on the raw rows (the hourly aggregate keeps neither latency nor a
   // per-type breakdown). When the raw window is empty (older than the prune
@@ -203,41 +203,33 @@ analyticsRouter.get('/summary', (req: Request, res: Response) => {
   // ordered selection so they range over the same set: a NULL sorts first under
   // ORDER BY latency_ms ASC, so if it were counted but not filtered the offset
   // math would shift and a NULL could be selected (rendered as 0).
-  const rawCount = (db.prepare(
-    `SELECT COUNT(*) as c FROM requests WHERE created_at >= ? AND latency_ms IS NOT NULL`
-  ).get(since) as { c: number }).c;
-  const percentileAt = (fraction: number): number | null => {
-    if (rawCount === 0) return null;
-    const offset = Math.floor((rawCount - 1) * fraction);
-    const row = db.prepare(`
-      SELECT latency_ms FROM requests
+  const rawCount = raw.latency_count;
+  // p50 and p95 in one statement: two OFFSET lookups over the same ordered set.
+  let p50LatencyMs: number | null = null;
+  let p95LatencyMs: number | null = null;
+  if (rawCount > 0) {
+    const ordered = `SELECT latency_ms FROM requests
       WHERE created_at >= ? AND latency_ms IS NOT NULL
       ORDER BY latency_ms ASC
-      LIMIT 1 OFFSET ?
-    `).get(since, offset) as { latency_ms: number } | undefined;
-    return row ? Math.round(row.latency_ms) : null;
-  };
-  const p50LatencyMs = percentileAt(0.5);
-  const p95LatencyMs = percentileAt(0.95);
-
-  const ttfbRow = db.prepare(`
-    SELECT AVG(ttfb_ms) as avg_ttfb_ms FROM requests
-    WHERE created_at >= ? AND ttfb_ms IS NOT NULL
-  `).get(since) as { avg_ttfb_ms: number | null } | undefined;
-  const avgTtfbMs = ttfbRow?.avg_ttfb_ms != null ? Math.round(ttfbRow.avg_ttfb_ms) : null;
-
-  const typeRows = db.prepare(`
-    SELECT request_type, COUNT(*) as count FROM requests
-    WHERE created_at >= ?
-    GROUP BY request_type
-  `).all(since) as Array<{ request_type: string; count: number }>;
-  const requestTypeCounts = { chat: 0, embedding: 0 };
-  for (const row of typeRows) {
-    if (row.request_type === 'embedding') requestTypeCounts.embedding = row.count;
-    else if (row.request_type === 'chat') requestTypeCounts.chat = row.count;
+      LIMIT 1 OFFSET ?`;
+    const rows = db.prepare(`
+      SELECT 50 AS q, latency_ms FROM (${ordered})
+      UNION ALL
+      SELECT 95 AS q, latency_ms FROM (${ordered})
+    `).all(
+      since, Math.floor((rawCount - 1) * 0.5),
+      since, Math.floor((rawCount - 1) * 0.95),
+    ) as Array<{ q: number; latency_ms: number }>;
+    for (const row of rows) {
+      if (row.q === 50) p50LatencyMs = Math.round(row.latency_ms);
+      else if (row.q === 95) p95LatencyMs = Math.round(row.latency_ms);
+    }
   }
 
-  const lifetimeFirst = readLifetimeSettings();
+  const avgTtfbMs = raw.avg_ttfb_ms != null ? Math.round(raw.avg_ttfb_ms) : null;
+  const requestTypeCounts = { chat: raw.chat_count ?? 0, embedding: raw.embedding_count ?? 0 };
+
+  const lifetimeFirst = lifetime.firstRequestAt;
 
   res.json({
     totalRequests,

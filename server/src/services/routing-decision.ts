@@ -2,7 +2,7 @@ import { createHash } from 'crypto';
 import type { ChatMessage, ChatContent } from '@freellmapi/shared/types.js';
 import { getSetting, setSetting } from '../db/index.js';
 import { setRequestRoutingStrategy } from '../lib/client-context.js';
-import { CLAIRIC_MODEL, DecisionError, listDecisionModels, runDecision } from './decision.js';
+import { CLAIRIC_MODEL, DecisionError, listDecisionCandidates, runDecision } from './decision.js';
 import { getRoutingStrategy } from './router.js';
 import type { PresetStrategy } from './scoring.js';
 
@@ -249,7 +249,7 @@ export function routingStrategyHeader(pick: DecisionPick): string {
  *  - `keyPlatforms`: providers whose key would make it ready, in priority order. */
 export function getDecisionRoutingStatus() {
   const settings = getDecisionRoutingSettings();
-  const candidates = listDecisionModels()
+  const candidates = listDecisionCandidates()
     .filter(m => m.enabled && m.modelId !== CLAIRIC_MODEL)
     .filter(m => settings.model === 'auto' ? !AUTO_SKIP_PLATFORMS.has(m.platform) : m.modelId === settings.model)
     .sort((a, b) => a.priority - b.priority || a.id - b.id);
