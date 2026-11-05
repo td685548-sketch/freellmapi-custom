@@ -2,20 +2,33 @@ import type { Request, Response, NextFunction } from 'express';
 import { validateUserApiKey } from '../services/user-keys.js';
 import { checkUserRateLimit, recordUserUsage } from '../services/user-quotas.js';
 
-function extractBearer(req: Request): string | undefined {
-  const auth = req.headers.authorization;
-  if (typeof auth !== 'string') return undefined;
-  const match = auth.match(/^Bearer\s+(sk-flm-[A-Za-z0-9_-]+)$/i);
-  return match ? match[1] : undefined;
+/**
+ * Every credential spelling the inference routes accept: OpenAI Bearer, Anthropic
+ * x-api-key, Gemini x-goog-api-key, and (Gemini only) ?key=. This mirrors
+ * routes/proxy.ts extractApiToken on purpose: a gate that reads fewer headers
+ * than the auth layer lets a personal key skip its limit by changing header.
+ */
+function extractUserKey(req: Request): string | undefined {
+  const first = (v: string | string[] | undefined): string | undefined => {
+    const x = (Array.isArray(v) ? v[0] : v)?.trim();
+    return x || undefined;
+  };
+  let token = req.headers.authorization?.replace(/^Bearer\s+/i, '').trim()
+    || first(req.headers['x-api-key'])
+    || first(req.headers['x-goog-api-key']);
+  if (!token && req.originalUrl.startsWith('/v1beta') && typeof req.query.key === 'string') {
+    token = req.query.key.trim() || undefined;
+  }
+  return token && token.startsWith('sk-flm-') ? token : undefined;
 }
 
 /**
- * Intercepts /v1 inference calls using user API keys (`sk-flm-...`).
+ * Intercepts /v1 and /v1beta inference calls using user API keys (`sk-flm-...`).
  * Enforces per-user sliding window RPM limit and records monthly usage.
  * Non-user keys (Unified key, client profiles) pass through seamlessly to upstream.
  */
 export function userInferenceGate(req: Request, res: Response, next: NextFunction): void {
-  const token = extractBearer(req);
+  const token = extractUserKey(req);
   if (!token) {
     return next();
   }

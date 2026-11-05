@@ -91,8 +91,8 @@ function installGate(app: Express, gate: PermissionGate): void {
 export function registerCustomRoutes(app: Express): void {
   app.use('/api', (_req, _res, next) => withRoutingSettingsScope(next));
   app.use('/v1', (_req, _res, next) => withRoutingSettingsScope(next));
-  // Rate-limiting and usage tracking gate for member personal API keys (/v1 inference)
-  app.use('/v1', userInferenceGate);
+  // Rate-limiting and usage tracking gate for member personal API keys (/v1 and /v1beta inference)
+  app.use(['/v1', '/v1beta'], userInferenceGate);
   // Safe preference metadata is usable by cache editors without granting
   // unrelated system-settings reads. The dedicated router enforces its gates.
   app.use('/api/cache/preferences', requireAuth, cachePreferencesRouter);
