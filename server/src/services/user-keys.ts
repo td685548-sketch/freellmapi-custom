@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { getDb } from '../db/index.js';
 
 export const USER_KEY_PREFIX = 'sk-flm-';
@@ -123,8 +124,27 @@ function touchLastUsed(keyHash: string, keyId: number): void {
 /**
  * Validate an incoming user API key (used by /v1 inference routing).
  */
+// One inference request authenticates the same personal key twice: in the /v1
+// limit gate and again in resolveAuth. The gate opens this scope so the second
+// lookup reuses the first answer instead of repeating the query (a network round
+// trip on a remote database). It lives only as long as the request that opened
+// it, so a revocation is honoured by the very next request.
+const requestMemo = new AsyncLocalStorage<Map<string, ValidatedUserKey | null>>();
+
+export function withUserKeyMemo<T>(run: () => T): T {
+  return requestMemo.run(new Map(), run);
+}
+
 export function validateUserApiKey(token: string | undefined): ValidatedUserKey | null {
   if (!token || !token.startsWith(USER_KEY_PREFIX)) return null;
+  const memo = requestMemo.getStore();
+  if (memo?.has(token)) return memo.get(token) ?? null;
+  const result = lookupUserApiKey(token);
+  memo?.set(token, result);
+  return result;
+}
+
+function lookupUserApiKey(token: string): ValidatedUserKey | null {
 
   const db = getDb();
   const keyHash = sha256(token);
