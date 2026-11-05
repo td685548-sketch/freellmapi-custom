@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module';
 import type { Db, DbFactory, DbStatement } from './types.js';
+import { measureDb } from '../custom/performance/metrics.js';
 
 const runtimeRequire = createRequire(import.meta.url);
 const remoteDatabases = new WeakSet<Db>();
@@ -54,11 +55,14 @@ export function wrapTursoDatabase(raw: Db, remote = true, secrets: readonly stri
   // Remote prepare is itself a network request. Retain a bounded set of SELECT
   // handles (never result rows); execution still reads current database state.
   const reads = new Map<string, DbStatement>();
+  const nativePrepare = process.env.CUSTOM_PERF_METRICS === '1'
+    ? (sql: string) => measureDb('native_prepare', () => safe(() => raw.prepare(sql)))
+    : (sql: string) => safe(() => raw.prepare(sql));
   function prepare(sql: string): DbStatement {
-    if (!remote || !/^\s*SELECT\b/i.test(sql)) return safe(() => raw.prepare(sql));
+    if (!remote || !/^\s*SELECT\b/i.test(sql)) return nativePrepare(sql);
     let stmt = reads.get(sql);
     if (stmt) reads.delete(sql);
-    else stmt = safe(() => raw.prepare(sql));
+    else stmt = nativePrepare(sql);
     reads.set(sql, stmt);
     if (reads.size > 128) reads.delete(reads.keys().next().value!);
     return stmt;

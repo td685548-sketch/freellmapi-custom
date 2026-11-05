@@ -1,6 +1,6 @@
 # Hướng dẫn triển khai theo giai đoạn
 
-Đọc [bối cảnh và thứ tự PR](README.md) trước. Tất cả tên module, flag và interface mới bên dưới là **đề xuất**, không phải API đã tồn tại. Agent được điều chỉnh cách làm khi chứng minh được tương đương bằng ADR và số đo.
+Đọc [bối cảnh và thứ tự PR](README.md) trước. P01 hiện có bộ đo `CUSTOM_PERF_METRICS=1` và benchmark local; xem [hợp đồng thực tế](../../specs/006-dashboard-performance/contracts/diagnostics.md). Những module, flag và interface chưa được ghi nhận là đã triển khai vẫn là **đề xuất**. Agent được điều chỉnh cách làm khi chứng minh được tương đương bằng ADR và số đo.
 
 ## P01 — Baseline và quan sát hệ thống
 

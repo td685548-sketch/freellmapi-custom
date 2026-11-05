@@ -2,7 +2,7 @@
 
 **Ngày lập:** 2026-11-01. **Mốc code đã kiểm tra:** `4efcf3b1` trên `origin/main`.
 
-Đây là kế hoạch triển khai và hợp đồng review, **chưa phải các tối ưu đã được thực hiện**. Người dùng sẽ giao tài liệu cho agent triển khai; Codex review PR và bằng chứng trước khi phát hành các thay đổi tiếp theo. Agent phải đọc lại code ở HEAD mới và ghi nhận sai khác so với mốc trên.
+Đây là kế hoạch triển khai và hợp đồng review; trạng thái đã thực hiện được ghi riêng ở mục tiến độ P01 bên dưới. Người dùng sẽ giao tài liệu cho agent triển khai; Codex review PR và bằng chứng trước khi phát hành các thay đổi tiếp theo. Agent phải đọc lại code ở HEAD mới và ghi nhận sai khác so với mốc trên.
 
 ## Đọc theo thứ tự
 
@@ -14,6 +14,10 @@
 Các quy tắc trong [AGENTS.md](../../AGENTS.md) và [constitution](../../.specify/memory/constitution.md) vẫn áp dụng. Với tính năng mới, agent thực hiện workflow Spec Kit của repo: specify → plan → tasks → implement. Bộ tài liệu này cung cấp yêu cầu đầu vào; không thay thế các artifact Spec Kit hoặc giả định rằng các lệnh đó đã được chạy.
 
 ## 1. Mục tiêu và giới hạn
+
+### Tiến độ P01 (2026-11-05)
+
+Đã bổ sung bộ đo opt-in `CUSTOM_PERF_METRICS=1`, thời gian DB/cache lúc khởi động và benchmark HTTP local bằng dữ liệu giả tại `server/src/scripts/benchmark-dashboard.ts`. Mặc định tắt; không có endpoint metrics. Xem [hợp đồng số đo](../../specs/006-dashboard-performance/contracts/diagnostics.md), [cách chạy](../../specs/006-dashboard-performance/quickstart.md) và [bằng chứng, giới hạn](results/2026-11-05-p01.md). Chưa triển khai P02–P07 hoặc thay đổi production; số local không thay cho waterfall đã đăng nhập trên staging.
 
 - Giảm thời gian chờ dữ liệu của dashboard; giữ HTTP phản hồi được khi DB hoặc provider chậm.
 - Đo được p50/p95, số lần truy cập DB, số request trình duyệt, độ trễ event loop và bộ nhớ.
