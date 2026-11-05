@@ -1,4 +1,5 @@
 import './env.js';
+import { measureStartup, stopPerformanceMetrics } from './custom/performance/metrics.js';
 import { createApp } from './app.js';
 import { initDb, getDb } from './db/index.js';
 import { isTursoDatabase } from './db/turso.js';
@@ -46,7 +47,7 @@ async function main() {
   } else {
     await restoreDbBackupIfNeeded();
   }
-  initDb(config.dbPath ?? undefined);
+  measureStartup('database_init', () => initDb(config.dbPath ?? undefined));
   applyDeclarativeConfigFromEnv();
   // After initDb: the unknown-model half of this check reads the catalog.
   warnOnRoutingOverrideDrift();
@@ -54,7 +55,7 @@ async function main() {
   // Reload the persisted response cache into the in-memory LRU so entries
   // survive a restart (the daily quota-reset re-run pattern). Best-effort:
   // a DB failure leaves the cache empty (memory-only), exactly as before.
-  loadCacheFromDb();
+  measureStartup('cache_hydration', loadCacheFromDb);
 
   // Cooldowns persist across restarts on purpose, but their expiry is collected
   // lazily (isOnCooldown, per model+key). Rows for routes nothing asks about
@@ -131,7 +132,7 @@ async function main() {
   const server = app.listen(Number(PORT), HOST, onReady(HOST));
   tuneKeepAlive(server);
   const servers = [server];
-  installGracefulShutdown({ servers: () => servers.filter(s => s.listening), closeDb: () => getDb().close?.() });
+  installGracefulShutdown({ servers: () => servers.filter(s => s.listening), closeDb: () => { stopPerformanceMetrics(); getDb().close?.(); } });
   server.on('error', (err: NodeJS.ErrnoException) => {
     // The default '::' bind fails where IPv6 is disabled (kernel
     // ipv6.disable=1 and the like) — retry IPv4-only rather than dying.
