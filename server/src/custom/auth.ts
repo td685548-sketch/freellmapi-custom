@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { createUser, createSession } from '../services/auth.js';
 import { validateInviteCode, claimInviteCode } from '../services/invites.js';
 import { mintUserApiKey } from '../services/user-keys.js';
+import { allowAuthRequest } from '../services/auth-security.js';
 import {
   createRegistrationRequest,
   isRegistrationPending,
@@ -29,24 +30,43 @@ const requestAccessSchema = z.object({
 customAuthRouter.post('/login', (req: Request, res: Response, next: NextFunction) => {
   const email = typeof req.body?.email === 'string' ? req.body.email : '';
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
-  if (email && password && isRegistrationPending(email, password)) {
-    res.status(403).json({
-      error: {
-        message: 'Tài khoản của bạn đang chờ Admin phê duyệt. Vui lòng quay lại sau!',
-        type: 'registration_pending',
-      },
-    });
-    return;
+  // Only attempts against a pending request are bucketed: verifyPassword is
+  // deliberately slow, and without a bucket this pre-check would be an
+  // unthrottled password oracle in front of upstream's own login throttle.
+  // Ordinary logins never touch the bucket, so nobody can be locked out of a
+  // working account by hammering its email.
+  if (email && password && isRegistrationPending(email)) {
+    if (!allowAuthRequest('pending-login:' + email.trim().toLowerCase(), 10)) {
+      res.status(429).json({ error: { message: 'Too many attempts. Try again later.', type: 'rate_limit_error' } });
+      return;
+    }
+    if (isRegistrationPending(email, password)) {
+      res.status(403).json({
+        error: {
+          message: 'Tài khoản của bạn đang chờ Admin phê duyệt. Vui lòng quay lại sau!',
+          type: 'registration_pending',
+        },
+      });
+      return;
+    }
   }
   next();
 });
 
 customAuthRouter.get('/validate-invite', (req: Request, res: Response) => {
+  if (!allowAuthRequest('validate-invite:' + req.ip, 30)) {
+    res.status(429).json({ error: { message: 'Too many attempts. Try again later.', type: 'rate_limit_error' } });
+    return;
+  }
   const code = typeof req.query.code === 'string' ? req.query.code : '';
   res.json(validateInviteCode(code));
 });
 
 customAuthRouter.post('/request-access', (req: Request, res: Response) => {
+  if (!allowAuthRequest('request-access:' + req.ip, 10)) {
+    res.status(429).json({ error: { message: 'Too many requests. Try again later.', type: 'rate_limit_error' } });
+    return;
+  }
   const parsed = requestAccessSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: { message: parsed.error.errors.map(e => e.message).join(', ') } });
@@ -81,6 +101,10 @@ customAuthRouter.post('/request-access', (req: Request, res: Response) => {
 
 
 customAuthRouter.post('/register', (req: Request, res: Response) => {
+  if (!allowAuthRequest('register:' + req.ip, 20)) {
+    res.status(429).json({ error: { message: 'Too many attempts. Try again later.', type: 'rate_limit_error' } });
+    return;
+  }
   const parsed = registerSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: { message: parsed.error.errors.map(e => e.message).join(', ') } });

@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
-import { validateUserApiKey } from '../services/user-keys.js';
+import { validateUserApiKey, withUserKeyMemo } from '../services/user-keys.js';
 import { checkUserRateLimit, recordUserUsage } from '../services/user-quotas.js';
 
 /**
@@ -33,6 +33,10 @@ export function userInferenceGate(req: Request, res: Response, next: NextFunctio
     return next();
   }
 
+  withUserKeyMemo(() => gate(token, req, res, next));
+}
+
+function gate(token: string, req: Request, res: Response, next: NextFunction): void {
   const userKey = validateUserApiKey(token);
   if (!userKey) {
     // If a user key was provided but is revoked or invalid, reject with 401

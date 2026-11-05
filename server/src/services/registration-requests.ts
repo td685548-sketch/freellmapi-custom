@@ -142,17 +142,17 @@ export function approveRegistrationRequest(
     throw err;
   }
 
-  // Insert into users
-  const insertUser = db.prepare('INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)')
-    .run(req.email, req.password_hash, 'member');
-  const userId = Number(insertUser.lastInsertRowid);
-
-  // Mint personal API key for the newly approved member
-  mintUserApiKey(userId, 'Default Key');
-
-  // Mark request as approved
-  db.prepare(`UPDATE registration_requests SET status = 'approved', reviewed_at = datetime('now'), reviewed_by = ? WHERE id = ?`)
-    .run(adminUserId, req.id);
+  // User, personal key and request status change together: a failure part way
+  // must not leave an account behind while the request still reads as pending.
+  const userId = db.transaction(() => {
+    const insertUser = db.prepare('INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)')
+      .run(req.email, req.password_hash, 'member');
+    const id = Number(insertUser.lastInsertRowid);
+    mintUserApiKey(id, 'Default Key');
+    db.prepare(`UPDATE registration_requests SET status = 'approved', reviewed_at = datetime('now'), reviewed_by = ? WHERE id = ?`)
+      .run(adminUserId, req.id);
+    return id;
+  })();
 
   // Send approval email notification asynchronously (non-blocking)
   notifyUserRegistrationApproved(req.email).catch(() => {});
