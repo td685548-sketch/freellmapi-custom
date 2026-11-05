@@ -100,6 +100,37 @@ function cacheKey(sql: string, args: unknown[]): string | null {
 
 const copyRow = (r: unknown): unknown => (r && typeof r === 'object' && !ArrayBuffer.isView(r) ? { ...(r as object) } : r);
 
+// --- SQLITE_BUSY retry (remote connections only) --------------------------
+//
+// Turso serialises writers. During a rolling deploy the new instance runs its
+// migrations while the old one is still writing, and the loser gets
+// SQLITE_BUSY. A local file database waits that out through `busy_timeout`, but
+// that pragma is controlled by the server for remote connections (see `pragma`
+// below), so nothing waited: the first BUSY threw, boot exited with status 1 and
+// the host restarted the service. The statement never ran, so retrying it is
+// safe. Backoff blocks the event loop (the driver is synchronous anyway), so
+// the budget is generous only while the process is booting and nobody is
+// waiting on a response, and tiny afterwards.
+const BOOT_WINDOW_SECONDS = 120;
+const BOOT_BUSY_BACKOFF_MS = [100, 200, 400, 800, 1_500, 2_500, 3_500];
+const RUNTIME_BUSY_BACKOFF_MS = [50, 100, 200];
+
+/** Milliseconds to wait before retry number `attempt` (0-based), or null once the budget is spent. */
+export function busyBackoffMs(attempt: number, uptimeSeconds: number = process.uptime()): number | null {
+  const schedule = uptimeSeconds < BOOT_WINDOW_SECONDS ? BOOT_BUSY_BACKOFF_MS : RUNTIME_BUSY_BACKOFF_MS;
+  return attempt < schedule.length ? schedule[attempt]! : null;
+}
+
+export function isBusyError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const code = (error as Error & { code?: unknown }).code;
+  // The remote transport reports the code only inside the message text.
+  return code === 'SQLITE_BUSY' || /\bSQLITE_BUSY\b|database is locked/i.test(error.message);
+}
+
+const sleeper = new Int32Array(new SharedArrayBuffer(4));
+const sleepSync = (ms: number): void => { Atomics.wait(sleeper, 0, 0, ms); };
+
 /** Preserve the synchronous application contract and support nested migrations.
  * Remote connections deliberately expose no local filename or memory flag. */
 export function wrapTursoDatabase(raw: Db, remote = true, secrets: readonly string[] = []): Db {
@@ -133,10 +164,16 @@ export function wrapTursoDatabase(raw: Db, remote = true, secrets: readonly stri
   function invalidateReads(): void {
     writeVersions.set(db, tursoWriteVersion(db) + 1);
   }
-  function safe<T>(operation: () => T): T {
-    try { return operation(); } catch (error) {
-      if (!(error instanceof Error) || secrets.length === 0) throw error;
-      throw sanitizedDriverError(error, secrets);
+  function safe<T>(operation: () => T, retryBusy = true): T {
+    for (let attempt = 0; ; attempt++) {
+      try { return operation(); } catch (error) {
+        if (remote && retryBusy && isBusyError(error)) {
+          const wait = busyBackoffMs(attempt);
+          if (wait !== null) { sleepSync(wait); continue; }
+        }
+        if (!(error instanceof Error) || secrets.length === 0) throw error;
+        throw sanitizedDriverError(error, secrets);
+      }
     }
   }
   function row(value: unknown): unknown {
@@ -221,7 +258,7 @@ export function wrapTursoDatabase(raw: Db, remote = true, secrets: readonly stri
       const compatible = remote && depth > 0
         ? sql.replace(/^(\s*CREATE\s+)TEMP(?:ORARY)?\s+(TABLE\s+"_endpoint_identity_[a-z_]+"\s+AS\b)/i, '$1$2')
         : sql;
-      safe(() => raw.exec(compatible));
+      safe(() => raw.exec(compatible), !/;\s*\S/.test(compatible));
     },
     pragma: source => {
       // These are controlled by Turso, not by individual remote connections.

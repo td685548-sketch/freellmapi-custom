@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'libsql';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { wrapTursoDatabase } from '../../db/turso.js';
+import { busyBackoffMs, wrapTursoDatabase } from '../../db/turso.js';
 import type { Db } from '../../db/types.js';
 
 // The remote wrapper reuses SELECT results for a few seconds, but only while
@@ -125,5 +125,58 @@ describe('Turso SELECT result cache', () => {
       .filter(f => /CREATE\s+TRIGGER/i.test(fs.readFileSync(path.join(dir, f), 'utf8')));
     // If this fails, add the trigger's written tables to TRIGGER_SIDE_EFFECTS in db/turso.ts.
     expect(withTriggers).toEqual(['20260914_000001_key_monthly_usage.ts']);
+  });
+});
+
+describe('Turso SQLITE_BUSY retry', () => {
+  function flaky(failures: number, message = 'Hrana(StreamError(Error { message: "SQLite error: database is locked", code: "SQLITE_BUSY" }))') {
+    const raw = new Database(':memory:') as unknown as Db;
+    raw.exec('CREATE TABLE a (id INTEGER PRIMARY KEY, v TEXT)');
+    let remaining = failures;
+    let runs = 0;
+    const wrapped: Db = new Proxy(raw, {
+      get(target, prop, receiver) {
+        if (prop !== 'prepare') return Reflect.get(target, prop, receiver);
+        return (sql: string) => {
+          const stmt = target.prepare(sql);
+          return {
+            get: (...a: unknown[]) => stmt.get(...a),
+            all: (...a: unknown[]) => stmt.all(...a),
+            run: (...a: unknown[]) => {
+              if (remaining-- > 0) throw new Error(message);
+              runs++;
+              return stmt.run(...a);
+            },
+          };
+        };
+      },
+    });
+    return { db: wrapTursoDatabase(wrapped, true), runs: () => runs };
+  }
+
+  it('retries a busy write instead of failing the caller', () => {
+    const { db, runs } = flaky(2);
+    db.prepare('INSERT INTO a (v) VALUES (?)').run('x');
+    expect(runs()).toBe(1);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM a').get()).toEqual({ n: 1 });
+  });
+
+  it('gives up with the original error once the budget is spent', () => {
+    const { db } = flaky(1000);
+    expect(() => db.prepare('INSERT INTO a (v) VALUES (?)').run('x')).toThrow(/database is locked/);
+  }, 30_000);
+
+  it('does not retry other errors', () => {
+    const { db, runs } = flaky(1, 'UNIQUE constraint failed: a.id');
+    expect(() => db.prepare('INSERT INTO a (v) VALUES (?)').run('x')).toThrow(/UNIQUE/);
+    expect(runs()).toBe(0);
+  });
+
+  it('allows a long wait while booting and a short one afterwards', () => {
+    expect(busyBackoffMs(0, 5)).toBe(100);
+    expect(busyBackoffMs(6, 5)).toBe(3_500);
+    expect(busyBackoffMs(7, 5)).toBeNull();
+    expect(busyBackoffMs(2, 600)).toBe(200);
+    expect(busyBackoffMs(3, 600)).toBeNull();
   });
 });
