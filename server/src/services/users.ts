@@ -129,6 +129,23 @@ export function setUserPermissions(userId: number, permissions: Permission[], ac
   })();
 }
 
+/**
+ * A delegated operator may only act on accounts whose authority it covers, the
+ * same rule setUserRole/setUserPermissions apply. Without it a holder of a
+ * narrow grant (say revoke_user_sessions) could lock out, or throttle, every
+ * administrator above it. Acting on yourself is always allowed.
+ * Throws { code: 'insufficient_privileges' }.
+ */
+export function assertCanManageAccount(userId: number, actorUserId: number): void {
+  if (userId === actorUserId) return;
+  const db = getDb();
+  const actor = db.prepare('SELECT role, is_primary, permissions FROM users WHERE id = ?').get(actorUserId) as PermissionRow | undefined;
+  const target = db.prepare('SELECT role, is_primary, permissions FROM users WHERE id = ?').get(userId) as PermissionRow | undefined;
+  if (!actor) deny('insufficient_privileges', 'Administrative access required');
+  if (!target) return;
+  if (!noBroaderThan(actor, grantedPermissions(target))) deny('insufficient_privileges', 'Cannot alter an account with broader authority');
+}
+
 /** Ends every dashboard session an account holds, including other devices' tabs. */
 export function revokeSessionsForUser(userId: number, actorUserId?: number): number {
   const db = getDb();
@@ -139,6 +156,7 @@ export function revokeSessionsForUser(userId: number, actorUserId?: number): num
       err.code = 'primary_admin_protected';
       throw err;
     }
+    assertCanManageAccount(userId, actorUserId);
   }
   return db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId).changes;
 }
@@ -153,6 +171,7 @@ export function revokeApiKeysForUser(userId: number, actorUserId?: number): numb
       err.code = 'primary_admin_protected';
       throw err;
     }
+    assertCanManageAccount(userId, actorUserId);
   }
   return db.prepare('UPDATE user_api_keys SET revoked = 1 WHERE user_id = ? AND revoked = 0')
     .run(userId).changes;

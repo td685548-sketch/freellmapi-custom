@@ -47,6 +47,7 @@ import * as removeGithubProvider from '../migrations/20261017_000002_remove_gith
 import * as requestFailureAttribution from '../migrations/20261017_233153_request_failure_attribution.js';
 import * as removeAurayProvider from '../migrations/20261019_000001_remove_auray_provider.js';
 import * as keyLastHealthyAt from '../migrations/20261020_000001_key_last_healthy_at.js';
+import * as customConversationOwner from '../migrations/20261105_000001_custom_conversation_owner.js';
 import * as cloudflareNeuronUsage from '../migrations/20261104_000001_cloudflare_neuron_usage.js';
 
 import * as migration20261031_155642_custom_user_roles_and_keys from '../migrations/20261031_155642_custom_user_roles_and_keys.js';
@@ -121,6 +122,7 @@ export const CUSTOM_REGISTRATION_REQUESTS_FILENAME = '20261101_040000_custom_reg
 export const CUSTOM_USER_USAGE_FILENAME = '20261101_050000_custom_user_usage.ts';
 export const CUSTOM_GRANULAR_RBAC_FILENAME = '20261101_163500_custom_granular_rbac.ts';
 export const CUSTOM_PRIMARY_ADMIN_SCOPE_FILENAME = '20261101_190500_custom_primary_admin_scope.ts';
+export const CUSTOM_CONVERSATION_OWNER_FILENAME = '20261105_000001_custom_conversation_owner.ts';
 export const CLOUDFLARE_NEURON_USAGE_FILENAME = '20261104_000001_cloudflare_neuron_usage.ts';
 
 export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
@@ -178,4 +180,5 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: CUSTOM_GRANULAR_RBAC_FILENAME, module: customGranularRbac },
   { filename: CUSTOM_PRIMARY_ADMIN_SCOPE_FILENAME, module: customPrimaryAdminScope },
   { filename: CLOUDFLARE_NEURON_USAGE_FILENAME, module: cloudflareNeuronUsage },
+  { filename: CUSTOM_CONVERSATION_OWNER_FILENAME, module: customConversationOwner },
 ];

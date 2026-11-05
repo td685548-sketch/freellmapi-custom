@@ -10,6 +10,7 @@ import {
   revokeApiKeysForUser,
   userExists,
   isPrimaryAdmin,
+  assertCanManageAccount,
 } from '../services/users.js';
 import { listAllUsersUsage, setUserRpmLimit } from '../services/user-quotas.js';
 import type { SessionUser } from '../services/auth.js';
@@ -145,6 +146,10 @@ adminUsersRouter.post('/:id/revoke-sessions', (req: Request, res: Response) => {
       res.status(403).json({ error: { message: err.message, type: 'primary_admin_protected' } });
       return;
     }
+    if (err.code === 'insufficient_privileges') {
+      res.status(403).json({ error: { message: err.message, type: 'insufficient_privileges' } });
+      return;
+    }
     res.status(500).json({ error: { message: 'Failed to revoke sessions.' } });
   }
 });
@@ -162,6 +167,10 @@ adminUsersRouter.post('/:id/revoke-keys', (req: Request, res: Response) => {
   } catch (err: any) {
     if (err.code === 'primary_admin_protected') {
       res.status(403).json({ error: { message: err.message, type: 'primary_admin_protected' } });
+      return;
+    }
+    if (err.code === 'insufficient_privileges') {
+      res.status(403).json({ error: { message: err.message, type: 'insufficient_privileges' } });
       return;
     }
     res.status(500).json({ error: { message: 'Failed to revoke keys.' } });
@@ -188,6 +197,13 @@ adminUsersRouter.put('/:id/quota', (req: Request, res: Response) => {
   }
   if (!userExists(id)) {
     res.status(404).json({ error: { message: 'No such account.', type: 'user_not_found' } });
+    return;
+  }
+
+  try {
+    assertCanManageAccount(id, actor(req).userId);
+  } catch (err: any) {
+    res.status(403).json({ error: { message: err.message, type: 'insufficient_privileges' } });
     return;
   }
 
