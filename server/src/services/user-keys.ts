@@ -96,6 +96,30 @@ export function revokeUserApiKey(userId: number, keyId: number): boolean {
   return result.changes > 0;
 }
 
+// last_used_at is informational (shown in the key list), but it used to be an
+// UPDATE on every authenticated request, and each request authenticates twice
+// (the /v1 limit gate, then resolveAuth). SQLite serialises writers and a remote
+// Turso write is a network round trip, so that put a write on the hot path of
+// every inference call. Writing at most once a minute per key keeps the column
+// accurate to the minute for a fraction of the cost. Keyed by hash, not row id,
+// so a recreated database never inherits another database's throttle state.
+const LAST_USED_WRITE_INTERVAL_MS = 60_000;
+const MAX_TRACKED_KEYS = 10_000;
+const lastTouched = new Map<string, number>();
+
+function touchLastUsed(keyHash: string, keyId: number): void {
+  const now = Date.now();
+  const prev = lastTouched.get(keyHash);
+  if (prev !== undefined && now - prev < LAST_USED_WRITE_INTERVAL_MS) return;
+  try {
+    getDb().prepare("UPDATE user_api_keys SET last_used_at = datetime('now') WHERE id = ?").run(keyId);
+    if (lastTouched.size >= MAX_TRACKED_KEYS) lastTouched.clear();
+    lastTouched.set(keyHash, now);
+  } catch {
+    // Best effort: a lock/concurrency error must never fail authentication.
+  }
+}
+
 /**
  * Validate an incoming user API key (used by /v1 inference routing).
  */
@@ -121,12 +145,7 @@ export function validateUserApiKey(token: string | undefined): ValidatedUserKey 
 
   if (!row || row.revoked) return null;
 
-  // Touch last_used_at asynchronously/best effort
-  try {
-    db.prepare("UPDATE user_api_keys SET last_used_at = datetime('now') WHERE id = ?").run(row.key_id);
-  } catch {
-    // Ignore concurrency/lock errors on read path
-  }
+  touchLastUsed(keyHash, row.key_id);
 
   return {
     userId: row.user_id,
