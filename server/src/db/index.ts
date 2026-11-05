@@ -8,6 +8,7 @@ import { initEncryptionKey, isEncryptionKeyInitialized, probeStoredSecrets } fro
 import { restrictAllToOwner, restrictDirToOwner } from '../lib/file-permissions.js';
 import { nodeSqliteFactory } from './node-sqlite.js';
 import { tursoEnabled, tursoFactory } from './turso.js';
+import { observeDatabase } from '../custom/performance/database.js';
 import type { Db, DbFactory } from './types.js';
 import { readRoutingSetting } from './routing-settings-scope.js';
 
@@ -81,7 +82,7 @@ export function connectDb(
     restrictDataDir(dataDir, created);
   }
 
-  db = factory(resolvedPath);
+  db = observeDatabase(factory(resolvedPath));
   if (!isMemory) db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   // The dashboard and the proxy hot path write concurrently; without a busy

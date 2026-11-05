@@ -39,6 +39,7 @@ import { requireAuth } from './middleware/requireAuth.js';
 import { createHostGuard } from './middleware/allowed-hosts.js';
 import { createProxyRateLimiter, createAdminRateLimiter } from './middleware/rateLimit.js';
 import { registerCustomRoutes } from './custom/register.js';
+import { installPerformanceMetrics } from './custom/performance/metrics.js';
 
 // Password-guess ceiling for GET /api/keys/export. Deliberately low: a real
 // user exports keys occasionally, never ten times a minute.
@@ -114,6 +115,7 @@ export function createApp(config?: Config) {
   // above everything below — its whole value is answering before any state or
   // credential is touched.
   app.use(createHostGuard(cfg.allowedHosts));
+  app.use(installPerformanceMetrics());
   const allowedCorsOrigins = new Set([
     ...DEFAULT_DASHBOARD_ORIGINS,
     ...cfg.dashboardOrigins,
