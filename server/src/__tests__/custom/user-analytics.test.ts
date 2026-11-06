@@ -107,7 +107,7 @@ describe('per-user analytics', () => {
     insert.run('cerebras', 'zai-glm-4.7', 'success', 100, 50, 400, daysAgo(2), memberId);
     insert.run('cerebras', 'zai-glm-4.7', 'error', 0, 0, 90, daysAgo(2), memberId);
     insert.run('groq', 'qwen/qwen3-32b', 'success', 10, 10, 200, daysAgo(40), memberId); // outside a 30 day window
-    insert.run('groq', 'llama-3.1-8b-instant', 'success', 999, 999, 1, daysAgo(1), otherId); // someone else's
+    insert.run('groq', 'other-member-only-model', 'success', 999, 999, 1, daysAgo(1), otherId); // someone else's
 
     const admin = await get(`/api/admin/users/${memberId}/analytics?days=30`, adminToken);
     expect(admin.status).toBe(200);
@@ -121,7 +121,7 @@ describe('per-user analytics', () => {
     expect(a.daily).toHaveLength(30);
     expect(a.daily.reduce((n: number, d: any) => n + d.requests, 0)).toBe(4);
     expect(a.models.find((m: any) => m.modelId === 'zai-glm-4.7')).toMatchObject({ platform: 'cerebras', requests: 2, errors: 1, tokens: 150 });
-    expect(a.models.some((m: any) => m.modelId === 'llama-3.1-8b-instant')).toBe(false);
+    expect(a.models.some((m: any) => m.modelId === 'other-member-only-model')).toBe(false);
     expect(typeof a.retainedSince).toBe('string');
 
     const wide = await get(`/api/admin/users/${memberId}/analytics?days=90`, adminToken);

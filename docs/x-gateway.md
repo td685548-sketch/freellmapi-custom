@@ -6,8 +6,8 @@ The X Gateway (`/x/v1`) is an administrative, OpenAI-compatible entrypoint into 
 
 - **Strict Admin-Only Access**: Gated by the `use_x_gateway` permission (held by default by the primary administrator).
 - **Independent Configuration**: Dedicated configuration tables (`x_gateway_config`, `x_gateway_combos`, `x_gateway_usage_hourly`) separate from upstream tables.
-- **Ordered Fallback Combos**: Custom model combos defined via `combo:<name>` for prioritized routing.
-- **Token Savers**: Optional prompt-level output savers (Caveman, Ponytail lite/full/ultra) and input tool-output compression.
+- **Ordered Fallback Combos**: Custom model combos are stored and validated, but `combo:<name>` routing is not wired into the request path yet.
+- **Token Savers**: The gateway-wide output savers are available on `/v1` and editable from the console; the separate per-request X defaults are stored but not applied to `/x/v1` yet.
 - **Dedicated Console**: Separate management UI at `/x` (Providers, Provider accounts, Endpoint & Key, Token Saver, Account usage), behind the same permission model.
 
 It reuses the core proxy routing and fallback execution internally without altering `/v1` endpoints.
@@ -18,7 +18,7 @@ The X Gateway is **disabled by default**. When disabled, any request to `/x/v1` 
 
 To enable the gateway:
 1. Sign in as an administrator holding the `edit_x_settings` permission.
-2. Navigate to the `/x` console or issue an authorized request:
+2. Open `/x/endpoint` and use the gateway switch, or issue an authorized request:
    ```http
    PUT /api/x-gateway/enabled
    Content-Type: application/json
@@ -47,9 +47,10 @@ curl http://localhost:3000/x/v1/chat/completions \
 
 Response headers added by the X Gateway:
 - `X-Gateway: x`
-- `X-Combo`: name of the active combo (when invoked via `combo:<name>`)
-- `X-Output-Saver-Applied`: comma-separated list of applied output savers
-- `X-Input-Tokens-Saved`: estimated input tokens saved by compression
+- `X-Output-Saver-Applied`: currently empty (savers are not applied on this path yet)
+- `X-Input-Tokens-Saved`: currently `0`
+
+The request is then handed to the ordinary chat handler, so routing, fallback, provider selection, limits and logging are the same as `/v1`.
 
 ## Console (`/x`)
 
@@ -85,22 +86,18 @@ Connect attempts are held in memory only: they are bound to the creating user an
 
 ## Savers
 
-The X Gateway supports prompt-level output savers and input compression:
-- **Caveman**: Instructs the model to output ultra-concise, telegram-style responses.
-- **Ponytail**: Concise outputs with levels `lite`, `full` (default), and `ultra`.
-- **Input Saver**: Compresses lengthy tool responses (`off`, `lossless`, `standard`).
+There are two separate settings, and only the first one affects requests today:
 
-Savers can be configured globally as defaults or overridden per request via headers:
-- `X-Token-Saver: off`: Disables all savers for the request.
-- `X-Output-Saver: caveman,ponytail:lite`: Explicit output savers.
-- `X-Input-Saver: standard`: Explicit input compression level.
+1. **Gateway-wide output savers** (`/api/savers`, edited on `/x/savers`): caveman and ponytail levels applied to `/v1` chat requests by the existing saver middleware. No X-specific savers are involved.
+2. **X default savers** (`PUT /api/x-gateway/defaults`): the stored shape is `{ caveman: boolean, ponytail: 'off'|'lite'|'full'|'ultra', input: 'off'|'lossless'|'standard' }`. **Not applied yet:** `/x/v1` currently forwards the conversation unchanged and does not read the `X-Token-Saver`, `X-Output-Saver` or `X-Input-Saver` headers, so setting them has no effect. The response headers report an empty saver list and `0` saved tokens.
 
 ## Combos
 
-Combos define ordered fallback lists of models (1-20 entries) referenced as `combo:<name>`. When a client requests `model: "combo:<name>"`, the gateway attempts models strictly in the configured order.
-- Maximum 50 combos per instance.
-- Combo names are restricted to 1-48 characters matching `[a-z0-9\-_.]` and cannot start with `auto:` or `combo:`.
-- If an entry is disabled or missing credentials, the router automatically fails over to the next candidate.
+Combos are stored and validated but **not routed yet**: `/x/v1` does not resolve `model: "combo:<name>"`, so such a request is handled like any other unknown model. The validation rules that the storage layer already enforces are:
+
+- Maximum 50 combos per instance, 1-20 ordered entries each, no duplicate entries.
+- Combo names are 1-48 characters matching `[a-z0-9\-_.]` and cannot be `auto` or start with `auto:` or `combo:`.
+- Entries are stored as `{ platform, modelId }` and are not checked against live provider credentials at save time.
 
 ## Security Considerations
 
@@ -109,11 +106,11 @@ The X Gateway attack surface is mitigated according to the following threat matr
 | Threat | Control |
 | --- | --- |
 | Non-admin uses the gateway | Permission checked on every request; 401/403; tests for anonymous, member, revoked key, demoted admin |
-| Combo names used from `/v1` | Resolver answers only inside the gateway scope |
+| Combo names used from `/v1` | Planned resolver answers only inside the gateway scope (not wired yet) |
 | Privilege escalation through the new permission | Existing delegation rule; group appears in the existing dialog |
 | Large or slow anonymous bodies | Existing pre-parse guard extended to `/x/v1` |
 | Abuse by a stolen admin key | Per-user rate limit, revocation (existing), kill switch, logging with the `x-gateway` tag |
-| Instruction injection through savers | Fixed server-side text only; no user-supplied saver text in phase 1 |
+| Instruction injection through savers | Planned: fixed server-side text only, no user-supplied saver text (not applied on `/x/v1` yet) |
 | Key disclosure through the console | The console never receives or displays a key; the usage example uses a placeholder |
 | CSRF on console APIs | Bearer-token session, no cookies |
 | Cache staleness after permission change | Permission read from the key lookup on every request, not cached |
@@ -122,7 +119,7 @@ The X Gateway attack surface is mitigated according to the following threat matr
 | Phishing through a forged login link | The dialog only links to `https://openrouter.ai` or `https://github.com` with no credentials or port |
 | Credential or token disclosure in the console | Accounts API returns labels, status, models and usage only; keys never leave the server |
 | Reconnect stealing another grant | Reconnect requires the original provider subject and `edit_keys` |
-| Resource exhaustion by combos | Name length, 50 combos, 20 entries each |
+| Resource exhaustion by combos | Name length, 50 combos, 20 entries each (storage layer enforced) |
 
 ## What it deliberately does not do
 
