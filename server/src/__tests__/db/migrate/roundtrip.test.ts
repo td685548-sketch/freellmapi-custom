@@ -63,6 +63,8 @@ const CUSTOM_REQUEST_USER_ID_FILENAME = '20261106_000001_custom_request_user_id.
 const CUSTOM_PROFILE_USAGE_FILENAME = '20261106_000002_custom_profile_usage.ts';
 const CUSTOM_USAGE_QUOTAS_FILENAME = '20261106_000003_custom_usage_quotas.ts';
 const CUSTOM_PROFILE_RESTRICTIONS_FILENAME = '20261106_000004_custom_profile_restrictions.ts';
+const CUSTOM_X_GATEWAY_FILENAME = '20261106_120000_custom_x_gateway.ts';
+const CUSTOM_PROVIDER_ACCOUNTS_FILENAME = '20261107_000001_custom_provider_accounts.ts';
 
 interface SchemaRow {
   type: string;
@@ -172,6 +174,8 @@ describe('migration round trip', () => {
         CUSTOM_PROFILE_USAGE_FILENAME,
         CUSTOM_USAGE_QUOTAS_FILENAME,
         CUSTOM_PROFILE_RESTRICTIONS_FILENAME,
+        CUSTOM_X_GATEWAY_FILENAME,
+        CUSTOM_PROVIDER_ACCOUNTS_FILENAME,
       ]);
     } finally {
       db.close();

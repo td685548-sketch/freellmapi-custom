@@ -57,7 +57,7 @@ type Route = 'public' | 'url-token' | 'credentialed';
 function classify(path: string): Route {
   if (path.startsWith('/v1/t/')) return 'url-token';
   if (path === '/api/auth' || path.startsWith('/api/auth/')) return 'public';
-  if (path.startsWith('/v1') || path.startsWith('/mcp') || path.startsWith('/api/')) return 'credentialed';
+  if (path.startsWith('/v1') || path.startsWith('/x/v1') || path.startsWith('/mcp') || path.startsWith('/api/')) return 'credentialed';
   return 'public';
 }
 

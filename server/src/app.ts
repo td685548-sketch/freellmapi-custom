@@ -210,7 +210,7 @@ export function createApp(config?: Config) {
   // body was already parsed, so the second parser only sees what the first
   // didn't own; an over-limit body throws from whichever parser matched.
   app.use(
-    ['/v1', '/v1beta', '/mcp', '/api/chat', '/api/generate', '/api/embed', '/api/embeddings'],
+    ['/v1', '/v1beta', '/x/v1', '/mcp', '/api/chat', '/api/generate', '/api/embed', '/api/embeddings'],
     express.json({ limit: cfg.requestBodyLimitBytes }),
   );
   app.use(express.json({ limit: '10mb' }));
@@ -313,6 +313,10 @@ export function createApp(config?: Config) {
   // Separately revocable URL tokens for clients that cannot set headers.
   app.use('/v1/t/:token', createProxyRateLimiter(cfg.proxyRateLimitRpm));
   app.use('/v1/t/:token', urlTokenRouter);
+
+  // X Gateway (9Router integration): admin-only OpenAI-compatible surface.
+  // Same per-IP rate limiter as /v1; auth and permission are in the x-gateway router.
+  app.use('/x/v1', createProxyRateLimiter(cfg.proxyRateLimitRpm));
 
   // OpenAI-compatible proxy. Per-IP rate limiting (#35 item #6) runs first so
   // it throttles unauthenticated brute-force / flood attempts before any

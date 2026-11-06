@@ -4,6 +4,7 @@ import { noteBudgetAlerts } from '../services/budget-alerts.js';
 import { getClientContext, noteRequestTokens } from './client-context.js';
 import { noteRequestRowId, type RequestTrace } from './attempt-trace.js';
 import { batchedWritesEnabled } from './write-group.js';
+import { getGatewayScope } from '../custom/x-gateway/context.js';
 
 type LogTx = ReturnType<typeof getDb>;
 
@@ -151,8 +152,9 @@ export function logRequest(
     const hour = hourKey(nowIso);
     const isSuccess = status === 'success' ? 1 : 0;
     const isError = status === 'error' ? 1 : 0;
+    const resolvedCaller = caller && caller !== 'http' ? caller : (getGatewayScope()?.gateway === 'x' ? 'x-gateway' : caller);
 
-    const insertParams = [platform, modelId, keyId, status, inputTokens, outputTokens, latencyMs, error, ttfbMs, requestedModel, servedModel, client.ip, client.userAgent, client.agent, caller, modelDbId, failureAttribution, nowIso, client.userId ?? null, client.profileId ?? null];
+    const insertParams = [platform, modelId, keyId, status, inputTokens, outputTokens, latencyMs, error, ttfbMs, requestedModel, servedModel, client.ip, client.userAgent, client.agent, resolvedCaller, modelDbId, failureAttribution, nowIso, client.userId ?? null, client.profileId ?? null];
     const hourlyParams = [hour, isSuccess, isError, inputTokens, outputTokens, isSuccess, isError, inputTokens, outputTokens];
     if (status === 'success') noteRequestTokens(inputTokens + outputTokens);
     const counters = lifetimeCountersStatement({ requests: 1, inputTokens, outputTokens }, nowIso);

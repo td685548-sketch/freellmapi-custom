@@ -10,6 +10,7 @@ vi.mock('../../services/request-retention.js', () => ({
 
 import { initDb, getDb } from '../../db/index.js';
 import { logRequest } from '../../lib/request-log.js';
+import { runInGatewayScope } from '../../custom/x-gateway/context.js';
 
 interface RequestRow {
   platform: string;
@@ -45,5 +46,24 @@ describe('logRequest caller dimension (#1102)', () => {
   it('writes NULL for legacy callers that do not pass a caller', () => {
     logRequest('groq', 'llama-3.3-70b', 7, 'success', 10, 5, 120, null);
     expect(latestRequest()?.caller).toBeNull();
+  });
+
+  it('tags requests as x-gateway when gateway scope is active', () => {
+    runInGatewayScope(
+      { gateway: 'x', outputSavers: [], inputSaver: 'off', inputTokensSaved: 0 },
+      () => {
+        // Default http caller from proxy becomes x-gateway
+        logRequest('groq', 'llama-3.3-70b', 7, 'success', 10, 5, 120, null, null, null, null, 'http');
+        expect(latestRequest()?.caller).toBe('x-gateway');
+
+        // Untagged caller inside gateway scope becomes x-gateway
+        logRequest('groq', 'llama-3.3-70b', 7, 'success', 10, 5, 120, null);
+        expect(latestRequest()?.caller).toBe('x-gateway');
+
+        // Explicit custom caller wins
+        logRequest('groq', 'llama-3.3-70b', 7, 'success', 10, 5, 120, null, null, null, null, 'custom-agent');
+        expect(latestRequest()?.caller).toBe('custom-agent');
+      },
+    );
   });
 });

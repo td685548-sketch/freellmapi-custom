@@ -184,6 +184,10 @@ describe('Granular permissions and cache preferences', () => {
         ['manage_backups', 'GET', '/api/backups/2/download', 'download_backups'],
         ['manage_backups', 'DELETE', '/api/backups/2', 'delete_backups'],
         ['manage_backups', 'PUT', '/api/backups/schedule', 'schedule_backups'],
+        ['manage_x_gateway', 'PUT', '/api/x-gateway/enabled', 'edit_x_settings'],
+        ['manage_x_gateway', 'POST', '/api/x-gateway/combos', 'edit_x_combos'],
+        ['manage_x_gateway', 'GET', '/api/x-gateway/usage', 'view_x_usage'],
+        ['manage_x_gateway', 'POST', '/api/x-gateway/test', 'use_x_gateway'],
       ] as const).map(([parent, method, path, permission]) => {
         expect(permissionForAction(parent, method, path)).toBe(permission);
         return permission;
