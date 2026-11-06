@@ -174,7 +174,7 @@ As the administrator I can see how much I have used through the gateway: request
 
 ## Assumptions
 
-- The gateway lives under `/x/v1/` and the console under `/x`, both on the same deployment and the same sign-in as the main application. "Separate interface" is interpreted as a distinct page area with its own navigation and layout, not a separate deployment or application.
+- The gateway lives under `/x/v1/` and the console under `/x`, both on the same deployment and the same sign-in as the main application. "Separate interface" is a distinct page area with its own navigation and layout inside the same application and the same sign-in (confirmed by the owner on 2026-11-06), not a separate deployment or application.
 - The gateway uses the administrator's existing personal key (the same `sk-flm-` keys the main gateway issues), restricted by the new permission; no separate key type is introduced in phase 1.
 - The fixed saver set in phase 1 is caveman, ponytail (lite/full/ultra) and the input saver; adding custom prompts is out of scope.
 - Streaming behaves as on the main gateway.

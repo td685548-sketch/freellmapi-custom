@@ -33,4 +33,4 @@
 
 - Addresses (`/x/v1`, `/x`) and the "personal key" are product decisions from the owner's brief, recorded in Assumptions, not implementation details.
 - SC-007/SC-008 refer to the repository's existing budget and measurement practice; they stay user-facing (no added storage cost, no added stall).
-- The one interpretation worth confirming before planning: "separate interface" is read as a separate console area in the same application and sign-in, not a separate deployment. Recorded in Assumptions.
+- Confirmed by the owner (2026-11-06): the console is a separate area (`/x`) in the same application and sign-in, not a separate deployment.
