@@ -12,6 +12,7 @@ import { QuotaCard } from './QuotaCard'
 import { ProfileRestrictionsCard } from './ProfileRestrictionsCard'
 import { ProfileIntegrationCard } from './ProfileIntegrationCard'
 import { KeyRotationCard } from './KeyRotationCard'
+import { RecentRequestsCard } from './RecentRequestsCard'
 import { useAdministrativeAccess } from './use-administrative-access'
 
 const MAX_RPM = 1000
@@ -108,6 +109,7 @@ export function ProfileUsagePage() {
           </>
         )}
       />
+      <RecentRequestsCard endpoint={`/api/client-profiles/${profileId}/requests`} />
     </div>
   )
 }

@@ -3,6 +3,7 @@ import { ArrowLeft } from 'lucide-react'
 import { PageHeader } from '@/components/page-header'
 import { UserAnalyticsView } from './UserAnalyticsView'
 import { QuotaCard } from './QuotaCard'
+import { RecentRequestsCard } from './RecentRequestsCard'
 import { useAdministrativeAccess } from './use-administrative-access'
 
 // /users/:id/analytics - one account's usage, for operators who can view accounts.
@@ -37,6 +38,7 @@ export function UserAnalyticsPage() {
         canEdit={can('edit_user_quotas')}
       />
       <UserAnalyticsView endpoint={`/api/admin/users/${userId}/analytics`} queryKey={['admin-user-analytics', userId]} />
+      <RecentRequestsCard endpoint={`/api/admin/users/${userId}/requests`} />
     </div>
   )
 }
