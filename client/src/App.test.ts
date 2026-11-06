@@ -35,4 +35,9 @@ describe('app shell heights', () => {
   it('keeps /playground in the full-bleed set', () => {
     expect(app).toMatch(/FULL_BLEED_ROUTES = new Set\(\[[^\]]*'\/playground'[^\]]*\]\)/)
   })
+
+  it('renders the X console outside the dashboard navbar and gates its entry', () => {
+    expect(app).toContain("if (location.pathname === '/x' || location.pathname.startsWith('/x/')) return <XGatewayApp />")
+    expect(app).toContain("hasPermission('use_x_gateway') ? [{ to: '/x/providers'")
+  })
 })

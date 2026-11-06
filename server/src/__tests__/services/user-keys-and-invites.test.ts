@@ -126,6 +126,8 @@ describe('Custom Multi-User & Invite System', () => {
     expect(validated?.userId).toBe(user.userId);
     expect(validated?.email).toBe('coder@example.com');
     expect(validated?.role).toBe('member');
+    expect(validated?.isPrimary).toBe(false);
+    expect(validated?.permissions).toEqual([]);
 
     // Inference resolveAuth recognizes the key
     const resolved = resolveAuth(minted.key);

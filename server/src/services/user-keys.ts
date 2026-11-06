@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { getDb } from '../db/index.js';
+import { parseStoredPermissions, type Permission } from '@freellmapi/shared/permissions.js';
 
 export const USER_KEY_PREFIX = 'sk-flm-';
 
@@ -12,6 +13,8 @@ export interface ValidatedUserKey {
   email: string;
   role: 'admin' | 'member';
   rpmLimit: number;
+  isPrimary: boolean;
+  permissions: readonly Permission[];
 }
 
 function sha256(val: string): string {
@@ -135,6 +138,15 @@ export function withUserKeyMemo<T>(run: () => T): T {
   return requestMemo.run(new Map(), run);
 }
 
+export function getMemoizedUserKey(): ValidatedUserKey | null {
+  const memo = requestMemo.getStore();
+  if (!memo) return null;
+  for (const userKey of memo.values()) {
+    if (userKey) return userKey;
+  }
+  return null;
+}
+
 export function validateUserApiKey(token: string | undefined): ValidatedUserKey | null {
   if (!token || !token.startsWith(USER_KEY_PREFIX)) return null;
   const memo = requestMemo.getStore();
@@ -150,7 +162,7 @@ function lookupUserApiKey(token: string): ValidatedUserKey | null {
   const keyHash = sha256(token);
 
   const row = db.prepare(`
-    SELECT k.id as key_id, k.user_id, k.rpm_limit, k.revoked, u.email, u.role
+    SELECT k.id as key_id, k.user_id, k.rpm_limit, k.revoked, u.email, u.role, u.is_primary, u.permissions
     FROM user_api_keys k
     JOIN users u ON u.id = k.user_id
     WHERE k.key_hash = ?
@@ -161,16 +173,24 @@ function lookupUserApiKey(token: string): ValidatedUserKey | null {
     revoked: number;
     email: string;
     role: string;
+    is_primary: number;
+    permissions: string | null;
   } | undefined;
 
   if (!row || row.revoked) return null;
 
   touchLastUsed(keyHash, row.key_id);
 
+  const role: 'admin' | 'member' = row.role === 'admin' ? 'admin' : 'member';
+  const isPrimary = Boolean(row.is_primary);
+  const permissions = parseStoredPermissions(row.permissions, role, isPrimary);
+
   return {
     userId: row.user_id,
     email: row.email,
-    role: row.role === 'admin' ? 'admin' : 'member',
+    role,
     rpmLimit: row.rpm_limit || 60,
+    isPrimary,
+    permissions,
   };
 }

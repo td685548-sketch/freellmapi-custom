@@ -93,13 +93,21 @@ When asked to implement a new feature:
 To keep the `main` branch stable, ensure clean CI validation, and preserve full traceability:
 
 ### Rule 1: Always Branch Before Modifying
-**Never commit or push directly to `main` for bug fixes or features.** Always create a dedicated branch off `main`:
+**Never commit or push directly to `main` for bug fixes or features.** Create a dedicated branch off `main`, except for the shared 9Router integration branch described below:
 ```powershell
 git checkout main
 git pull origin main
 git checkout -b <type>/<short-description>
 # Examples: fix/login-session-timeout, feat/user-quota-limits, chore/update-deps
 ```
+
+#### 9Router integration: reuse one shared branch
+- Use **`feat/9router-integration`** for all work integrating 9Router features into FreeLLMAPI, including output savers, combos, gateway/API, UI, tests, fixes, and documentation for that integration.
+- Create this branch from `main` **once**, then reuse it. **Do not create a new branch for each integration feature or task.** Split changes into focused commits instead.
+- Keep the branch after a PR is merged. Before the next batch, merge the latest `origin/main` into it without discarding pending work or rewriting history.
+- Reuse an open PR from this branch; if the previous PR is already merged, open the next PR from **the same branch** to `main`.
+- Test/build requirements still apply, and merge only when CI is green. This exception changes branch reuse, not validation or the prohibition on direct feature commits to `main`.
+- Work unrelated to the 9Router integration still uses dedicated branches under the default rule above.
 
 ### Rule 2: Verify Tests and Build
 Before committing or creating a PR, verify that the workspace passes all tests and builds:
