@@ -24,6 +24,7 @@ import { cachePreferencesRouter } from '../routes/cache-preferences.js';
 import { outputSaversRouter } from './output-savers/router.js';
 import { statusCache } from './status-cache.js';
 import { xGatewayRouter } from './x-gateway/router.js';
+import { xGatewayConsoleRouter } from './x-gateway/console-router.js';
 import { getConfigSnapshot } from './x-gateway/config.js';
 import { providerAccountsRouter } from './provider-accounts/router.js';
 
@@ -149,6 +150,9 @@ export function registerCustomRoutes(app: Express): void {
   app.use('/x/v1', xGatewayRouter);
   // Account logins manage shared credentials with the router's granular key permissions.
   app.use('/api/x-accounts', providerAccountsRouter);
+  // Gateway switch and default savers. The manage_x_gateway gate above maps each
+  // path to its leaf (edit_x_settings for writes, use_x_gateway for reads).
+  app.use('/api/x-gateway', xGatewayConsoleRouter);
 
   // Custom fork routes with their dedicated permission gates
   app.use('/api/auth', externalAuthRouter, customAuthRouter);
