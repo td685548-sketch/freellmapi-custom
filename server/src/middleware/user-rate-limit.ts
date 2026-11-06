@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { validateUserApiKey, withUserKeyMemo } from '../services/user-keys.js';
+import { setRequestUser } from '../lib/client-context.js';
 import { checkUserRateLimit, recordUserUsage } from '../services/user-quotas.js';
 
 /**
@@ -67,10 +68,14 @@ function gate(token: string, req: Request, res: Response, next: NextFunction): v
     return;
   }
 
+  // Every row logged while serving this request is attributed to the account, and
+  // the tokens of the successful ones ride along with the request count below.
+  const context = setRequestUser(userKey.userId);
+
   // Record usage when response completes
   res.on('finish', () => {
     if (res.statusCode < 400) {
-      recordUserUsage(userKey.userId, 0);
+      recordUserUsage(userKey.userId, context?.userTokens ?? 0);
     }
   });
 

@@ -25,6 +25,7 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
   }
   if (parent === 'manage_users' && path.startsWith('/api/admin/users')) {
     if (read && ['/api/admin/users', '/api/admin/users/usage'].includes(path)) return 'view_users';
+    if (read && /^\/api\/admin\/users\/\d+\/analytics$/.test(path)) return 'view_users';
     if (/^\/api\/admin\/users\/\d+\/role$/.test(path) && method === 'PATCH') return 'edit_user_roles';
     if (/^\/api\/admin\/users\/\d+\/permissions$/.test(path) && method === 'PUT') return 'edit_user_permissions';
     if (/^\/api\/admin\/users\/\d+\/quota$/.test(path) && method === 'PUT') return 'edit_user_quotas';

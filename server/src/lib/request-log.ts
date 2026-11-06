@@ -1,7 +1,7 @@
 import { getDb } from '../db/index.js';
 import { pruneRequestAnalytics } from '../services/request-retention.js';
 import { noteBudgetAlerts } from '../services/budget-alerts.js';
-import { getClientContext } from './client-context.js';
+import { getClientContext, noteRequestTokens } from './client-context.js';
 import { noteRequestRowId, type RequestTrace } from './attempt-trace.js';
 import { batchedWritesEnabled } from './write-group.js';
 
@@ -51,8 +51,8 @@ const REQUEST_HOURLY_SQL = `
       `;
 
 const REQUEST_INSERT_SQL = `
-        INSERT INTO requests (platform, model_id, key_id, status, input_tokens, output_tokens, latency_ms, error, ttfb_ms, requested_model, served_model, client_ip, client_user_agent, client_agent, caller, model_db_id, failure_attribution, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO requests (platform, model_id, key_id, status, input_tokens, output_tokens, latency_ms, error, ttfb_ms, requested_model, served_model, client_ip, client_user_agent, client_agent, caller, model_db_id, failure_attribution, created_at, user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
 // Resolve the concrete models.id for a request (#1187). Catalog requests
@@ -152,8 +152,9 @@ export function logRequest(
     const isSuccess = status === 'success' ? 1 : 0;
     const isError = status === 'error' ? 1 : 0;
 
-    const insertParams = [platform, modelId, keyId, status, inputTokens, outputTokens, latencyMs, error, ttfbMs, requestedModel, servedModel, client.ip, client.userAgent, client.agent, caller, modelDbId, failureAttribution, nowIso];
+    const insertParams = [platform, modelId, keyId, status, inputTokens, outputTokens, latencyMs, error, ttfbMs, requestedModel, servedModel, client.ip, client.userAgent, client.agent, caller, modelDbId, failureAttribution, nowIso, client.userId ?? null];
     const hourlyParams = [hour, isSuccess, isError, inputTokens, outputTokens, isSuccess, isError, inputTokens, outputTokens];
+    if (status === 'success') noteRequestTokens(inputTokens + outputTokens);
     const counters = lifetimeCountersStatement({ requests: 1, inputTokens, outputTokens }, nowIso);
 
     if (batchedWritesEnabled(db)) {
