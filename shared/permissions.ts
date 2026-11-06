@@ -61,6 +61,12 @@ export const PERMISSION_GROUPS = [
     { key: "view_usage_accounts", title: "View account ranking", description: "See every account's email with its request, token, error and latency figures." },
     { key: "view_usage_profiles", title: "View client key ranking", description: "See every client profile's name with its request, token, error and latency figures." },
   ] },
+  { key: "manage_x_gateway", title: "X Gateway (9Router)", description: "Admin-only gateway with combos and token savers.", children: [
+    { key: "use_x_gateway", title: "Use X gateway", description: "Use the X gateway and open its console." },
+    { key: "edit_x_combos", title: "Manage combos", description: "Create, edit, reorder and delete combos." },
+    { key: "edit_x_settings", title: "Configure gateway", description: "Switch the gateway on or off and change default savers." },
+    { key: "view_x_usage", title: "View gateway usage", description: "Read the X gateway usage view." },
+  ] },
  ] as const;
 export type ParentPermission = typeof PERMISSION_GROUPS[number]['key'];
 export type ChildPermission = typeof PERMISSION_GROUPS[number]['children'][number]['key'];

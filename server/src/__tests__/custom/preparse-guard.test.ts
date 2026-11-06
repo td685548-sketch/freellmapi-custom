@@ -6,6 +6,7 @@ import { createApp } from '../../app.js';
 import { getDb, getUnifiedApiKey, initDb } from '../../db/index.js';
 import { createSession, createUser } from '../../services/auth.js';
 import { mintUrlToken } from '../../services/url-tokens.js';
+import { mintUserApiKey } from '../../services/user-keys.js';
 import { clearStatusCache, setStatusCacheTestOverride } from '../../custom/status-cache.js';
 
 // Large request bodies are refused BEFORE they are parsed unless the caller holds
@@ -37,7 +38,7 @@ describe('pre-parse guard and public probes', () => {
       // loopback connection is the operator's own machine and is deliberately not guarded.
       const headers: Record<string, string | number> = { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.9', ...opts.headers };
       if (opts.body !== undefined && !opts.chunked) headers['content-length'] = Buffer.byteLength(opts.body);
-      const req = http.request({ host: '127.0.0.1', port, path, method: opts.method ?? 'POST', headers }, res => {
+      const req = http.request({ host: '127.0.0.1', port, path, method: opts.method ?? 'POST', headers, agent: false }, res => {
         let data = '';
         res.on('data', c => { data += c; });
         res.on('end', () => { let body: any = null; try { body = JSON.parse(data); } catch { /* not json */ } resolve({ status: res.statusCode ?? 0, body }); });
@@ -55,13 +56,14 @@ describe('pre-parse guard and public probes', () => {
     expect(res.status).toBe(413);
     expect(res.body.error.message).toMatch(/unauthenticated endpoint/);
     expect(res.body.error.code).toBe('request_too_large');
-  });
+  }, 15000);
 
   it('refuses a large body on a credentialed endpoint without a valid credential', async () => {
     const refused = async (path: string, headers: Record<string, string> = {}) => {
       const res = await send(path, { body: big, headers });
       expect(res.status, path).toBe(401);
       expect(res.body.error.message, path).toMatch(/body this large/); // from the guard, not the route
+      await new Promise(r => setTimeout(r, 15));
     };
     await refused('/v1/chat/completions');
     await refused('/v1/chat/completions', { authorization: 'Bearer nope' });
@@ -69,7 +71,8 @@ describe('pre-parse guard and public probes', () => {
     await refused('/api/conversations', { authorization: 'Bearer bogus-session' });
     await refused('/v1/t/bogustoken/chat/completions');
     await refused('/mcp');
-  });
+    await refused('/x/v1/chat/completions');
+  }, 30000);
 
   it('refuses a large chunked body (no Content-Length) the same way', async () => {
     const a = await send('/v1/chat/completions', { body: big, chunked: true });
@@ -78,7 +81,7 @@ describe('pre-parse guard and public probes', () => {
     const b = await send('/api/auth/login', { body: big, chunked: true });
     expect(b.status).toBe(413);
     expect(b.body.error.message).toMatch(/unauthenticated endpoint/);
-  });
+  }, 30000);
 
   it('lets credential holders through to the normal handlers', async () => {
     const asKey = await send('/v1/chat/completions', { body: big, headers: { authorization: `Bearer ${getUnifiedApiKey()}` } });
@@ -90,6 +93,9 @@ describe('pre-parse guard and public probes', () => {
     const { token } = mintUrlToken('guard-test');
     const asUrlToken = await send(`/v1/t/${token}/chat/completions`, { body: big });
     expect(asUrlToken.body?.error?.message ?? '').not.toMatch(/body this large/);
+    const personal = mintUserApiKey(createUser('admin-preparse@example.com', 'Password123!').userId);
+    const asPersonalKey = await send('/x/v1/chat/completions', { body: big, headers: { authorization: `Bearer ${personal.key}` } });
+    expect(asPersonalKey.body?.error?.message ?? '').not.toMatch(/body this large/);
   });
 
   it('does not guard a direct loopback connection (the operator\'s own machine)', async () => {

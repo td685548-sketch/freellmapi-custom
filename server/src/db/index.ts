@@ -7,7 +7,7 @@ import { runMigrationsSync } from './migrate/runner.js';
 import { initEncryptionKey, isEncryptionKeyInitialized, probeStoredSecrets } from '../lib/crypto.js';
 import { restrictAllToOwner, restrictDirToOwner } from '../lib/file-permissions.js';
 import { nodeSqliteFactory } from './node-sqlite.js';
-import { beginStartupBusyBudget, tursoEnabled, tursoFactory } from './turso.js';
+import { beginStartupBusyBudget, endStartupBusyBudget, tursoEnabled, tursoFactory } from './turso.js';
 import { observeDatabase } from '../custom/performance/database.js';
 import type { Db, DbFactory } from './types.js';
 import { readRoutingSetting } from './routing-settings-scope.js';
@@ -235,6 +235,10 @@ export function initDb(
       'or ENCRYPTION_KEY) came from different installs — restore the key that belongs to this ' +
       'database, then restart.',
     );
+  }
+
+  if (process.env.NODE_ENV === 'test') {
+    endStartupBusyBudget();
   }
 
   return db;

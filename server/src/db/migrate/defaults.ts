@@ -55,6 +55,8 @@ import * as customUsageQuotas from '../migrations/20261106_000003_custom_usage_q
 import * as customProfileRestrictions from '../migrations/20261106_000004_custom_profile_restrictions.js';
 import * as customProfilePreviousKeys from '../migrations/20261107_000001_custom_profile_previous_keys.js';
 import * as cloudflareNeuronUsage from '../migrations/20261104_000001_cloudflare_neuron_usage.js';
+import * as customXGateway from '../migrations/20261106_120000_custom_x_gateway.js';
+import * as customProviderAccounts from '../migrations/20261107_000001_custom_provider_accounts.js';
 
 import * as migration20261031_155642_custom_user_roles_and_keys from '../migrations/20261031_155642_custom_user_roles_and_keys.js';
 import * as customRegistrationRequests from '../migrations/20261101_040000_custom_registration_requests.js';
@@ -136,6 +138,8 @@ export const CUSTOM_USAGE_QUOTAS_FILENAME = '20261106_000003_custom_usage_quotas
 export const CUSTOM_PROFILE_RESTRICTIONS_FILENAME = '20261106_000004_custom_profile_restrictions.ts';
 export const CUSTOM_PROFILE_PREVIOUS_KEYS_FILENAME = '20261107_000001_custom_profile_previous_keys.ts';
 export const CLOUDFLARE_NEURON_USAGE_FILENAME = '20261104_000001_cloudflare_neuron_usage.ts';
+export const CUSTOM_X_GATEWAY_FILENAME = '20261106_120000_custom_x_gateway.ts';
+export const CUSTOM_PROVIDER_ACCOUNTS_FILENAME = '20261107_000001_custom_provider_accounts.ts';
 
 export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: LEGACY_BASELINE_FILENAME, module: legacyBaseline },
@@ -198,5 +202,7 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: CUSTOM_PROFILE_USAGE_FILENAME, module: customProfileUsage },
   { filename: CUSTOM_USAGE_QUOTAS_FILENAME, module: customUsageQuotas },
   { filename: CUSTOM_PROFILE_RESTRICTIONS_FILENAME, module: customProfileRestrictions },
+  { filename: CUSTOM_X_GATEWAY_FILENAME, module: customXGateway },
   { filename: CUSTOM_PROFILE_PREVIOUS_KEYS_FILENAME, module: customProfilePreviousKeys },
+  { filename: CUSTOM_PROVIDER_ACCOUNTS_FILENAME, module: customProviderAccounts },
 ];

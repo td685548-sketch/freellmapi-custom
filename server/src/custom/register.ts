@@ -25,6 +25,10 @@ import { guardKeyAddition } from './key-addition-guard.js';
 import { cachePreferencesRouter } from '../routes/cache-preferences.js';
 import { outputSaversRouter } from './output-savers/router.js';
 import { statusCache } from './status-cache.js';
+import { xGatewayRouter } from './x-gateway/router.js';
+import { xGatewayConsoleRouter } from './x-gateway/console-router.js';
+import { getConfigSnapshot } from './x-gateway/config.js';
+import { providerAccountsRouter } from './provider-accounts/router.js';
 
 // Everything this fork adds to the HTTP surface is wired here, so upstream's
 // app.ts keeps a handful of added lines instead of edited mount statements.
@@ -87,6 +91,9 @@ export const PERMISSION_GATES: readonly PermissionGate[] = [
   // Modality catalogs reach the same credential store as the Keys page — they can
   // create, delete, or probe a stored key — so their writes need manage_keys.
   { path: ['/api/embeddings', '/api/media', '/api/search', '/api/decisions'], permission: 'manage_keys', methods: WRITE_METHODS },
+
+  // X Gateway (9Router integration): admin-only gateway console and API management.
+  { path: '/api/x-gateway', permission: 'manage_x_gateway' },
 ];
 
 function installGate(app: Express, gate: PermissionGate): void {
@@ -106,9 +113,18 @@ export function registerCustomRoutes(app: Express): void {
   // Public probes answer from a 5 s copy so anonymous callers cannot turn them into database load.
   app.use(['/livez', '/readyz'], statusCache);
   app.use('/api', (_req, _res, next) => withRoutingSettingsScope(next));
-  app.use('/v1', (_req, _res, next) => withRoutingSettingsScope(next));
-  // Rate-limiting and usage tracking gate for member personal API keys (/v1 and /v1beta inference)
-  app.use(['/v1', '/v1beta'], userInferenceGate);
+  app.use(['/v1', '/x/v1'], (_req, _res, next) => withRoutingSettingsScope(next));
+  // When the X Gateway is off, answer 404 immediately before any auth checks
+  // so an inactive gateway leaks nothing about its existence.
+  app.use('/x/v1', (_req, res, next) => {
+    if (!getConfigSnapshot().enabled) {
+      res.status(404).json({ error: { message: 'Not found', type: 'not_found' } });
+      return;
+    }
+    next();
+  });
+  // Rate-limiting and usage tracking gate for member personal API keys (/v1, /v1beta and /x/v1 inference)
+  app.use(['/v1', '/v1beta', '/x/v1'], userInferenceGate);
   // Same for client-profile (`sk-cp-…`) keys: attribution plus the profile's own RPM cap.
   app.use(['/v1', '/v1beta'], profileInferenceGate);
   // Safe preference metadata is usable by cache editors without granting
@@ -132,6 +148,15 @@ export function registerCustomRoutes(app: Express): void {
 
   // The /api/analytics gate above enforces auth + view_logs for this mount too.
   app.use('/api/analytics/provider-tiers', providerTiersRouter);
+
+  // X Gateway (9Router integration): admin-only OpenAI-compatible surface at /x/v1.
+  // Mounted after the personal-key gate so auth is already resolved.
+  app.use('/x/v1', xGatewayRouter);
+  // Account logins manage shared credentials with the router's granular key permissions.
+  app.use('/api/x-accounts', providerAccountsRouter);
+  // Gateway switch and default savers. The manage_x_gateway gate above maps each
+  // path to its leaf (edit_x_settings for writes, use_x_gateway for reads).
+  app.use('/api/x-gateway', xGatewayConsoleRouter);
 
   // Custom fork routes with their dedicated permission gates
   app.use('/api/auth', externalAuthRouter, customAuthRouter);

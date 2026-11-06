@@ -60,6 +60,19 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
     if (path === '/api/usage/accounts') return 'view_usage_accounts';
     if (path === '/api/usage/profiles') return 'view_usage_profiles';
   }
+  if (parent === 'manage_x_gateway') {
+    if (path === '/api/x-gateway/enabled' || path === '/api/x-gateway/defaults') {
+      return read ? 'use_x_gateway' : 'edit_x_settings';
+    }
+    if (path === '/api/x-gateway/models') return 'edit_x_combos';
+    if (path.startsWith('/api/x-gateway/combos')) {
+      return read ? 'use_x_gateway' : 'edit_x_combos';
+    }
+    if (path.startsWith('/api/x-gateway/usage') && read) return 'view_x_usage';
+    if (path === '/api/x-gateway/test') return 'use_x_gateway';
+    if (read) return 'use_x_gateway';
+    return parent;
+  }
   if (parent === 'manage_settings') {
     if (path === '/api/cache/stats' && read) return 'view_cache';
     if (['/api/cache/config', '/api/cache/preferences'].includes(path) && method === 'PUT') return 'edit_cache';

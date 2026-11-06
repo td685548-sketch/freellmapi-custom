@@ -47,10 +47,11 @@ function gate(token: string, req: Request, res: Response, next: NextFunction): v
   const userKey = validateUserApiKey(token);
   if (!userKey) {
     // If a user key was provided but is revoked or invalid, reject with 401
+    const isXGateway = req.originalUrl?.startsWith('/x/v1') || req.baseUrl === '/x/v1';
     res.status(401).json({
       error: {
         message: 'Incorrect or revoked API key provided.',
-        type: 'invalid_request_error',
+        type: isXGateway ? 'authentication_error' : 'invalid_request_error',
         code: 'invalid_api_key',
       },
     });

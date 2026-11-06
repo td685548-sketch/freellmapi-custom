@@ -2,6 +2,7 @@ import type { Platform } from '@freellmapi/shared/types.js';
 import type { BaseProvider } from './base.js';
 import { GoogleProvider } from './google.js';
 import { OpenAICompatProvider } from './openai-compat.js';
+import { CopilotProvider } from '../custom/provider-accounts/copilot.js';
 import { CohereProvider } from './cohere.js';
 import { TavilyProvider } from './tavily.js';
 import { ExaProvider } from './exa.js';
@@ -665,6 +666,7 @@ export function resolveProvider(platform: Platform, baseUrl?: string | null): Ba
   if (platform === 'custom') {
     const trimmed = baseUrl?.trim();
     if (!trimmed) return undefined;
+    if (trimmed === 'https://api.githubcopilot.com') return new CopilotProvider();
     return new OpenAICompatProvider({
       platform: 'custom',
       name: 'Custom (OpenAI-compatible)',

@@ -51,6 +51,7 @@ import { UsageRankingPage } from '@/custom/UsageRankingPage'
 import PremiumPage from '@/pages/PremiumPage'
 import NotFoundPage from '@/pages/NotFoundPage'
 import AgentsPage from '@/pages/AgentsPage'
+import XGatewayApp from '@/custom/x-gateway/XGatewayApp'
 
 // Every failed mutation surfaces as an error toast, so no action fails
 // silently. A page that already shows the failure inline can opt out with
@@ -285,6 +286,7 @@ function Navbar() {
     ...(canManageInvites ? [{ to: '/invites', labelKey: 'nav.invites', customLabel: 'Invites' }] : []),
     ...(canManageUsers ? [{ to: '/users', labelKey: 'nav.users', customLabel: 'Users' }] : []),
     ...(canViewUsage ? [{ to: '/usage', labelKey: 'nav.usage', customLabel: 'Usage' }] : []),
+    ...(hasPermission('use_x_gateway') ? [{ to: '/x/providers', labelKey: 'nav.xGateway', customLabel: 'X Gateway' }] : []),
   ]
 
   return (
@@ -493,6 +495,7 @@ function PageContainer({ children }: { children: ReactNode }) {
 function AppShell({ children }: { children: ReactNode }) {
   const location = useLocation()
   const fullBleed = FULL_BLEED_ROUTES.has(location.pathname)
+  if (location.pathname === '/x' || location.pathname.startsWith('/x/')) return <XGatewayApp />
   return (
     <div className={`flex flex-col ${fullBleed ? 'h-dvh overflow-hidden' : 'min-h-screen'} ${isMacDesktop ? 'desktop-backdrop' : 'bg-background'}`}>
       {children}
