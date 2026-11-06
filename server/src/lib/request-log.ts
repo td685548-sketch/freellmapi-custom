@@ -18,19 +18,45 @@ function hourKey(createdAt: string): string {
 // blocking network round trip. The conflict clause keeps the old behaviour per
 // key: counters add the new delta to what is stored (the first insert stores the
 // delta itself), first_request_at keeps whatever is already there.
-function bumpLifetimeCounters(
-  db: LogTx,
+function lifetimeCountersStatement(
   deltas: { requests: number; inputTokens: number; outputTokens: number },
   firstRequestAt: string,
-): void {
-  db.prepare(`
+): { sql: string; params: string[] } {
+  return {
+    sql: `
     INSERT INTO settings (key, value) VALUES
       ('total_requests', ?), ('total_input_tokens', ?), ('total_output_tokens', ?), ('first_request_at', ?)
     ON CONFLICT(key) DO UPDATE SET value = CASE
       WHEN settings.key = 'first_request_at' THEN settings.value
       ELSE CAST(CAST(settings.value AS INTEGER) + CAST(excluded.value AS INTEGER) AS TEXT)
     END
-  `).run(String(deltas.requests), String(deltas.inputTokens), String(deltas.outputTokens), firstRequestAt);
+  `,
+    params: [String(deltas.requests), String(deltas.inputTokens), String(deltas.outputTokens), firstRequestAt],
+  };
+}
+
+const REQUEST_HOURLY_SQL = `
+        INSERT INTO request_hourly (hour, total_requests, success_count, error_count, input_tokens, output_tokens)
+        VALUES (?, 1, ?, ?, ?, ?)
+        ON CONFLICT(hour) DO UPDATE SET
+          total_requests = total_requests + 1,
+          success_count  = success_count + ?,
+          error_count    = error_count + ?,
+          input_tokens   = input_tokens + ?,
+          output_tokens  = output_tokens + ?
+      `;
+
+const REQUEST_INSERT_SQL = `
+        INSERT INTO requests (platform, model_id, key_id, status, input_tokens, output_tokens, latency_ms, error, ttfb_ms, requested_model, served_model, client_ip, client_user_agent, client_agent, caller, model_db_id, failure_attribution, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+
+// Opt-in: on a remote database, write the whole request log in one network round
+// trip (db.executeBatch) instead of BEGIN + three writes + COMMIT. The driver is
+// synchronous, so each round trip is time the server answers nothing. Off by
+// default because batching has to be verified against the real Turso service.
+function batchedLoggingEnabled(db: LogTx): boolean {
+  return process.env.FREEAPI_TURSO_BATCH_WRITES === '1' && typeof db.executeBatch === 'function';
 }
 
 // Resolve the concrete models.id for a request (#1187). Catalog requests
@@ -130,31 +156,35 @@ export function logRequest(
     const isSuccess = status === 'success' ? 1 : 0;
     const isError = status === 'error' ? 1 : 0;
 
-    const tx = db.transaction(() => {
-      const insert = db.prepare(`
-        INSERT INTO requests (platform, model_id, key_id, status, input_tokens, output_tokens, latency_ms, error, ttfb_ms, requested_model, served_model, client_ip, client_user_agent, client_agent, caller, model_db_id, failure_attribution, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(platform, modelId, keyId, status, inputTokens, outputTokens, latencyMs, error, ttfbMs, requestedModel, servedModel, client.ip, client.userAgent, client.agent, caller, modelDbId, failureAttribution, nowIso);
+    const insertParams = [platform, modelId, keyId, status, inputTokens, outputTokens, latencyMs, error, ttfbMs, requestedModel, servedModel, client.ip, client.userAgent, client.agent, caller, modelDbId, failureAttribution, nowIso];
+    const hourlyParams = [hour, isSuccess, isError, inputTokens, outputTokens, isSuccess, isError, inputTokens, outputTokens];
+    const counters = lifetimeCountersStatement({ requests: 1, inputTokens, outputTokens }, nowIso);
 
-      // Report the row id back to the fallback loop's attempt trace (if one is
-      // active): the LAST id noted during a loop run is the terminal row the
-      // per-attempt batch is keyed to. No-op outside a fallback-loop run.
-      if (insert.lastInsertRowid != null) noteRequestRowId(insert.lastInsertRowid);
+    if (batchedLoggingEnabled(db)) {
+      // The requests INSERT goes last so last_insert_rowid() on this connection is
+      // that row's id (a trigger's inserts do not change it, and request_hourly's
+      // upsert would if it ran after). Same rows as the transaction below.
+      db.executeBatch!([
+        { sql: REQUEST_HOURLY_SQL, params: hourlyParams },
+        counters,
+        { sql: REQUEST_INSERT_SQL, params: insertParams },
+      ]);
+      const row = db.prepare('SELECT last_insert_rowid() AS id').get() as { id: number | bigint } | undefined;
+      if (row?.id) noteRequestRowId(row.id);
+    } else {
+      const tx = db.transaction(() => {
+        const insert = db.prepare(REQUEST_INSERT_SQL).run(...insertParams);
 
-      db.prepare(`
-        INSERT INTO request_hourly (hour, total_requests, success_count, error_count, input_tokens, output_tokens)
-        VALUES (?, 1, ?, ?, ?, ?)
-        ON CONFLICT(hour) DO UPDATE SET
-          total_requests = total_requests + 1,
-          success_count  = success_count + ?,
-          error_count    = error_count + ?,
-          input_tokens   = input_tokens + ?,
-          output_tokens  = output_tokens + ?
-      `).run(hour, isSuccess, isError, inputTokens, outputTokens, isSuccess, isError, inputTokens, outputTokens);
+        // Report the row id back to the fallback loop's attempt trace (if one is
+        // active): the LAST id noted during a loop run is the terminal row the
+        // per-attempt batch is keyed to. No-op outside a fallback-loop run.
+        if (insert.lastInsertRowid != null) noteRequestRowId(insert.lastInsertRowid);
 
-      bumpLifetimeCounters(db, { requests: 1, inputTokens, outputTokens }, nowIso);
-    });
-    tx();
+        db.prepare(REQUEST_HOURLY_SQL).run(...hourlyParams);
+        db.prepare(counters.sql).run(...counters.params);
+      });
+      tx();
+    }
 
     pruneRequestAnalytics({ db });
 
