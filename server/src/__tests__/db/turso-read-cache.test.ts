@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'libsql';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { busyBackoffMs, wrapTursoDatabase } from '../../db/turso.js';
+import { busyBackoffMs, LIFETIME_COUNTERS_MARKER, tursoSettingsVersion, wrapTursoDatabase } from '../../db/turso.js';
 import type { Db } from '../../db/types.js';
 
 // The remote wrapper reuses SELECT results for a few seconds, but only while
@@ -224,5 +224,70 @@ describe('Turso executeBatch', () => {
     raw.exec('CREATE TABLE a (id INTEGER PRIMARY KEY, v TEXT)');
     const db = wrapTursoDatabase(raw, true);
     expect(() => db.transaction(() => db.executeBatch!([{ sql: 'INSERT INTO a (v) VALUES (?)', params: ['x'] }]))()).toThrow(/inside a transaction/);
+  });
+});
+
+
+describe('lifetime counters and cached settings', () => {
+  function open() {
+    const raw = new Database(':memory:') as unknown as Db;
+    raw.exec("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE other (id INTEGER PRIMARY KEY, v TEXT)");
+    raw.exec("INSERT INTO settings VALUES ('routing_strategy', 'speed'), ('total_requests', '0')");
+    let selects = 0;
+    const prepare = raw.prepare.bind(raw);
+    raw.prepare = (sql: string) => {
+      const stmt = prepare(sql);
+      return {
+        get: (...a: unknown[]) => { if (/^\s*SELECT/i.test(sql)) selects++; return stmt.get(...a); },
+        all: (...a: unknown[]) => { if (/^\s*SELECT/i.test(sql)) selects++; return stmt.all(...a); },
+        run: (...a: unknown[]) => stmt.run(...a),
+      };
+    };
+    return { db: wrapTursoDatabase(raw, true), selects: () => selects };
+  }
+  const COUNTER_UPSERT = `${LIFETIME_COUNTERS_MARKER}
+    INSERT INTO settings (key, value) VALUES ('total_requests', ?) ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(settings.value AS INTEGER) + CAST(excluded.value AS INTEGER) AS TEXT)`;
+
+  it('a counter upsert leaves cached settings reads and the settings version alone', () => {
+    const { db, selects } = open();
+    const read = () => db.prepare('SELECT value FROM settings WHERE key = ?').get('routing_strategy');
+    read(); read();
+    expect(selects()).toBe(1);
+    const before = tursoSettingsVersion(db);
+    db.prepare(COUNTER_UPSERT).run('1');
+    db.prepare(COUNTER_UPSERT).run('1');
+    read();
+    expect(selects()).toBe(1);
+    expect(tursoSettingsVersion(db)).toBe(before);
+  });
+
+  it('a real settings write still invalidates both', () => {
+    const { db, selects } = open();
+    const read = () => db.prepare('SELECT value FROM settings WHERE key = ?').get('routing_strategy') as { value: string };
+    read();
+    const before = tursoSettingsVersion(db);
+    db.prepare("UPDATE settings SET value = 'speed2' WHERE key = 'routing_strategy'").run();
+    expect(read().value).toBe('speed2');
+    expect(selects()).toBe(2);
+    expect(tursoSettingsVersion(db)).toBeGreaterThan(before);
+    // Writes to other tables do not touch the settings version.
+    const mid = tursoSettingsVersion(db);
+    db.prepare('INSERT INTO other (v) VALUES (?)').run('x');
+    expect(tursoSettingsVersion(db)).toBe(mid);
+  });
+
+  it('a read of the counters themselves is invalidated by the counter upsert', () => {
+    const { db } = open();
+    const totals = () => db.prepare("SELECT value FROM settings WHERE key IN ('total_requests')").get() as { value: string };
+    expect(totals().value).toBe('0');
+    db.prepare(COUNTER_UPSERT).run('5');
+    expect(totals().value).toBe('5');
+  });
+
+  it('a rolled-back transaction bumps the settings version', () => {
+    const { db } = open();
+    const before = tursoSettingsVersion(db);
+    expect(() => db.transaction(() => { throw new Error('boom'); })()).toThrow('boom');
+    expect(tursoSettingsVersion(db)).toBeGreaterThan(before);
   });
 });

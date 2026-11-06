@@ -10,6 +10,21 @@ export function tursoWriteVersion(db: Db): number {
   return writeVersions.get(db) ?? 0;
 }
 
+// Bumped only when the `settings` table (other than the lifetime counters) may
+// have changed, or when everything is dropped. The routing-settings scope keys on
+// this instead of tursoWriteVersion: a quota write or a log row cannot change a
+// setting, yet it used to force every attempt of a request to re-read all of them.
+const settingsVersions = new WeakMap<Db, number>();
+export function tursoSettingsVersion(db: Db): number {
+  return settingsVersions.get(db) ?? 0;
+}
+
+/** Lifetime request counters live in `settings` but are written on every logged
+ *  request and read by one analytics query. The statement carries this marker so
+ *  its writes bump a table of their own and leave routing settings alone. */
+export const LIFETIME_COUNTERS_MARKER = '/* @lifetime-counters */';
+const COUNTER_KEYS = /\b(?:total_requests|total_input_tokens|total_output_tokens|first_request_at)\b/;
+
 export function tursoEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   const driver = env.FREEAPI_DB_DRIVER?.trim().toLowerCase() || 'sqlite';
   if (driver !== 'sqlite' && driver !== 'turso') {
@@ -77,6 +92,9 @@ const COMMA_JOIN = /\bFROM\s+[\w."`[\]]+(?:\s+(?:AS\s+)?\w+)?\s*,/i;
 function readTables(sql: string): string[] | null {
   if (NOT_CACHEABLE.test(sql) || COMMA_JOIN.test(sql)) return null;
   const names = [...sql.matchAll(/\b(?:FROM|JOIN)\s+["`[]?([A-Za-z_]\w*)/gi)].map(m => m[1]!.toLowerCase());
+  // A read of the lifetime counters depends on their own table, which the
+  // counter upsert bumps instead of `settings`.
+  if (names.includes('settings') && COUNTER_KEYS.test(sql)) names.push('settings_counters');
   return names.length ? [...new Set(names)] : null;
 }
 
@@ -190,12 +208,18 @@ export function wrapTursoDatabase(raw: Db, remote = true, secrets: readonly stri
   const tableVersions = new Map<string, number>();
   let epoch = 0;
   const versionOf = (t: string) => tableVersions.get(t) ?? 0;
-  function dropResults(): void { epoch += 1; resultCache.clear(); }
+  function dropResults(): void { epoch += 1; resultCache.clear(); settingsVersions.set(db, tursoSettingsVersion(db) + 1); }
   function noteWrite(sql: string): void {
+    if (sql.includes(LIFETIME_COUNTERS_MARKER)) {
+      // Counters only: no setting, routing scope or cached setting read changes.
+      tableVersions.set('settings_counters', versionOf('settings_counters') + 1);
+      return;
+    }
     invalidateReads();
     const tables = writtenTables(sql);
     if (!tables) { dropResults(); return; }
     for (const t of tables) tableVersions.set(t, versionOf(t) + 1);
+    if (tables.includes('settings')) settingsVersions.set(db, tursoSettingsVersion(db) + 1);
   }
   function prepare(sql: string): DbStatement {
     if (!remote || !/^\s*SELECT\b/i.test(sql)) return nativePrepare(sql);
@@ -353,6 +377,9 @@ export function wrapTursoDatabase(raw: Db, remote = true, secrets: readonly stri
           db.exec(outermost ? 'COMMIT' : `RELEASE SAVEPOINT ${savepoint}`);
           return result;
         } catch (error) {
+          // A reader inside the transaction may have captured values that the
+          // rollback is about to undo (the routing scope does exactly that).
+          settingsVersions.set(db, tursoSettingsVersion(db) + 1);
           try {
             if (outermost) raw.exec('ROLLBACK');
             else {

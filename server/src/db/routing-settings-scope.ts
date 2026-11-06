@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Db } from './types.js';
-import { isTursoDatabase, tursoWriteVersion } from './turso.js';
+import { isTursoDatabase, tursoSettingsVersion } from './turso.js';
 
 // Only small routing configuration belongs here. Never prefetch credentials,
 // sessions, license material, or the potentially large cached catalog document.
@@ -39,7 +39,7 @@ export function withRoutingSettingsScope<T>(run: () => T): T {
 export function readRoutingSetting(db: Db, key: string, fallback: () => string | undefined): string | undefined {
   const scope = storage.getStore();
   if (!scope?.active || !allowed.has(key) || !isTursoDatabase(db)) return fallback();
-  const version = tursoWriteVersion(db);
+  const version = tursoSettingsVersion(db);
   if (!scope.values || scope.db !== db || scope.version !== version) {
     const rows = db.prepare(sql).all(...KEYS) as Array<Record<string, unknown>>;
     scope.values = new Map(
