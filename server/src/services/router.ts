@@ -1412,7 +1412,24 @@ function activeChainOrThrow(db: Db): ChainRow[] {
   throw err;
 }
 
+/**
+ * The chain for a request, narrowed to the models a client profile's key may use when it carries an
+ * allowlist (set by the profile gate). Unrestricted requests get the chain untouched.
+ */
 export function resolveRoutingChain(modelString: string | undefined): ResolvedChain {
+  const resolved = resolveUnrestrictedChain(modelString);
+  const allowed = getClientContext().allowedModels;
+  if (!allowed) return resolved;
+  const chain = resolved.chain.filter(entry => allowed.has(entry.model_id.toLowerCase()));
+  if (!chain.some(entry => entry.enabled)) {
+    const err = new Error('None of the models this key may use is enabled. Ask the operator to enable one or widen the key\'s model list.') as any;
+    err.status = 400;
+    throw err;
+  }
+  return { ...resolved, chain };
+}
+
+function resolveUnrestrictedChain(modelString: string | undefined): ResolvedChain {
   const db = getDb();
 
   if (!modelString || modelString.toLowerCase() === 'auto') {

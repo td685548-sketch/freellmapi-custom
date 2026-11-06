@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { PageHeader } from '@/components/page-header'
 import { UserAnalyticsView, type ProfileAnalytics, type RequestAnalytics } from './UserAnalyticsView'
 import { QuotaCard } from './QuotaCard'
+import { ProfileRestrictionsCard } from './ProfileRestrictionsCard'
 import { useAdministrativeAccess } from './use-administrative-access'
 
 const MAX_RPM = 1000
@@ -99,6 +100,7 @@ export function ProfileUsagePage() {
               queryKey={['profile-quota', profileId]}
               canEdit={can('edit_client_profiles')}
             />
+            <ProfileRestrictionsCard profileId={profileId} canEdit={can('edit_client_profiles')} />
           </>
         )}
       />

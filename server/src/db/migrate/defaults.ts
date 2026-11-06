@@ -51,6 +51,7 @@ import * as customConversationOwner from '../migrations/20261105_000001_custom_c
 import * as customRequestUserId from '../migrations/20261106_000001_custom_request_user_id.js';
 import * as customProfileUsage from '../migrations/20261106_000002_custom_profile_usage.js';
 import * as customUsageQuotas from '../migrations/20261106_000003_custom_usage_quotas.js';
+import * as customProfileRestrictions from '../migrations/20261106_000004_custom_profile_restrictions.js';
 import * as cloudflareNeuronUsage from '../migrations/20261104_000001_cloudflare_neuron_usage.js';
 
 import * as migration20261031_155642_custom_user_roles_and_keys from '../migrations/20261031_155642_custom_user_roles_and_keys.js';
@@ -129,6 +130,7 @@ export const CUSTOM_CONVERSATION_OWNER_FILENAME = '20261105_000001_custom_conver
 export const CUSTOM_REQUEST_USER_ID_FILENAME = '20261106_000001_custom_request_user_id.ts';
 export const CUSTOM_PROFILE_USAGE_FILENAME = '20261106_000002_custom_profile_usage.ts';
 export const CUSTOM_USAGE_QUOTAS_FILENAME = '20261106_000003_custom_usage_quotas.ts';
+export const CUSTOM_PROFILE_RESTRICTIONS_FILENAME = '20261106_000004_custom_profile_restrictions.ts';
 export const CLOUDFLARE_NEURON_USAGE_FILENAME = '20261104_000001_cloudflare_neuron_usage.ts';
 
 export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
@@ -190,4 +192,5 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: CUSTOM_REQUEST_USER_ID_FILENAME, module: customRequestUserId },
   { filename: CUSTOM_PROFILE_USAGE_FILENAME, module: customProfileUsage },
   { filename: CUSTOM_USAGE_QUOTAS_FILENAME, module: customUsageQuotas },
+  { filename: CUSTOM_PROFILE_RESTRICTIONS_FILENAME, module: customProfileRestrictions },
 ];
