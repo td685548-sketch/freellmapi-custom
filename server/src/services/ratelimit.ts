@@ -1,6 +1,7 @@
 // Sliding window rate limit tracker with SQLite persistence.
 
 import { getDb, getSetting, setSetting } from '../db/index.js';
+import type { Db } from '../db/index.js';
 import { isLoopbackOrPrivateUrl } from '../lib/url-guard.js';
 import { parseModelScope, scopeAllows } from '../lib/model-scope.js';
 
@@ -213,6 +214,7 @@ function recordUsage(
   tokens: number,
   now: number,
 ): boolean {
+  usageWrites++;
   return withDb(db => {
     db.prepare(`
       INSERT INTO rate_limit_usage (platform, model_id, key_id, kind, tokens, created_at_ms)
@@ -229,6 +231,46 @@ function recordUsage(
   }) ?? false;
 }
 
+// One statement answers every window a gate asks about for a (platform, model,
+// key): requests and tokens, per minute and per day. The gates used to issue one
+// statement per number (four per attempt, six with the cooldown decision), and on
+// a remote database every statement is a blocking round trip. The result is kept
+// for a few milliseconds so the request and token gates of the SAME attempt share
+// one read; any usage write in this process drops it, so a gate never reads past
+// a write it can see. Under NODE_ENV=test it is bypassed, like the other
+// in-process caches, because suites insert usage rows directly.
+interface PersistedUsage { rpm: number; rpd: number; tpm: number; tpd: number }
+let usageWrites = 0;
+let usageMemo: { db: Db; platform: string; modelId: string; keyId: number; at: number; writes: number; value: PersistedUsage } | null = null;
+const USAGE_MEMO_MS = 5;
+let usageMemoOverride: boolean | null = null;
+const usageMemoEnabled = (): boolean => usageMemoOverride ?? process.env.NODE_ENV !== 'test';
+/** Test hook. */
+export function setUsageMemoTestOverride(value: boolean | null): void { usageMemoOverride = value; usageMemo = null; }
+
+export function persistedUsage(platform: string, modelId: string, keyId: number, now: number): PersistedUsage | undefined {
+  return withDb(db => {
+    const memo = usageMemo;
+    if (usageMemoEnabled() && memo && memo.db === db && memo.platform === platform && memo.modelId === modelId
+      && memo.keyId === keyId && memo.writes === usageWrites && now >= memo.at && now - memo.at <= USAGE_MEMO_MS) {
+      return memo.value;
+    }
+    const row = db.prepare(`
+      SELECT COALESCE(SUM(CASE WHEN kind = 'request' AND created_at_ms > ? THEN 1 ELSE 0 END), 0) AS rpm,
+             COALESCE(SUM(CASE WHEN kind = 'request' THEN 1 ELSE 0 END), 0) AS rpd,
+             COALESCE(SUM(CASE WHEN kind = 'tokens' AND created_at_ms > ? THEN tokens ELSE 0 END), 0) AS tpm,
+             COALESCE(SUM(CASE WHEN kind = 'tokens' THEN tokens ELSE 0 END), 0) AS tpd
+        FROM rate_limit_usage
+       WHERE platform = ?
+         AND model_id = ?
+         AND key_id = ?
+         AND created_at_ms > ?
+    `).get(now - MINUTE, now - MINUTE, platform, modelId, keyId, now - DAY) as PersistedUsage;
+    if (usageMemoEnabled()) usageMemo = { db, platform, modelId, keyId, at: now, writes: usageWrites, value: row };
+    return row;
+  });
+}
+
 function countPersistedRequests(
   platform: string,
   modelId: string,
@@ -236,6 +278,10 @@ function countPersistedRequests(
   windowMs: number,
   now: number,
 ): number | undefined {
+  if (windowMs === MINUTE || windowMs === DAY) {
+    const usage = persistedUsage(platform, modelId, keyId, now);
+    return usage === undefined ? undefined : windowMs === MINUTE ? usage.rpm : usage.rpd;
+  }
   return withDb(db => {
     const row = db.prepare(`
       SELECT COUNT(*) AS used
@@ -257,6 +303,10 @@ function sumPersistedTokens(
   windowMs: number,
   now: number,
 ): number | undefined {
+  if (windowMs === MINUTE || windowMs === DAY) {
+    const usage = persistedUsage(platform, modelId, keyId, now);
+    return usage === undefined ? undefined : windowMs === MINUTE ? usage.tpm : usage.tpd;
+  }
   return withDb(db => {
     const row = db.prepare(`
       SELECT COALESCE(SUM(tokens), 0) AS used
