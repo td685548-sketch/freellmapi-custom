@@ -14,7 +14,7 @@ import type { Scheduler } from '../lib/scheduler.js';
 import { sanitizeProviderErrorMessage } from '../lib/error-redaction.js';
 import { providerLog } from '../lib/server-logs.js';
 import { triggerBuiltinModelDiscovery } from './builtin-model-discovery.js';
-import { invalidateKeyCache } from './key-cache.js';
+import { getCachedKeyStatus, invalidateKeyCache } from './key-cache.js';
 
 const DEFAULT_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 // Floor of 60s: a misconfigured tiny interval turns the health pass into a
@@ -476,10 +476,15 @@ export function markKeyHealthyFromRequest(keyId: number): void {
         .prepare("UPDATE api_keys SET last_healthy_at = datetime('now') WHERE id = ?")
         .run(keyId);
     }
-    const res = getDb()
-      .prepare("UPDATE api_keys SET status = 'healthy', last_health_error = NULL WHERE id = ? AND status IN ('error', 'unknown')")
-      .run(keyId);
-    if (res.changes > 0) invalidateKeyCache();
+    // The registry already knows this key is healthy on almost every request;
+    // the conditional UPDATE below could not change a row then, but it is still
+    // a network round trip on a remote database.
+    if (getCachedKeyStatus(keyId) !== 'healthy') {
+      const res = getDb()
+        .prepare("UPDATE api_keys SET status = 'healthy', last_health_error = NULL WHERE id = ? AND status IN ('error', 'unknown')")
+        .run(keyId);
+      if (res.changes > 0) invalidateKeyCache();
+    }
     failureCount.delete(keyId);
     // #1510: a served request is the strongest reachability evidence there is —
     // it also ends any transport-error streak, parked or not.

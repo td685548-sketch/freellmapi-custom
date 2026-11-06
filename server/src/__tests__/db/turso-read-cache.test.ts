@@ -94,6 +94,23 @@ describe('Turso SELECT result cache', () => {
     expect((db.prepare('SELECT COUNT(*) AS n FROM a').get() as { n: number }).n).toBe(1);
   });
 
+  it('keeps cached reads of other tables across a transaction', () => {
+    const { db, selects } = setup();
+    db.prepare('INSERT INTO a (v) VALUES (?)').run('one');
+    const read = () => db.prepare('SELECT v FROM a').all();
+    read(); read();
+    expect(selects()).toBe(1);
+    // Logging a request is a transaction that writes other tables; it used to
+    // empty the whole cache at BEGIN, at COMMIT and again afterwards.
+    db.transaction(() => { db.prepare('INSERT INTO b (a_id, w) VALUES (1, ?)').run('x'); })();
+    read();
+    expect(selects()).toBe(1);
+    // ...but a transaction that writes the cached table still invalidates it.
+    db.transaction(() => { db.prepare('INSERT INTO a (v) VALUES (?)').run('two'); })();
+    expect(read()).toHaveLength(2);
+    expect(selects()).toBe(2);
+  });
+
   it('skips time-dependent and unparseable queries, and honours the kill switch', () => {
     const { db, selects } = setup();
     db.prepare("SELECT datetime('now') AS t FROM a").all();
@@ -178,5 +195,34 @@ describe('Turso SQLITE_BUSY retry', () => {
     expect(busyBackoffMs(7, 5)).toBeNull();
     expect(busyBackoffMs(2, 600)).toBe(200);
     expect(busyBackoffMs(3, 600)).toBeNull();
+  });
+});
+
+
+describe('Turso executeBatch', () => {
+  it('runs one atomic script, and a BUSY failure is rolled back before the retry', () => {
+    const raw = new Database(':memory:') as unknown as Db;
+    raw.exec('CREATE TABLE a (id INTEGER PRIMARY KEY, v TEXT)');
+    const scripts: string[] = [];
+    let failures = 2;
+    const exec = raw.exec.bind(raw);
+    raw.exec = (sql: string) => {
+      scripts.push(sql.slice(0, 12));
+      if (/^BEGIN;/.test(sql) && failures-- > 0) throw new Error('SQLite error: database is locked');
+      return exec(sql);
+    };
+    const db = wrapTursoDatabase(raw, true);
+    db.executeBatch!([{ sql: 'INSERT INTO a (v) VALUES (?)', params: ["it's"] }, { sql: 'INSERT INTO a (v) VALUES (?)', params: [null] }]);
+    expect(db.prepare('SELECT v FROM a ORDER BY id').all()).toEqual([{ v: "it's" }, { v: null }]);
+    expect(scripts.filter(s => s === 'ROLLBACK')).toHaveLength(2); // one per failed attempt
+  });
+
+  it('is not offered on local connections or inside a transaction', () => {
+    const local = wrapTursoDatabase(new Database(':memory:') as unknown as Db, false);
+    expect(local.executeBatch).toBeUndefined();
+    const raw = new Database(':memory:') as unknown as Db;
+    raw.exec('CREATE TABLE a (id INTEGER PRIMARY KEY, v TEXT)');
+    const db = wrapTursoDatabase(raw, true);
+    expect(() => db.transaction(() => db.executeBatch!([{ sql: 'INSERT INTO a (v) VALUES (?)', params: ['x'] }]))()).toThrow(/inside a transaction/);
   });
 });

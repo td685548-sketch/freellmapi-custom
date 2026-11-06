@@ -132,6 +132,47 @@ export function isBusyError(error: unknown): boolean {
 const sleeper = new Int32Array(new SharedArrayBuffer(4));
 const sleepSync = (ms: number): void => { Atomics.wait(sleeper, 0, 0, ms); };
 
+// Transaction control changes no data, so it must not wipe the SELECT result
+// cache. It used to: every transaction cleared the cache at BEGIN, at COMMIT and
+// again in its `finally`, and logging a request is a transaction, so under
+// traffic the cache was emptied several times per request. Writes inside a
+// transaction already bump the versions of the tables they touch (and a delete
+// or an unparseable statement drops everything), which is what protects readers.
+const TRANSACTION_CONTROL = /^\s*(?:BEGIN|COMMIT|END|ROLLBACK|SAVEPOINT|RELEASE)\b/i;
+
+/** Render a bound value as an SQL literal. Strings double their quotes; a string
+ * holding NUL (which SQL text cannot carry) is refused rather than altered. */
+export function sqlLiteral(value: unknown): string {
+  if (value === null || value === undefined) return 'NULL';
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new Error('Cannot inline a non-finite number');
+    return String(value);
+  }
+  if (typeof value === 'bigint') return value.toString();
+  if (typeof value === 'boolean') return value ? '1' : '0';
+  if (typeof value === 'string') {
+    if (value.includes('\0')) throw new Error('Cannot inline a string containing NUL');
+    return `'${value.replace(/'/g, "''")}'`;
+  }
+  if (ArrayBuffer.isView(value)) return `X'${Buffer.from(value.buffer, value.byteOffset, value.byteLength).toString('hex')}'`;
+  throw new Error(`Cannot inline a ${typeof value} parameter`);
+}
+
+/** Substitute positional `?` placeholders, skipping quoted text and comments. */
+export function inlineParams(sql: string, params: readonly unknown[]): string {
+  let next = 0;
+  const out = sql.replace(
+    /'(?:''|[^'])*'|"(?:""|[^"])*"|`(?:``|[^`])*`|\[[^\]]*\]|--[^\n]*|\/\*[\s\S]*?\*\/|(\?)/g,
+    (token, placeholder: string | undefined) => {
+      if (!placeholder) return token;
+      if (next >= params.length) throw new Error('Fewer parameters than placeholders');
+      return sqlLiteral(params[next++]);
+    },
+  );
+  if (next !== params.length) throw new Error('More parameters than placeholders');
+  return out;
+}
+
 /** Preserve the synchronous application contract and support nested migrations.
  * Remote connections deliberately expose no local filename or memory flag. */
 export function wrapTursoDatabase(raw: Db, remote = true, secrets: readonly string[] = []): Db {
@@ -254,8 +295,10 @@ export function wrapTursoDatabase(raw: Db, remote = true, secrets: readonly stri
     prepare: statement,
     exec: sql => {
       invalidateReads();
-      dropResults();
-      reads.clear();
+      if (!TRANSACTION_CONTROL.test(sql)) {
+        dropResults();
+        reads.clear();
+      }
       // Upstream's endpoint-identity migration parks child rows in TEMP tables.
       // Turso disallows TEMP. These reserved tables are created and dropped in
       // the same write transaction, so ordinary tables have the same lifetime.
@@ -273,6 +316,29 @@ export function wrapTursoDatabase(raw: Db, remote = true, secrets: readonly stri
       return safe(() => raw.pragma(source));
     },
     close: () => { reads.clear(); resultCache.clear(); raw.close?.(); },
+    ...(remote ? {
+      // One network round trip for a whole write group instead of one per
+      // statement. The script is atomic (BEGIN ... COMMIT); if anything fails it is
+      // rolled back before the error or a BUSY retry, so a retry never doubles rows.
+      executeBatch: (statements: ReadonlyArray<{ sql: string; params: readonly unknown[] }>) => {
+        if (depth > 0) throw new Error('executeBatch cannot run inside a transaction');
+        // Conservative: invalidate before running, like every other write path.
+        for (const s of statements) noteWrite(s.sql);
+        const script = ['BEGIN', ...statements.map(s => inlineParams(s.sql, s.params)), 'COMMIT'].join(';\n');
+        for (let attempt = 0; ; attempt++) {
+          try {
+            raw.exec(script);
+            break;
+          } catch (error) {
+            try { raw.exec('ROLLBACK'); } catch { /* nothing open */ }
+            const wait = isBusyError(error) ? busyBackoffMs(attempt) : null;
+            if (wait !== null) { sleepSync(wait); continue; }
+            if (!(error instanceof Error) || secrets.length === 0) throw error;
+            throw sanitizedDriverError(error, secrets);
+          }
+        }
+      },
+    } : {}),
     transaction: <F extends (...args: any[]) => unknown>(fn: F): F => {
       const wrapped = function (this: unknown, ...args: Parameters<F>): ReturnType<F> {
         const outermost = depth === 0;
@@ -295,7 +361,7 @@ export function wrapTursoDatabase(raw: Db, remote = true, secrets: readonly stri
             }
           } catch { /* Preserve the original failure. */ }
           throw error;
-        } finally { depth -= 1; invalidateReads(); dropResults(); }
+        } finally { depth -= 1; invalidateReads(); }
       };
       return wrapped as F;
     },

@@ -12,6 +12,13 @@ export interface Db {
   // zero-arg transactions and the parameterised form used in routes/embeddings.
   transaction<F extends (...args: any[]) => unknown>(fn: F): F;
   pragma(source: string): unknown;
+  /**
+   * Run several writes atomically in ONE round trip. Only remote (Turso)
+   * connections provide it; callers must fall back to transaction() without it.
+   * Parameters are inlined as SQL literals, so this is for fixed, internal
+   * statements only.
+   */
+  executeBatch?(statements: ReadonlyArray<{ sql: string; params: readonly unknown[] }>): void;
   // Optional file metadata, populated when the backing store is better-sqlite3
   // (the default factory passes the raw handle through). Consumers that need a
   // filesystem location (e.g. the dev encryption-key file) must treat absence
