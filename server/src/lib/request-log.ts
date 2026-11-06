@@ -13,21 +13,24 @@ function hourKey(createdAt: string): string {
   return createdAt.slice(0, 13) + ':00:00';
 }
 
-function incrementSetting(db: LogTx, key: string, delta: number): void {
-  // Read-then-write inside the same transaction; safe because better-sqlite3
-  // is synchronous and serialized at the connection level. ON CONFLICT keeps
-  // the first ever insert without a prior SELECT.
+// The lifetime counters and first_request_at in ONE statement. They used to be
+// four upserts per logged request, and on a remote database each upsert is a
+// blocking network round trip. The conflict clause keeps the old behaviour per
+// key: counters add the new delta to what is stored (the first insert stores the
+// delta itself), first_request_at keeps whatever is already there.
+function bumpLifetimeCounters(
+  db: LogTx,
+  deltas: { requests: number; inputTokens: number; outputTokens: number },
+  firstRequestAt: string,
+): void {
   db.prepare(`
-    INSERT INTO settings (key, value) VALUES (?, ?)
-    ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + ? AS TEXT)
-  `).run(key, String(delta), delta);
-}
-
-function setSettingIfMissing(db: LogTx, key: string, value: string): void {
-  db.prepare(`
-    INSERT INTO settings (key, value) VALUES (?, ?)
-    ON CONFLICT(key) DO NOTHING
-  `).run(key, value);
+    INSERT INTO settings (key, value) VALUES
+      ('total_requests', ?), ('total_input_tokens', ?), ('total_output_tokens', ?), ('first_request_at', ?)
+    ON CONFLICT(key) DO UPDATE SET value = CASE
+      WHEN settings.key = 'first_request_at' THEN settings.value
+      ELSE CAST(CAST(settings.value AS INTEGER) + CAST(excluded.value AS INTEGER) AS TEXT)
+    END
+  `).run(String(deltas.requests), String(deltas.inputTokens), String(deltas.outputTokens), firstRequestAt);
 }
 
 // Resolve the concrete models.id for a request (#1187). Catalog requests
@@ -149,10 +152,7 @@ export function logRequest(
           output_tokens  = output_tokens + ?
       `).run(hour, isSuccess, isError, inputTokens, outputTokens, isSuccess, isError, inputTokens, outputTokens);
 
-      incrementSetting(db, 'total_requests', 1);
-      incrementSetting(db, 'total_input_tokens', inputTokens);
-      incrementSetting(db, 'total_output_tokens', outputTokens);
-      setSettingIfMissing(db, 'first_request_at', nowIso);
+      bumpLifetimeCounters(db, { requests: 1, inputTokens, outputTokens }, nowIso);
     });
     tx();
 

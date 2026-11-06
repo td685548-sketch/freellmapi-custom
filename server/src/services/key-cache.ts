@@ -77,6 +77,19 @@ export function getUsableKeysByPlatform(db: Db = getDb()): Map<string, KeyRow[]>
 }
 
 /**
+ * The status the in-memory registry holds for a key, or undefined when the
+ * registry is not loaded (or the key is not usable: disabled, errored, invalid).
+ * Lets a hot path skip a write that cannot change anything, without a query.
+ */
+export function getCachedKeyStatus(keyId: number): string | undefined {
+  if (!cachesEnabled() || keyRegistry === null) return undefined;
+  for (const keys of keyRegistry.values()) {
+    for (const key of keys) if (key.id === keyId) return key.status;
+  }
+  return undefined;
+}
+
+/**
  * Return usable keys for a specific platform.
  */
 export function getUsableKeysForPlatform(platform: string, db: Db = getDb()): KeyRow[] {
