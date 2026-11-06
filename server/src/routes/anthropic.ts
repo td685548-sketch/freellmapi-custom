@@ -12,6 +12,7 @@ import type {
 import { routeRequest, resolveModelGroupCandidates, resolveRoutingChain, resolveStickyPreference, routingReserveTokens, failureAttributionFor, type RouteResult, type ResolvedChain, type ChainRow } from '../services/router.js';
 import { getSetting } from '../db/index.js';
 import { resolveAuth, prependSystemPrompt, type ResolvedAuth } from '../lib/system-prompt.js';
+import { applyOutputSavers } from '../custom/output-savers/apply.js';
 import { contentToString, estimateInputTokens } from '../lib/content.js';
 import { routeOutputBudget } from '../lib/output-cap.js';
 import { resolveTaskType } from '../lib/task-type.js';
@@ -525,6 +526,10 @@ export async function handleMessages(req: Request, res: Response): Promise<void>
   });
   messages = compressionResult.messages;
   res.setHeader('X-FreeLLM-Compress', formatCompressionHeader(compressionResult));
+
+  // Output savers (caveman/ponytail): after compression so their text survives,
+  // before the enforced prompt so a profile keeps priority.
+  messages = applyOutputSavers(messages, req.headers['x-freellm-saver']);
 
   // Server-enforced system prompt (#411): injected AFTER compression so it is
   // never compressed away, and FIRST in the list so a caller-supplied system

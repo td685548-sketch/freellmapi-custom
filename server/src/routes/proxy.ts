@@ -14,6 +14,7 @@ import { runImageGeneration, runVideoGeneration, runSpeech, runTranscription, Me
 import multer from 'multer';
 import { getDb } from '../db/index.js';
 import { resolveAuth, prependSystemPrompt, type ResolvedAuth } from '../lib/system-prompt.js';
+import { applyOutputSavers } from '../custom/output-savers/apply.js';
 import { contentToString, estimateInputTokens, messageHasImage, normalizeOutboundContent, sanitizeResponse } from '../lib/content.js';
 import { routeOutputBudget } from '../lib/output-cap.js';
 import { resolveTaskType } from '../lib/task-type.js';
@@ -1441,7 +1442,10 @@ proxyRouter.post('/completions', async (req: Request, res: Response) => {
     ? parsed.data.max_tokens : 128;
   const stop = providerSafeStop(parsed.data.stop);
   // A profile's enforced prompt goes ahead of the autocomplete system message.
-  const messages = prependSystemPrompt(completionPromptToMessages(prompt, suffix), auth.systemPrompt);
+  const messages = prependSystemPrompt(
+    applyOutputSavers(completionPromptToMessages(prompt, suffix), req.headers['x-freellm-saver']),
+    auth.systemPrompt,
+  );
   const estimatedInputTokens = messages.reduce((sum, m) => sum + Math.ceil(contentToString(m.content).length / 4), 0);
   // Cap the reserved output so a huge client-set max_tokens doesn't falsely
   // exclude the whole model pool (#470); input is still counted in full. The
@@ -2028,6 +2032,11 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   });
   messages = compressionResult.messages;
   res.setHeader('X-FreeLLM-Compress', formatCompressionHeader(compressionResult));
+
+  // Output savers (caveman/ponytail) go in after compression, so their own
+  // text is never compressed away, and before the enforced profile prompt, so
+  // a profile's instructions keep priority over a styling hint.
+  messages = applyOutputSavers(messages, req.headers['x-freellm-saver']);
 
   // Server-enforced system prompt (#411): injected AFTER compression so it is
   // never compressed away, and FIRST in the list so a caller-supplied system

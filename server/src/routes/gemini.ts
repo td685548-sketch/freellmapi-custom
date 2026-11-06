@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { buildModelListing, type NormalizedModel } from '../services/model-listing.js';
 import { extractApiToken } from './proxy.js';
 import { resolveAuth, prependSystemPrompt, type ResolvedAuth } from '../lib/system-prompt.js';
+import { applyOutputSavers } from '../custom/output-savers/apply.js';
 import { runInboundChat, type InboundChatWire } from '../lib/inbound-chat.js';
 import {
   effortFromGeminiThinking,
@@ -204,8 +205,12 @@ async function handleGenerate(req: Request, res: Response, stream: boolean): Pro
     model: resolveGeminiModel(model),
     // Server-enforced system prompt (#411): enforced prompt FIRST so the
     // caller's systemInstruction follows it and cannot override it. Neutral
-    // no-op for the unified key and for profiles without a prompt.
-    messages: prependSystemPrompt(geminiContentsToMessages(body), auth.systemPrompt),
+    // no-op for the unified key and for profiles without a prompt. Output
+    // savers (caveman/ponytail) sit behind it so a profile keeps priority.
+    messages: prependSystemPrompt(
+      applyOutputSavers(geminiContentsToMessages(body), req.headers['x-freellm-saver']),
+      auth.systemPrompt,
+    ),
     stream,
     // Gemini CLI never sends maxOutputTokens; the shared 1024-token default
     // would truncate every response, so match Gemini's own model default.

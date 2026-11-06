@@ -17,6 +17,7 @@ import { providerTiersRouter } from '../routes/provider-tiers.js';
 import { requireActionPermission } from './permission-actions.js';
 import { guardKeyAddition } from './key-addition-guard.js';
 import { cachePreferencesRouter } from '../routes/cache-preferences.js';
+import { outputSaversRouter } from './output-savers/router.js';
 import { statusCache } from './status-cache.js';
 
 // Everything this fork adds to the HTTP surface is wired here, so upstream's
@@ -74,6 +75,7 @@ export const PERMISSION_GATES: readonly PermissionGate[] = [
   { path: '/api/fallback', permission: 'manage_settings', methods: WRITE_METHODS },
   { path: '/api/cache', permission: 'manage_settings' },
   { path: '/api/compression', permission: 'manage_settings', methods: WRITE_METHODS },
+  { path: '/api/savers', permission: 'manage_settings', methods: WRITE_METHODS },
   { path: '/api/premium', permission: 'manage_settings', methods: WRITE_METHODS },
 
   // Modality catalogs reach the same credential store as the Keys page — they can
@@ -114,6 +116,11 @@ export function registerCustomRoutes(app: Express): void {
   app.use('/api/client-profiles', profileAnalyticsRouter);
   // Usage ranking of accounts and client keys; its view_usage gate is in PERMISSION_GATES.
   app.use('/api/usage', usageRouter);
+
+  // Output-token savers (caveman/ponytail). The manage_settings gate above is
+  // what makes a write need a settings permission; reads stay open so a
+  // member-facing status view can show what is active.
+  app.use('/api/savers', outputSaversRouter);
 
   // The /api/analytics gate above enforces auth + view_logs for this mount too.
   app.use('/api/analytics/provider-tiers', providerTiersRouter);

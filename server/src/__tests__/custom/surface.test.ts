@@ -48,6 +48,7 @@ const WRITE_METHOD_GATES: Array<[string, 'POST' | 'PUT' | 'PATCH' | 'DELETE', st
   ['/api/fallback/routing', 'PUT', 'manage_settings'],
   ['/api/cache/config', 'PUT', 'manage_settings'],
   ['/api/compression/preview', 'POST', 'manage_settings'],
+  ['/api/savers', 'PUT', 'manage_settings'],
   ['/api/premium/key', 'POST', 'manage_settings'],
   ['/api/embeddings/custom', 'POST', 'manage_keys'],
   ['/api/media/1', 'PUT', 'manage_keys'],

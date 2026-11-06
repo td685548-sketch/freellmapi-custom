@@ -69,6 +69,7 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
     if (path.startsWith('/api/client-profiles')) return read ? 'view_client_profiles' : 'edit_client_profiles';
     if (path.startsWith('/api/update')) return 'manage_updates';
     if (path.startsWith('/api/compression') || path === '/api/settings/compression') return read ? 'view_settings' : 'manage_compression';
+    if (path.startsWith('/api/savers')) return read ? 'view_settings' : 'manage_compression';
     if (/^\/api\/(models|profiles|fallback|premium)(\/|$)/.test(path)) return 'manage_routing';
     if (['version', 'update-check', 'unify', 'fusion', 'enable-mcp', 'anthropic-map', 'gemini-map', 'agent-compatibility', 'output-limit', 'min-context-window', 'guardrails', 'headroom', 'task-weight-share', 'min-reliability-floor', 'provider-moment-attribution', 'proxy', 'proxy/test'].some(name => path === `/api/settings/${name}`)) return read ? 'view_settings' : 'edit_settings';
   }
