@@ -24,7 +24,10 @@ function lifetimeCountersStatement(
   firstRequestAt: string,
 ): { sql: string; params: string[] } {
   return {
+    // The marker tells the remote driver this is the lifetime-counter upsert, so it
+    // does not invalidate cached routing settings (see LIFETIME_COUNTERS_MARKER).
     sql: `
+    /* @lifetime-counters */
     INSERT INTO settings (key, value) VALUES
       ('total_requests', ?), ('total_input_tokens', ?), ('total_output_tokens', ?), ('first_request_at', ?)
     ON CONFLICT(key) DO UPDATE SET value = CASE
