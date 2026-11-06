@@ -199,7 +199,7 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: CUSTOM_PROFILE_USAGE_FILENAME, module: customProfileUsage },
   { filename: CUSTOM_USAGE_QUOTAS_FILENAME, module: customUsageQuotas },
   { filename: CUSTOM_PROFILE_RESTRICTIONS_FILENAME, module: customProfileRestrictions },
-  { filename: CUSTOM_PROFILE_PREVIOUS_KEYS_FILENAME, module: customProfilePreviousKeys },
   { filename: CUSTOM_X_GATEWAY_FILENAME, module: customXGateway },
+  { filename: CUSTOM_PROFILE_PREVIOUS_KEYS_FILENAME, module: customProfilePreviousKeys },
   { filename: CUSTOM_PROVIDER_ACCOUNTS_FILENAME, module: customProviderAccounts },
 ];

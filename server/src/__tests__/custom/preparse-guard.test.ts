@@ -38,19 +38,10 @@ describe('pre-parse guard and public probes', () => {
       // loopback connection is the operator's own machine and is deliberately not guarded.
       const headers: Record<string, string | number> = { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.9', ...opts.headers };
       if (opts.body !== undefined && !opts.chunked) headers['content-length'] = Buffer.byteLength(opts.body);
-      const req = http.request({ host: '127.0.0.1', port, path, method: opts.method ?? 'POST', headers }, res => {
+      const req = http.request({ host: '127.0.0.1', port, path, method: opts.method ?? 'POST', headers, agent: false }, res => {
         let data = '';
-        let settled = false;
-        const settle = () => {
-          if (settled) return;
-          settled = true;
-          let body: any = null;
-          try { body = JSON.parse(data); } catch { /* not json */ }
-          resolve({ status: res.statusCode ?? 0, body });
-        };
         res.on('data', c => { data += c; });
-        res.on('end', settle);
-        res.on('close', settle);
+        res.on('end', () => { let body: any = null; try { body = JSON.parse(data); } catch { /* not json */ } resolve({ status: res.statusCode ?? 0, body }); });
       });
       req.on('error', err => { if ((err as NodeJS.ErrnoException).code === 'ECONNRESET' || (err as NodeJS.ErrnoException).code === 'EPIPE') return; reject(err); });
       if (opts.body !== undefined) {
@@ -72,6 +63,7 @@ describe('pre-parse guard and public probes', () => {
       const res = await send(path, { body: big, headers });
       expect(res.status, path).toBe(401);
       expect(res.body.error.message, path).toMatch(/body this large/); // from the guard, not the route
+      await new Promise(r => setTimeout(r, 15));
     };
     await refused('/v1/chat/completions');
     await refused('/v1/chat/completions', { authorization: 'Bearer nope' });
