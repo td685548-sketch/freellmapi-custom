@@ -5,6 +5,7 @@ import { defaultDbFactory, getDb, initDb } from '../../db/index.js';
 import { wrapTursoDatabase } from '../../db/turso.js';
 import { encrypt } from '../../lib/crypto.js';
 import { setKeyCacheTestOverride } from '../../services/key-cache.js';
+import { setUsageMemoTestOverride } from '../../services/ratelimit.js';
 import { setRoutingStrategy } from '../../services/router.js';
 import { createUser } from '../../services/auth.js';
 import { mintUserApiKey } from '../../services/user-keys.js';
@@ -22,6 +23,7 @@ describe('X Gateway round-trip statement budget (SC-007)', () => {
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     vi.stubEnv('FREEAPI_TURSO_BATCH_WRITES', '1');
     setKeyCacheTestOverride(true);
+    setUsageMemoTestOverride(true);
 
     initDb(':memory:', {
       factory: () => {
@@ -96,6 +98,7 @@ describe('X Gateway round-trip statement budget (SC-007)', () => {
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
     setKeyCacheTestOverride(null);
+    setUsageMemoTestOverride(null);
   });
 
   const chat = async (path: string) => {
