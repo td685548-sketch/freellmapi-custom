@@ -141,8 +141,8 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
             {value === 'api_key' ? s.apiKey : value === 'device_code' ? s.device : s.oauth}
           </label>)}
         </fieldset>}
-        <label>{s.name}<input autoFocus maxLength={100} value={label} placeholder={s.namePlaceholder} onChange={event => setLabel(event.target.value)} disabled={busy} required /></label>
-        {method === 'api_key' && <label>{s.credential}<input type="password" autoComplete="new-password" value={key} onChange={event => setKey(event.target.value)} placeholder={s.credentialPlaceholder} disabled={busy} required /></label>}
+        <label>{s.name}<input id="x-account-label" name="label" autoFocus maxLength={100} value={label} placeholder={s.namePlaceholder} onChange={event => setLabel(event.target.value)} disabled={busy} required /></label>
+        {method === 'api_key' && <label>{s.credential}<input id="x-account-credential" name="credential" type="password" autoComplete="new-password" value={key} onChange={event => setKey(event.target.value)} placeholder={s.credentialPlaceholder} disabled={busy} required /></label>}
         <p className="x-security"><ShieldCheck size={16} />{s.encrypted}</p>
         <div className="x-dialog-actions"><button type="button" className="x-button" onClick={onClose}>{s.cancel}</button><button className="x-button x-primary" disabled={busy}>{busy && <LoaderCircle size={16} className="x-spin" />}{busy ? s.connecting : method === 'api_key' ? s.addAccount : s.signIn}</button></div>
       </form> : <div className="x-auth-wait">
@@ -152,7 +152,7 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
         }}><Copy size={17} /></button></div>}
         <a className="x-button x-primary" target="_blank" rel="noopener noreferrer" href={trustedLoginUrl(attempt.flow === 'oauth_pkce' ? attempt.authorizationUrl : attempt.verificationUri, provider.id) ?? undefined}>{s.openLogin}<ExternalLink size={15} /></a>
         <p className="x-caption">{s.expires} {new Date(attempt.expiresAt).toLocaleTimeString()}</p>
-        {attempt.flow === 'oauth_pkce' && <form className="x-form" onSubmit={completeManual}><label>{s.manualCallback}<input type="url" value={manual} autoComplete="off" onChange={event => setManual(event.target.value)} placeholder={s.callbackPlaceholder} /></label><button className="x-button" disabled={busy || !manual.trim()}>{busy ? s.connecting : s.complete}</button></form>}
+        {attempt.flow === 'oauth_pkce' && <form className="x-form" onSubmit={completeManual}><label>{s.manualCallback}<input id="x-account-callback" name="callback" type="url" value={manual} autoComplete="off" onChange={event => setManual(event.target.value)} placeholder={s.callbackPlaceholder} /></label><button className="x-button" disabled={busy || !manual.trim()}>{busy ? s.connecting : s.complete}</button></form>}
         <button className="x-button x-full" onClick={onClose}>{s.cancel}</button>
       </div>}
     </DialogPopup>
