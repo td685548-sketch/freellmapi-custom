@@ -26,6 +26,7 @@ const FULL_METHOD_GATES: Array<[string, string]> = [
   ['/api/backups', 'manage_backups'],
   ['/api/logs', 'view_logs'],
   ['/api/analytics', 'view_logs'],
+  ['/api/usage', 'view_usage'],
   ['/api/health', 'manage_keys'],
   ['/api/free-tier', 'manage_keys'],
   ['/api/fallback/rate-limit-usage', 'manage_keys'],

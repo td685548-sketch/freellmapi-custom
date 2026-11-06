@@ -54,6 +54,10 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
     if (path === '/api/logs/clear' && method === 'POST') return 'clear_server_logs';
     if ((path.startsWith('/api/analytics/') || ['/api/analytics', '/api/fallback/token-usage', '/api/fallback/quota-forecast'].includes(path)) && read) return 'view_analytics';
   }
+  if (parent === 'view_usage' && read) {
+    if (path === '/api/usage/accounts') return 'view_usage_accounts';
+    if (path === '/api/usage/profiles') return 'view_usage_profiles';
+  }
   if (parent === 'manage_settings') {
     if (path === '/api/cache/stats' && read) return 'view_cache';
     if (['/api/cache/config', '/api/cache/preferences'].includes(path) && method === 'PUT') return 'edit_cache';

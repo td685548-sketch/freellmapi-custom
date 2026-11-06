@@ -47,6 +47,7 @@ import { AnalyticsAccessPage, InvitesAccessPage, LogsAccessPage, UsersAccessPage
 import { UsersNavBadge } from '@/custom/UsersNavBadge'
 import { UserAnalyticsPage } from '@/custom/UserAnalyticsPage'
 import { ProfileUsagePage } from '@/custom/ProfileUsagePage'
+import { UsageRankingPage } from '@/custom/UsageRankingPage'
 import PremiumPage from '@/pages/PremiumPage'
 import NotFoundPage from '@/pages/NotFoundPage'
 import AgentsPage from '@/pages/AgentsPage'
@@ -269,6 +270,7 @@ function Navbar() {
   const canManageInvites = typeof hasPermission === 'function' ? group('manage_invites') : isAdmin
   const canManageUsers = typeof hasPermission === 'function' ? (group('manage_users') || group('manage_requests')) : isAdmin
   const canManageSettings = typeof hasPermission === 'function' ? group('manage_settings') : isAdmin
+  const canViewUsage = typeof hasPermission === 'function' ? group('view_usage') : isAdmin
   const canManageKeys = typeof hasPermission === 'function' ? (group('manage_keys') || group('manage_backups') || group('manage_settings')) : isAdmin
 
   const visibleNavItems: Array<{ to: string; labelKey: string; customLabel?: string }> = [
@@ -282,6 +284,7 @@ function Navbar() {
     }).map(i => i.to === '/analytics' && !hasPermission('view_analytics') ? { ...i, to: '/logs', labelKey: 'nav.logs' } : i),
     ...(canManageInvites ? [{ to: '/invites', labelKey: 'nav.invites', customLabel: 'Invites' }] : []),
     ...(canManageUsers ? [{ to: '/users', labelKey: 'nav.users', customLabel: 'Users' }] : []),
+    ...(canViewUsage ? [{ to: '/usage', labelKey: 'nav.usage', customLabel: 'Usage' }] : []),
   ]
 
   return (
@@ -535,6 +538,7 @@ function App() {
                       <Route path="/users" element={<UsersAccessPage />} />
                       <Route path="/users/:id/analytics" element={<UserAnalyticsPage />} />
                       <Route path="/profiles/:id/usage" element={<ProfileUsagePage />} />
+                      <Route path="/usage" element={<UsageRankingPage />} />
                       <Route path="/agents" element={<AgentsPage />} />
                       <Route path="/fallback" element={<Navigate to="/models/chat" replace />} />
                       <Route path="/analytics" element={<AnalyticsAccessPage />} />

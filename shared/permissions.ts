@@ -57,6 +57,10 @@ export const PERMISSION_GROUPS = [
     { key: "clear_server_logs", title: "Clear server logs", description: "Delete retained server logs." },
     { key: "view_analytics", title: "View analytics", description: "Read usage statistics, routing metrics and provider tiers." },
   ] },
+  { key: "view_usage", title: "Usage ranking", description: "Compare traffic and speed across accounts and client keys.", children: [
+    { key: "view_usage_accounts", title: "View account ranking", description: "See every account's email with its request, token, error and latency figures." },
+    { key: "view_usage_profiles", title: "View client key ranking", description: "See every client profile's name with its request, token, error and latency figures." },
+  ] },
  ] as const;
 export type ParentPermission = typeof PERMISSION_GROUPS[number]['key'];
 export type ChildPermission = typeof PERMISSION_GROUPS[number]['children'][number]['key'];

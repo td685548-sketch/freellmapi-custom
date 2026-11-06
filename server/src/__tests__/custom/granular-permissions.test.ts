@@ -83,6 +83,7 @@ describe('Granular permissions and cache preferences', () => {
     ['restore_backups', 'POST', '/api/backups/999/restore'],
     ['view_server_logs', 'GET', '/api/logs'], ['clear_server_logs', 'POST', '/api/logs/clear'],
     ['view_analytics', 'GET', '/api/analytics/provider-tiers'],
+    ['view_usage_accounts', 'GET', '/api/usage/accounts'], ['view_usage_profiles', 'GET', '/api/usage/profiles'],
     ['edit_cache', 'PUT', '/api/cache/config'], ['clear_cache', 'DELETE', '/api/cache'],
     ['reveal_gateway_key', 'GET', '/api/settings/api-key'],
   ] as const;
