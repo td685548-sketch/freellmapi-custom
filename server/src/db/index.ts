@@ -7,7 +7,7 @@ import { runMigrationsSync } from './migrate/runner.js';
 import { initEncryptionKey, isEncryptionKeyInitialized, probeStoredSecrets } from '../lib/crypto.js';
 import { restrictAllToOwner, restrictDirToOwner } from '../lib/file-permissions.js';
 import { nodeSqliteFactory } from './node-sqlite.js';
-import { tursoEnabled, tursoFactory } from './turso.js';
+import { beginStartupBusyBudget, tursoEnabled, tursoFactory } from './turso.js';
 import { observeDatabase } from '../custom/performance/database.js';
 import type { Db, DbFactory } from './types.js';
 import { readRoutingSetting } from './routing-settings-scope.js';
@@ -202,6 +202,9 @@ export function initDb(
   dbPath?: string,
   opts?: { ensureDir?: boolean; factory?: DbFactory },
 ): Db {
+  // Migrations and first writes may have to wait for a previous instance to release the write lock;
+  // index.ts ends the long wait once the server listens.
+  beginStartupBusyBudget();
   const db = connectDb(dbPath, opts);
 
   if (process.env.NODE_ENV !== 'development') {
