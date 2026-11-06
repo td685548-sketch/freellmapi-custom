@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { getDb } from '../db/index.js';
+import { countUsableKeysByPlatform } from '../services/key-cache.js';
 import { parseBudget } from '../lib/budget.js';
 import { getActiveProfileId } from '../services/profile-models.js';
 import { inferQuotaPoolKey, getQuotaStateForKeys } from '../services/provider-quota.js';
@@ -114,10 +115,9 @@ freeTierRouter.get('/', (_req: Request, res: Response) => {
   );
   // Usable keys per platform: a documented budget is per account, so two usable
   // accounts really are twice the pool (fallback.ts uses the same filter).
-  const keyCountMap = new Map(
-    (db.prepare("SELECT platform, COUNT(*) as count FROM api_keys WHERE enabled = 1 AND status IN ('healthy', 'unknown') GROUP BY platform").all() as { platform: string; count: number }[])
-      .map(k => [k.platform, k.count]),
-  );
+  // From the in-memory usable-key registry (same predicate: enabled, healthy or
+  // unknown), not a GROUP BY over the network on every dashboard poll.
+  const keyCountMap = countUsableKeysByPlatform(db);
 
   // Chain membership mirrors /token-usage: the active profile's chain when one
   // is active, the default fallback chain otherwise. `chain_enabled` is only a
