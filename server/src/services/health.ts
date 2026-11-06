@@ -319,7 +319,11 @@ export async function checkKeyHealth(keyId: number): Promise<KeyStatus> {
       ? "UPDATE api_keys SET status = ?, last_health_error = ?, last_checked_at = datetime('now'), last_healthy_at = datetime('now') WHERE id = ?"
       : "UPDATE api_keys SET status = ?, last_health_error = ?, last_checked_at = datetime('now') WHERE id = ?")
       .run(status, lastError, keyId);
-    invalidateKeyCache();
+    // The registry holds status, not the check timestamps or error text this
+    // UPDATE mostly refreshes. Dropping it on every probe made the next request
+    // re-read the whole key table (hundreds of rows over the network) once per
+    // key per pass; drop it only when the verdict actually changed.
+    if (row.status !== status) invalidateKeyCache();
 
     if (isValid) {
       failureCount.delete(keyId);

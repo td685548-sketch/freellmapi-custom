@@ -1,3 +1,4 @@
+import { runWriteGroup } from '../lib/write-group.js';
 import crypto from 'crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { getDb } from '../db/index.js';
@@ -396,8 +397,11 @@ export function recordQuotaObservation(input: QuotaObservationInput): ProviderQu
   const nowSql = toSqliteUtc(observedAt);
   const updatedAt = nowSql;
 
-  db.transaction(() => {
-    db.prepare(`
+  // One group: on a remote database this used to be BEGIN + two writes + COMMIT,
+  // four round trips for every health probe and every served chat request.
+  runWriteGroup(db, [
+    {
+      sql: `
       INSERT INTO provider_quota_state (
         platform, key_id, quota_pool_key, metric, limit_value, remaining_value,
         reset_at, reset_strategy, source, confidence, notes, observed_at, updated_at
@@ -417,22 +421,24 @@ export function recordQuotaObservation(input: QuotaObservationInput): ProviderQu
       WHERE excluded.remaining_value IS NOT NULL
         AND (provider_quota_state.remaining_value IS NULL
           OR julianday(excluded.observed_at) >= julianday(provider_quota_state.observed_at))
-    `).run(
-      platform, keyId, quotaPoolKey, metric, limitValue, remainingValue, resetAt, resetStrategy, source, confidence, notes, nowSql, updatedAt,
-    );
-
-    db.prepare(`
+    `,
+      params: [platform, keyId, quotaPoolKey, metric, limitValue, remainingValue, resetAt, resetStrategy, source, confidence, notes, nowSql, updatedAt],
+    },
+    {
+      sql: `
       INSERT INTO provider_quota_observations (
         id, platform, key_id, provider_account_id, model_id, quota_pool_key, metric,
         status_code, limit_value, remaining_value, reset_at, retry_after_ms,
         reset_strategy, source, confidence, notes, raw_json, endpoint, observed_at, created_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      id, platform, keyId, providerAccountId, modelId, quotaPoolKey, metric,
-      statusCode, limitValue, remainingValue, resetAt, retryAfterMs,
-      resetStrategy, source, confidence, notes, rawJson, endpoint, nowSql, nowSql,
-    );
-  })();
+    `,
+      params: [
+        id, platform, keyId, providerAccountId, modelId, quotaPoolKey, metric,
+        statusCode, limitValue, remainingValue, resetAt, retryAfterMs,
+        resetStrategy, source, confidence, notes, rawJson, endpoint, nowSql, nowSql,
+      ],
+    },
+  ]);
 
   // The row just moved, so the memoised headroom for this platform is wrong —
   // drop it rather than let a 5s window hide a fresh 429 from the router.

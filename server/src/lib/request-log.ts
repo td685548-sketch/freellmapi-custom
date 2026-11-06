@@ -3,6 +3,7 @@ import { pruneRequestAnalytics } from '../services/request-retention.js';
 import { noteBudgetAlerts } from '../services/budget-alerts.js';
 import { getClientContext } from './client-context.js';
 import { noteRequestRowId, type RequestTrace } from './attempt-trace.js';
+import { batchedWritesEnabled } from './write-group.js';
 
 type LogTx = ReturnType<typeof getDb>;
 
@@ -50,14 +51,6 @@ const REQUEST_INSERT_SQL = `
         INSERT INTO requests (platform, model_id, key_id, status, input_tokens, output_tokens, latency_ms, error, ttfb_ms, requested_model, served_model, client_ip, client_user_agent, client_agent, caller, model_db_id, failure_attribution, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
-
-// Opt-in: on a remote database, write the whole request log in one network round
-// trip (db.executeBatch) instead of BEGIN + three writes + COMMIT. The driver is
-// synchronous, so each round trip is time the server answers nothing. Off by
-// default because batching has to be verified against the real Turso service.
-function batchedLoggingEnabled(db: LogTx): boolean {
-  return process.env.FREEAPI_TURSO_BATCH_WRITES === '1' && typeof db.executeBatch === 'function';
-}
 
 // Resolve the concrete models.id for a request (#1187). Catalog requests
 // resolve by (platform, model_id); custom requests resolve through the
@@ -160,7 +153,7 @@ export function logRequest(
     const hourlyParams = [hour, isSuccess, isError, inputTokens, outputTokens, isSuccess, isError, inputTokens, outputTokens];
     const counters = lifetimeCountersStatement({ requests: 1, inputTokens, outputTokens }, nowIso);
 
-    if (batchedLoggingEnabled(db)) {
+    if (batchedWritesEnabled(db)) {
       // The requests INSERT goes last so last_insert_rowid() on this connection is
       // that row's id (a trigger's inserts do not change it, and request_hourly's
       // upsert would if it ran after). Same rows as the transaction below.
