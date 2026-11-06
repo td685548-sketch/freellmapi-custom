@@ -47,6 +47,7 @@ import * as removeGithubProvider from '../migrations/20261017_000002_remove_gith
 import * as requestFailureAttribution from '../migrations/20261017_233153_request_failure_attribution.js';
 import * as removeAurayProvider from '../migrations/20261019_000001_remove_auray_provider.js';
 import * as keyLastHealthyAt from '../migrations/20261020_000001_key_last_healthy_at.js';
+import * as customMediaEndpointIdentity from '../migrations/20261028_000001_custom_media_endpoint_identity.js';
 import * as customConversationOwner from '../migrations/20261105_000001_custom_conversation_owner.js';
 import * as customRequestUserId from '../migrations/20261106_000001_custom_request_user_id.js';
 import * as customProfileUsage from '../migrations/20261106_000002_custom_profile_usage.js';
@@ -119,6 +120,7 @@ export const REMOVE_GITHUB_PROVIDER_FILENAME = '20261017_000002_remove_github_pr
 export const REQUEST_FAILURE_ATTRIBUTION_FILENAME = '20261017_233153_request_failure_attribution.ts';
 export const REMOVE_AURAY_PROVIDER_FILENAME = '20261019_000001_remove_auray_provider.ts';
 export const KEY_LAST_HEALTHY_AT_FILENAME = '20261020_000001_key_last_healthy_at.ts';
+export const CUSTOM_MEDIA_ENDPOINT_IDENTITY_FILENAME = '20261028_000001_custom_media_endpoint_identity.ts';
 export const CUSTOM_USER_ROLES_AND_KEYS_FILENAME = '20261031_155642_custom_user_roles_and_keys.ts';
 
 export const CUSTOM_EXTERNAL_AUTH_FILENAME = '20261101_020000_custom_external_auth.ts';
@@ -183,6 +185,7 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: REQUEST_FAILURE_ATTRIBUTION_FILENAME, module: requestFailureAttribution },
   { filename: REMOVE_AURAY_PROVIDER_FILENAME, module: removeAurayProvider },
   { filename: KEY_LAST_HEALTHY_AT_FILENAME, module: keyLastHealthyAt },
+  { filename: CUSTOM_MEDIA_ENDPOINT_IDENTITY_FILENAME, module: customMediaEndpointIdentity },
   { filename: CUSTOM_USER_ROLES_AND_KEYS_FILENAME, module: migration20261031_155642_custom_user_roles_and_keys },
   { filename: CUSTOM_EXTERNAL_AUTH_FILENAME, module: customExternalAuth },
   { filename: CUSTOM_REGISTRATION_REQUESTS_FILENAME, module: customRegistrationRequests },
