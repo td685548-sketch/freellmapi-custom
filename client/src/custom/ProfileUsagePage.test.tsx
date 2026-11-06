@@ -39,6 +39,8 @@ beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   vi.mocked(apiFetch).mockReset()
 })
+// The page also loads the allowances; answer those separately from the analytics.
+const answer = (a: unknown) => vi.mocked(apiFetch).mockImplementation(async (url: string) => (String(url).includes('usage-quota') ? { quota: { dailyRequests: null, dailyTokens: null, monthlyRequests: null, monthlyTokens: null }, tracked: false, usage: { day: { requests: 0, tokens: 0 }, month: { requests: 0, tokens: 0 } }, resetsAt: { day: '2026-11-07T00:00:00.000Z', month: '2026-12-01T00:00:00.000Z' } } : a) as never)
 afterEach(() => { act(() => root.unmount()); client.clear(); container.remove() })
 async function render() {
   await act(async () => root.render(
@@ -59,7 +61,7 @@ const saveButton = () => [...container.querySelectorAll('button')].find(b => b.t
 
 describe('ProfileUsagePage', () => {
   it('shows the profile, its numbers and its current limit', async () => {
-    vi.mocked(apiFetch).mockResolvedValue(analytics(60))
+    answer(analytics(60))
     await render()
     expect(apiFetch).toHaveBeenCalledWith('/api/client-profiles/5/analytics?days=30')
     expect(container.textContent).toContain('Shop widget')
@@ -69,7 +71,7 @@ describe('ProfileUsagePage', () => {
   })
 
   it('saves a new limit, and an empty field clears it', async () => {
-    vi.mocked(apiFetch).mockResolvedValue(analytics(60))
+    answer(analytics(60))
     await render()
     expect(saveButton().disabled).toBe(true)
     await type('120')
@@ -81,7 +83,7 @@ describe('ProfileUsagePage', () => {
   })
 
   it('refuses a value outside 1..1000', async () => {
-    vi.mocked(apiFetch).mockResolvedValue(analytics(60))
+    answer(analytics(60))
     await render()
     for (const bad of ['0', '1001', '1.5', 'abc']) {
       await type(bad)
@@ -91,7 +93,7 @@ describe('ProfileUsagePage', () => {
 
   it('is read-only without edit_client_profiles', async () => {
     actor.perms = new Set(['view_client_profiles'])
-    vi.mocked(apiFetch).mockResolvedValue(analytics(60))
+    answer(analytics(60))
     await render()
     expect(input().disabled).toBe(true)
     expect(saveButton().disabled).toBe(true)

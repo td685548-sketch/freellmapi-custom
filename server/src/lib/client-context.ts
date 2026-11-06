@@ -76,14 +76,15 @@ export function setRequestUser(userId: number): ClientContext | undefined {
   return store;
 }
 
-/** Add a logged success row's tokens to this request's per-user tally. */
+/** Add a logged success row's tokens to this request's per-user / per-profile tally. */
 export function noteRequestTokens(tokens: number): void {
   const store = storage.getStore();
-  if (store?.userId !== undefined && tokens > 0) store.userTokens = (store.userTokens ?? 0) + tokens;
+  if ((store?.userId !== undefined || store?.profileId !== undefined) && tokens > 0) store.userTokens = (store.userTokens ?? 0) + tokens;
 }
 
 /** Attribute this request to a client profile (per-profile analytics). */
-export function setRequestProfile(profileId: number): void {
+export function setRequestProfile(profileId: number): ClientContext | undefined {
   const store = storage.getStore();
   if (store) store.profileId = profileId;
+  return store;
 }

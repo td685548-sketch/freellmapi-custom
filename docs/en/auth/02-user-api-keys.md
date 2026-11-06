@@ -68,6 +68,7 @@ A member's key routes through the same catalog, fallback chain, sticky sessions 
 `app.use('/v1', userInferenceGate)` ([server/src/custom/register.ts:89](../../../server/src/custom/register.ts#L89)) runs before upstream's inference routes and, for a `sk-flm-…` bearer token, does two things ([server/src/middleware/user-rate-limit.ts:17](../../../server/src/middleware/user-rate-limit.ts#L17)):
 
 - **Per-user RPM limit.** `user_api_keys.rpm_limit` (default `60`) is a sliding 60-second window per `userId`; over the cap the gate answers `429 user_rate_limit_exceeded` and every response carries `X-RateLimit-Limit-User-RPM` / `-Remaining-` / `-Reset-`. `PUT /api/admin/users/:id/quota` changes it, 1..1000 ([05](05-admin-user-management.md)).
+- **Daily / monthly allowances.** Optional per-account limits on requests and tokens per UTC day and month, stored in the database (`custom_usage_quotas`, `custom_usage_counters`), so unlike the per-minute window they survive a restart. Over a limit the gate answers `429 insufficient_quota` / `user_quota_exceeded` with `Retry-After`. Set by an operator with `edit_user_quotas`; see the 2026-11-06 entry in the [changelog](CHANGELOG.md).
 - **Monthly request counting.** On any response under 400 it upserts `user_monthly_usage` for `YYYY-MM`, best-effort inside a `try`/`catch` that swallows failures. Read it back at `GET /api/user/usage` or, for everyone, `GET /api/admin/users/usage`.
 
 Four things to know about it, all read off the code:
