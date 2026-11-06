@@ -111,3 +111,13 @@ export async function notifyUserRegistrationApproved(userEmail: string): Promise
 
   await sendRawGmail(userEmail, subject, body);
 }
+
+/** Send one plain-text notification through the configured Gmail sender. False when none is configured or delivery failed. */
+export function sendNotificationEmail(to: string, subject: string, body: string): Promise<boolean> {
+  return sendRawGmail(to, subject, body);
+}
+
+/** Whether a Gmail sender is configured, i.e. whether notification emails can go out at all. */
+export function notificationEmailAvailable(): boolean {
+  return Boolean(getExternalAuthConfig().gmail);
+}

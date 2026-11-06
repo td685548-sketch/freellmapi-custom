@@ -26,6 +26,7 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
   if (parent === 'manage_users' && path.startsWith('/api/admin/users')) {
     if (read && ['/api/admin/users', '/api/admin/users/usage'].includes(path)) return 'view_users';
     if (read && /^\/api\/admin\/users\/\d+\/analytics$/.test(path)) return 'view_users';
+    if (read && /^\/api\/admin\/users\/\d+\/requests(?:\/\d+\/attempts)?$/.test(path)) return 'view_users';
     if (/^\/api\/admin\/users\/\d+\/usage-quota$/.test(path)) return read ? 'view_users' : method === 'PUT' ? 'edit_user_quotas' : parent;
     if (/^\/api\/admin\/users\/\d+\/role$/.test(path) && method === 'PATCH') return 'edit_user_roles';
     if (/^\/api\/admin\/users\/\d+\/permissions$/.test(path) && method === 'PUT') return 'edit_user_permissions';
@@ -85,7 +86,7 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
     if (path.startsWith('/api/compression') || path === '/api/settings/compression') return read ? 'view_settings' : 'manage_compression';
     if (path.startsWith('/api/savers')) return read ? 'view_settings' : 'manage_compression';
     if (/^\/api\/(models|profiles|fallback|premium)(\/|$)/.test(path)) return 'manage_routing';
-    if (['version', 'update-check', 'unify', 'fusion', 'enable-mcp', 'anthropic-map', 'gemini-map', 'agent-compatibility', 'output-limit', 'min-context-window', 'guardrails', 'headroom', 'task-weight-share', 'min-reliability-floor', 'provider-moment-attribution', 'proxy', 'proxy/test'].some(name => path === `/api/settings/${name}`)) return read ? 'view_settings' : 'edit_settings';
+    if (['version', 'update-check', 'unify', 'fusion', 'enable-mcp', 'anthropic-map', 'gemini-map', 'agent-compatibility', 'output-limit', 'min-context-window', 'guardrails', 'headroom', 'task-weight-share', 'min-reliability-floor', 'provider-moment-attribution', 'proxy', 'proxy/test', 'usage-alerts', 'usage-alerts/test'].some(name => path === `/api/settings/${name}`)) return read ? 'view_settings' : 'edit_settings';
   }
   return parent;
 }

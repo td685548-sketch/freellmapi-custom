@@ -1,5 +1,6 @@
 import { getDb } from '../db/index.js';
 import type { UsageAmount, UsageQuota, UsageQuotaState } from '@freellmapi/shared/usage-quota.js';
+import { noteAllowance } from './usage-alerts.js';
 
 // Daily / monthly allowances (requests and tokens) of accounts and client profiles.
 //
@@ -151,6 +152,7 @@ export function admitQuota(kind: SubjectKind, id: number): Admission {
       } catch (err) {
         console.error('[usage-quota] could not persist usage:', err);
       }
+      noteAllowance(kind, id, quota, { day, month }, w);
     },
   };
 }

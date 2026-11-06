@@ -15,6 +15,8 @@ import { usageRouter } from '../routes/usage.js';
 import { profileRestrictionsRouter } from '../routes/profile-restrictions.js';
 import { profileTestRouter } from '../routes/profile-test.js';
 import { profileKeyRotationRouter } from '../routes/profile-key-rotation.js';
+import { adminUserRequestsRouter, profileRequestsRouter, selfRequestsRouter } from '../routes/recent-requests.js';
+import { usageAlertSettingsRouter } from '../routes/usage-alert-settings.js';
 import { adminUserQuotaRouter, profileQuotaRouter, selfQuotaRouter } from '../routes/usage-quota.js';
 import { withRoutingSettingsScope } from '../db/routing-settings-scope.js';
 import { providerTiersRouter } from '../routes/provider-tiers.js';
@@ -133,7 +135,9 @@ export function registerCustomRoutes(app: Express): void {
   for (const gate of PERMISSION_GATES) installGate(app, gate);
   app.use(['/api/keys', '/api/embeddings', '/api/media', '/api/decisions'], guardKeyAddition);
   // Usage and request cap per client profile; the manage_settings gate for this prefix is installed just above.
-  app.use('/api/client-profiles', profileAnalyticsRouter, profileQuotaRouter, profileRestrictionsRouter, profileTestRouter, profileKeyRotationRouter);
+  app.use('/api/client-profiles', profileAnalyticsRouter, profileQuotaRouter, profileRestrictionsRouter, profileTestRouter, profileKeyRotationRouter, profileRequestsRouter);
+  // Where usage alerts go; the /api/settings gate above covers it (view_settings / edit_settings).
+  app.use('/api/settings/usage-alerts', usageAlertSettingsRouter);
   // Usage ranking of accounts and client keys; its view_usage gate is in PERMISSION_GATES.
   app.use('/api/usage', usageRouter);
 
@@ -157,7 +161,7 @@ export function registerCustomRoutes(app: Express): void {
   // Custom fork routes with their dedicated permission gates
   app.use('/api/auth', externalAuthRouter, customAuthRouter);
   app.use('/api/invites', requireAuth, requireActionPermission('manage_invites'), invitesRouter);
-  app.use('/api/admin/users', requireAuth, requireActionPermission('manage_users'), adminUsersRouter, adminUserAnalyticsRouter, adminUserQuotaRouter);
+  app.use('/api/admin/users', requireAuth, requireActionPermission('manage_users'), adminUsersRouter, adminUserAnalyticsRouter, adminUserQuotaRouter, adminUserRequestsRouter);
   app.use('/api/admin/registration-requests', requireAuth, requireActionPermission('manage_requests'), adminRegistrationRequestsRouter);
-  app.use('/api/user', requireAuth, userKeysRouter, selfAnalyticsRouter, selfQuotaRouter);
+  app.use('/api/user', requireAuth, userKeysRouter, selfAnalyticsRouter, selfQuotaRouter, selfRequestsRouter);
 }
