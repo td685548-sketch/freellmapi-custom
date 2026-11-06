@@ -11,6 +11,7 @@ import { customAuthRouter } from './auth.js';
 import { userInferenceGate } from '../middleware/user-rate-limit.js';
 import { profileInferenceGate } from '../middleware/profile-gate.js';
 import { profileAnalyticsRouter } from '../routes/profile-analytics.js';
+import { usageRouter } from '../routes/usage.js';
 import { withRoutingSettingsScope } from '../db/routing-settings-scope.js';
 import { providerTiersRouter } from '../routes/provider-tiers.js';
 import { requireActionPermission } from './permission-actions.js';
@@ -58,6 +59,7 @@ export const PERMISSION_GATES: readonly PermissionGate[] = [
   { path: '/api/update', permission: 'manage_settings' },
   { path: '/api/backups', permission: 'manage_backups' },
   { path: ['/api/logs', '/api/analytics'], permission: 'view_logs' },
+  { path: '/api/usage', permission: 'view_usage' },
 
   // The key roster, its health errors, and endpoints that decrypt and spend a
   // stored provider key on demand.
@@ -110,6 +112,8 @@ export function registerCustomRoutes(app: Express): void {
   app.use(['/api/keys', '/api/embeddings', '/api/media', '/api/decisions'], guardKeyAddition);
   // Usage and request cap per client profile; the manage_settings gate for this prefix is installed just above.
   app.use('/api/client-profiles', profileAnalyticsRouter);
+  // Usage ranking of accounts and client keys; its view_usage gate is in PERMISSION_GATES.
+  app.use('/api/usage', usageRouter);
 
   // The /api/analytics gate above enforces auth + view_logs for this mount too.
   app.use('/api/analytics/provider-tiers', providerTiersRouter);
