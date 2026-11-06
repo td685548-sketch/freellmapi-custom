@@ -107,6 +107,8 @@ FreeLLMAPI 从 `.env` 读取的全部变量，按主题分组。默认值和说�
 | `RESPONSE_CACHE_MAX_TEMPERATURE` | `1.0` | 只缓存温度不高于该值的请求；更高的温度需要新鲜多样的输出。默认在开启时全部缓存；调低它（如 `0.2`）则只缓存接近确定性的调用。 |
 | `RESPONSE_CACHE_MAX_ENTRIES` | `5000` | 存储条目的硬上限，由 JSON 与流式两个存储共用（同一提示词两种方式各占一个名额）；超过后按最近最少使用逐出。 |
 | `FREELLMAPI_COMPRESSION` | `off` | 请求侧的提示词/上下文压缩。`lossless` 应用空白清理、完全重复块的引用以及可逆的表格化 JSON 编码；`standard` 再过滤工具输出和已被取代的文件读取；`aggressive` 追加基于年龄/相关性/预算的浓缩。仪表盘可以在设置里实时更改。单个请求可以用 `X-FreeLLM-Compress` 把配置的模式调低，但不能越过全局 `off` 总开关。 |
+| `FREELLMAPI_CAVEMAN` | `off` | 输出侧节省器：简洁的**回答**。`lite`/`full`/`ultra` 逐级压缩散文（先去掉废话和含糊措辞，再去冠词并允许片段，最后到电报体），而代码块、文件路径、命令、错误串、URL 和用户自己的语言保持精确。它作为一条固定的系统消息注入在对话之前，文本是源码里的常量，所以这里只选等级。已存储的设置（`PUT /api/savers`）优先，单个请求可以用 `X-FreeLLM-Saver` 调低。见 [../compression/02-output-savers.md](../compression/02-output-savers.md)。 |
+| `FREELLMAPI_PONYTAIL` | `off` | 输出侧节省器：极简的**代码**。`lite`/`full`/`ultra` 让模型在写任何东西之前先走一遍「更懒」的梯子（这东西需要存在吗 → 标准库 → 平台原生能力 → 已装依赖 → 一行搞定 → 最少可用代码），并交出最短的可用 diff。它绝不会简化掉信任边界的输入校验、错误处理、安全、无障碍，或任何被明确要求的东西。优先级和逐请求头同 `FREELLMAPI_CAVEMAN`。 |
 | `REQUEST_ANALYTICS_RETENTION_DAYS` | `90` | 请求分析的留存天数。设为 `0` 取消此限制。 |
 | `REQUEST_ANALYTICS_MAX_ROWS` | `100000` | 请求分析的行数上限。设为 `0` 取消此限制。 |
 | `REQUEST_ANALYTICS_LOG_CLIENT` | `true` | 把每次请求的调用者身份（客户端 IP + User-Agent）记入请求分析，并显示在仪表盘的「最近调用」表里。设为 `false` 则改存 null（聚合分析不受影响）。 |

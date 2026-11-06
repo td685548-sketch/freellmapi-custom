@@ -12,7 +12,7 @@
 | [architecture/](architecture/OVERVIEW.md) | [en/architecture/](architecture/OVERVIEW.md) | 架构深入解析：老虎机路由与评分、额度与冷却引擎、流式管线、降级模式与故障转移、目录同步、可观测性。另见 [00-high-level-index.md](architecture/00-high-level-index.md)。 |
 | [cli/](cli/OVERVIEW.md) | [en/cli/](cli/OVERVIEW.md) | 安装 CLI：`setup-*` 生成器、配置文件合并层。 |
 | [clients/](clients/OVERVIEW.md) | [en/clients/](clients/OVERVIEW.md) | 客户端与编程智能体：兼容 OpenAI 的客户端、配置配方、MCP、编辑器补全。 |
-| [compression/](compression/OVERVIEW.md) | [en/compression/](compression/OVERVIEW.md) | 提示词压缩：模式、安全保护、按请求控制、过滤器、统计。 |
+| [compression/](compression/OVERVIEW.md) | [en/compression/](compression/OVERVIEW.md) | 提示词压缩：模式、安全保护、按请求控制、过滤器、统计；另有 caveman/ponytail 输出节省器。 |
 | [deployment/](deployment/OVERVIEW.md) | [en/deployment/](deployment/OVERVIEW.md) | Docker 运维：镜像、Compose、网络、升级、备份。 |
 | [desktop/](desktop/OVERVIEW.md) | [en/desktop/](desktop/OVERVIEW.md) | 桌面应用：Electron 结构、文件日志、更新分发。 |
 | [env/](env/OVERVIEW.md) | [en/env/](env/OVERVIEW.md) | 运行时配置：`.env` 变量、加密密钥、出站代理。 |

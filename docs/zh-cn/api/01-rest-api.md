@@ -229,6 +229,8 @@ HTTP 头只能携带可打印的 ASCII 字符，所以模型 id 里超出这个�
 
 启用[提示词压缩](../compression/01-compression-pipeline.md)后，`X-FreeLLM-Compress: off|on|lossless|standard|aggressive` 可以对单次请求关闭或调低已配置的模式，但不能高于运维方配置的模式。响应会报告实际生效的模式和预估节省量，例如 `X-FreeLLM-Compress: standard; saved~=1840`。
 
+[输出节省器](../compression/02-output-savers.md)在回答侧有同样的单向规则：`X-FreeLLM-Saver: off|lite|full|ultra|caveman=level|ponytail=level`（可写成 `caveman=lite,ponytail=off` 组合）只能调低或关闭运维方已开启的等级，不能调高，也不能打开运维方保持关闭的节省器。响应头里什么都不加 —— 节省体现在模型自己的输出中。
+
 ## 嵌入
 
 `/v1/embeddings` 兼容 OpenAI，但和聊天路由有一处刻意的区别：**故障转移绝不跨模型。** 不同模型产出的向量位于互不兼容的空间里，悄悄换个模型会污染建立在这个代理之上的任何向量库。所以嵌入是按 **系列**（一个模型身份加一个维度）路由的，故障转移只在服务于同一系列的提供方之间进行。

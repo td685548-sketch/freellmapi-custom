@@ -12,7 +12,7 @@ Language-specific index for English documentation.
 | [architecture/](architecture/OVERVIEW.md) | Architecture deep-dives: bandit routing & scoring, quota & cooldown engine, streaming, degraded mode & failover, catalog sync, observability. See also [00-high-level-index.md](architecture/00-high-level-index.md). |
 | [cli/](cli/OVERVIEW.md) | Setup CLI: `setup-*` generators, config-file merge layer. |
 | [clients/](clients/OVERVIEW.md) | Clients & coding agents: OpenAI-compatible clients, setup recipes, MCP, autocomplete. |
-| [compression/](compression/OVERVIEW.md) | Prompt compression: modes, safeguards, per-request controls, filters, statistics. |
+| [compression/](compression/OVERVIEW.md) | Prompt compression: modes, safeguards, per-request controls, filters, statistics. Plus the caveman/ponytail output savers. |
 | [deployment/](deployment/OVERVIEW.md) | Docker operations: image, Compose, networking, upgrades, backups. |
 | [desktop/](desktop/OVERVIEW.md) | Desktop app: Electron shape, file logging, update delivery. |
 | [env/](env/OVERVIEW.md) | Runtime configuration: `.env` variables, encryption keys, outbound proxies. |

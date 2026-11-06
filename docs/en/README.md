@@ -11,6 +11,7 @@ This is the user entry point — start here to install the gateway, call the Ope
 - **[Supported agents](clients/02-supported-agents.md)** — every agent FreeLLMAPI works with and its one-line setup command.
 - **[Clients & coding agents](clients/01-agent-clients.md)** — OpenAI-compatible clients, recipes for Claude Code / Codex CLI / Cline / Continue / Aider / opencode / Cursor, the MCP server, editor autocomplete, and Context Handoff.
 - **[Prompt compression](compression/01-compression-pipeline.md)** — request-side modes, safeguards, per-request controls, custom tool-output filters, statistics, and preview APIs.
+- **[Output savers](compression/02-output-savers.md)** — caveman and ponytail: answer-side terseness levels, environment/API enablement, and the per-request `X-FreeLLM-Saver` header.
 - **[Proxy transports](proxy/OVERVIEW.md)** — outbound proxy transports — forward vs Fetch Relay, system auto-detect, `TRUST_PROXY` for inbound; see [Fetch Relay transport](proxy/01-fetch-relay.md) for the relay protocol and Cloudflare Worker reference.
 - **[Architecture & internals](architecture/00-high-level-index.md)** — how the router works, routing and operational details, what's not supported, honest limitations, and the provider Terms-of-Service review.
 - **[Multi-user access (this fork)](auth/OVERVIEW.md)** — admin/member roles with granular permission grants, invite-code registration, permission-gated `/api/*` mounts, and per-user `sk-flm-…` API keys with their own request quota. Custom feature; upstream is single-user.
