@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'libsql';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { busyBackoffMs, LIFETIME_COUNTERS_MARKER, tursoSettingsVersion, wrapTursoDatabase } from '../../db/turso.js';
+import { beginStartupBusyBudget, busyBackoffMs, endStartupBusyBudget, LIFETIME_COUNTERS_MARKER, tursoSettingsVersion, wrapTursoDatabase } from '../../db/turso.js';
 import type { Db } from '../../db/types.js';
 
 // The remote wrapper reuses SELECT results for a few seconds, but only while
@@ -195,6 +195,32 @@ describe('Turso SQLITE_BUSY retry', () => {
     expect(busyBackoffMs(7, 5)).toBeNull();
     expect(busyBackoffMs(2, 600)).toBe(200);
     expect(busyBackoffMs(3, 600)).toBeNull();
+  });
+
+  it('waits about a minute for the write lock while starting up, and never once serving', () => {
+    const schedule: number[] = [];
+    for (let attempt = 0; ; attempt++) {
+      const wait = busyBackoffMs(attempt, 5, true);
+      if (wait === null) break;
+      schedule.push(wait);
+    }
+    const total = schedule.reduce((a, b) => a + b, 0);
+    expect(total).toBeGreaterThanOrEqual(55_000);
+    expect(total).toBeLessThanOrEqual(65_000);
+    expect(schedule.slice(0, 7)).toEqual([100, 200, 400, 800, 1_500, 2_500, 3_500]); // the usual start is unchanged
+    expect(Math.max(...schedule)).toBe(5_000);
+    // After the boot window the startup budget no longer applies, even if it was never ended.
+    expect(busyBackoffMs(3, 600, true)).toBeNull();
+  });
+
+  it('follows the startup flag by default, and ends with it', () => {
+    expect(busyBackoffMs(8, 5)).toBeNull(); // the plain boot schedule has 7 entries
+    beginStartupBusyBudget();
+    expect(busyBackoffMs(8, 5)).toBe(5_000);
+    expect(busyBackoffMs(16, 5)).toBe(5_000);
+    expect(busyBackoffMs(17, 5)).toBeNull();
+    endStartupBusyBudget();
+    expect(busyBackoffMs(8, 5)).toBeNull();
   });
 });
 

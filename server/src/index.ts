@@ -2,7 +2,7 @@ import './env.js';
 import { measureStartup, stopPerformanceMetrics } from './custom/performance/metrics.js';
 import { createApp } from './app.js';
 import { initDb, getDb } from './db/index.js';
-import { isTursoDatabase } from './db/turso.js';
+import { endStartupBusyBudget, isTursoDatabase } from './db/turso.js';
 import { startHealthChecker, checkAllKeys } from './services/health.js';
 import { restoreProxySettings, flushProxyCache } from './lib/proxy.js';
 import { startWakeDetect } from './lib/wake-detect.js';
@@ -81,6 +81,8 @@ async function main() {
   const app = createApp(config);
 
   const onReady = (host: string) => () => {
+    // Listening: from here a long wait for the write lock would freeze requests, so it ends.
+    endStartupBusyBudget();
     const display = host.includes(':') ? `[${host}]` : host;
     console.log(`Server running on http://${display}:${PORT}`);
     console.log(`Proxy endpoint: http://${display}:${PORT}/v1/chat/completions`);

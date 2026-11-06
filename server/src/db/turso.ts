@@ -133,11 +133,31 @@ const copyRow = (r: unknown): unknown => (r && typeof r === 'object' && !ArrayBu
 const BOOT_WINDOW_SECONDS = 120;
 const BOOT_BUSY_BACKOFF_MS = [100, 200, 400, 800, 1_500, 2_500, 3_500];
 const RUNTIME_BUSY_BACKOFF_MS = [50, 100, 200];
+// While the process is still starting up (migrations and the first writes, before the server listens)
+// nobody is waiting on a response, so it may wait much longer for the previous instance to let go of the
+// write lock: about a minute. A rolling deploy once exited here with "database is locked" after ~9 s
+// and Render rolled the deploy back (status update_failed). Ended by endStartupBusyBudget() when the
+// server starts listening, after which a wait would freeze a server that is serving requests.
+const STARTUP_BUSY_BACKOFF_MS = [...BOOT_BUSY_BACKOFF_MS, ...Array<number>(10).fill(5_000)];
+
+let startupBudget = false;
+export function beginStartupBusyBudget(): void { startupBudget = true; }
+export function endStartupBusyBudget(): void { startupBudget = false; }
 
 /** Milliseconds to wait before retry number `attempt` (0-based), or null once the budget is spent. */
-export function busyBackoffMs(attempt: number, uptimeSeconds: number = process.uptime()): number | null {
-  const schedule = uptimeSeconds < BOOT_WINDOW_SECONDS ? BOOT_BUSY_BACKOFF_MS : RUNTIME_BUSY_BACKOFF_MS;
+export function busyBackoffMs(attempt: number, uptimeSeconds: number = process.uptime(), startup: boolean = startupBudget): number | null {
+  const schedule = uptimeSeconds >= BOOT_WINDOW_SECONDS
+    ? RUNTIME_BUSY_BACKOFF_MS
+    : startup ? STARTUP_BUSY_BACKOFF_MS : BOOT_BUSY_BACKOFF_MS;
   return attempt < schedule.length ? schedule[attempt]! : null;
+}
+
+let warnedLongBusyWait = false;
+/** Say once, in the log, that startup is waiting for another writer: otherwise a long wait looks like a hang. */
+function noteBusyWait(attempt: number): void {
+  if (attempt !== BOOT_BUSY_BACKOFF_MS.length || warnedLongBusyWait || !startupBudget) return;
+  warnedLongBusyWait = true;
+  console.warn('[db] the database is locked by another writer (probably the previous instance, still shutting down); startup keeps waiting for up to a minute');
 }
 
 export function isBusyError(error: unknown): boolean {
@@ -238,7 +258,7 @@ export function wrapTursoDatabase(raw: Db, remote = true, secrets: readonly stri
       try { return operation(); } catch (error) {
         if (remote && retryBusy && isBusyError(error)) {
           const wait = busyBackoffMs(attempt);
-          if (wait !== null) { sleepSync(wait); continue; }
+          if (wait !== null) { noteBusyWait(attempt); sleepSync(wait); continue; }
         }
         if (!(error instanceof Error) || secrets.length === 0) throw error;
         throw sanitizedDriverError(error, secrets);
@@ -356,7 +376,7 @@ export function wrapTursoDatabase(raw: Db, remote = true, secrets: readonly stri
           } catch (error) {
             try { raw.exec('ROLLBACK'); } catch { /* nothing open */ }
             const wait = isBusyError(error) ? busyBackoffMs(attempt) : null;
-            if (wait !== null) { sleepSync(wait); continue; }
+            if (wait !== null) { noteBusyWait(attempt); sleepSync(wait); continue; }
             if (!(error instanceof Error) || secrets.length === 0) throw error;
             throw sanitizedDriverError(error, secrets);
           }
