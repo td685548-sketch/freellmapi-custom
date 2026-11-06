@@ -9,6 +9,8 @@ import { adminUserAnalyticsRouter, selfAnalyticsRouter } from '../routes/user-an
 import { externalAuthRouter } from '../routes/external-auth.js';
 import { customAuthRouter } from './auth.js';
 import { userInferenceGate } from '../middleware/user-rate-limit.js';
+import { profileInferenceGate } from '../middleware/profile-gate.js';
+import { profileAnalyticsRouter } from '../routes/profile-analytics.js';
 import { withRoutingSettingsScope } from '../db/routing-settings-scope.js';
 import { providerTiersRouter } from '../routes/provider-tiers.js';
 import { requireActionPermission } from './permission-actions.js';
@@ -97,6 +99,8 @@ export function registerCustomRoutes(app: Express): void {
   app.use('/v1', (_req, _res, next) => withRoutingSettingsScope(next));
   // Rate-limiting and usage tracking gate for member personal API keys (/v1 and /v1beta inference)
   app.use(['/v1', '/v1beta'], userInferenceGate);
+  // Same for client-profile (`sk-cp-…`) keys: attribution plus the profile's own RPM cap.
+  app.use(['/v1', '/v1beta'], profileInferenceGate);
   // Safe preference metadata is usable by cache editors without granting
   // unrelated system-settings reads. The dedicated router enforces its gates.
   app.use('/api/cache/preferences', requireAuth, cachePreferencesRouter);
@@ -104,6 +108,8 @@ export function registerCustomRoutes(app: Express): void {
   // Granular route-level permission gates for upstream-mounted endpoints
   for (const gate of PERMISSION_GATES) installGate(app, gate);
   app.use(['/api/keys', '/api/embeddings', '/api/media', '/api/decisions'], guardKeyAddition);
+  // Usage and request cap per client profile; the manage_settings gate for this prefix is installed just above.
+  app.use('/api/client-profiles', profileAnalyticsRouter);
 
   // The /api/analytics gate above enforces auth + view_logs for this mount too.
   app.use('/api/analytics/provider-tiers', providerTiersRouter);

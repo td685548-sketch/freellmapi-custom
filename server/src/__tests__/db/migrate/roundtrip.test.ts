@@ -60,6 +60,7 @@ const CUSTOM_PRIMARY_ADMIN_SCOPE_FILENAME = '20261101_190500_custom_primary_admi
 const CLOUDFLARE_NEURON_USAGE_FILENAME = '20261104_000001_cloudflare_neuron_usage.ts';
 const CUSTOM_CONVERSATION_OWNER_FILENAME = '20261105_000001_custom_conversation_owner.ts';
 const CUSTOM_REQUEST_USER_ID_FILENAME = '20261106_000001_custom_request_user_id.ts';
+const CUSTOM_PROFILE_USAGE_FILENAME = '20261106_000002_custom_profile_usage.ts';
 
 interface SchemaRow {
   type: string;
@@ -166,6 +167,7 @@ describe('migration round trip', () => {
         CLOUDFLARE_NEURON_USAGE_FILENAME,
         CUSTOM_CONVERSATION_OWNER_FILENAME,
         CUSTOM_REQUEST_USER_ID_FILENAME,
+        CUSTOM_PROFILE_USAGE_FILENAME,
       ]);
     } finally {
       db.close();

@@ -16,6 +16,8 @@ export interface ClientContext {
   /** Tokens of the successful rows logged in this request, so the per-user gate
    *  can book them with the request count it already writes (no extra write). */
   userTokens?: number;
+  /** The client profile (`sk-cp-…` key) behind this request, set by the profile gate. */
+  profileId?: number;
 }
 
 // Request-scoped caller identity, readable from anywhere below the middleware
@@ -78,4 +80,10 @@ export function setRequestUser(userId: number): ClientContext | undefined {
 export function noteRequestTokens(tokens: number): void {
   const store = storage.getStore();
   if (store?.userId !== undefined && tokens > 0) store.userTokens = (store.userTokens ?? 0) + tokens;
+}
+
+/** Attribute this request to a client profile (per-profile analytics). */
+export function setRequestProfile(profileId: number): void {
+  const store = storage.getStore();
+  if (store) store.profileId = profileId;
 }
