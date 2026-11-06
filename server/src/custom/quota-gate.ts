@@ -1,5 +1,6 @@
 import type { Response } from 'express';
 import { admitQuota, type SubjectKind } from '../services/usage-quotas.js';
+import { noteOutcome } from '../services/usage-alerts.js';
 
 /**
  * Applies a subject's daily / monthly allowance to one inference request. Returns false after
@@ -33,6 +34,7 @@ export function enforceUsageQuota(kind: SubjectKind, id: number, res: Response, 
     if (ended) return;
     ended = true;
     admission.settle(finished && res.statusCode < 400, finished ? tokensUsed() : 0);
+    if (finished) noteOutcome(kind, id, res.statusCode);
   };
   res.on('finish', () => end(true));
   res.on('close', () => end(false)); // a hang-up before 'finish' hands the request back
