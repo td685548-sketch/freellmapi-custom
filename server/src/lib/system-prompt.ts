@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import type { ChatMessage } from '@freellmapi/shared/types.js';
 import { getDb, getUnifiedApiKey } from '../db/index.js';
 import { validateUserApiKey, USER_KEY_PREFIX } from '../services/user-keys.js';
+import { profileIdForPreviousKey } from '../services/profile-previous-keys.js';
 
 // Per-client API keys with server-enforced system prompts (#411). A client
 // profile is a second kind of inference credential: it authenticates ONLY the
@@ -65,9 +66,14 @@ export function resolveAuth(token: string | undefined): ResolvedAuth | null {
     return { kind: 'user', userId: valid.userId, email: valid.email, systemPrompt: null };
   }
   if (!token.startsWith(CLIENT_PROFILE_KEY_PREFIX)) return null;
-  const row = getDb().prepare(
-    'SELECT id, name, system_prompt, enabled FROM client_profiles WHERE token_hash = ?',
-  ).get(hashClientProfileKey(token)) as ProfileRow | undefined;
+  const hash = hashClientProfileKey(token);
+  const select = 'SELECT id, name, system_prompt, enabled FROM client_profiles WHERE ';
+  // A key replaced by a rotation with a grace period still authenticates as its profile until it expires.
+  const previous = (): ProfileRow | undefined => {
+    const id = profileIdForPreviousKey(hash);
+    return id === undefined ? undefined : getDb().prepare(select + 'id = ?').get(id) as ProfileRow | undefined;
+  };
+  const row = (getDb().prepare(select + 'token_hash = ?').get(hash) as ProfileRow | undefined) ?? previous();
   if (!row || !row.enabled) return null;
   const prompt = row.system_prompt != null && row.system_prompt.trim().length > 0
     ? row.system_prompt

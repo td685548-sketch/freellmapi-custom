@@ -11,6 +11,7 @@ import { UserAnalyticsView, type ProfileAnalytics, type RequestAnalytics } from 
 import { QuotaCard } from './QuotaCard'
 import { ProfileRestrictionsCard } from './ProfileRestrictionsCard'
 import { ProfileIntegrationCard } from './ProfileIntegrationCard'
+import { KeyRotationCard } from './KeyRotationCard'
 import { useAdministrativeAccess } from './use-administrative-access'
 
 const MAX_RPM = 1000
@@ -92,6 +93,7 @@ export function ProfileUsagePage() {
           <>
             <h2 className="text-lg font-semibold">{(a as ProfileAnalytics).name}</h2>
             <ProfileIntegrationCard profileId={profileId} canTest={can('edit_client_profiles')} />
+            <KeyRotationCard profileId={profileId} canEdit={can('edit_client_profiles')} />
             <QuotaEditor
               profile={a as ProfileAnalytics}
               canEdit={can('edit_client_profiles')}
