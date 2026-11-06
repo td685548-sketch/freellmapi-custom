@@ -28,9 +28,8 @@ export interface UserAnalyticsModel {
   tokens: number
 }
 
-export interface UserAnalytics {
-  userId: number
-  email: string
+/** Window statistics shared by an account's and a client profile's analytics. */
+export interface RequestAnalytics {
   days: number
   /** Window start, 'YYYY-MM-DD HH:MM:SS' UTC. */
   since: string
@@ -40,4 +39,18 @@ export interface UserAnalytics {
   models: UserAnalyticsModel[]
   /** Oldest attributed row still retained; older traffic was pruned or predates attribution. */
   retainedSince: string | null
+}
+
+export interface UserAnalytics extends RequestAnalytics {
+  userId: number
+  email: string
+}
+
+/** A client profile (`sk-cp-…` key) as seen by its usage page. */
+export interface ProfileAnalytics extends RequestAnalytics {
+  profileId: number
+  name: string
+  enabled: boolean
+  /** Requests per minute allowed for the key; null means unlimited. */
+  rpmLimit: number | null
 }

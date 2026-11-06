@@ -46,6 +46,7 @@ import { useAdministrativeAccess } from '@/custom/use-administrative-access'
 import { AnalyticsAccessPage, InvitesAccessPage, LogsAccessPage, UsersAccessPage } from '@/custom/ScopedAdministrativePages'
 import { UsersNavBadge } from '@/custom/UsersNavBadge'
 import { UserAnalyticsPage } from '@/custom/UserAnalyticsPage'
+import { ProfileUsagePage } from '@/custom/ProfileUsagePage'
 import PremiumPage from '@/pages/PremiumPage'
 import NotFoundPage from '@/pages/NotFoundPage'
 import AgentsPage from '@/pages/AgentsPage'
@@ -533,6 +534,7 @@ function App() {
                       <Route path="/invites" element={<InvitesAccessPage />} />
                       <Route path="/users" element={<UsersAccessPage />} />
                       <Route path="/users/:id/analytics" element={<UserAnalyticsPage />} />
+                      <Route path="/profiles/:id/usage" element={<ProfileUsagePage />} />
                       <Route path="/agents" element={<AgentsPage />} />
                       <Route path="/fallback" element={<Navigate to="/models/chat" replace />} />
                       <Route path="/analytics" element={<AnalyticsAccessPage />} />

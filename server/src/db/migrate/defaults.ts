@@ -49,6 +49,7 @@ import * as removeAurayProvider from '../migrations/20261019_000001_remove_auray
 import * as keyLastHealthyAt from '../migrations/20261020_000001_key_last_healthy_at.js';
 import * as customConversationOwner from '../migrations/20261105_000001_custom_conversation_owner.js';
 import * as customRequestUserId from '../migrations/20261106_000001_custom_request_user_id.js';
+import * as customProfileUsage from '../migrations/20261106_000002_custom_profile_usage.js';
 import * as cloudflareNeuronUsage from '../migrations/20261104_000001_cloudflare_neuron_usage.js';
 
 import * as migration20261031_155642_custom_user_roles_and_keys from '../migrations/20261031_155642_custom_user_roles_and_keys.js';
@@ -125,6 +126,7 @@ export const CUSTOM_GRANULAR_RBAC_FILENAME = '20261101_163500_custom_granular_rb
 export const CUSTOM_PRIMARY_ADMIN_SCOPE_FILENAME = '20261101_190500_custom_primary_admin_scope.ts';
 export const CUSTOM_CONVERSATION_OWNER_FILENAME = '20261105_000001_custom_conversation_owner.ts';
 export const CUSTOM_REQUEST_USER_ID_FILENAME = '20261106_000001_custom_request_user_id.ts';
+export const CUSTOM_PROFILE_USAGE_FILENAME = '20261106_000002_custom_profile_usage.ts';
 export const CLOUDFLARE_NEURON_USAGE_FILENAME = '20261104_000001_cloudflare_neuron_usage.ts';
 
 export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
@@ -184,4 +186,5 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: CLOUDFLARE_NEURON_USAGE_FILENAME, module: cloudflareNeuronUsage },
   { filename: CUSTOM_CONVERSATION_OWNER_FILENAME, module: customConversationOwner },
   { filename: CUSTOM_REQUEST_USER_ID_FILENAME, module: customRequestUserId },
+  { filename: CUSTOM_PROFILE_USAGE_FILENAME, module: customProfileUsage },
 ];

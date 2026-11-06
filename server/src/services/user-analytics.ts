@@ -1,5 +1,5 @@
 import { getDb } from '../db/index.js';
-import type { UserAnalytics, UserAnalyticsDay } from '@freellmapi/shared/user-analytics.js';
+import type { RequestAnalytics, UserAnalytics, UserAnalyticsDay } from '@freellmapi/shared/user-analytics.js';
 
 // Per-account analytics over `requests.user_id` (set for traffic that arrived with
 // a personal `sk-flm-…` key). Raw rows follow the analytics retention, so this reads
@@ -21,7 +21,10 @@ function sqlTime(ms: number): string {
   return new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
 }
 
-export function getUserAnalytics(userId: number, email: string, days: number, now: number = Date.now()): UserAnalytics {
+// The attribution columns analytics can group by. A closed set: the name is spliced into SQL.
+type OwnerColumn = 'user_id' | 'profile_id';
+
+export function getRequestAnalytics(column: OwnerColumn, ownerId: number, days: number, now: number = Date.now()): RequestAnalytics {
   const db = getDb();
   const since = sqlTime(now - days * DAY_MS);
 
@@ -35,8 +38,8 @@ export function getUserAnalytics(userId: number, email: string, days: number, no
       COALESCE(SUM(CASE WHEN status = 'success' THEN output_tokens ELSE 0 END), 0) AS outputTokens,
       AVG(CASE WHEN status = 'success' THEN latency_ms END) AS avgLatencyMs,
       MAX(created_at) AS lastRequestAt
-    FROM requests WHERE user_id = ? AND created_at >= ?
-  `).get(userId, since) as {
+    FROM requests WHERE ${column} = ? AND created_at >= ?
+  `).get(ownerId, since) as {
     requests: number; success: number; errors: number; canceled: number;
     inputTokens: number; outputTokens: number; avgLatencyMs: number | null; lastRequestAt: string | null;
   };
@@ -46,9 +49,9 @@ export function getUserAnalytics(userId: number, email: string, days: number, no
            COUNT(*) AS requests,
            COALESCE(SUM(status = 'error'), 0) AS errors,
            COALESCE(SUM(CASE WHEN status = 'success' THEN input_tokens + output_tokens ELSE 0 END), 0) AS tokens
-    FROM requests WHERE user_id = ? AND created_at >= ?
+    FROM requests WHERE ${column} = ? AND created_at >= ?
     GROUP BY date
-  `).all(userId, since) as UserAnalyticsDay[];
+  `).all(ownerId, since) as UserAnalyticsDay[];
   const byDate = new Map(dayRows.map(r => [r.date, r]));
   const daily: UserAnalyticsDay[] = [];
   for (let i = days - 1; i >= 0; i--) {
@@ -61,18 +64,16 @@ export function getUserAnalytics(userId: number, email: string, days: number, no
            COUNT(*) AS requests,
            COALESCE(SUM(status = 'error'), 0) AS errors,
            COALESCE(SUM(CASE WHEN status = 'success' THEN input_tokens + output_tokens ELSE 0 END), 0) AS tokens
-    FROM requests WHERE user_id = ? AND created_at >= ?
+    FROM requests WHERE ${column} = ? AND created_at >= ?
     GROUP BY platform, model_id
     ORDER BY requests DESC, tokens DESC
     LIMIT ?
-  `).all(userId, since, MODEL_LIMIT) as UserAnalytics['models'];
+  `).all(ownerId, since, MODEL_LIMIT) as UserAnalytics['models'];
 
-  const first = db.prepare('SELECT MIN(created_at) AS first FROM requests WHERE user_id = ?')
-    .get(userId) as { first: string | null };
+  const first = db.prepare(`SELECT MIN(created_at) AS first FROM requests WHERE ${column} = ?`)
+    .get(ownerId) as { first: string | null };
 
   return {
-    userId,
-    email,
     days,
     since,
     totals: {
@@ -89,4 +90,8 @@ export function getUserAnalytics(userId: number, email: string, days: number, no
     models,
     retainedSince: first.first,
   };
+}
+
+export function getUserAnalytics(userId: number, email: string, days: number, now: number = Date.now()): UserAnalytics {
+  return { userId, email, ...getRequestAnalytics('user_id', userId, days, now) };
 }

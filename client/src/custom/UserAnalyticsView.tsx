@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Activity, CircleAlert, Clock, Coins, Gauge } from 'lucide-react'
 import {
@@ -8,8 +8,8 @@ import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { SegmentedControl } from '@/components/ui/segmented-control'
 
-import type { UserAnalytics } from '../../../shared/user-analytics'
-export type { UserAnalytics } from '../../../shared/user-analytics'
+import type { RequestAnalytics } from '../../../shared/user-analytics'
+export type { RequestAnalytics, UserAnalytics, ProfileAnalytics } from '../../../shared/user-analytics'
 
 const RANGES = [
   { value: '7', label: '7 days' },
@@ -36,16 +36,26 @@ function Tile({ icon: Icon, label, value, hint }: { icon: typeof Activity; label
 }
 
 /**
- * One account's usage. `endpoint` is the admin route for a chosen account or the
- * caller's own; both answer `{ analytics }`. Requests count only traffic that came
- * in with a personal `sk-flm-…` key.
+ * One subject's usage: an account (admin route for a chosen account, or the caller's
+ * own) or a client profile. Every endpoint answers `{ analytics }`. `scope` finishes the
+ * sentence "Requests made with …"; `header` renders above the numbers once loaded.
  */
-export function UserAnalyticsView({ endpoint, queryKey }: { endpoint: string; queryKey: unknown[] }) {
+export function UserAnalyticsView({
+  endpoint,
+  queryKey,
+  scope = 'a personal key',
+  header,
+}: {
+  endpoint: string
+  queryKey: unknown[]
+  scope?: string
+  header?: (analytics: RequestAnalytics) => ReactNode
+}) {
   const [days, setDays] = useState<'7' | '30' | '90'>('30')
 
-  const { data, isLoading, isError, error, refetch } = useQuery<{ analytics: UserAnalytics }>({
+  const { data, isLoading, isError, error, refetch } = useQuery<{ analytics: RequestAnalytics }>({
     queryKey: [...queryKey, days],
-    queryFn: () => apiFetch<{ analytics: UserAnalytics }>(`${endpoint}?days=${days}`),
+    queryFn: () => apiFetch<{ analytics: RequestAnalytics }>(`${endpoint}?days=${days}`),
   })
 
   const a = data?.analytics
@@ -71,9 +81,10 @@ export function UserAnalyticsView({ endpoint, queryKey }: { endpoint: string; qu
 
   return (
     <div className="space-y-6">
+      {header?.(a)}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-muted-foreground">
-          Requests made with a personal key, last {a.days} days (UTC).
+          Requests made with {scope}, last {a.days} days (UTC).
           {a.retainedSince ? ` Oldest retained request: ${a.retainedSince.slice(0, 10)}.` : ''}
         </p>
         {range}
@@ -84,7 +95,7 @@ export function UserAnalyticsView({ endpoint, queryKey }: { endpoint: string; qu
           <Activity className="size-8 mx-auto text-muted-foreground opacity-50" />
           <p className="text-sm font-medium">No requests in this window</p>
           <p className="text-xs text-muted-foreground">
-            Only traffic sent with a personal sk-flm-… key is attributed to an account.
+            Only traffic sent with {scope} is counted here.
           </p>
         </div>
       ) : (

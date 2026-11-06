@@ -10,6 +10,7 @@ import { Switch } from '@/components/ui/switch'
 import { ConfirmButton } from '@/components/confirm-button'
 import { ChevronRight, RotateCw, Trash2 } from 'lucide-react'
 import { useI18n } from '@/i18n'
+import { ProfileUsageLink } from '@/custom/ProfileUsageLink'
 
 interface ClientProfile {
   id: number
@@ -135,6 +136,7 @@ export function ClientProfilesSection({ canView = true, canEdit = true }: { canV
                       <p className="text-[11px] text-muted-foreground truncate mt-0.5">{p.systemPrompt}</p>
                     )}
                   </div>
+                  <ProfileUsageLink profileId={p.id} />
                   <Switch
                     size="sm"
                     checked={p.enabled}

@@ -9,7 +9,7 @@ import { checkUserRateLimit, recordUserUsage } from '../services/user-quotas.js'
  * routes/proxy.ts extractApiToken on purpose: a gate that reads fewer headers
  * than the auth layer lets a personal key skip its limit by changing header.
  */
-function extractUserKey(req: Request): string | undefined {
+export function extractInferenceToken(req: Request): string | undefined {
   const first = (v: string | string[] | undefined): string | undefined => {
     const x = (Array.isArray(v) ? v[0] : v)?.trim();
     return x || undefined;
@@ -20,6 +20,11 @@ function extractUserKey(req: Request): string | undefined {
   if (!token && req.originalUrl.startsWith('/v1beta') && typeof req.query.key === 'string') {
     token = req.query.key.trim() || undefined;
   }
+  return token || undefined;
+}
+
+function extractUserKey(req: Request): string | undefined {
+  const token = extractInferenceToken(req);
   return token && token.startsWith('sk-flm-') ? token : undefined;
 }
 
