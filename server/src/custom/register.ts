@@ -13,6 +13,7 @@ import { providerTiersRouter } from '../routes/provider-tiers.js';
 import { requireActionPermission } from './permission-actions.js';
 import { guardKeyAddition } from './key-addition-guard.js';
 import { cachePreferencesRouter } from '../routes/cache-preferences.js';
+import { statusCache } from './status-cache.js';
 
 // Everything this fork adds to the HTTP surface is wired here, so upstream's
 // app.ts keeps a handful of added lines instead of edited mount statements.
@@ -89,6 +90,8 @@ function installGate(app: Express, gate: PermissionGate): void {
 }
 
 export function registerCustomRoutes(app: Express): void {
+  // Public probes answer from a 5 s copy so anonymous callers cannot turn them into database load.
+  app.use(['/livez', '/readyz'], statusCache);
   app.use('/api', (_req, _res, next) => withRoutingSettingsScope(next));
   app.use('/v1', (_req, _res, next) => withRoutingSettingsScope(next));
   // Rate-limiting and usage tracking gate for member personal API keys (/v1 and /v1beta inference)
