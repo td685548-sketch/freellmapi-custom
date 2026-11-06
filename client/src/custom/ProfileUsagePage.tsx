@@ -10,6 +10,7 @@ import { PageHeader } from '@/components/page-header'
 import { UserAnalyticsView, type ProfileAnalytics, type RequestAnalytics } from './UserAnalyticsView'
 import { QuotaCard } from './QuotaCard'
 import { ProfileRestrictionsCard } from './ProfileRestrictionsCard'
+import { ProfileIntegrationCard } from './ProfileIntegrationCard'
 import { useAdministrativeAccess } from './use-administrative-access'
 
 const MAX_RPM = 1000
@@ -90,6 +91,7 @@ export function ProfileUsagePage() {
         header={(a: RequestAnalytics) => (
           <>
             <h2 className="text-lg font-semibold">{(a as ProfileAnalytics).name}</h2>
+            <ProfileIntegrationCard profileId={profileId} canTest={can('edit_client_profiles')} />
             <QuotaEditor
               profile={a as ProfileAnalytics}
               canEdit={can('edit_client_profiles')}
