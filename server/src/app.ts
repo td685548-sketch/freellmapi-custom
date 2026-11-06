@@ -39,6 +39,7 @@ import { requireAuth } from './middleware/requireAuth.js';
 import { createHostGuard } from './middleware/allowed-hosts.js';
 import { createProxyRateLimiter, createAdminRateLimiter } from './middleware/rateLimit.js';
 import { registerCustomRoutes } from './custom/register.js';
+import { preparseGuard } from './custom/preparse-guard.js';
 import { installPerformanceMetrics } from './custom/performance/metrics.js';
 
 // Password-guess ceiling for GET /api/keys/export. Deliberately low: a real
@@ -195,6 +196,8 @@ export function createApp(config?: Config) {
       callback(null, !origin || allowedCorsOrigins.has(origin));
     },
   }));
+  // Refuse large bodies from callers with no credential BEFORE they are parsed.
+  app.use(preparseGuard);
   // Two-tier JSON body limits. The LLM wire surfaces carry vision payloads —
   // base64 images inline in the body (~33% inflation; google.ts forwards
   // images up to 8MB apiece) — so a single-screenshot Codex turn can clear
