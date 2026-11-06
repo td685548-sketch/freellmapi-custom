@@ -2,6 +2,7 @@ import { getDb } from '../db/index.js';
 import type { ProfileAnalytics } from '@freellmapi/shared/user-analytics.js';
 import { getRequestAnalytics } from './user-analytics.js';
 import { hashClientProfileKey } from '../lib/system-prompt.js';
+import { profileIdForPreviousKey } from './profile-previous-keys.js';
 
 // Usage and per-minute limit of client profiles (`sk-cp-…` keys). The profile CRUD
 // itself lives in routes/client-profiles.ts (upstream); this module only adds the
@@ -28,9 +29,16 @@ export function parseAllowedModels(raw: string | null): string[] {
 
 /** The enabled profile a key belongs to, or null (unknown/disabled keys fall through to the normal 401). */
 export function profileForGate(token: string): GateProfile | null {
-  const row = getDb()
-    .prepare('SELECT id, rpm_limit AS rpmLimit, allowed_models AS allowedModels, max_tokens_cap AS maxTokens FROM client_profiles WHERE token_hash = ? AND enabled = 1')
-    .get(hashClientProfileKey(token)) as (Omit<GateProfile, 'allowedModels'> & { allowedModels: string | null }) | undefined;
+  const db = getDb();
+  const hash = hashClientProfileKey(token);
+  const select = 'SELECT id, rpm_limit AS rpmLimit, allowed_models AS allowedModels, max_tokens_cap AS maxTokens FROM client_profiles WHERE enabled = 1 AND ';
+  type Row = (Omit<GateProfile, 'allowedModels'> & { allowedModels: string | null }) | undefined;
+  let row = db.prepare(select + 'token_hash = ?').get(hash) as Row;
+  if (!row) {
+    // A key in its post-rotation grace period counts as its profile: same limits, same numbers.
+    const id = profileIdForPreviousKey(hash);
+    if (id !== undefined) row = db.prepare(select + 'id = ?').get(id) as Row;
+  }
   return row ? { ...row, allowedModels: parseAllowedModels(row.allowedModels) } : null;
 }
 
