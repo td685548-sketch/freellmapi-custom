@@ -13,6 +13,7 @@ import { ProfileRestrictionsCard } from './ProfileRestrictionsCard'
 import { ProfileIntegrationCard } from './ProfileIntegrationCard'
 import { KeyRotationCard } from './KeyRotationCard'
 import { RecentRequestsCard } from './RecentRequestsCard'
+import { EndUsersCard } from './EndUsersCard'
 import { useAdministrativeAccess } from './use-administrative-access'
 
 const MAX_RPM = 1000
@@ -109,6 +110,7 @@ export function ProfileUsagePage() {
           </>
         )}
       />
+      <EndUsersCard profileId={profileId} canEdit={can('edit_client_profiles')} />
       <RecentRequestsCard endpoint={`/api/client-profiles/${profileId}/requests`} />
     </div>
   )

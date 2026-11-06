@@ -46,6 +46,7 @@ function Row({ r, base }: { r: RecentRequest; base: string }) {
         <span className="text-muted-foreground">{r.platform}</span>
         <span className="tabular-nums text-muted-foreground">{r.latencyMs.toLocaleString()} ms</span>
         {r.status === 'success' && <span className="tabular-nums text-muted-foreground">{r.inputTokens} in / {r.outputTokens} out</span>}
+        {r.endUser && <span className="text-muted-foreground">user: {r.endUser}</span>}
         {r.error && <span className="w-full truncate pl-6 text-destructive" title={r.error}>{r.error}</span>}
       </button>
       {open && (
@@ -63,13 +64,13 @@ function Row({ r, base }: { r: RecentRequest; base: string }) {
  * The newest requests of one account or client key, newest first: what was asked, what answered, how long
  * it took and, for a failure, why. Click a row for the failover chain behind it.
  */
-export function RecentRequestsCard({ endpoint, title = 'Recent requests' }: { endpoint: string; title?: string }) {
+export function RecentRequestsCard({ endpoint, title = 'Recent requests', query: extra = '' }: { endpoint: string; title?: string; query?: string }) {
   const [filter, setFilter] = useState<'all' | 'error'>('all')
   const query = useInfiniteQuery<RecentRequestsPage>({
-    queryKey: [endpoint, filter],
+    queryKey: [endpoint, filter, extra],
     initialPageParam: null as number | null,
     queryFn: ({ pageParam }) => apiFetch<RecentRequestsPage>(
-      `${endpoint}?limit=${PAGE}${filter === 'error' ? '&status=error' : ''}${pageParam ? `&before=${pageParam}` : ''}`,
+      `${endpoint}?limit=${PAGE}${filter === 'error' ? '&status=error' : ''}${extra}${pageParam ? `&before=${pageParam}` : ''}`,
     ),
     getNextPageParam: (last) => (last && typeof last.nextBefore === 'number' ? last.nextBefore : undefined),
   })

@@ -54,6 +54,7 @@ import * as customProfileUsage from '../migrations/20261106_000002_custom_profil
 import * as customUsageQuotas from '../migrations/20261106_000003_custom_usage_quotas.js';
 import * as customProfileRestrictions from '../migrations/20261106_000004_custom_profile_restrictions.js';
 import * as customProfilePreviousKeys from '../migrations/20261107_000001_custom_profile_previous_keys.js';
+import * as customEndUsers from '../migrations/20261107_000002_custom_end_users.js';
 import * as cloudflareNeuronUsage from '../migrations/20261104_000001_cloudflare_neuron_usage.js';
 import * as customXGateway from '../migrations/20261106_120000_custom_x_gateway.js';
 import * as customProviderAccounts from '../migrations/20261107_000001_custom_provider_accounts.js';
@@ -137,6 +138,7 @@ export const CUSTOM_PROFILE_USAGE_FILENAME = '20261106_000002_custom_profile_usa
 export const CUSTOM_USAGE_QUOTAS_FILENAME = '20261106_000003_custom_usage_quotas.ts';
 export const CUSTOM_PROFILE_RESTRICTIONS_FILENAME = '20261106_000004_custom_profile_restrictions.ts';
 export const CUSTOM_PROFILE_PREVIOUS_KEYS_FILENAME = '20261107_000001_custom_profile_previous_keys.ts';
+export const CUSTOM_END_USERS_FILENAME = '20261107_000002_custom_end_users.ts';
 export const CLOUDFLARE_NEURON_USAGE_FILENAME = '20261104_000001_cloudflare_neuron_usage.ts';
 export const CUSTOM_X_GATEWAY_FILENAME = '20261106_120000_custom_x_gateway.ts';
 export const CUSTOM_PROVIDER_ACCOUNTS_FILENAME = '20261107_000001_custom_provider_accounts.ts';
@@ -205,4 +207,5 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: CUSTOM_X_GATEWAY_FILENAME, module: customXGateway },
   { filename: CUSTOM_PROFILE_PREVIOUS_KEYS_FILENAME, module: customProfilePreviousKeys },
   { filename: CUSTOM_PROVIDER_ACCOUNTS_FILENAME, module: customProviderAccounts },
+  { filename: CUSTOM_END_USERS_FILENAME, module: customEndUsers },
 ];

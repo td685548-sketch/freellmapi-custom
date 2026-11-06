@@ -17,15 +17,16 @@ export function clampPage(raw: unknown): number {
 export function listRecentRequests(
   owner: RequestOwner,
   ownerId: number,
-  opts: { onlyErrors: boolean; limit: number; before: number | null },
+  opts: { onlyErrors: boolean; limit: number; before: number | null; endUser?: string | null },
 ): RecentRequestsPage {
   const where = [`${owner} = ?`];
   const params: unknown[] = [ownerId];
   if (opts.onlyErrors) where.push("status = 'error'");
+  if (opts.endUser) { where.push('end_user = ?'); params.push(opts.endUser); }
   if (opts.before !== null) { where.push('id < ?'); params.push(opts.before); }
   const rows = getDb().prepare(`
     SELECT id, created_at AS createdAt, status, platform, model_id AS modelId, requested_model AS requestedModel,
-           latency_ms AS latencyMs, ttfb_ms AS ttfbMs, input_tokens AS inputTokens, output_tokens AS outputTokens, error
+           latency_ms AS latencyMs, ttfb_ms AS ttfbMs, input_tokens AS inputTokens, output_tokens AS outputTokens, error, end_user AS endUser
     FROM requests WHERE ${where.join(' AND ')}
     ORDER BY id DESC LIMIT ?
   `).all(...params, opts.limit + 1) as RecentRequest[];

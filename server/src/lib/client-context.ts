@@ -20,6 +20,8 @@ export interface ClientContext {
   profileId?: number;
   /** Lowercase model ids this request may be routed to (a client profile's allowlist); unset = any. */
   allowedModels?: ReadonlySet<string>;
+  /** The web app's own end user (X-End-User or the OpenAI `user` field), for client-profile traffic. */
+  endUser?: string;
 }
 
 // Request-scoped caller identity, readable from anywhere below the middleware
@@ -95,4 +97,10 @@ export function setRequestProfile(profileId: number): ClientContext | undefined 
 export function setRequestAllowedModels(models: ReadonlySet<string>): void {
   const store = storage.getStore();
   if (store) store.allowedModels = models;
+}
+
+/** Record the end user a client-profile request is made for. */
+export function setRequestEndUser(endUser: string): void {
+  const store = storage.getStore();
+  if (store) store.endUser = endUser;
 }
