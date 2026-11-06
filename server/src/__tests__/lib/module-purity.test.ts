@@ -73,6 +73,7 @@ const NOT_GUARDED = [
   'scheduler.ts',
   'served-model.ts',
   'wake-detect.ts',
+  'write-group.ts',
 ];
 
 /** True when every specifier inside `{...}` is type-only, so the whole
