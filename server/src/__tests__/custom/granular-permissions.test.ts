@@ -174,6 +174,8 @@ describe('Granular permissions and cache preferences', () => {
         ['manage_settings', 'PUT', '/api/settings/proxy', 'edit_settings'],
         ['manage_settings', 'PUT', '/api/fallback', 'manage_routing'],
         ['manage_settings', 'POST', '/api/compression/preview', 'manage_compression'],
+        ['manage_settings', 'GET', '/api/savers', 'view_settings'],
+        ['manage_settings', 'PUT', '/api/savers', 'manage_compression'],
         ['manage_settings', 'GET', '/api/client-profiles', 'view_client_profiles'],
         ['manage_settings', 'POST', '/api/client-profiles', 'edit_client_profiles'],
         ['manage_settings', 'POST', '/api/update', 'manage_updates'],

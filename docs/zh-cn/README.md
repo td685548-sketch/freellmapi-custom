@@ -13,6 +13,7 @@
 - **[支持的智能体](clients/02-supported-agents.md)** —— FreeLLMAPI 支持的全部智能体及其一行配置命令。
 - **[客户端与编程智能体](clients/01-agent-clients.md)** —— 兼容 OpenAI 的客户端，Claude Code / Codex CLI / Cline / Continue / Aider / opencode / Cursor 的配方，MCP 服务，编辑器补全，以及上下文交接。
 - **[提示词压缩](compression/01-compression-pipeline.md)** —— 请求侧的各种模式、安全保护、按请求的控制项、自定义工具输出过滤器、统计数据和预览 API。
+- **[输出节省器](compression/02-output-savers.md)** —— caveman 与 ponytail：回答侧的简洁等级、环境变量/API 开启方式，以及按请求的 `X-FreeLLM-Saver` 头。
 - **[代理传输](proxy/OVERVIEW.md)** —— 出站代理传输：正向代理与 Fetch Relay、系统自动检测、入站的 `TRUST_PROXY`；中继协议与 Cloudflare Worker 参考实现见 [Fetch Relay 传输](proxy/01-fetch-relay.md)。
 - **[架构与内部实现](architecture/00-high-level-index.md)** —— 路由器如何工作、路由与运维细节、哪些还不支持、诚实的局限性说明，以及各提供方的服务条款审查。
 
