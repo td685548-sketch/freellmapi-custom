@@ -10,6 +10,12 @@ export interface ClientContext {
   /** The preset a decision model picked for this request (#1354), read by the
    *  router while the 'decision' strategy is active. Unset = Balanced. */
   routingStrategy?: PresetStrategy;
+  /** The account behind a personal `sk-flm-…` key, set by the per-user gate;
+   *  unset for the unified key, client profiles and dashboard sessions. */
+  userId?: number;
+  /** Tokens of the successful rows logged in this request, so the per-user gate
+   *  can book them with the request count it already writes (no extra write). */
+  userTokens?: number;
 }
 
 // Request-scoped caller identity, readable from anywhere below the middleware
@@ -58,4 +64,18 @@ export function getClientContext(): ClientContext {
 export function setRequestRoutingStrategy(strategy: PresetStrategy | undefined): void {
   const store = storage.getStore();
   if (store) store.routingStrategy = strategy;
+}
+
+/** Attribute this request to a personal-key account (per-user analytics). Returns
+ *  the live context so the caller can read `userTokens` after the response. */
+export function setRequestUser(userId: number): ClientContext | undefined {
+  const store = storage.getStore();
+  if (store) store.userId = userId;
+  return store;
+}
+
+/** Add a logged success row's tokens to this request's per-user tally. */
+export function noteRequestTokens(tokens: number): void {
+  const store = storage.getStore();
+  if (store?.userId !== undefined && tokens > 0) store.userTokens = (store.userTokens ?? 0) + tokens;
 }

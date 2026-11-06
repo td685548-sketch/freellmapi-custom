@@ -5,6 +5,7 @@ import { adminUsersRouter } from '../routes/admin-users.js';
 import { adminRegistrationRequestsRouter } from '../routes/admin-registration-requests.js';
 import { invitesRouter } from '../routes/invites.js';
 import { userKeysRouter } from '../routes/user-keys.js';
+import { adminUserAnalyticsRouter, selfAnalyticsRouter } from '../routes/user-analytics.js';
 import { externalAuthRouter } from '../routes/external-auth.js';
 import { customAuthRouter } from './auth.js';
 import { userInferenceGate } from '../middleware/user-rate-limit.js';
@@ -110,7 +111,7 @@ export function registerCustomRoutes(app: Express): void {
   // Custom fork routes with their dedicated permission gates
   app.use('/api/auth', externalAuthRouter, customAuthRouter);
   app.use('/api/invites', requireAuth, requireActionPermission('manage_invites'), invitesRouter);
-  app.use('/api/admin/users', requireAuth, requireActionPermission('manage_users'), adminUsersRouter);
+  app.use('/api/admin/users', requireAuth, requireActionPermission('manage_users'), adminUsersRouter, adminUserAnalyticsRouter);
   app.use('/api/admin/registration-requests', requireAuth, requireActionPermission('manage_requests'), adminRegistrationRequestsRouter);
-  app.use('/api/user', requireAuth, userKeysRouter);
+  app.use('/api/user', requireAuth, userKeysRouter, selfAnalyticsRouter);
 }

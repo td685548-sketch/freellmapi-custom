@@ -30,6 +30,7 @@ All of these are dashboard-session routes (`Authorization: Bearer <session token
 | `GET` | `/api/user/keys` | Caller's keys, newest first, with `revoked` and `lastUsedAt` |
 | `POST` | `/api/user/keys` | `{ name? }` → `201 { key: { id, key, keyPrefix, name, createdAt } }`; plaintext appears only here |
 | `DELETE` | `/api/user/keys/:id` | Sets `revoked = 1` for a key owned by the caller; `404` if it is another user's key or already revoked |
+| `GET` | `/api/user/analytics` | `?days=1..90` (default 30) → `{ analytics }`: the caller's totals, per-day series and top models from `requests.user_id` ([`routes/user-analytics.ts`](../../../server/src/routes/user-analytics.ts)); no grant needed |
 | `GET` | `/api/user/usage` | Caller's own current-month `{ requests, tokens, rpmLimit }` ([server/src/routes/user-keys.ts:71](../../../server/src/routes/user-keys.ts#L71)); the admin-wide view is `GET /api/admin/users/usage`, which needs `manage_users` ([05](05-admin-user-management.md)) |
 
 There is no endpoint that lists or revokes *another* user's keys, and no un-revoke.
@@ -73,7 +74,7 @@ Four things to know about it, all read off the code:
 
 - **The gate only recognises `Authorization: Bearer sk-flm-…`.** [`extractBearer`](../../../server/src/middleware/user-rate-limit.ts#L5) matches that one header shape, so the same key presented as `x-api-key` or `x-goog-api-key`, or in Gemini's `?key=` — all shapes [`resolveAuth`](../../../server/src/lib/system-prompt.ts#L62) accepts, on `/v1`, `/v1/messages` and `/v1beta` alike — reaches inference unchecked: the request succeeds, no RPM check runs, nothing is counted. Treat the limit as a courtesy counter for well-behaved clients, not an enforcement boundary — the real ceilings are the per-IP proxy limiter (`PROXY_RATE_LIMIT_RPM`, default 120) and the upstream providers' own quotas.
 - **The window is in-process memory** (`Map` in [`user-quotas.ts:4`](../../../server/src/services/user-quotas.ts#L4)). A restart clears it, and replicas behind a load balancer each count their own traffic, so the effective cap is `limit × replicas` with a free refill on deploy.
-- **`tokens` is never recorded.** The only production call site passes `0` ([`user-rate-limit.ts:56`](../../../server/src/middleware/user-rate-limit.ts#L56)), so `user_monthly_usage.tokens` stays `0` and the admin usage table shows request counts only — there is no per-person cost figure.
+- **`tokens` are recorded since the per-user analytics change.** The gate attributes the request to the account (`ClientContext.userId`); `logRequest` stamps `requests.user_id` and tallies the tokens of successful rows, and the gate books that tally into `user_monthly_usage.tokens` with the request count it already writes (no extra write). Only traffic arriving with a personal key is attributed; rows older than the change have `user_id` NULL. There is still no money figure per person.
 - **Revoked or unknown `sk-flm-…` bearer tokens are rejected by the gate with `401 invalid_api_key`**, which is a different answer from upstream's unified-key path and happens *before* `resolveAuth` runs.
 
 Also unchanged: **no expiry** on a key, and no way to scope one to a model or an endpoint.
@@ -82,7 +83,7 @@ Also unchanged: **no expiry** on a key, and no way to scope one to a model or an
 
 Verified against the current code — do not document or sell these as features:
 
-- **No per-user *cost* attribution.** `kind: 'user'` carries `userId` and `email` through `resolveAuth`, and nothing downstream uses them, so Analytics still reports the instance as one tenant; per-person accounting means the request counts above, or one instance per person. The `role` that [`validateUserApiKey`](../../../server/src/services/user-keys.ts#L134) also reads is dropped by `resolveAuth`'s user branch ([`system-prompt.ts:65`](../../../server/src/lib/system-prompt.ts#L65)), so a member key and an admin key are indistinguishable to the inference pipeline itself.
+- **No per-user *cost* attribution.** Per-account *usage* exists (requests, tokens, errors, latency, models over the retained window: `GET /api/admin/users/:id/analytics`, and `GET /api/user/analytics` for the caller), but the main Analytics page still reports the instance as one tenant and nothing prices a token. The `role` that [`validateUserApiKey`](../../../server/src/services/user-keys.ts#L134) also reads is dropped by `resolveAuth`'s user branch ([`system-prompt.ts:65`](../../../server/src/lib/system-prompt.ts#L65)), so a member key and an admin key are indistinguishable to the inference pipeline itself.
 
 ## Cost of using one
 

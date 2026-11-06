@@ -59,6 +59,7 @@ const CUSTOM_GRANULAR_RBAC_FILENAME = '20261101_163500_custom_granular_rbac.ts';
 const CUSTOM_PRIMARY_ADMIN_SCOPE_FILENAME = '20261101_190500_custom_primary_admin_scope.ts';
 const CLOUDFLARE_NEURON_USAGE_FILENAME = '20261104_000001_cloudflare_neuron_usage.ts';
 const CUSTOM_CONVERSATION_OWNER_FILENAME = '20261105_000001_custom_conversation_owner.ts';
+const CUSTOM_REQUEST_USER_ID_FILENAME = '20261106_000001_custom_request_user_id.ts';
 
 interface SchemaRow {
   type: string;
@@ -164,6 +165,7 @@ describe('migration round trip', () => {
         CUSTOM_PRIMARY_ADMIN_SCOPE_FILENAME,
         CLOUDFLARE_NEURON_USAGE_FILENAME,
         CUSTOM_CONVERSATION_OWNER_FILENAME,
+        CUSTOM_REQUEST_USER_ID_FILENAME,
       ]);
     } finally {
       db.close();

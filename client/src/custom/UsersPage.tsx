@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/page-header'
 import { ConfirmButton } from '@/components/confirm-button'
 import { toast } from '@/lib/toast'
 import { PermissionsDialog } from './PermissionsDialog'
+import { UsageLink } from './UsageLink'
 
 import type { AdminUser, RegistrationRequest } from '../../../shared/user-access'
 export type { AdminUser, RegistrationRequest } from '../../../shared/user-access'
@@ -316,6 +317,7 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
+                    <UsageLink userId={u.id} />
                     <Button
                       variant="outline"
                       size="sm"

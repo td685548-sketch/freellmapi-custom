@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { PageHeader } from '@/components/page-header'
 import { CopyButton } from '@/components/copy-button'
 import { toast } from '@/lib/toast'
+import { UserAnalyticsView } from './UserAnalyticsView'
 
 import type { UserApiKey } from '../../../shared/user-access'
 export type { UserApiKey } from '../../../shared/user-access'
@@ -107,6 +108,11 @@ export function MemberKeysView() {
           <div className="text-xs text-muted-foreground">Up to 60 requests/minute allocated to your personal keys</div>
         </div>
       </div>
+
+      <section className="space-y-3" aria-label="My usage">
+        <h2 className="text-sm font-semibold">My usage</h2>
+        <UserAnalyticsView endpoint="/api/user/analytics" queryKey={['user-analytics']} />
+      </section>
 
       {/* Newly minted key banner */}
       {newlyCreatedKey && (
