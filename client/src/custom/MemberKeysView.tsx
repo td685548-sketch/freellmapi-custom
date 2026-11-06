@@ -96,7 +96,7 @@ export function MemberKeysView() {
         <div className="rounded-2xl border bg-card p-5 space-y-1 shadow-sm">
           <div className="text-xs font-medium text-muted-foreground">Usage this month ({usageData?.usage?.month || 'Current'})</div>
           <div className="text-2xl font-bold text-foreground">
-            {usageData?.usage?.requests ?? 0} <span className="text-sm font-normal text-muted-foreground">requests</span>
+            {usageData?.usage?.requests ?? 0} <span className="text-sm font-normal text-muted-foreground">successful requests</span>
           </div>
           <div className="text-xs text-muted-foreground">{usageData?.usage?.tokens ?? 0} total tokens</div>
         </div>

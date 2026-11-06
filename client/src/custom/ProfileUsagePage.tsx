@@ -31,7 +31,7 @@ function QuotaEditor({ profile, canEdit, onSaved }: { profile: ProfileAnalytics;
       onSubmit={(e) => { e.preventDefault(); if (canEdit && valid && !unchanged) save.mutate(parsed) }}
     >
       <div className="space-y-1">
-        <label htmlFor="profile-rpm" className="text-xs font-medium text-muted-foreground">Requests per minute</label>
+        <label htmlFor="profile-rpm" className="block text-xs font-medium text-muted-foreground">Requests per minute</label>
         <Input
           id="profile-rpm"
           inputMode="numeric"

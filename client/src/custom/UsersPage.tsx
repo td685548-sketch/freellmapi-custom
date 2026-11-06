@@ -289,7 +289,7 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
                       <span>Joined: {new Date(u.createdAt).toLocaleDateString()}</span>
                       <span>Active keys: <strong>{u.activeKeys}</strong></span>
                       <span>Sessions: <strong>{u.sessions}</strong></span>
-                      <span>This month: <strong className="text-foreground">{usageMap.get(u.id)?.requests ?? 0} reqs</strong> ({usageMap.get(u.id)?.tokens ?? 0} tokens)</span>
+                      <span>This month: <strong className="text-foreground">{usageMap.get(u.id)?.requests ?? 0} successful reqs</strong> ({usageMap.get(u.id)?.tokens ?? 0} tokens)</span>
                       <span className="flex items-center gap-1">
                         Limit: <strong className="text-foreground">{usageMap.get(u.id)?.rpmLimit ?? 60} RPM</strong>
                         {!u.isSelf && !u.isPrimary && can('quotas') && (
