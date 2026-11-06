@@ -7,6 +7,7 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { getDb } from '../db/index.js';
+import { countUsableKeysByPlatform } from '../services/key-cache.js';
 import { getAllPenalties, getRoutingScores, getRoutingStrategy, setRoutingStrategy, setCustomWeights, getExploreEnabled, setExploreEnabled, getPeakHoursConfig, setPeakHoursConfig, getActiveRoutingWeights, getKeySelectionStrategy, setKeySelectionStrategy } from '../services/router.js';
 import { BANDIT_PRESETS, isValidTimezone, type RoutingStrategy } from '../services/scoring.js';
 import { parseBudget, monthlyBudgetScore } from '../lib/budget.js';
@@ -522,10 +523,9 @@ fallbackRouter.get('/token-usage', (_req: Request, res: Response) => {
   `).all() as { platform: string; model_id: string; used: number }[];
   const usageByModel = new Map(usageRows.map(r => [`${r.platform}:${r.model_id}`, r.used]));
 
-  const keyCountMap = new Map(
-    (db.prepare("SELECT platform, COUNT(*) as count FROM api_keys WHERE enabled = 1 AND status IN ('healthy', 'unknown') GROUP BY platform").all() as { platform: string; count: number }[])
-      .map(k => [k.platform, k.count])
-  );
+  // From the in-memory usable-key registry (same predicate: enabled, healthy or
+  // unknown), not a GROUP BY over the network on every dashboard poll.
+  const keyCountMap = countUsableKeysByPlatform(db);
 
   const modelBudgets = rawModels
     .filter(m => platformSet.has(m.platform))

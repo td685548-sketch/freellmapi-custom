@@ -26,7 +26,10 @@ import {
   builtinDiscoveryMode,
   discoverBuiltinModels,
   ineligibleMessage,
+  BUILTIN_DISCOVERY_PLATFORMS,
   isBuiltinDiscoveryEligible,
+  loadDiscoveryContext,
+  type DiscoveryContext,
   registerDiscoveredModels,
   registeredModelIds,
   triggerBuiltinModelDiscovery,
@@ -270,6 +273,19 @@ export function isExportableKey(row: { platform: string; baseUrl: string | null;
 // have a chat row, so counting `models` alone reported "no models" — and fired
 // the no-catalog notice — for them even on a fully synced Premium install
 // (#1327).
+// Every platform's enabled model count in one statement, for the roster, which
+// used to ask once per platform that has no key check.
+function enabledModelCounts(): Map<string, number> {
+  const rows = getDb().prepare(`
+    SELECT platform, SUM(c) AS c FROM (
+      SELECT platform, COUNT(*) AS c FROM models WHERE enabled = 1 GROUP BY platform
+      UNION ALL SELECT platform, COUNT(*) AS c FROM embedding_models WHERE enabled = 1 GROUP BY platform
+      UNION ALL SELECT platform, COUNT(*) AS c FROM media_models WHERE enabled = 1 GROUP BY platform
+    ) GROUP BY platform
+  `).all() as Array<{ platform: string; c: number }>;
+  return new Map(rows.map(r => [r.platform, Number(r.c)]));
+}
+
 function enabledModelCount(platform: string): number {
   const db = getDb();
   const row = db.prepare(`
@@ -396,11 +412,8 @@ keysRouter.get('/', (_req: Request, res: Response) => {
     LEFT JOIN key_monthly_usage u ON u.key_id = ak.id AND u.month = ?
     ORDER BY ak.created_at DESC
   `).all(new Date(now).toISOString().slice(0, 7)) as any[];
-  const modelCounts = new Map<string, number>();
-  const modelCountFor = (platform: string): number => {
-    if (!modelCounts.has(platform)) modelCounts.set(platform, enabledModelCount(platform));
-    return modelCounts.get(platform)!;
-  };
+  let modelCounts: Map<string, number> | undefined;
+  const modelCountFor = (platform: string): number => (modelCounts ??= enabledModelCounts()).get(platform) ?? 0;
 
   const customModels = [
     ...db.prepare(`
@@ -457,9 +470,15 @@ keysRouter.get('/', (_req: Request, res: Response) => {
   // #1348: which built-in platforms may fill their model list from their own
   // /models, so the dashboard offers Fetch models on those key rows only.
   const discoverable = new Map<string, boolean>();
+  let discoveryContext: DiscoveryContext | undefined;
   const canDiscover = (platform: string) => {
     if (platform === 'custom') return false;
-    if (!discoverable.has(platform)) discoverable.set(platform, isBuiltinDiscoveryEligible(db, platform));
+    if (!discoverable.has(platform)) {
+      // Only the few allowlisted platforms need the database at all; for every
+      // other one the check answers before reading anything, so don't load it.
+      if ((BUILTIN_DISCOVERY_PLATFORMS as readonly string[]).includes(platform)) discoveryContext ??= loadDiscoveryContext(db);
+      discoverable.set(platform, isBuiltinDiscoveryEligible(db, platform, discoveryContext));
+    }
     return discoverable.get(platform)!;
   };
 

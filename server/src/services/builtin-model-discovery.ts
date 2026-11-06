@@ -73,22 +73,42 @@ export interface DiscoveryEligibility {
   provider?: OpenAICompatProvider;
 }
 
+/** What the eligibility check reads from the database, loaded once so a caller
+ *  that asks about many platforms (the keys roster) pays for it once rather than
+ *  once per platform. */
+export interface DiscoveryContext {
+  applied: Set<string>;
+  catalogOwned: Set<string>;
+}
+
+export function loadDiscoveryContext(db: Db): DiscoveryContext {
+  const rows = db.prepare(`
+    SELECT platform FROM models WHERE source = 'catalog'
+    UNION SELECT platform FROM embedding_models
+    UNION SELECT platform FROM media_models
+  `).all() as Array<{ platform: string }>;
+  return { applied: appliedCatalogPlatforms(db), catalogOwned: new Set(rows.map(r => r.platform)) };
+}
+
 /** Whether `platform` may fill its model list from its own /models. */
-export function builtinDiscoveryEligibility(db: Db, platform: string): DiscoveryEligibility {
+export function builtinDiscoveryEligibility(db: Db, platform: string, context?: DiscoveryContext): DiscoveryEligibility {
   if (builtinDiscoveryMode() === 'off') return { eligible: false, reason: 'disabled' };
   if (!(BUILTIN_DISCOVERY_PLATFORMS as readonly string[]).includes(platform)) {
     return { eligible: false, reason: 'not_allowlisted' };
   }
   const provider = getProvider(platform as Platform);
   if (!(provider instanceof OpenAICompatProvider)) return { eligible: false, reason: 'not_openai_compatible' };
-  if (appliedCatalogPlatforms(db).has(platform) || hasCatalogOwnedRows(db, platform)) {
+  const managed = context
+    ? context.applied.has(platform) || context.catalogOwned.has(platform)
+    : appliedCatalogPlatforms(db).has(platform) || hasCatalogOwnedRows(db, platform);
+  if (managed) {
     return { eligible: false, reason: 'catalog_managed' };
   }
   return { eligible: true, provider };
 }
 
-export function isBuiltinDiscoveryEligible(db: Db, platform: string): boolean {
-  return builtinDiscoveryEligibility(db, platform).eligible;
+export function isBuiltinDiscoveryEligible(db: Db, platform: string, context?: DiscoveryContext): boolean {
+  return builtinDiscoveryEligibility(db, platform, context).eligible;
 }
 
 /** A human sentence for an ineligible platform, for route errors. */
