@@ -18,6 +18,8 @@ export interface ClientContext {
   userTokens?: number;
   /** The client profile (`sk-cp-…` key) behind this request, set by the profile gate. */
   profileId?: number;
+  /** Lowercase model ids this request may be routed to (a client profile's allowlist); unset = any. */
+  allowedModels?: ReadonlySet<string>;
 }
 
 // Request-scoped caller identity, readable from anywhere below the middleware
@@ -87,4 +89,10 @@ export function setRequestProfile(profileId: number): ClientContext | undefined 
   const store = storage.getStore();
   if (store) store.profileId = profileId;
   return store;
+}
+
+/** Restrict this request's routing to these model ids (lowercase). */
+export function setRequestAllowedModels(models: ReadonlySet<string>): void {
+  const store = storage.getStore();
+  if (store) store.allowedModels = models;
 }

@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
-import { setRequestProfile } from '../lib/client-context.js';
+import { setRequestAllowedModels, setRequestProfile } from '../lib/client-context.js';
+import { capOutputTokens, checkModel, refuse } from '../custom/profile-restrictions.js';
 import { enforceUsageQuota } from '../custom/quota-gate.js';
 import { CLIENT_PROFILE_KEY_PREFIX } from '../lib/system-prompt.js';
 import { profileForGate } from '../services/profile-usage.js';
@@ -24,6 +25,16 @@ export function profileInferenceGate(req: Request, res: Response, next: NextFunc
   if (!profile) return next();
 
   const context = setRequestProfile(profile.id);
+
+  // Restrictions first: a refused request costs the key neither a rate-limit slot nor an allowance.
+  if (profile.allowedModels.length > 0) {
+    const allowed = new Set(profile.allowedModels);
+    const refusal = checkModel(req, allowed);
+    if (refusal) { refuse(res, refusal, allowed); return; }
+    setRequestAllowedModels(allowed);
+  }
+  if (profile.maxTokens !== null) capOutputTokens(req, profile.maxTokens);
+
   const quota = () => enforceUsageQuota('profile', profile.id, res, () => context?.userTokens ?? 0);
   if (profile.rpmLimit === null) { if (quota()) next(); return; }
 

@@ -12,14 +12,26 @@ export const MAX_PROFILE_RPM = 1000;
 export interface GateProfile {
   id: number;
   rpmLimit: number | null;
+  /** Lowercase model ids the key may use; empty = any. */
+  allowedModels: string[];
+  maxTokens: number | null;
+}
+
+/** The stored JSON list, tolerant of anything unexpected (an unreadable list restricts nothing it cannot name, so it reads as empty). */
+export function parseAllowedModels(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((m): m is string => typeof m === 'string' && m.length > 0) : [];
+  } catch { return []; }
 }
 
 /** The enabled profile a key belongs to, or null (unknown/disabled keys fall through to the normal 401). */
 export function profileForGate(token: string): GateProfile | null {
   const row = getDb()
-    .prepare('SELECT id, rpm_limit AS rpmLimit FROM client_profiles WHERE token_hash = ? AND enabled = 1')
-    .get(hashClientProfileKey(token)) as GateProfile | undefined;
-  return row ?? null;
+    .prepare('SELECT id, rpm_limit AS rpmLimit, allowed_models AS allowedModels, max_tokens_cap AS maxTokens FROM client_profiles WHERE token_hash = ? AND enabled = 1')
+    .get(hashClientProfileKey(token)) as (Omit<GateProfile, 'allowedModels'> & { allowedModels: string | null }) | undefined;
+  return row ? { ...row, allowedModels: parseAllowedModels(row.allowedModels) } : null;
 }
 
 /** Set (1..1000) or clear (null = unlimited) a profile's requests-per-minute cap. False when the profile does not exist. */
