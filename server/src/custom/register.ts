@@ -111,7 +111,7 @@ export function registerCustomRoutes(app: Express): void {
   // Public probes answer from a 5 s copy so anonymous callers cannot turn them into database load.
   app.use(['/livez', '/readyz'], statusCache);
   app.use('/api', (_req, _res, next) => withRoutingSettingsScope(next));
-  app.use('/v1', (_req, _res, next) => withRoutingSettingsScope(next));
+  app.use(['/v1', '/x/v1'], (_req, _res, next) => withRoutingSettingsScope(next));
   // When the X Gateway is off, answer 404 immediately before any auth checks
   // so an inactive gateway leaks nothing about its existence.
   app.use('/x/v1', (_req, res, next) => {
