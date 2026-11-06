@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { setRequestProfile } from '../lib/client-context.js';
+import { enforceUsageQuota } from '../custom/quota-gate.js';
 import { CLIENT_PROFILE_KEY_PREFIX } from '../lib/system-prompt.js';
 import { profileForGate } from '../services/profile-usage.js';
 import { checkUserRateLimit } from '../services/user-quotas.js';
@@ -22,8 +23,9 @@ export function profileInferenceGate(req: Request, res: Response, next: NextFunc
   const profile = profileForGate(token);
   if (!profile) return next();
 
-  setRequestProfile(profile.id);
-  if (profile.rpmLimit === null) return next();
+  const context = setRequestProfile(profile.id);
+  const quota = () => enforceUsageQuota('profile', profile.id, res, () => context?.userTokens ?? 0);
+  if (profile.rpmLimit === null) { if (quota()) next(); return; }
 
   const limit = checkUserRateLimit(-profile.id, profile.rpmLimit);
   res.setHeader('X-RateLimit-Limit-Profile-RPM', limit.limit.toString());
@@ -39,5 +41,5 @@ export function profileInferenceGate(req: Request, res: Response, next: NextFunc
     });
     return;
   }
-  next();
+  if (quota()) next();
 }

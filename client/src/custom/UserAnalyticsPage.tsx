@@ -2,6 +2,7 @@ import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import { PageHeader } from '@/components/page-header'
 import { UserAnalyticsView } from './UserAnalyticsView'
+import { QuotaCard } from './QuotaCard'
 import { useAdministrativeAccess } from './use-administrative-access'
 
 // /users/:id/analytics - one account's usage, for operators who can view accounts.
@@ -29,6 +30,11 @@ export function UserAnalyticsPage() {
             Users
           </Link>
         }
+      />
+      <QuotaCard
+        endpoint={`/api/admin/users/${userId}/usage-quota`}
+        queryKey={['admin-user-quota', userId]}
+        canEdit={can('edit_user_quotas')}
       />
       <UserAnalyticsView endpoint={`/api/admin/users/${userId}/analytics`} queryKey={['admin-user-analytics', userId]} />
     </div>

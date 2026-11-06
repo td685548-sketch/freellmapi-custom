@@ -12,6 +12,7 @@ import { userInferenceGate } from '../middleware/user-rate-limit.js';
 import { profileInferenceGate } from '../middleware/profile-gate.js';
 import { profileAnalyticsRouter } from '../routes/profile-analytics.js';
 import { usageRouter } from '../routes/usage.js';
+import { adminUserQuotaRouter, profileQuotaRouter, selfQuotaRouter } from '../routes/usage-quota.js';
 import { withRoutingSettingsScope } from '../db/routing-settings-scope.js';
 import { providerTiersRouter } from '../routes/provider-tiers.js';
 import { requireActionPermission } from './permission-actions.js';
@@ -111,7 +112,7 @@ export function registerCustomRoutes(app: Express): void {
   for (const gate of PERMISSION_GATES) installGate(app, gate);
   app.use(['/api/keys', '/api/embeddings', '/api/media', '/api/decisions'], guardKeyAddition);
   // Usage and request cap per client profile; the manage_settings gate for this prefix is installed just above.
-  app.use('/api/client-profiles', profileAnalyticsRouter);
+  app.use('/api/client-profiles', profileAnalyticsRouter, profileQuotaRouter);
   // Usage ranking of accounts and client keys; its view_usage gate is in PERMISSION_GATES.
   app.use('/api/usage', usageRouter);
 
@@ -121,7 +122,7 @@ export function registerCustomRoutes(app: Express): void {
   // Custom fork routes with their dedicated permission gates
   app.use('/api/auth', externalAuthRouter, customAuthRouter);
   app.use('/api/invites', requireAuth, requireActionPermission('manage_invites'), invitesRouter);
-  app.use('/api/admin/users', requireAuth, requireActionPermission('manage_users'), adminUsersRouter, adminUserAnalyticsRouter);
+  app.use('/api/admin/users', requireAuth, requireActionPermission('manage_users'), adminUsersRouter, adminUserAnalyticsRouter, adminUserQuotaRouter);
   app.use('/api/admin/registration-requests', requireAuth, requireActionPermission('manage_requests'), adminRegistrationRequestsRouter);
-  app.use('/api/user', requireAuth, userKeysRouter, selfAnalyticsRouter);
+  app.use('/api/user', requireAuth, userKeysRouter, selfAnalyticsRouter, selfQuotaRouter);
 }

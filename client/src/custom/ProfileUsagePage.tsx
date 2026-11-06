@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PageHeader } from '@/components/page-header'
 import { UserAnalyticsView, type ProfileAnalytics, type RequestAnalytics } from './UserAnalyticsView'
+import { QuotaCard } from './QuotaCard'
 import { useAdministrativeAccess } from './use-administrative-access'
 
 const MAX_RPM = 1000
@@ -92,6 +93,11 @@ export function ProfileUsagePage() {
               profile={a as ProfileAnalytics}
               canEdit={can('edit_client_profiles')}
               onSaved={() => queryClient.invalidateQueries({ queryKey })}
+            />
+            <QuotaCard
+              endpoint={`/api/client-profiles/${profileId}/usage-quota`}
+              queryKey={['profile-quota', profileId]}
+              canEdit={can('edit_client_profiles')}
             />
           </>
         )}

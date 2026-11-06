@@ -9,6 +9,7 @@ import { PageHeader } from '@/components/page-header'
 import { CopyButton } from '@/components/copy-button'
 import { toast } from '@/lib/toast'
 import { UserAnalyticsView } from './UserAnalyticsView'
+import { QuotaCard } from './QuotaCard'
 
 import type { UserApiKey } from '../../../shared/user-access'
 export type { UserApiKey } from '../../../shared/user-access'
@@ -111,6 +112,7 @@ export function MemberKeysView() {
 
       <section className="space-y-3" aria-label="My usage">
         <h2 className="text-sm font-semibold">My usage</h2>
+        <QuotaCard endpoint="/api/user/usage-quota" queryKey={['user-quota']} canEdit={false} />
         <UserAnalyticsView endpoint="/api/user/analytics" queryKey={['user-analytics']} />
       </section>
 
