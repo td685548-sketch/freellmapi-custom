@@ -17,7 +17,7 @@ const RE_GIT_STATUS = /^On branch |^nothing to commit|^Changes (not |to be )|^Un
 const RE_GIT_LOG = /^[*|/\\ ]*commit [0-9a-f]{7,40}$/m;
 const RE_PORCELAIN = /^[ MADRCU?!][ MADRCU?!] \S/m;
 const RE_BUILD_OUTPUT = /^(npm (warn|error|ERR!)|yarn (warn|error)|\s*Compiling\s+\S+|\s*Downloading\s+\S+|added \d+ package|\[ERROR\]|BUILD (SUCCESS|FAILED)|\s*Finished\s+|Successfully (installed|built)|ERROR:)/im;
-const RE_TREE_GLYPH = /[├└]──|│  /;
+const RE_TREE_GLYPH = /[├└]──|│ {2}/;
 const RE_LS_ROW = /^[-dlbcps][rwx-]{9}/m;
 const RE_LS_TOTAL = /^total \d+$/m;
 const RE_CARGO_ERR_CONT = /^\s*(-->|\||\d+\s*\||=)/;

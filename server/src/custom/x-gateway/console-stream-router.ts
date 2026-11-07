@@ -33,6 +33,7 @@ if (!g[globalKey]) {
 
 const state = g[globalKey]!;
 
+// eslint-disable-next-line no-control-regex
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
 
 function stripAnsi(str: string): string {
@@ -107,8 +108,7 @@ export function initConsoleLogCapture(): void {
         appendLine(`${now} [STDOUT] ${cleaned}`);
       }
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (origStdoutWrite as any)(chunk, ...rest);
+    return (origStdoutWrite as (chunk: unknown, ...rest: unknown[]) => boolean)(chunk, ...rest);
   };
 
   const origStderrWrite = process.stderr.write.bind(process.stderr);
@@ -120,8 +120,7 @@ export function initConsoleLogCapture(): void {
         appendLine(`${now} [STDERR] ${cleaned}`);
       }
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (origStderrWrite as any)(chunk, ...rest);
+    return (origStderrWrite as (chunk: unknown, ...rest: unknown[]) => boolean)(chunk, ...rest);
   };
 
   state.patched = true;
