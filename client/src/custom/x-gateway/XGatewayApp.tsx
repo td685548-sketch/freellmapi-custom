@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
-import { ArrowLeft, BarChart3, ChevronRight, KeyRound, Menu, Moon, Scissors, Server, ShieldCheck, Sun, X } from 'lucide-react'
+import { ArrowLeft, BarChart3, ChevronRight, KeyRound, Layers, Menu, MessageSquare, Moon, Scissors, ScrollText, Server, ShieldCheck, Sun, X } from 'lucide-react'
 import { useI18n } from '@/i18n'
 import { useTheme } from '@/theme-context'
 import { Toaster } from '@/components/toaster'
@@ -15,10 +15,15 @@ import ProviderAccounts from './pages/ProviderAccounts'
 import Endpoint from './pages/Endpoint'
 import AccountUsage from './pages/AccountUsage'
 import TokenSavers from './pages/TokenSavers'
+import Combos from './pages/Combos'
+import Playground from './pages/Playground'
+import ConsoleLog from './pages/ConsoleLog'
+import { useMgmtStrings } from './management-strings'
 import './x-gateway.css'
 
 function XGatewayShell() {
   const s = useXStrings()
+  const m = useMgmtStrings()
   const session = useUserSession()
   const { locale, setLocale } = useI18n()
   const { resolvedDark, setTheme } = useTheme()
@@ -31,8 +36,10 @@ function XGatewayShell() {
   const items = [
     { to: '/x/endpoint', label: s.endpoint, icon: KeyRound },
     ...(canView ? [{ to: '/x/providers', label: s.providers, icon: Server }] : []),
+    ...(canView ? [{ to: '/x/combos', label: m.combos, icon: Layers }] : []),
+    { to: '/x/playground', label: m.playground, icon: MessageSquare },
     { to: '/x/savers', label: s.savers, icon: Scissors },
-    ...(canView ? [{ to: '/x/usage', label: s.usage, icon: BarChart3 }] : []),
+    ...(canView ? [{ to: '/x/usage', label: s.usage, icon: BarChart3 }, { to: '/x/logs', label: m.logs, icon: ScrollText }] : []),
   ]
   const current = items.find(item => location.pathname.startsWith(item.to))?.label ?? s.workspace
   return <div className="x-console x-layout">
@@ -52,6 +59,9 @@ function XGatewayShell() {
         <Route path="accounts/callback" element={<AccountCallback />} />
         <Route path="endpoint" element={<Endpoint />} />
         <Route path="savers" element={<TokenSavers />} />
+        <Route path="combos" element={protectedPage(<Combos />)} />
+        <Route path="playground" element={<Playground />} />
+        <Route path="logs" element={protectedPage(<ConsoleLog />)} />
         <Route path="usage" element={protectedPage(<AccountUsage />)} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes></ErrorBoundary></main>

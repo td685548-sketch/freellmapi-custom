@@ -66,6 +66,7 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
     if (/^\/api\/usage\/(?:daily\/(?:profiles|end-users)|export\/(?:profiles|end-users)\.csv)$/.test(path)) return 'view_usage_profiles';
   }
   if (parent === 'manage_x_gateway') {
+    if (path.startsWith('/api/x-gateway/playground/')) return 'use_x_gateway';
     if (path === '/api/x-gateway/enabled' || path === '/api/x-gateway/defaults' || path === '/api/x-gateway/proxy') {
       return read ? 'use_x_gateway' : 'edit_x_settings';
     }

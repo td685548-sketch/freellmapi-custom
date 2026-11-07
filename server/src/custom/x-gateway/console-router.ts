@@ -14,6 +14,8 @@ import {
   mintXGatewayClientKey,
   revokeXGatewayClientKey,
 } from './client-keys.js';
+import { xGatewayManagementRouter } from './management-router.js';
+import { xPlaygroundRouter } from './playground-router.js';
 
 /** Console API for the gateway switch, outbound proxy, dedicated API keys, and default savers.
  *
@@ -125,6 +127,9 @@ xGatewayConsoleRouter.delete('/keys/:id', (req, res) => {
   if (!revoked) throw new ConsoleError(404, 'Key not found or already revoked.');
   res.json({ ok: true, id: Number(rawId) });
 });
+
+xGatewayConsoleRouter.use(xPlaygroundRouter);
+xGatewayConsoleRouter.use(xGatewayManagementRouter);
 
 xGatewayConsoleRouter.use((_req, res) => {
   res.status(404).json({ error: { type: 'not_found', message: 'Not found' } });
