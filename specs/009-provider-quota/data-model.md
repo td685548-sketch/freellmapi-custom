@@ -1,0 +1,2 @@
+# Data Model
+x_gateway_quota: account_id FK x_gateway_keys ON DELETE CASCADE, snapshot_json (normalized windows only), observed_at, checked_at, last_error. x_gateway_quota_tiers: account_id FK, tier (subscription/cheap/free). Windows: id/limit/remaining/unit/resetAt/scope/source. Freshness: 5 minutes; reset-passed windows become stale individually; stale unknown never blocks indefinitely. Failed probes do not advance observed_at. Refresh cooldown: 30 seconds, coalesced per DB/account.

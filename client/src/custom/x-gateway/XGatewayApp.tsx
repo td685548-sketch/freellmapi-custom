@@ -14,6 +14,7 @@ import Providers, { AccountLoadState } from './pages/Providers'
 import ProviderAccounts from './pages/ProviderAccounts'
 import Endpoint from './pages/Endpoint'
 import AccountUsage from './pages/AccountUsage'
+import Quota from './pages/Quota'
 import TokenSavers from './pages/TokenSavers'
 import './x-gateway.css'
 
@@ -32,6 +33,7 @@ function XGatewayShell() {
     { to: '/x/endpoint', label: s.endpoint, icon: KeyRound },
     ...(canView ? [{ to: '/x/providers', label: s.providers, icon: Server }] : []),
     { to: '/x/savers', label: s.savers, icon: Scissors },
+    ...(session.hasPermission('view_x_usage') ? [{ to: '/x/quota', label: 'Quota', icon: BarChart3 }] : []),
     ...(canView ? [{ to: '/x/usage', label: s.usage, icon: BarChart3 }] : []),
   ]
   const current = items.find(item => location.pathname.startsWith(item.to))?.label ?? s.workspace
@@ -53,6 +55,7 @@ function XGatewayShell() {
         <Route path="endpoint" element={<Endpoint />} />
         <Route path="savers" element={<TokenSavers />} />
         <Route path="usage" element={protectedPage(<AccountUsage />)} />
+        <Route path="quota" element={<Quota />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes></ErrorBoundary></main>
     </div><Toaster />

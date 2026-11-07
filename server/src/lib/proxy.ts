@@ -13,6 +13,12 @@ import type { ProxyMode } from '@freellmapi/shared/types.js';
 // it rides request-scoped AsyncLocalStorage instead, set by the dispatcher
 // around a provider call and read here in proxyFetch.
 const perKeyProxyStore = new AsyncLocalStorage<string>();
+const responseObserverStore = new AsyncLocalStorage<(response: Response) => void>();
+
+/** Optional scoped observation; never consumes a body or affects transport. */
+export function withProxyResponseObserver<T>(observer: (response: Response) => void, fn: () => T): T {
+  return responseObserverStore.run(observer, fn);
+}
 
 /** Run `fn` with a per-key proxy override in effect; empty URL = global proxy. */
 export function withKeyProxy<T>(proxyUrl: string | undefined, fn: () => T): T {
@@ -849,6 +855,7 @@ export async function proxyFetch(
     }
 
     const response = await dispatchFetch(url, init, platform, requestType, timeoutMs);
+    try { responseObserverStore.getStore()?.(response); } catch { /* Observations must not break inference. */ }
 
     if (platform === 'custom' && REDIRECT_STATUSES.has(response.status)) {
       const location = response.headers.get('location') ?? 'an unspecified location';
