@@ -200,7 +200,7 @@ xGatewayMediaRouter.post('/media/test/image', async (req: Request, res: Response
   const startMs = Date.now();
   const defaultModel = getMediaDefaults().image?.defaultModel || 'auto';
   const requestedModel = parsed.data.model && parsed.data.model !== 'auto' ? parsed.data.model : defaultModel;
-  const { candidates, notFoundError } = resolveCandidateRoutes(requestedModel);
+  const { candidates, notFoundError } = resolveCandidateRoutes(requestedModel, 'image');
 
   if (notFoundError) {
     res.status(404).json({ error: { message: notFoundError } });
@@ -239,7 +239,7 @@ xGatewayMediaRouter.post('/media/test/image', async (req: Request, res: Response
           }),
         );
         const latencyMs = Date.now() - startMs;
-        recordXGatewayKeyUsage(account.id, 1);
+        recordXGatewayKeyUsage(account.id, Math.max(1, parsed.data.n ?? 1));
         logRequest(
           account.provider, modelId, null, 'success', 1, 1,
           latencyMs, null, latencyMs, requestedModel, null, 'x-gateway',

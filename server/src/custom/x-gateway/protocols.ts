@@ -1085,7 +1085,7 @@ xGatewayProtocolsRouter.post('/embeddings', xGatewayAuth, async (req: Request, r
             },
             body: JSON.stringify({
               ...body,
-              model: requestedModel === 'auto' ? modelId : body.model,
+              model: requestedModel === 'auto' ? modelId : requestedModel,
             }),
           },
           account.platform,
@@ -1123,7 +1123,7 @@ xGatewayProtocolsRouter.post('/images/generations', xGatewayAuth, async (req: Re
 
   const rawModel = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'auto';
   const requestedModel = rawModel === 'auto' ? (getMediaDefaults().image?.defaultModel || 'auto') : rawModel;
-  const { candidates, notFoundError } = resolveCandidateRoutes(requestedModel);
+  const { candidates, notFoundError } = resolveCandidateRoutes(requestedModel, 'image');
   if (notFoundError) {
     res.status(404).json({ error: { message: notFoundError, type: 'invalid_request_error', code: 'model_not_found' } });
     return;
@@ -1160,7 +1160,7 @@ xGatewayProtocolsRouter.post('/images/generations', xGatewayAuth, async (req: Re
             platform: account.platform,
           }),
         );
-        recordXGatewayKeyUsage(account.id, 1);
+        recordXGatewayKeyUsage(account.id, Math.max(1, Number(body.n) || 1));
         res.setHeader('X-Routed-Via', `${account.provider}/${modelId}`);
         res.status(200).json(result);
         return;
@@ -1177,7 +1177,7 @@ xGatewayProtocolsRouter.post('/images/generations', xGatewayAuth, async (req: Re
             },
             body: JSON.stringify({
               ...body,
-              model: requestedModel === 'auto' ? modelId : body.model,
+              model: requestedModel === 'auto' ? modelId : requestedModel,
             }),
           },
           account.platform,
@@ -1249,7 +1249,7 @@ xGatewayProtocolsRouter.post('/audio/speech', xGatewayAuth, async (req: Request,
             },
             body: JSON.stringify({
               ...body,
-              model: requestedModel === 'auto' ? modelId : body.model,
+              model: requestedModel === 'auto' ? modelId : requestedModel,
             }),
           },
           account.platform,

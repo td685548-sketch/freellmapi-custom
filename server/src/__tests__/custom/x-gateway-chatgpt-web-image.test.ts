@@ -76,6 +76,19 @@ describe('X Gateway ChatGPT Web image routing', () => {
     }));
   });
 
+  it('routes model:auto to the image model instead of the account chat model', async () => {
+    vi.mocked(generateChatGptWebImages).mockClear();
+    const res = await realFetch(`${base}/x/v1/images/generations`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'auto', prompt: 'a red cube' }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-routed-via')).toBe('chatgpt-web/gpt-image-2');
+    expect(generateChatGptWebImages).toHaveBeenCalledTimes(1);
+  });
+
   it('returns 429 when the ChatGPT account is out of image quota', async () => {
     vi.mocked(generateChatGptWebImages).mockRejectedValueOnce(Object.assign(
       new Error('ChatGPT account has hit its image generation quota'),
