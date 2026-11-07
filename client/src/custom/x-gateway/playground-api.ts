@@ -1,7 +1,9 @@
 import { apiFetch, clearToken, getToken, UNAUTHORIZED_EVENT } from '@/lib/api';
 import { getSessionRevision } from '../session-state';
 import { readChatStream } from '@/lib/playground-stream';
-import type { PlaygroundCatalog, PlaygroundRequest } from '../../../../shared/x-playground';
+import type { PlaygroundCatalog, PlaygroundRequest, PlaygroundContent } from '../../../../shared/x-playground';
+
+export type { PlaygroundCatalog, PlaygroundRequest, PlaygroundContent };
 
 export const loadPlaygroundModels = (signal?: AbortSignal) =>
   apiFetch<PlaygroundCatalog>('/api/x-gateway/playground/models', { signal });

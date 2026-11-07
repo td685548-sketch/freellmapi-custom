@@ -42,6 +42,7 @@ import { outputSaversRouter } from './output-savers/router.js';
 import { statusCache } from './status-cache.js';
 import { xGatewayRouter } from './x-gateway/router.js';
 import { xGatewayConsoleRouter } from './x-gateway/console-router.js';
+import { xSkillsPublicRouter } from './x-gateway/skills-router.js';
 import { getConfigSnapshot } from './x-gateway/config.js';
 import { providerAccountsRouter } from './provider-accounts/router.js';
 
@@ -191,6 +192,8 @@ export function registerCustomRoutes(app: Express): void {
   // Gateway switch and default savers. The manage_x_gateway gate above maps each
   // path to its leaf (edit_x_settings for writes, use_x_gateway for reads).
   app.use('/api/x-gateway', xGatewayConsoleRouter);
+  // Public skills server for AI coding agents (Claude, Cursor, Codex, OpenCode, Cline)
+  app.use('/x-skills', xSkillsPublicRouter);
 
   // Custom fork routes with their dedicated permission gates
   app.use('/api/auth', externalAuthRouter, customAuthRouter);
