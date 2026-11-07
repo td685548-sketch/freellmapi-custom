@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import { GatewayGalaxyLabel } from './custom/x-gateway/GatewayGalaxyLabel'
 import { BrowserRouter, Routes, Route, Navigate, NavLink, Link, useLocation, useNavigate } from 'react-router-dom'
 import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ChevronDown, KeyRound, LogOut, Menu, MoreHorizontal, RefreshCw, Search, Settings, Sparkles } from 'lucide-react'
@@ -344,7 +345,9 @@ function Navbar() {
                 </div>
               ) : (
                 <NavItem key={item.to} to={item.to}>
-                  {item.customLabel || t(item.labelKey)}
+                  {item.to === '/x/providers'
+                    ? <GatewayGalaxyLabel>{item.customLabel || t(item.labelKey)}</GatewayGalaxyLabel>
+                    : item.customLabel || t(item.labelKey)}
                   {item.to === '/users' && <UsersNavBadge />}
                 </NavItem>
               )
@@ -423,7 +426,9 @@ function Navbar() {
                         onClick={() => navigate(item.to)}
                         className={location.pathname === item.to ? 'bg-accent text-accent-foreground font-medium' : undefined}
                       >
-                        {item.customLabel || t(item.labelKey)}
+                        {item.to === '/x/providers'
+                          ? <GatewayGalaxyLabel>{item.customLabel || t(item.labelKey)}</GatewayGalaxyLabel>
+                          : item.customLabel || t(item.labelKey)}
                         {item.to === '/users' && <UsersNavBadge />}
                       </DropdownMenuItem>
                     )
