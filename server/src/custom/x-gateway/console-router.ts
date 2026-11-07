@@ -13,7 +13,13 @@ import {
   listXGatewayClientKeys,
   mintXGatewayClientKey,
   revokeXGatewayClientKey,
+  updateXGatewayClientKeyAccess,
 } from './client-keys.js';
+import {
+  getCapacityAdapterSettings,
+  setCapacityAdapterSettings,
+  type CapacityAdapterSettings,
+} from './capacity-adapter.js';
 import { xGatewayManagementRouter } from './management-router.js';
 import { xQuotaRouter } from './quota/router.js';
 import { xPlaygroundRouter } from './playground-router.js';
@@ -133,6 +139,48 @@ xGatewayConsoleRouter.delete('/keys/:id', (req, res) => {
   const revoked = revokeXGatewayClientKey(uid, Number(rawId));
   if (!revoked) throw new ConsoleError(404, 'Key not found or already revoked.');
   res.json({ ok: true, id: Number(rawId) });
+});
+
+xGatewayConsoleRouter.patch('/keys/:id/access', (req, res) => {
+  const uid = requireUserId(req);
+  const rawId = String(req.params.id ?? '');
+  if (!/^[1-9]\d*$/.test(rawId)) throw new ConsoleError(400, 'Invalid key ID.');
+  const body = req.body && typeof req.body === 'object' ? req.body as Record<string, unknown> : {};
+  const restricted = Boolean(body.restricted);
+  const allow = Array.isArray(body.allow)
+    ? (body.allow as unknown[]).filter((x): x is string => typeof x === 'string')
+    : [];
+  const updated = updateXGatewayClientKeyAccess(uid, Number(rawId), { restricted, allow });
+  if (!updated) throw new ConsoleError(404, 'Key not found or revoked.');
+  res.json({ ok: true, id: Number(rawId), access: { restricted, allow } });
+});
+
+xGatewayConsoleRouter.get('/capacity-adapter', (_req, res) => {
+  res.json(getCapacityAdapterSettings());
+});
+
+xGatewayConsoleRouter.put('/capacity-adapter', (req, res) => {
+  const uid = requireUserId(req);
+  const body = req.body && typeof req.body === 'object' ? req.body as Partial<CapacityAdapterSettings> : {};
+  const current = getCapacityAdapterSettings();
+  const next: CapacityAdapterSettings = {
+    vision: {
+      enabled: body.vision?.enabled !== undefined ? Boolean(body.vision.enabled) : current.vision.enabled,
+      roundRobin: body.vision?.roundRobin !== undefined ? Boolean(body.vision.roundRobin) : current.vision.roundRobin,
+      models: Array.isArray(body.vision?.models)
+        ? body.vision.models.filter((m): m is string => typeof m === 'string' && Boolean(m.trim()))
+        : current.vision.models,
+    },
+    audioInput: {
+      enabled: body.audioInput?.enabled !== undefined ? Boolean(body.audioInput.enabled) : current.audioInput.enabled,
+      roundRobin: body.audioInput?.roundRobin !== undefined ? Boolean(body.audioInput.roundRobin) : current.audioInput.roundRobin,
+      models: Array.isArray(body.audioInput?.models)
+        ? body.audioInput.models.filter((m): m is string => typeof m === 'string' && Boolean(m.trim()))
+        : current.audioInput.models,
+    },
+  };
+  setCapacityAdapterSettings(next, uid);
+  res.json(next);
 });
 
 xGatewayConsoleRouter.use(xPlaygroundRouter);

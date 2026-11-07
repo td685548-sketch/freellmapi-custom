@@ -70,6 +70,7 @@ import * as customProviderAccounts from '../migrations/20261107_000001_custom_pr
 import * as customXGatewayKeys from '../migrations/20261107_120000_custom_x_gateway_keys.js';
 import * as customXGatewayProxyAndApiKeys from '../migrations/20261107_130000_custom_x_gateway_proxy_and_api_keys.js';
 import * as customXGatewayProxyPool from '../migrations/20261107_150000_custom_x_gateway_proxy_pool.js';
+import * as customXGatewayKeyAccess from '../migrations/20261107_160000_custom_x_gateway_key_access.js';
 
 import * as migration20261031_155642_custom_user_roles_and_keys from '../migrations/20261031_155642_custom_user_roles_and_keys.js';
 import * as customRegistrationRequests from '../migrations/20261101_040000_custom_registration_requests.js';
@@ -164,6 +165,7 @@ export const CUSTOM_X_GATEWAY_FILENAME = '20261106_120000_custom_x_gateway.ts';
 export const CUSTOM_PROVIDER_ACCOUNTS_FILENAME = '20261107_000001_custom_provider_accounts.ts';
 export const CUSTOM_X_GATEWAY_KEYS_FILENAME = '20261107_120000_custom_x_gateway_keys.ts';
 export const CUSTOM_X_GATEWAY_PROXY_AND_API_KEYS_FILENAME = '20261107_130000_custom_x_gateway_proxy_and_api_keys.ts';
+export const CUSTOM_X_GATEWAY_KEY_ACCESS_FILENAME = '20261107_160000_custom_x_gateway_key_access.ts';
 
 export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: LEGACY_BASELINE_FILENAME, module: legacyBaseline },
@@ -242,4 +244,5 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: CUSTOM_X_GATEWAY_PROXY_AND_API_KEYS_FILENAME, module: customXGatewayProxyAndApiKeys },
   { filename: '20261107_140000_custom_x_gateway_quota.ts', module: customXGatewayQuota },
   { filename: '20261107_150000_custom_x_gateway_proxy_pool.ts', module: customXGatewayProxyPool },
+  { filename: CUSTOM_X_GATEWAY_KEY_ACCESS_FILENAME, module: customXGatewayKeyAccess },
 ];
