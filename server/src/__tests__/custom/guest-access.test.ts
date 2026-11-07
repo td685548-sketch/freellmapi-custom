@@ -106,7 +106,7 @@ describe('guest access', () => {
     setUserPermissions(delegateId, ['view_users'], ownerId);
     const seen = await get('/api/admin/guest-access', delegateToken);
     expect(seen.status).toBe(200);
-    expect(seen.body.available.map((p: any) => p.key)).toEqual(['view_models', 'view_usage_profiles', 'view_usage_accounts']);
+    expect(seen.body.available.map((p: any) => p.key)).toEqual(['view_models', 'view_usage_profiles', 'view_usage_accounts', 'try_playground']);
     expect((await get('/api/admin/guest-access', delegateToken, 'PUT', { permissions: ['view_models'] })).status).toBe(403);
     setUserPermissions(delegateId, ['edit_user_permissions'], ownerId);
     expect((await get('/api/admin/guest-access', delegateToken, 'PUT', { permissions: ['view_models'] })).status).toBe(200);

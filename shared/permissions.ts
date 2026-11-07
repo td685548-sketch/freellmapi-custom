@@ -56,6 +56,7 @@ export const PERMISSION_GROUPS = [
     { key: "view_server_logs", title: "View server logs", description: "Read redacted server diagnostic messages." },
     { key: "clear_server_logs", title: "Clear server logs", description: "Delete retained server logs." },
     { key: "view_analytics", title: "View analytics", description: "Read usage statistics, routing metrics and provider tiers." },
+    { key: "view_token_budget", title: "View token budget", description: "See the Monthly token budget card on the Models page: remaining and used tokens per model." },
     { key: "view_audit_log", title: "View change history", description: "See who changed limits, keys, permissions and settings on the dashboard, and when." },
   ] },
   { key: "view_usage", title: "Usage ranking", description: "Compare traffic and speed across accounts and client keys.", children: [

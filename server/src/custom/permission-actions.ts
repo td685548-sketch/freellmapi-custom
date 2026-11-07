@@ -57,6 +57,7 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
     if (path === '/api/logs' && read) return 'view_server_logs';
     if (path === '/api/logs/clear' && method === 'POST') return 'clear_server_logs';
     if (path === '/api/audit' && read) return 'view_audit_log';
+    if (read && ['/api/fallback/token-usage', '/api/fallback/quota-forecast'].includes(path)) return 'view_token_budget';
     if ((path.startsWith('/api/analytics/') || ['/api/analytics', '/api/fallback/token-usage', '/api/fallback/quota-forecast'].includes(path)) && read) return 'view_analytics';
   }
   if (parent === 'view_usage' && read) {
@@ -119,6 +120,8 @@ export function requireActionPermission(parent: ParentPermission) {
     // Guest requests exist only for the read routes an administrator opened (services/guest-access.ts).
     if (isGuestRequest(req)) { next(); return; }
     if ((req.method === 'GET' || req.method === 'HEAD') && req.originalUrl.split('?')[0] === '/api/cache/stats' && hasPermission(user, 'view_analytics')) { next(); return; }
+    // Accounts granted View analytics before the token-budget leaf existed keep seeing the budget card.
+    if ((req.method === 'GET' || req.method === 'HEAD') && ['/api/fallback/token-usage', '/api/fallback/quota-forecast'].includes(req.originalUrl.split('?')[0]!) && hasPermission(user, 'view_analytics')) { next(); return; }
     if ((req.method === 'GET' || req.method === 'HEAD') && ['/api/settings/version', '/api/settings/update-check'].includes(req.originalUrl.split('?')[0]!) && hasPermission(user, 'manage_updates')) { next(); return; }
     if (hasPermission(user, permission)) { next(); return; }
     res.status(403).json({ error: { type: 'forbidden', message: `Permission denied: '${permission}' access required (or parent '${parent}').` } });
