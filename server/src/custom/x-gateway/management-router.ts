@@ -1,15 +1,8 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
-import type { ChatMessage } from '@freellmapi/shared/types.js';
 import { getDb } from '../../db/index.js';
-import { decrypt } from '../../lib/crypto.js';
-import { withKeyProxy } from '../../lib/proxy.js';
-import { logRequest } from '../../lib/request-log.js';
-import { resolveXGatewayProvider } from '../provider-accounts/catalog.js';
-import { recordXGatewayKeyUsage, resolveXGatewayAccountProxy } from '../provider-accounts/store.js';
 import { validateCombo, type ComboEntry } from './combos.js';
 import { createCombo, deleteCombo, getComboById, listCombos, updateCombo } from './config.js';
-import { applyGatewaySavers, resolveCandidateRoutes } from './router.js';
 
 /** Combos CRUD, request log, hourly usage and an in-console playground.
  *
@@ -22,16 +15,6 @@ export const xGatewayManagementRouter = Router();
 const comboSchema = z.object({
   name: z.string().trim().min(1).max(48),
   entries: z.array(z.object({ platform: z.string(), modelId: z.string() })).min(1).max(20),
-}).strict();
-
-const playgroundSchema = z.object({
-  model: z.string().trim().max(200).optional(),
-  messages: z.array(z.object({
-    role: z.enum(['system', 'user', 'assistant']),
-    content: z.string().max(100_000),
-  })).min(1).max(100),
-  temperature: z.number().min(0).max(2).optional(),
-  max_tokens: z.number().int().min(1).max(32_768).optional(),
 }).strict();
 
 function fail(res: Response, status: number, message: string): void {
@@ -123,58 +106,3 @@ xGatewayManagementRouter.get('/usage/hourly', (req, res) => {
   ).all(since);
   res.json({ hours, buckets: rows });
 });
-
-// POST /api/x-gateway/test — run one non-streaming chat through the same routing as /x/v1.
-xGatewayManagementRouter.post('/test', async (req, res) => {
-  const parsed = playgroundSchema.safeParse(req.body);
-  if (!parsed.success) return fail(res, 400, 'Invalid request.');
-  const startMs = Date.now();
-  const requestedModel = parsed.data.model || 'auto';
-  const { candidates, notFoundError } = resolveCandidateRoutes(requestedModel);
-  if (notFoundError) return fail(res, 404, notFoundError);
-  if (candidates.length === 0) return fail(res, 503, 'No enabled X Gateway provider accounts available.');
-  const { messages } = applyGatewaySavers(req, parsed.data.messages as ChatMessage[]);
-
-  let lastError = 'All X Gateway provider accounts failed.';
-  for (const { account, modelId } of candidates) {
-    const provider = resolveXGatewayProvider(account.provider, account.base_url);
-    if (!provider) continue;
-    try {
-      const credential = decrypt(account.encrypted_key, account.iv, account.auth_tag);
-      const completion = await withKeyProxy(resolveXGatewayAccountProxy(account), () =>
-        provider.chatCompletion(
-          credential,
-          messages,
-          modelId,
-          { temperature: parsed.data.temperature, max_tokens: parsed.data.max_tokens },
-          { platform: account.platform, keyId: account.id, modelId },
-        ),
-      );
-      const latencyMs = Date.now() - startMs;
-      const promptTokens = completion.usage?.prompt_tokens ?? 0;
-      const completionTokens = completion.usage?.completion_tokens ?? 0;
-      recordXGatewayKeyUsage(account.id, promptTokens + completionTokens);
-      logRequest(
-        account.provider, modelId, null, 'success', promptTokens, completionTokens,
-        latencyMs, null, latencyMs, requestedModel === 'auto' ? null : requestedModel, null, 'x-gateway',
-      );
-      res.json({
-        content: completion.choices?.[0]?.message?.content ?? '',
-        provider: account.provider,
-        accountLabel: account.label,
-        model: modelId,
-        latencyMs,
-        usage: completion.usage ?? null,
-      });
-      return;
-    } catch (err) {
-      lastError = err instanceof Error ? err.message : lastError;
-    }
-  }
-  logRequest(
-    candidates[0].account.provider, candidates[0].modelId, null, 'error', 0, 0,
-    Date.now() - startMs, lastError, null, requestedModel === 'auto' ? null : requestedModel, null, 'x-gateway',
-  );
-  fail(res, 502, lastError);
-});
-

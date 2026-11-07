@@ -13,10 +13,6 @@ export interface XHourlyBucket {
   hour: string; requests: number; success: number; errors: number
   inputTokens: number; outputTokens: number
 }
-export interface PlaygroundResult {
-  content: string; provider: string; accountLabel?: string; model: string
-  latencyMs: number; usage: { prompt_tokens?: number; completion_tokens?: number } | null
-}
 
 export const mgmtApi = {
   combos: (signal?: AbortSignal) => apiFetch<{ combos: XCombo[] }>(`${base}/combos`, { signal }),
@@ -28,8 +24,6 @@ export const mgmtApi = {
   logs: (status: string, signal?: AbortSignal) =>
     apiFetch<{ logs: XLog[] }>(`${base}/usage/logs?limit=100${status ? `&status=${status}` : ''}`, { signal }),
   hourly: (signal?: AbortSignal) =>
-    apiFetch<{ buckets: XHourlyBucket[] }>(`${base}/usage/hourly?hours=24`, { signal }),
-  chat: (body: { model?: string; messages: { role: string; content: string }[] }) =>
-    apiFetch<PlaygroundResult>(`${base}/test`, { method: 'POST', body: JSON.stringify(body) }),
+    apiFetch<{ buckets: XHourlyBucket[] }>(`${base}/usage/hourly?hours=24`, { signal })
 }
 
