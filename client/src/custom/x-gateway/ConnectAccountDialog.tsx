@@ -223,6 +223,34 @@ export function extractOAuthCredential(raw: string): string {
   return trimmed
 }
 
+export function extractCookieCredential(raw: string): string {
+  let trimmed = raw.trim()
+  if (/^(?:Cookie|Authorization):\s*/i.test(trimmed)) {
+    trimmed = trimmed.replace(/^(?:Cookie|Authorization):\s*/i, '').replace(/^Bearer\s+/i, '').trim()
+  }
+  if ((trimmed.startsWith('[') && trimmed.endsWith(']')) || (trimmed.startsWith('{') && trimmed.endsWith('}'))) {
+    try {
+      const parsed = JSON.parse(trimmed) as unknown
+      const cookies = Array.isArray(parsed)
+        ? parsed
+        : (parsed && typeof parsed === 'object' && Array.isArray((parsed as { cookies?: unknown }).cookies)
+          ? (parsed as { cookies: unknown[] }).cookies
+          : null)
+      if (cookies && cookies.length > 0) {
+        const header = cookies
+          .filter((c): c is { name: string; value: string } =>
+            Boolean(c) && typeof c === 'object' && typeof (c as { name?: unknown }).name === 'string' && typeof (c as { value?: unknown }).value === 'string')
+          .map(c => `${c.name}=${c.value}`)
+          .join('; ')
+        if (header) return header
+      }
+    } catch {
+      // Fall through and return raw trimmed string
+    }
+  }
+  return trimmed
+}
+
 export function ConnectAccountDialog({ provider, account, onClose }: {
   provider: AccountProvider; account?: ProviderAccount; onClose: () => void
 }) {
@@ -316,7 +344,11 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
     setBusy(true)
     try {
       if (isDirectCredential) {
-        const finalKey = oauthCliGuide ? extractOAuthCredential(key) : key.trim()
+        const finalKey = oauthCliGuide
+          ? extractOAuthCredential(key)
+          : isCookieMethod
+            ? extractCookieCredential(key)
+            : key.trim()
         await accountsApi.addKey(
           provider.id,
           finalKey,
