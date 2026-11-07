@@ -19,6 +19,7 @@ import { adminUserRequestsRouter, profileRequestsRouter, selfRequestsRouter } fr
 import { usageAlertSettingsRouter } from '../routes/usage-alert-settings.js';
 import { endUsersRouter } from '../routes/end-users.js';
 import { profileKnowledgeRouter } from '../routes/profile-knowledge.js';
+import { profileConversationsRouter, storedConversationsRouter } from '../routes/profile-conversations.js';
 import { adminUserQuotaRouter, profileQuotaRouter, selfQuotaRouter } from '../routes/usage-quota.js';
 import { withRoutingSettingsScope } from '../db/routing-settings-scope.js';
 import { providerTiersRouter } from '../routes/provider-tiers.js';
@@ -127,6 +128,9 @@ export function registerCustomRoutes(app: Express): void {
   });
   // Rate-limiting and usage tracking gate for member personal API keys (/v1, /v1beta and /x/v1 inference)
   app.use(['/v1', '/v1beta', '/x/v1'], userInferenceGate);
+  // A web app's own view of the conversations kept for its key; ahead of the profile gate so reading or
+  // erasing them costs no allowance.
+  app.use('/v1/stored-conversations', storedConversationsRouter);
   // Same for client-profile (`sk-cp-…`) keys: attribution plus the profile's own RPM cap.
   app.use(['/v1', '/v1beta'], profileInferenceGate);
   // Safe preference metadata is usable by cache editors without granting
@@ -137,7 +141,7 @@ export function registerCustomRoutes(app: Express): void {
   for (const gate of PERMISSION_GATES) installGate(app, gate);
   app.use(['/api/keys', '/api/embeddings', '/api/media', '/api/decisions'], guardKeyAddition);
   // Usage and request cap per client profile; the manage_settings gate for this prefix is installed just above.
-  app.use('/api/client-profiles', profileAnalyticsRouter, profileQuotaRouter, profileRestrictionsRouter, profileTestRouter, profileKeyRotationRouter, profileRequestsRouter, endUsersRouter, profileKnowledgeRouter);
+  app.use('/api/client-profiles', profileAnalyticsRouter, profileQuotaRouter, profileRestrictionsRouter, profileTestRouter, profileKeyRotationRouter, profileRequestsRouter, endUsersRouter, profileKnowledgeRouter, profileConversationsRouter);
   // Where usage alerts go; the /api/settings gate above covers it (view_settings / edit_settings).
   app.use('/api/settings/usage-alerts', usageAlertSettingsRouter);
   // Usage ranking of accounts and client keys; its view_usage gate is in PERMISSION_GATES.

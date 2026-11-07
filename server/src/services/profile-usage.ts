@@ -5,6 +5,8 @@ import type { ProfileAnalytics } from '@freellmapi/shared/user-analytics.js';
 import { getRequestAnalytics } from './user-analytics.js';
 import { hashClientProfileKey } from '../lib/system-prompt.js';
 import { profileIdForPreviousKey } from './profile-previous-keys.js';
+import { SETTINGS_COLUMNS as CONV_COLUMNS, settingsFromRow as conversationSettings } from './profile-conversations.js';
+import type { ConversationSettings } from '@freellmapi/shared/conversations.js';
 
 // Usage and per-minute limit of client profiles (`sk-cp-…` keys). The profile CRUD
 // itself lives in routes/client-profiles.ts (upstream); this module only adds the
@@ -22,6 +24,8 @@ export interface GateProfile {
   endUserQuota: EndUserQuota;
   /** Reference passages from the key's knowledge base, when switched on. */
   knowledge: { enabled: boolean; maxChars: number };
+  /** Server-side conversations (X-Conversation-Id). */
+  conversations: ConversationSettings;
 }
 
 /** The stored JSON list, tolerant of anything unexpected (an unreadable list restricts nothing it cannot name, so it reads as empty). */
@@ -39,8 +43,8 @@ export function profileForGate(token: string): GateProfile | null {
   const hash = hashClientProfileKey(token);
   const select = 'SELECT id, rpm_limit AS rpmLimit, allowed_models AS allowedModels, max_tokens_cap AS maxTokens, '
     + 'eu_daily_requests AS euDR, eu_daily_tokens AS euDT, eu_monthly_requests AS euMR, eu_monthly_tokens AS euMT, '
-    + 'kb_enabled AS kbEnabled, kb_max_chars AS kbMaxChars FROM client_profiles WHERE enabled = 1 AND ';
-  type Row = (Omit<GateProfile, 'allowedModels' | 'endUserQuota' | 'knowledge'> & { allowedModels: string | null; euDR: number | null; euDT: number | null; euMR: number | null; euMT: number | null; kbEnabled: number; kbMaxChars: number | null }) | undefined;
+    + `kb_enabled AS kbEnabled, kb_max_chars AS kbMaxChars, ${CONV_COLUMNS} FROM client_profiles WHERE enabled = 1 AND `;
+  type Row = (Omit<GateProfile, 'allowedModels' | 'endUserQuota' | 'knowledge' | 'conversations'> & Parameters<typeof conversationSettings>[0] & { allowedModels: string | null; euDR: number | null; euDT: number | null; euMR: number | null; euMT: number | null; kbEnabled: number; kbMaxChars: number | null }) | undefined;
   let row = db.prepare(select + 'token_hash = ?').get(hash) as Row;
   if (!row) {
     // A key in its post-rotation grace period counts as its profile: same limits, same numbers.
@@ -52,6 +56,7 @@ export function profileForGate(token: string): GateProfile | null {
     id: row.id, rpmLimit: row.rpmLimit, maxTokens: row.maxTokens, allowedModels: parseAllowedModels(row.allowedModels),
     endUserQuota: { dailyRequests: row.euDR, dailyTokens: row.euDT, monthlyRequests: row.euMR, monthlyTokens: row.euMT },
     knowledge: { enabled: row.kbEnabled === 1, maxChars: row.kbMaxChars ?? KNOWLEDGE_LIMITS.defaultMaxChars },
+    conversations: conversationSettings(row),
   };
 }
 
