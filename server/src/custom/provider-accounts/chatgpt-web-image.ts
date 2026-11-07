@@ -413,7 +413,7 @@ function collectIds(text: string, fileIds: string[], sedimentIds: string[], dire
   for (const match of text.matchAll(/sediment:\/\/([A-Za-z0-9_-]+)/g)) addUnique(sedimentIds, match[1]);
   if (directUrls) {
     const unescaped = text.replace(/\\\//g, '/');
-    for (const match of unescaped.matchAll(/https:\/\/files\.oaiusercontent\.com\/[^\s"')>]+/g)) {
+    for (const match of unescaped.matchAll(/https:\/\/[A-Za-z0-9.-]*(?:oaiusercontent|oaistatic)\.com\/[^\s"')>]+/g)) {
       addUnique(directUrls, match[0]);
     }
   }
@@ -597,15 +597,34 @@ async function pollConversationImages(
 }
 
 /** Signed asset URLs come from ChatGPT itself, so let normal redirects (CDN) work. */
-async function downloadUrl(url: string, signal?: AbortSignal): Promise<{ b64: string; mime: string } | null> {
-  const res = await webFetch(url, {}, DOWNLOAD_TIMEOUT_MS, ('chatgpt-web' as Platform), signal);
-  if (!res.ok) return null;
-  const buffer = Buffer.from(await res.arrayBuffer());
-  if (!buffer.length) return null;
-  return {
-    b64: buffer.toString('base64'),
-    mime: (res.headers.get('content-type') || 'image/png').split(';')[0],
-  };
+async function downloadUrl(
+  url: string,
+  userAgent: string,
+  signal?: AbortSignal,
+): Promise<{ b64: string; mime: string } | null> {
+  try {
+    const res = await webFetch(
+      url,
+      {
+        headers: {
+          'User-Agent': userAgent,
+          Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        },
+      },
+      DOWNLOAD_TIMEOUT_MS,
+      ('chatgpt-web' as Platform),
+      signal,
+    );
+    if (!res.ok) return null;
+    const buffer = Buffer.from(await res.arrayBuffer());
+    if (!buffer.length) return null;
+    return {
+      b64: buffer.toString('base64'),
+      mime: (res.headers.get('content-type') || 'image/png').split(';')[0],
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** Resolve one generated id into `{ b64, mime }`. */
@@ -616,8 +635,9 @@ async function downloadGeneratedImage(
   signal?: AbortSignal,
 ): Promise<{ b64: string; mime: string }> {
   if (directUrls) {
-    for (const url of directUrls) {
-      const media = await downloadUrl(url, signal);
+    for (const rawUrl of directUrls) {
+      const targetUrl = rawUrl.startsWith('/') ? `${ctx.baseUrl}${rawUrl}` : rawUrl;
+      const media = await downloadUrl(targetUrl, ctx.userAgent, signal);
       if (media) return media;
     }
   }
@@ -638,16 +658,28 @@ async function downloadGeneratedImage(
     if ([301, 302, 303, 307, 308].includes(res.status)) {
       const loc = res.headers.get('location');
       if (loc) {
-        const media = await downloadUrl(loc, signal);
+        const targetUrl = loc.startsWith('/') ? `${ctx.baseUrl}${loc}` : loc;
+        const media = await downloadUrl(targetUrl, ctx.userAgent, signal);
         if (media) return media;
       }
     }
 
     if (res.ok) {
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.startsWith('image/')) {
+        const buffer = Buffer.from(await res.arrayBuffer());
+        if (buffer.length) {
+          return {
+            b64: buffer.toString('base64'),
+            mime: contentType.split(';')[0],
+          };
+        }
+      }
       const body = await res.json().catch(() => null) as { download_url?: unknown; url?: unknown } | null;
-      const url = typeof body?.download_url === 'string' ? body.download_url : (typeof body?.url === 'string' ? body.url : '');
-      if (url) {
-        const media = await downloadUrl(url, signal);
+      const rawUrl = typeof body?.download_url === 'string' ? body.download_url : (typeof body?.url === 'string' ? body.url : '');
+      if (rawUrl) {
+        const targetUrl = rawUrl.startsWith('/') ? `${ctx.baseUrl}${rawUrl}` : rawUrl;
+        const media = await downloadUrl(targetUrl, ctx.userAgent, signal);
         if (media) return media;
       }
     }
@@ -666,16 +698,28 @@ async function downloadGeneratedImage(
     if ([301, 302, 303, 307, 308].includes(res.status)) {
       const loc = res.headers.get('location');
       if (loc) {
-        const media = await downloadUrl(loc, signal);
+        const targetUrl = loc.startsWith('/') ? `${ctx.baseUrl}${loc}` : loc;
+        const media = await downloadUrl(targetUrl, ctx.userAgent, signal);
         if (media) return media;
       }
     }
 
     if (res.ok) {
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.startsWith('image/')) {
+        const buffer = Buffer.from(await res.arrayBuffer());
+        if (buffer.length) {
+          return {
+            b64: buffer.toString('base64'),
+            mime: contentType.split(';')[0],
+          };
+        }
+      }
       const body = await res.json().catch(() => null) as { download_url?: unknown; url?: unknown } | null;
-      const url = typeof body?.download_url === 'string' ? body.download_url : (typeof body?.url === 'string' ? body.url : '');
-      if (url) {
-        const media = await downloadUrl(url, signal);
+      const rawUrl = typeof body?.download_url === 'string' ? body.download_url : (typeof body?.url === 'string' ? body.url : '');
+      if (rawUrl) {
+        const targetUrl = rawUrl.startsWith('/') ? `${ctx.baseUrl}${rawUrl}` : rawUrl;
+        const media = await downloadUrl(targetUrl, ctx.userAgent, signal);
         if (media) return media;
       }
     }

@@ -231,4 +231,41 @@ describe('ChatGPT Web image generation (9Router picture_v2 parity)', () => {
     expect(result.data).toHaveLength(1);
     expect(result.data[0]?.b64_json).toBe(PNG.toString('base64'));
   }, 15_000);
+
+  it('downloads directly if files download endpoint answers 200 with image binary', async () => {
+    let cdnUserAgent = '';
+    vi.mocked(proxyFetch).mockImplementation(async (url, init) => {
+      const target = String(url);
+      const method = init?.method ?? 'GET';
+      if (target.endsWith('/api/auth/session')) return json({ accessToken: 'access-token' });
+      if (target.endsWith('/sentinel/chat-requirements/prepare')) return json({ prepare_token: 'prepare-token' });
+      if (target.endsWith('/sentinel/chat-requirements')) return json({ token: 'requirements-token' });
+      if (target.endsWith('/backend-api/f/conversation/prepare')) return json({ conduit_token: 'conduit-token' });
+      if (target.endsWith('/backend-api/f/conversation') && method === 'POST') {
+        const sse = [
+          'data: {"conversation_id":"55555555-5555-5555-5555-555555555555"}',
+          'data: {"message":{"content":{"parts":["file-service://file-binary12345678"]}}}',
+          '',
+        ].join('\n');
+        return new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+      }
+      if (target.endsWith('/backend-api/files/file-binary12345678/download')) {
+        const headers = init?.headers as Record<string, string> | undefined;
+        cdnUserAgent = headers?.['User-Agent'] ?? '';
+        return new Response(PNG, { status: 200, headers: { 'content-type': 'image/png' } });
+      }
+      return new Response('not found', { status: 404 });
+    });
+
+    const result = await generateChatGptWebImages({
+      credential: '__Secure-next-auth.session-token=valid',
+      prompt: 'a purple hexagon',
+      userAgent: 'CustomBrowser/1.0',
+      n: 1,
+    });
+
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]?.b64_json).toBe(PNG.toString('base64'));
+    expect(cdnUserAgent).toBe('CustomBrowser/1.0');
+  }, 15_000);
 });
