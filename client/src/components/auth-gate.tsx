@@ -16,6 +16,8 @@ import { EmailRecovery, ExternalForgotPassword } from '@/custom/EmailRecovery'
 import { ExternalAuthCallback } from '@/custom/ExternalAuthCallback'
 import { useExternalAuthLanding } from '@/custom/use-external-auth'
 import { RegistrationKeyNotice } from '@/custom/RegistrationKeyNotice'
+import { GuestShell } from '@/custom/GuestShell'
+import type { GuestPermission } from '../../../shared/guest-access'
 
 // Matches the server rule (routes/auth.ts zod schema).
 const PASSWORD_MIN = 8
@@ -63,7 +65,7 @@ function Centered({ children }: { children: ReactNode }) {
   )
 }
 
-function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () => void }) {
+function AuthForm({ mode, onAuthed, start = 'login' }: { mode: 'setup' | 'login'; onAuthed: () => void; start?: 'login' | 'request' }) {
   const { t } = useI18n()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -90,9 +92,9 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
     return params.get('mode') === 'register' || !!params.get('invite')
   })
 
-  const [authView, setAuthView] = useState<'login' | 'register'>(registerParam ? 'register' : 'login')
+  const [authView, setAuthView] = useState<'login' | 'register'>(registerParam || start === 'request' ? 'register' : 'login')
   const [inviteCode, setInviteCode] = useState(inviteParam)
-  const [registerType, setRegisterType] = useState<'invite' | 'request'>('invite')
+  const [registerType, setRegisterType] = useState<'invite' | 'request'>(start === 'request' ? 'request' : 'invite')
   const [requestNote, setRequestNote] = useState('')
   const [requestSubmittedEmail, setRequestSubmittedEmail] = useState<string | null>(null)
 
@@ -675,6 +677,22 @@ export function ChangeCredentialsModal({ mode, onClose }: ChangeCredentialsModal
   )
 }
 
+// Signed out: the guest views an administrator opened (custom/GuestShell), or the sign-in card.
+function SignedOut({ onAuthed }: { onAuthed: () => void }) {
+  const guest = useQuery<{ permissions: GuestPermission[] }>({ queryKey: ['guest-access'], queryFn: () => apiFetch('/api/auth/guest'), retry: false })
+  const [view, setView] = useState<'browse' | 'login' | 'request'>('browse')
+  const permissions = guest.data?.permissions ?? []
+  if (guest.isLoading) return <Centered><Loader2 className="mx-auto size-4 animate-spin text-muted-foreground" aria-hidden /></Centered>
+  if (permissions.length === 0) return <AuthForm mode="login" onAuthed={onAuthed} />
+  if (view === 'browse') return <GuestShell permissions={permissions} onSignIn={() => setView('login')} onRequest={() => setView('request')} />
+  return (
+    <div className="relative">
+      <button type="button" onClick={() => setView('browse')} className="absolute left-4 top-4 z-10 text-sm text-muted-foreground hover:text-foreground">← Back to browsing</button>
+      <AuthForm key={view} mode="login" start={view} onAuthed={onAuthed} />
+    </div>
+  )
+}
+
 export function AuthGate({ children }: { children: ReactNode }) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
@@ -762,7 +780,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return <Centered><p className="flex items-center justify-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" aria-hidden />{t('auth.loading')}</p></Centered>
   }
   if (data.needsSetup) return <AuthForm mode="setup" onAuthed={onAuthed} />
-  if (!data.authenticated) return <AuthForm mode="login" onAuthed={onAuthed} />
+  if (!data.authenticated) return <SignedOut onAuthed={onAuthed} />
 
   return <div key={revision} className="contents">{children}</div>
 }

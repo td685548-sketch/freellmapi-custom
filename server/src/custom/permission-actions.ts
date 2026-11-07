@@ -3,6 +3,7 @@ import type { Permission } from '@freellmapi/shared/user-access.js';
 import type { ParentPermission } from '@freellmapi/shared/permissions.js';
 import { hasPermission } from '../middleware/requirePermission.js';
 import type { SessionUser } from '../services/auth.js';
+import { isGuestRequest } from '../services/guest-access.js';
 
 /** Resolve known operations only. New/unrecognized endpoints require the old
  * parent capability, so a leaf cannot accidentally unlock future features. */
@@ -23,6 +24,7 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
     if (path === '/api/keys/custom/probe' && method === 'POST') return 'test_keys';
     if (/^\/api\/(embeddings|media|search|decisions)(\/|$)/.test(path)) return 'manage_key_models';
   }
+  if (parent === 'manage_users' && path === '/api/admin/guest-access') return read ? 'view_users' : method === 'PUT' ? 'edit_user_permissions' : parent;
   if (parent === 'manage_users' && path.startsWith('/api/admin/users')) {
     if (read && ['/api/admin/users', '/api/admin/users/usage'].includes(path)) return 'view_users';
     if (read && /^\/api\/admin\/users\/\d+\/analytics$/.test(path)) return 'view_users';
@@ -100,6 +102,8 @@ export function requireActionPermission(parent: ParentPermission) {
   return (req: Request, res: Response, next: NextFunction): void => {
     const permission = permissionForAction(parent, req.method, req.originalUrl);
     const user = (req as Request & { user?: SessionUser }).user;
+    // Guest requests exist only for the read routes an administrator opened (services/guest-access.ts).
+    if (isGuestRequest(req)) { next(); return; }
     if ((req.method === 'GET' || req.method === 'HEAD') && req.originalUrl.split('?')[0] === '/api/cache/stats' && hasPermission(user, 'view_analytics')) { next(); return; }
     if ((req.method === 'GET' || req.method === 'HEAD') && ['/api/settings/version', '/api/settings/update-check'].includes(req.originalUrl.split('?')[0]!) && hasPermission(user, 'manage_updates')) { next(); return; }
     if (hasPermission(user, permission)) { next(); return; }

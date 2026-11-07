@@ -29,6 +29,8 @@ import { usageReportSettingsRouter } from '../routes/usage-report-settings.js';
 import { auditMiddleware } from '../services/audit-log.js';
 import { auditLogRouter } from '../routes/audit-log.js';
 import { playgroundAttribution } from './playground-attribution.js';
+import { guestAccessMiddleware } from '../services/guest-access.js';
+import { guestAccessAdminRouter, guestInfoRouter } from '../routes/guest-access.js';
 import { adminUserQuotaRouter, profileQuotaRouter, selfQuotaRouter } from '../routes/usage-quota.js';
 import { withRoutingSettingsScope } from '../db/routing-settings-scope.js';
 import { providerTiersRouter } from '../routes/provider-tiers.js';
@@ -127,6 +129,9 @@ export function registerCustomRoutes(app: Express): void {
   app.use('/api', (_req, _res, next) => withRoutingSettingsScope(next));
   // Change history: every successful dashboard write is recorded once its response has gone out.
   app.use('/api', auditMiddleware);
+  // Signed-out visitors: read-only access to the views an administrator opened, before any gate.
+  app.use('/api', guestAccessMiddleware);
+  app.use('/api/auth/guest', guestInfoRouter);
   app.use(['/v1', '/x/v1'], (_req, _res, next) => withRoutingSettingsScope(next));
   // When the X Gateway is off, answer 404 immediately before any auth checks
   // so an inactive gateway leaks nothing about its existence.
@@ -188,6 +193,7 @@ export function registerCustomRoutes(app: Express): void {
   app.use('/api/auth', externalAuthRouter, customAuthRouter);
   app.use('/api/invites', requireAuth, requireActionPermission('manage_invites'), invitesRouter);
   app.use('/api/audit', requireAuth, requireActionPermission('view_logs'), auditLogRouter);
+  app.use('/api/admin/guest-access', requireAuth, requireActionPermission('manage_users'), guestAccessAdminRouter);
   app.use('/api/admin/users', requireAuth, requireActionPermission('manage_users'), adminUsersRouter, adminUserAnalyticsRouter, adminUserQuotaRouter, adminUserRequestsRouter);
   app.use('/api/admin/registration-requests', requireAuth, requireActionPermission('manage_requests'), adminRegistrationRequestsRouter);
   app.use('/api/user', requireAuth, userKeysRouter, selfAnalyticsRouter, selfQuotaRouter, selfRequestsRouter);

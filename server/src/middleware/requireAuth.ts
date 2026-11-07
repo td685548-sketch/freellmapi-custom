@@ -14,6 +14,8 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   // lookup a blocking round trip. Never reused across requests.
   const prior = req as Request & { user?: ReturnType<typeof validateSession>; sessionToken?: string };
   if (prior.user && token && prior.sessionToken === token) { next(); return; }
+  // A signed-out visitor on a route an administrator opened to guests (custom/register.ts, read-only).
+  if (prior.user && !token && (req as Request & { guestAccess?: boolean }).guestAccess) { next(); return; }
   const session = validateSession(token);
   if (!session) {
     res.status(401).json({ error: { message: 'Authentication required', type: 'authentication_error' } });

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { clampAnalyticsDays } from '../services/user-analytics.js';
 import { getUsageOverview } from '../services/usage-overview.js';
+import { isGuestRequest } from '../services/guest-access.js';
 import { MAX_RANGE_DAYS, dailyUsage, dayOf, toCsv, type DailyKind } from '../services/usage-daily.js';
 
 // Usage ranking data. Mounted at /api/usage behind the `view_usage` gate in custom/register.ts;
@@ -11,12 +12,12 @@ export const usageRouter = Router();
 
 // GET /api/usage/accounts?days=&fresh=1 (fresh skips the 30-second reuse)
 usageRouter.get('/accounts', (req: Request, res: Response) => {
-  res.json({ overview: getUsageOverview('account', clampAnalyticsDays(req.query.days), Date.now(), req.query.fresh === '1') });
+  res.json({ overview: getUsageOverview('account', clampAnalyticsDays(req.query.days), Date.now(), req.query.fresh === '1' && !isGuestRequest(req)) });
 });
 
 // GET /api/usage/profiles?days=
 usageRouter.get('/profiles', (req: Request, res: Response) => {
-  res.json({ overview: getUsageOverview('profile', clampAnalyticsDays(req.query.days), Date.now(), req.query.fresh === '1') });
+  res.json({ overview: getUsageOverview('profile', clampAnalyticsDays(req.query.days), Date.now(), req.query.fresh === '1' && !isGuestRequest(req)) });
 });
 
 // --- Long-term daily figures (custom_usage_daily) and CSV exports ---------------------------------

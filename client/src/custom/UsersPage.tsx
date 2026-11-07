@@ -9,6 +9,7 @@ import { ConfirmButton } from '@/components/confirm-button'
 import { toast } from '@/lib/toast'
 import { PermissionsDialog } from './PermissionsDialog'
 import { UsageLink } from './UsageLink'
+import { GuestAccessCard } from './GuestAccessCard'
 
 import type { AdminUser, RegistrationRequest } from '../../../shared/user-access'
 export type { AdminUser, RegistrationRequest } from '../../../shared/user-access'
@@ -474,6 +475,8 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
         onOpenChange={(open) => !open && setPermissionsUser(null)}
         onSuccess={refreshAll}
       />
+
+      {can('viewUsers') && <GuestAccessCard canEdit={can('permissions')} />}
 
       <p className="text-xs text-muted-foreground">
         Creating accounts directly without invitation or approval is not allowed to protect system capacity.
