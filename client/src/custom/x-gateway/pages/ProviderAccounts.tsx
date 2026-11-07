@@ -1,10 +1,13 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, CircleCheck, Ellipsis, KeyRound, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, Unplug, X } from 'lucide-react'
 import { Dialog, DialogPopup, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import type { ProviderAccount } from '../../../../../shared/x-accounts'
 import { accountsApi, refreshAccounts, useAccounts } from '../api'
+import { useSessionRevision } from '../../session-state'
+import { proxyPoolApi } from '../proxy-pool-api'
+import { usePoolStrings } from '../proxy-pool-strings'
 import { useXStrings } from '../strings'
 import { ConnectAccountDialog } from '../ConnectAccountDialog'
 import { AccountLoadState, ProviderMark } from './Providers'
@@ -12,23 +15,28 @@ import { AccountLoadState, ProviderMark } from './Providers'
 export default function ProviderAccounts() {
   const { providerId } = useParams()
   const s = useXStrings()
+  const p = usePoolStrings()
+  const revision = useSessionRevision()
   const query = useAccounts()
   const client = useQueryClient()
+  const poolQuery = useQuery({ queryKey: ['x-proxy-pool', revision], queryFn: ({ signal }) => proxyPoolApi.list(signal), retry: false, staleTime: 15_000 })
+  const poolEntries = poolQuery.data?.entries ?? []
   const [connect, setConnect] = useState<true | ProviderAccount | null>(null)
   const [edit, setEdit] = useState<ProviderAccount | null>(null)
   const [label, setLabel] = useState('')
   const [proxyUrl, setProxyUrl] = useState('')
+  const [poolId, setPoolId] = useState('')
   const [remove, setRemove] = useState<ProviderAccount | null>(null)
   const [tab, setTab] = useState<'accounts' | 'models'>('accounts')
   const [testResult, setTestResult] = useState<{ id: number; ok: boolean } | null>(null)
   const change = useMutation({
     meta: { silenceToast: true },
-    mutationFn: async (action: { type: 'edit' | 'remove' | 'toggle' | 'test'; id: number; label?: string; proxyUrl?: string; enabled?: boolean }) => {
+    mutationFn: async (action: { type: 'edit' | 'remove' | 'toggle' | 'test'; id: number; label?: string; proxyUrl?: string; proxyPoolId?: number | null; enabled?: boolean }) => {
       if (action.type === 'test') {
         const result = await accountsApi.test(action.id)
         setTestResult({ id: action.id, ok: result.ok })
       } else if (action.type === 'remove') await accountsApi.remove(action.id)
-      else await accountsApi.edit(action.id, action.type === 'toggle' ? { enabled: action.enabled } : { label: action.label, ...(action.proxyUrl !== undefined ? { proxyUrl: action.proxyUrl } : {}) })
+      else await accountsApi.edit(action.id, action.type === 'toggle' ? { enabled: action.enabled } : { label: action.label, ...(action.proxyUrl !== undefined ? { proxyUrl: action.proxyUrl } : {}), ...(action.proxyPoolId !== undefined ? { proxyPoolId: action.proxyPoolId } : {}) })
     },
     onSuccess: async () => { setEdit(null); setRemove(null); await refreshAccounts(client) },
   })
@@ -46,7 +54,9 @@ export default function ProviderAccounts() {
     if (edit && label.trim()) {
       const nextProxy = proxyUrl.trim()
       const proxyPatch = nextProxy !== (edit.proxyUrl ?? '') ? { proxyUrl: nextProxy } : {}
-      change.mutate({ type: 'edit', id: edit.id, label: label.trim(), ...proxyPatch })
+      const nextPool = poolId === '' ? null : Number(poolId)
+      const poolPatch = nextPool !== (edit.proxyPoolId ?? null) ? { proxyPoolId: nextPool } : {}
+      change.mutate({ type: 'edit', id: edit.id, label: label.trim(), ...proxyPatch, ...poolPatch })
     }
   }
 
@@ -65,15 +75,15 @@ export default function ProviderAccounts() {
     {tab === 'accounts' ? <section id="x-accounts-panel" role="tabpanel" aria-labelledby="x-accounts-tab">
       {!provider.accounts.length && <div className="x-empty x-panel"><Unplug size={38} /><h2>{s.noAccounts}</h2><p>{s.noAccountsHelp}</p>{canConnect && <button className="x-button x-primary" onClick={() => setConnect(true)}><Plus size={16} />{s.addAccount}</button>}</div>}
       <div className="x-account-list">{provider.accounts.map(account => <article key={account.id} className={`x-account x-panel ${account.enabled ? '' : 'x-account-paused'}`}>
-        <div className="x-account-top"><span className="x-account-icon"><KeyRound size={20} /></span><div className="x-account-identity"><h3>{account.label || provider.name}</h3><p>{account.identity ?? (account.authMethod === 'api_key' ? s.apiKey : account.authMethod === 'cookie' ? s.cookie : s.oauth)}{account.proxyUrl ? ` · Proxy: ${account.proxyUrl}` : ''}</p></div><span className={`x-badge ${!account.enabled ? '' : account.status === 'healthy' ? 'x-green' : account.status === 'error' ? 'x-red' : ''}`}><span className="x-dot" />{!account.enabled ? s.paused : account.status === 'healthy' ? s.healthy : account.status === 'error' ? s.needsLogin : s.unknown}</span>{permissions.edit && <button className="x-switch" role="switch" aria-checked={account.enabled} aria-label={`${account.enabled ? s.disable : s.enable}: ${account.label}`} disabled={change.isPending} onClick={() => change.mutate({ type: 'toggle', id: account.id, enabled: !account.enabled })}><span /></button>}</div>
+        <div className="x-account-top"><span className="x-account-icon"><KeyRound size={20} /></span><div className="x-account-identity"><h3>{account.label || provider.name}</h3><p>{account.identity ?? (account.authMethod === 'api_key' ? s.apiKey : account.authMethod === 'cookie' ? s.cookie : s.oauth)}{account.proxyUrl ? ` · Proxy: ${account.proxyUrl}` : ''}{account.proxyPoolName ? ` · ${p.poolBadge}: ${account.proxyPoolName}` : ''}</p></div><span className={`x-badge ${!account.enabled ? '' : account.status === 'healthy' ? 'x-green' : account.status === 'error' ? 'x-red' : ''}`}><span className="x-dot" />{!account.enabled ? s.paused : account.status === 'healthy' ? s.healthy : account.status === 'error' ? s.needsLogin : s.unknown}</span>{permissions.edit && <button className="x-switch" role="switch" aria-checked={account.enabled} aria-label={`${account.enabled ? s.disable : s.enable}: ${account.label}`} disabled={change.isPending} onClick={() => change.mutate({ type: 'toggle', id: account.id, enabled: !account.enabled })}><span /></button>}</div>
         <div className="x-account-metrics"><div><span>{s.requests}</span><strong>{count(account.monthlyUsage.requests)}<small> / {account.monthlyRequestCap ? count(account.monthlyRequestCap) : '∞'}</small></strong></div><div><span>{s.tokens}</span><strong>{count(account.monthlyUsage.tokens)}<small> / {account.monthlyTokenCap ? count(account.monthlyTokenCap) : '∞'}</small></strong></div></div>
-        <div className="x-account-actions">{permissions.test && <button className="x-button x-small" disabled={change.isPending} onClick={() => { setTestResult(null); change.mutate({ type: 'test', id: account.id }) }}><ShieldCheck size={14} />{change.isPending && change.variables?.type === 'test' && change.variables.id === account.id ? s.testing : s.test}</button>}{permissions.edit && (provider.id !== 'github-copilot' || permissions.manageModels) && (account.authMethod === 'oauth_pkce' || account.authMethod === 'device_code') && <button className="x-button x-small" disabled={change.isPending} onClick={() => { change.reset(); setConnect(account) }}><RefreshCw size={14} />{s.reconnect}</button>}<span className="x-spacer" />{permissions.edit && <button className="x-icon-button" aria-label={`${s.edit}: ${account.label}`} onClick={() => { change.reset(); setEdit(account); setLabel(account.label); setProxyUrl(account.proxyUrl ?? '') }}><Pencil size={16} /></button>}{permissions.delete && <button className="x-icon-button x-danger" aria-label={`${s.remove}: ${account.label}`} onClick={() => { change.reset(); setRemove(account) }}><Trash2 size={16} /></button>}{!permissions.edit && !permissions.delete && <span className="x-caption">{s.readOnly}<Ellipsis size={15} /></span>}</div>
+        <div className="x-account-actions">{permissions.test && <button className="x-button x-small" disabled={change.isPending} onClick={() => { setTestResult(null); change.mutate({ type: 'test', id: account.id }) }}><ShieldCheck size={14} />{change.isPending && change.variables?.type === 'test' && change.variables.id === account.id ? s.testing : s.test}</button>}{permissions.edit && (provider.id !== 'github-copilot' || permissions.manageModels) && (account.authMethod === 'oauth_pkce' || account.authMethod === 'device_code') && <button className="x-button x-small" disabled={change.isPending} onClick={() => { change.reset(); setConnect(account) }}><RefreshCw size={14} />{s.reconnect}</button>}<span className="x-spacer" />{permissions.edit && <button className="x-icon-button" aria-label={`${s.edit}: ${account.label}`} onClick={() => { change.reset(); setEdit(account); setLabel(account.label); setProxyUrl(account.proxyUrl ?? ''); setPoolId(account.proxyPoolId != null ? String(account.proxyPoolId) : '') }}><Pencil size={16} /></button>}{permissions.delete && <button className="x-icon-button x-danger" aria-label={`${s.remove}: ${account.label}`} onClick={() => { change.reset(); setRemove(account) }}><Trash2 size={16} /></button>}{!permissions.edit && !permissions.delete && <span className="x-caption">{s.readOnly}<Ellipsis size={15} /></span>}</div>
         {testResult && testResult.id === account.id && <p className={testResult.ok ? 'x-test-ok' : 'x-error'} role="status">{testResult.ok && <CircleCheck size={16} />}{testResult.ok ? s.testOk : s.testFailed}</p>}
       </article>)}</div>
       <div className="x-info-row"><ShieldCheck size={20} /><div><h3>{s.routing}</h3><p>{s.routingHelp}</p><p>{s.sharedPool}</p></div></div>
     </section> : <section id="x-models-panel" role="tabpanel" aria-labelledby="x-models-tab" className="x-panel x-model-list">{models.length ? models.map(model => <div key={model.id}><strong>{model.name}</strong><code>{model.id}</code></div>) : <p className="x-muted">{s.noModels}</p>}</section>}
     {connect && <ConnectAccountDialog provider={provider} account={connect === true ? undefined : connect} onClose={() => setConnect(null)} />}
-    {edit && <Dialog open onOpenChange={open => { if (!open && !change.isPending) setEdit(null) }}><DialogPopup className="x-console x-dialog"><DialogTitle>{s.edit}</DialogTitle><DialogDescription>{edit.label}</DialogDescription><form className="x-form" onSubmit={editSubmit}><label>{s.name}<input id="x-account-edit-label" name="label" autoFocus required maxLength={100} value={label} onChange={event => setLabel(event.target.value)} /></label><label>{s.accountProxy}<input id="x-account-edit-proxy" name="proxyUrl" value={proxyUrl} placeholder={s.accountProxyPlaceholder} onChange={event => setProxyUrl(event.target.value)} /></label>{change.isError && <p className="x-error" role="alert">{change.error.message}</p>}<div className="x-dialog-actions"><button type="button" className="x-button" disabled={change.isPending} onClick={() => setEdit(null)}>{s.cancel}</button><button className="x-button x-primary" disabled={change.isPending || !label.trim()}>{change.isPending ? s.saving : s.save}</button></div></form></DialogPopup></Dialog>}
+    {edit && <Dialog open onOpenChange={open => { if (!open && !change.isPending) setEdit(null) }}><DialogPopup className="x-console x-dialog"><DialogTitle>{s.edit}</DialogTitle><DialogDescription>{edit.label}</DialogDescription><form className="x-form" onSubmit={editSubmit}><label>{s.name}<input id="x-account-edit-label" name="label" autoFocus required maxLength={100} value={label} onChange={event => setLabel(event.target.value)} /></label><label>{s.accountProxy}<input id="x-account-edit-proxy" name="proxyUrl" value={proxyUrl} placeholder={s.accountProxyPlaceholder} onChange={event => setProxyUrl(event.target.value)} /></label><label>{p.accountPool}<select id="x-account-edit-pool" name="proxyPoolId" value={poolId} onChange={event => setPoolId(event.target.value)}><option value="">{p.accountPoolNone}</option>{poolEntries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}{entry.enabled ? '' : ` (${p.disabled})`}</option>)}</select></label>{change.isError && <p className="x-error" role="alert">{change.error.message}</p>}<div className="x-dialog-actions"><button type="button" className="x-button" disabled={change.isPending} onClick={() => setEdit(null)}>{s.cancel}</button><button className="x-button x-primary" disabled={change.isPending || !label.trim()}>{change.isPending ? s.saving : s.save}</button></div></form></DialogPopup></Dialog>}
     {remove && <Dialog open onOpenChange={open => { if (!open && !change.isPending) setRemove(null) }}><DialogPopup className="x-console x-dialog"><DialogTitle>{s.removeTitle}</DialogTitle><DialogDescription>{remove.label} — {s.removeHelp}</DialogDescription>{change.isError && <p className="x-error" role="alert">{change.error.message}</p>}<div className="x-dialog-actions"><button className="x-button" disabled={change.isPending} onClick={() => setRemove(null)}><X size={14} />{s.cancel}</button><button className="x-button x-destructive" disabled={change.isPending} onClick={() => change.mutate({ type: 'remove', id: remove.id })}><Trash2 size={14} />{s.remove}</button></div></DialogPopup></Dialog>}
   </>
 }

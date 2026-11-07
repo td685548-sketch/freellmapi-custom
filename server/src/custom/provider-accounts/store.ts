@@ -6,6 +6,7 @@ import { decryptProxyUrl, encryptProxyUrl, isValidKeyProxyUrl, KEY_PROXY_URL_ERR
 import { parseModelScope } from '../../lib/model-scope.js';
 import { clearCooldownsForKey } from '../../services/ratelimit.js';
 import { getOutboundProxyUrl } from '../x-gateway/config.js';
+import { pickAutoProxyPoolId, proxyPoolExists, resolvePoolProxyUrl } from '../x-gateway/proxy-pool.js';
 import { AccountError, COPILOT_BASE_URL } from './http.js';
 import { clearCopilotToken, type CopilotModel } from './copilot.js';
 import {
@@ -38,6 +39,7 @@ export interface AccountRow {
   proxy_encrypted: string | null;
   proxy_iv: string | null;
   proxy_auth_tag: string | null;
+  proxy_pool_id: number | null;
 }
 
 interface RawXGatewayKeyRow {
@@ -60,6 +62,8 @@ interface RawXGatewayKeyRow {
   proxy_encrypted?: string | null;
   proxy_iv?: string | null;
   proxy_auth_tag?: string | null;
+  proxy_pool_id?: number | null;
+  proxy_pool_name?: string | null;
 }
 
 function hydrateAccountRow(raw: RawXGatewayKeyRow): AccountRow {
@@ -85,14 +89,17 @@ function hydrateAccountRow(raw: RawXGatewayKeyRow): AccountRow {
     proxy_encrypted: raw.proxy_encrypted ?? null,
     proxy_iv: raw.proxy_iv ?? null,
     proxy_auth_tag: raw.proxy_auth_tag ?? null,
+    proxy_pool_id: raw.proxy_pool_id == null ? null : Number(raw.proxy_pool_id),
   };
 }
 
 export function resolveXGatewayAccountProxy(
-  row?: Pick<AccountRow, 'proxy_encrypted' | 'proxy_iv' | 'proxy_auth_tag'> | null,
+  row?: Pick<AccountRow, 'proxy_encrypted' | 'proxy_iv' | 'proxy_auth_tag' | 'proxy_pool_id'> | null,
 ): string | undefined {
   const perAccount = decryptProxyUrl(row);
   if (perAccount) return perAccount;
+  const pooled = resolvePoolProxyUrl(row?.proxy_pool_id);
+  if (pooled) return pooled;
   const gatewayWide = getOutboundProxyUrl();
   return gatewayWide || undefined;
 }
@@ -206,9 +213,11 @@ export function listAccounts(): ProviderAccountsResponse['providers'] {
   const db = getDb();
   const month = new Date().toISOString().slice(0, 7);
   const rows = db.prepare(`
-    SELECT k.*, COALESCE(u.requests, 0) AS requests, COALESCE(u.tokens, 0) AS tokens
+    SELECT k.*, COALESCE(u.requests, 0) AS requests, COALESCE(u.tokens, 0) AS tokens,
+           pp.name AS proxy_pool_name
     FROM x_gateway_keys k
     LEFT JOIN x_gateway_key_monthly_usage u ON u.key_id = k.id AND u.month = ?
+    LEFT JOIN x_gateway_proxy_pool pp ON pp.id = k.proxy_pool_id
     ORDER BY k.id
   `).all(month) as Array<RawXGatewayKeyRow & { requests: number; tokens: number }>;
 
@@ -239,6 +248,7 @@ export function listAccounts(): ProviderAccountsResponse['providers'] {
       enabled: row.enabled === 1,
       status: row.status,
       ...(maskedProxy ? { proxyUrl: maskedProxy } : {}),
+      ...(row.proxy_pool_id != null ? { proxyPoolId: row.proxy_pool_id, proxyPoolName: raw.proxy_pool_name ?? `#${row.proxy_pool_id}` } : {}),
       monthlyUsage: { requests: Number(raw.requests), tokens: Number(raw.tokens) },
       monthlyRequestCap: row.monthly_request_cap,
       monthlyTokenCap: row.monthly_token_cap,
@@ -358,9 +368,9 @@ export function saveAccount(input: {
         db.prepare(`
           INSERT INTO x_gateway_keys (
             provider, label, subject, auth_method, encrypted_key, iv, auth_tag,
-            base_url, model_scope_json, models_json, status, enabled, created_by
+            base_url, model_scope_json, models_json, status, enabled, created_by, proxy_pool_id
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unknown', 1, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unknown', 1, ?, ?)
         `).run(
           input.provider,
           input.label,
@@ -373,6 +383,7 @@ export function saveAccount(input: {
           modelScopeJson,
           modelsJson,
           input.userId ?? null,
+          pickAutoProxyPoolId(),
         ).lastInsertRowid,
       );
     }
@@ -390,6 +401,7 @@ export function createApiKeyAccount(input: {
   label?: string;
   baseUrl?: string | null;
   proxyUrl?: string | null;
+  proxyPoolId?: number | null;
   authMethod?: ProviderAccountAuthMethod;
   models?: { id: string; name: string }[];
   userId?: number | null;
@@ -425,6 +437,16 @@ export function createApiKeyAccount(input: {
   }
   const proxyEncrypted = encryptProxyUrl(rawProxyUrl);
 
+  let proxyPoolId: number | null = null;
+  if (input.proxyPoolId != null) {
+    if (!proxyPoolExists(input.proxyPoolId)) {
+      throw new AccountError(400, 'Proxy pool entry not found.');
+    }
+    proxyPoolId = input.proxyPoolId;
+  } else if (input.proxyPoolId === undefined && !rawProxyUrl) {
+    proxyPoolId = pickAutoProxyPoolId();
+  }
+
   const authMethod: ProviderAccountAuthMethod = input.authMethod
     ?? (catalogEntry.category === 'webCookie' ? 'cookie' : 'api_key');
 
@@ -441,9 +463,9 @@ export function createApiKeyAccount(input: {
       INSERT INTO x_gateway_keys (
         provider, label, subject, auth_method, encrypted_key, iv, auth_tag,
         base_url, model_scope_json, models_json, status, enabled, created_by,
-        proxy_encrypted, proxy_iv, proxy_auth_tag
+        proxy_encrypted, proxy_iv, proxy_auth_tag, proxy_pool_id
       )
-      VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'unknown', 1, ?, ?, ?, ?)
+      VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'unknown', 1, ?, ?, ?, ?, ?)
     `).run(
       normalizedProvider,
       input.label?.trim() ?? '',
@@ -458,6 +480,7 @@ export function createApiKeyAccount(input: {
       proxyEncrypted.encrypted,
       proxyEncrypted.iv,
       proxyEncrypted.authTag,
+      proxyPoolId,
     ).lastInsertRowid,
   );
 
@@ -471,6 +494,7 @@ export function updateAccount(
     label?: string;
     enabled?: boolean;
     proxyUrl?: string;
+    proxyPoolId?: number | null;
     monthlyRequestCap?: number;
     monthlyTokenCap?: number;
   },
@@ -494,12 +518,20 @@ export function updateAccount(
     nextProxyTag = enc.authTag;
   }
 
+  let nextPoolId = existing.proxy_pool_id;
+  if (patch.proxyPoolId !== undefined) {
+    if (patch.proxyPoolId !== null && !proxyPoolExists(patch.proxyPoolId)) {
+      throw new AccountError(400, 'Proxy pool entry not found.');
+    }
+    nextPoolId = patch.proxyPoolId;
+  }
+
   getDb().prepare(`
     UPDATE x_gateway_keys
     SET label = ?, enabled = ?, monthly_request_cap = ?, monthly_token_cap = ?,
-        proxy_encrypted = ?, proxy_iv = ?, proxy_auth_tag = ?
+        proxy_encrypted = ?, proxy_iv = ?, proxy_auth_tag = ?, proxy_pool_id = ?
     WHERE id = ?
-  `).run(nextLabel, nextEnabled, nextReqCap, nextTokCap, nextProxyEnc, nextProxyIv, nextProxyTag, id);
+  `).run(nextLabel, nextEnabled, nextReqCap, nextTokCap, nextProxyEnc, nextProxyIv, nextProxyTag, nextPoolId, id);
 
   invalidateXGatewayKeyCache();
   return accountRow(id);

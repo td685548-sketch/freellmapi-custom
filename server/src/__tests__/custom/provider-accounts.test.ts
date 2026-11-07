@@ -11,6 +11,8 @@ import { accountRow, invalidateXGatewayKeyCache } from '../../custom/provider-ac
 import { X_GATEWAY_PROVIDERS, resolveXGatewayProvider } from '../../custom/provider-accounts/catalog.js';
 import { setEnabled } from '../../custom/x-gateway/config.js';
 import * as migration from '../../db/migrations/20261107_120000_custom_x_gateway_keys.js';
+import * as proxyAndApiKeysMigration from '../../db/migrations/20261107_130000_custom_x_gateway_proxy_and_api_keys.js';
+import * as proxyPoolMigration from '../../db/migrations/20261107_150000_custom_x_gateway_proxy_pool.js';
 import {
   COPILOT_BASE_URL, COPILOT_TOKEN_URL, DEVICE_URL, GITHUB_TOKEN_URL, GITHUB_USER_URL, OPENROUTER_KEY_URL,
 } from '../../custom/provider-accounts/http.js';
@@ -477,6 +479,10 @@ it('roundtrips the x_gateway_keys migration with unique identities and cascade o
   migration.down(getDb());
   migration.up(getDb());
   migration.up(getDb());
+  // The recreated table lacks columns added by later migrations; restore them
+  // so subsequent tests in this shared in-memory DB see the full schema.
+  proxyAndApiKeysMigration.up(getDb());
+  proxyPoolMigration.up(getDb());
   expect(getDb().prepare('SELECT * FROM x_gateway_keys').all()).toHaveLength(0);
 });
 

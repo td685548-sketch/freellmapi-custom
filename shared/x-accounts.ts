@@ -10,6 +10,8 @@ export interface ProviderAccount {
   enabled: boolean;
   status: string;
   proxyUrl?: string;
+  proxyPoolId?: number;
+  proxyPoolName?: string;
   monthlyUsage: { requests: number; tokens: number };
   monthlyRequestCap: number;
   monthlyTokenCap: number;
@@ -38,6 +40,7 @@ export interface ProviderAccountCreateRequest {
   label?: string;
   baseUrl?: string;
   proxyUrl?: string;
+  proxyPoolId?: number | null;
   authMethod?: ProviderAccountAuthMethod;
   models?: { id: string; name: string }[];
 }
@@ -64,6 +67,6 @@ export type ProviderAccountAuthStartResponse = {
 
 export type ProviderAccountAuthResult = { status: 'connected'; accountId: number };
 export type ProviderAccountPollResponse = ProviderAccountAuthResult | { status: 'pending'; interval: number };
-export interface ProviderAccountUpdateRequest { label?: string; enabled?: boolean; proxyUrl?: string }
+export interface ProviderAccountUpdateRequest { label?: string; enabled?: boolean; proxyUrl?: string; proxyPoolId?: number | null }
 export interface ProviderAccountTestRequest { model?: string; message?: string }
 export interface ProviderAccountTestResponse { ok: boolean; message?: string }

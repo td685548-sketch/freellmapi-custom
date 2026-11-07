@@ -4,7 +4,8 @@ import type { ChatMessage } from '@freellmapi/shared/types.js';
 import type { CompletionOptions } from '../../providers/base.js';
 import { decrypt } from '../../lib/crypto.js';
 import { estimateInputTokens } from '../../lib/content.js';
-import { withKeyProxy } from '../../lib/proxy.js';
+import { withQuotaTracking } from './quota/tracking.js';
+import { applyQuotaRouting } from './quota/store.js';
 import { logRequest } from '../../lib/request-log.js';
 import { sanitizeProviderErrorMessage } from '../../lib/error-redaction.js';
 import { applyOutputSavers } from '../output-savers/apply.js';
@@ -43,9 +44,9 @@ export function resolveCandidateRoutes(requestedModel: string | undefined): {
   candidates: CandidateRoute[];
   notFoundError?: string;
 } {
-  const usable = getUsableXGatewayKeys().filter(isWithinAccountCaps);
   const rawModel = (requestedModel ?? 'auto').trim() || 'auto';
   const lower = rawModel.toLowerCase();
+  const usable = applyQuotaRouting(getUsableXGatewayKeys().filter(isWithinAccountCaps), lower === 'auto' || lower.startsWith('auto:'));
 
   if (lower === 'auto' || lower.startsWith('auto:')) {
     const candidates: CandidateRoute[] = [];
@@ -82,11 +83,9 @@ export function resolveCandidateRoutes(requestedModel: string | undefined): {
     const matchedProvider = normalizeXGatewayProviderId(prefix);
     if (matchedProvider && suffix) {
       const providerAccounts = usable.filter(a => a.provider === matchedProvider);
-      if (providerAccounts.length > 0) {
-        return {
-          candidates: providerAccounts.map(account => ({ account, modelId: suffix })),
-        };
-      }
+      return {
+        candidates: providerAccounts.map(account => ({ account, modelId: suffix })),
+      };
     }
   }
 
@@ -220,7 +219,7 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
 
       if (!isStream) {
         try {
-          const completion = await withKeyProxy(effectiveProxy, () =>
+          const completion = await withQuotaTracking(account, modelId, effectiveProxy, () =>
             provider.chatCompletion(
               credential,
               messages,
@@ -258,7 +257,7 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
         }
       } else {
         try {
-          await withKeyProxy(effectiveProxy, async () => {
+          await withQuotaTracking(account, modelId, effectiveProxy, async () => {
             const stream = provider.streamChatCompletion(
               credential,
               messages,
