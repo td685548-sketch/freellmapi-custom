@@ -23,10 +23,11 @@ import {
 import { xGatewayAuth } from './auth.js';
 import { getConfigSnapshot } from './config.js';
 import { runInGatewayScope } from './context.js';
+import { xGatewayProtocolsRouter } from './protocols.js';
 
 export const xGatewayRouter = Router();
 
-interface CandidateRoute {
+export interface CandidateRoute {
   account: AccountRow & { requests: number; tokens: number };
   modelId: string;
 }
@@ -37,7 +38,7 @@ function isWithinAccountCaps(account: AccountRow & { requests: number; tokens: n
   return true;
 }
 
-function resolveCandidateRoutes(requestedModel: string | undefined): {
+export function resolveCandidateRoutes(requestedModel: string | undefined): {
   candidates: CandidateRoute[];
   notFoundError?: string;
 } {
@@ -104,7 +105,7 @@ function resolveCandidateRoutes(requestedModel: string | undefined): {
   };
 }
 
-function applyGatewaySavers(req: Request, messages: ChatMessage[]): {
+export function applyGatewaySavers(req: Request, messages: ChatMessage[]): {
   messages: ChatMessage[];
   appliedSavers: string[];
 } {
@@ -341,7 +342,7 @@ xGatewayRouter.post('/chat/completions', xGatewayAuth, async (req: Request, res:
 });
 
 // GET /x/v1/models — list models from enabled X Gateway accounts and combos
-xGatewayRouter.get('/models', xGatewayAuth, (_req: Request, res: Response) => {
+xGatewayRouter.get('/models', xGatewayAuth, (req: Request, res: Response) => {
   res.setHeader('X-Gateway', 'x');
   const snapshot = getConfigSnapshot();
   const seen = new Set<string>();
@@ -371,8 +372,35 @@ xGatewayRouter.get('/models', xGatewayAuth, (_req: Request, res: Response) => {
     }
   }
 
+  // Content-negotiation for Anthropic SDK / Claude Code (`anthropic-version` header)
+  if (req.headers['anthropic-version']) {
+    const createdAt = '2026-01-01T00:00:00Z';
+    const anthropicModels = [
+      { type: 'model' as const, id: 'auto', display_name: 'X Gateway Auto', created_at: createdAt },
+      { type: 'model' as const, id: 'claude-sonnet-4-5-20250929', display_name: 'Claude Sonnet 4.5 (X Gateway)', created_at: createdAt },
+      { type: 'model' as const, id: 'claude-opus-4-6', display_name: 'Claude Opus 4.6 (X Gateway)', created_at: createdAt },
+      { type: 'model' as const, id: 'claude-haiku-4-5-20251001', display_name: 'Claude Haiku 4.5 (X Gateway)', created_at: createdAt },
+      ...data.map(m => ({
+        type: 'model' as const,
+        id: m.id,
+        display_name: m.id,
+        created_at: createdAt,
+      })),
+    ];
+    res.json({
+      data: anthropicModels,
+      has_more: false,
+      first_id: anthropicModels[0]?.id ?? null,
+      last_id: anthropicModels[anthropicModels.length - 1]?.id ?? null,
+    });
+    return;
+  }
+
   res.json({ object: 'list', data });
 });
+
+// Mount Anthropic Messages, OpenAI Responses, Legacy Completions, Embeddings, Image & Audio routes
+xGatewayRouter.use(xGatewayProtocolsRouter);
 
 // Catch-all: any other path under /x/v1 returns JSON 404
 xGatewayRouter.use((_req: Request, res: Response) => {
