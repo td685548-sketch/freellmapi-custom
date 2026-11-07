@@ -74,6 +74,9 @@ describe('client key stored conversations', () => {
   beforeAll(async () => {
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     vi.stubEnv('FREEAPI_TURSO_BATCH_WRITES', '1');
+    // This suite sends many requests through one loopback IP. Conversation
+    // assertions must not depend on how fast a CI runner reaches the IP cap.
+    vi.stubEnv('PROXY_RATE_LIMIT_RPM', '0');
     setKeyCacheTestOverride(true);
     initDb(':memory:', { factory: () => wrapTursoDatabase(defaultDbFactory()(':memory:'), true) });
     const key = encrypt('gsk_conv');

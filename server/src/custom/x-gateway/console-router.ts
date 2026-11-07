@@ -1,3 +1,4 @@
+import { xQuotaRouter } from './quota/router.js';
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
 import type { SessionUser } from '../../services/auth.js';
@@ -125,6 +126,8 @@ xGatewayConsoleRouter.delete('/keys/:id', (req, res) => {
   if (!revoked) throw new ConsoleError(404, 'Key not found or already revoked.');
   res.json({ ok: true, id: Number(rawId) });
 });
+
+xGatewayConsoleRouter.use(xQuotaRouter);
 
 xGatewayConsoleRouter.use((_req, res) => {
   res.status(404).json({ error: { type: 'not_found', message: 'Not found' } });

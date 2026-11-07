@@ -4,7 +4,8 @@ import type { ChatMessage } from '@freellmapi/shared/types.js';
 import type { CompletionOptions } from '../../providers/base.js';
 import { decrypt } from '../../lib/crypto.js';
 import { estimateInputTokens } from '../../lib/content.js';
-import { withKeyProxy } from '../../lib/proxy.js';
+import { withQuotaTracking } from './quota/tracking.js';
+import { applyQuotaRouting } from './quota/store.js';
 import { logRequest } from '../../lib/request-log.js';
 import { applyOutputSavers } from '../output-savers/apply.js';
 import { buildSaverBlock } from '../output-savers/prompts.js';
@@ -42,9 +43,9 @@ export function resolveCandidateRoutes(requestedModel: string | undefined): {
   candidates: CandidateRoute[];
   notFoundError?: string;
 } {
-  const usable = getUsableXGatewayKeys().filter(isWithinAccountCaps);
   const rawModel = (requestedModel ?? 'auto').trim() || 'auto';
   const lower = rawModel.toLowerCase();
+  const usable = applyQuotaRouting(getUsableXGatewayKeys().filter(isWithinAccountCaps), lower === 'auto' || lower.startsWith('auto:'));
 
   if (lower === 'auto' || lower.startsWith('auto:')) {
     const candidates: CandidateRoute[] = [];
@@ -81,11 +82,9 @@ export function resolveCandidateRoutes(requestedModel: string | undefined): {
     const matchedProvider = normalizeXGatewayProviderId(prefix);
     if (matchedProvider && suffix) {
       const providerAccounts = usable.filter(a => a.provider === matchedProvider);
-      if (providerAccounts.length > 0) {
-        return {
-          candidates: providerAccounts.map(account => ({ account, modelId: suffix })),
-        };
-      }
+      return {
+        candidates: providerAccounts.map(account => ({ account, modelId: suffix })),
+      };
     }
   }
 
@@ -213,7 +212,7 @@ xGatewayRouter.post('/chat/completions', xGatewayAuth, async (req: Request, res:
 
       if (!isStream) {
         try {
-          const completion = await withKeyProxy(effectiveProxy, () =>
+          const completion = await withQuotaTracking(account, modelId, effectiveProxy, () =>
             provider.chatCompletion(
               credential,
               messages,
@@ -251,7 +250,7 @@ xGatewayRouter.post('/chat/completions', xGatewayAuth, async (req: Request, res:
         }
       } else {
         try {
-          await withKeyProxy(effectiveProxy, async () => {
+          await withQuotaTracking(account, modelId, effectiveProxy, async () => {
             const stream = provider.streamChatCompletion(
               credential,
               messages,

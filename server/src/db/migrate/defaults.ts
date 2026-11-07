@@ -1,5 +1,6 @@
 import * as customExternalAuth from '../migrations/20261101_020000_custom_external_auth.js';
 import type { Db } from '../types.js';
+import * as customXGatewayQuota from '../migrations/20261107_140000_custom_x_gateway_quota.js';
 import * as legacyBaseline from '../migrations/20260101_000000_legacy_baseline.js';
 import * as customProviderModalities from '../migrations/20260627_000001_custom_provider_modalities.js';
 import * as catalogModelState from '../migrations/20260627_000002_catalog_model_state.js';
@@ -238,4 +239,5 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: CUSTOM_FEEDBACK_FILENAME, module: customFeedback },
   { filename: CUSTOM_X_GATEWAY_KEYS_FILENAME, module: customXGatewayKeys },
   { filename: CUSTOM_X_GATEWAY_PROXY_AND_API_KEYS_FILENAME, module: customXGatewayProxyAndApiKeys },
+  { filename: '20261107_140000_custom_x_gateway_quota.ts', module: customXGatewayQuota },
 ];
