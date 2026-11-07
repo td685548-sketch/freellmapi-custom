@@ -40,7 +40,30 @@ function isWithinAccountCaps(account: AccountRow & { requests: number; tokens: n
   return true;
 }
 
-export function resolveCandidateRoutes(requestedModel: string | undefined): {
+export type CandidateModality = 'chat' | 'image';
+
+const IMAGE_MODEL_RE =
+  /(?:^|[^a-z])(image|imagen|dall-?e|flux|diffusion|sdxl|seedream|ideogram|recraft|midjourney|qwen-image|wanx)(?:[^a-z]|$)/i;
+
+/**
+ * `auto` normally means "first model of the account", which is a chat model.
+ * Image routes need the account's image model instead, or the chat model gets
+ * forwarded to `/images/generations` and rejected upstream.
+ */
+function pickCandidateModel(models: { id: string; name?: string }[], modality: CandidateModality): string {
+  if (modality === 'image') {
+    const image = models.find(m => IMAGE_MODEL_RE.test(m.id) || IMAGE_MODEL_RE.test(m.name ?? ''));
+    if (image) return image.id;
+    const generic = models.find(m => m.id.toLowerCase() === 'default' || m.id.toLowerCase() === 'auto');
+    if (generic) return generic.id;
+  }
+  return models[0]?.id ?? 'default';
+}
+
+export function resolveCandidateRoutes(
+  requestedModel: string | undefined,
+  modality: CandidateModality = 'chat',
+): {
   candidates: CandidateRoute[];
   notFoundError?: string;
 } {
@@ -52,8 +75,7 @@ export function resolveCandidateRoutes(requestedModel: string | undefined): {
     const candidates: CandidateRoute[] = [];
     for (const account of usable) {
       const models = accountModels(account);
-      const modelId = models[0]?.id ?? 'default';
-      candidates.push({ account, modelId });
+      candidates.push({ account, modelId: pickCandidateModel(models, modality) });
     }
     return { candidates };
   }

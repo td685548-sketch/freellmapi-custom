@@ -9,6 +9,12 @@ import type {
 import { contentToString, estimateInputTokens } from '../../lib/content.js';
 import { BaseProvider, providerHttpError, type CompletionOptions, type KeyValidationResult } from '../../providers/base.js';
 import type { QuotaObservationContext } from '../../services/provider-quota.js';
+import { runChatGptWebChat } from './chatgpt-web-chat.js';
+import {
+  fetchChatGptWebAccessToken,
+  normalizeChatGptWebCookie,
+} from './chatgpt-web-image.js';
+import { looksLikeCookieHeader, looksLikeHtmlDocument } from './cookie-format.js';
 
 const BROWSER_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -63,19 +69,27 @@ export function buildWebSessionHeaders(
     'Referer': `${origin}/`,
   };
 
+  // ChatGPT Web is the only webCookie provider that exchanges the stored cookie
+  // for an access token; normalize token / Cookie header / storage-state JSON
+  // into the Cookie header the handshake expects.
+  if (providerId === 'chatgpt-web') {
+    headers['Cookie'] = normalizeChatGptWebCookie(trimmed);
+    return headers;
+  }
+
   if (/^Bearer\s+/i.test(trimmed)) {
     headers['Authorization'] = trimmed;
     return headers;
   }
 
   // If the credential contains key=value pairs (e.g. `sso=xyz; sso-rw=abc`), send as Cookie header
-  if (trimmed.includes('=') && !trimmed.startsWith('eyJ')) {
+  if (looksLikeCookieHeader(trimmed)) {
     headers['Cookie'] = trimmed;
     return headers;
   }
 
   const cookieName = DEFAULT_COOKIE_NAMES[providerId] ?? 'session';
-  if (providerId === 'deepseek-web' || providerId === 'chatgpt-web') {
+  if (providerId === 'deepseek-web') {
     headers['Authorization'] = `Bearer ${trimmed}`;
     headers['Cookie'] = `${cookieName}=${trimmed}`;
     return headers;
@@ -272,6 +286,10 @@ export class WebCookieProvider extends BaseProvider {
     options?: CompletionOptions,
     _quotaContext?: QuotaObservationContext,
   ): Promise<ChatCompletionResponse> {
+    if (this.providerId === 'chatgpt-web') {
+      return this.chatGptWebCompletion(apiKey, messages, modelId, options);
+    }
+
     const { pathSuffix, body } = buildWebProviderPayload(this.providerId, messages, modelId, false, options);
     const url = resolveTargetUrl(this.baseUrl, pathSuffix);
     const headers = buildWebSessionHeaders(this.providerId, apiKey);
@@ -296,8 +314,16 @@ export class WebCookieProvider extends BaseProvider {
       );
     }
 
+    const contentType = res.headers.get('content-type') ?? '';
+    if (contentType.includes('text/html')) {
+      throw this.htmlChallengeError('response');
+    }
+
     const rawText = await res.text();
     const trimmed = rawText.trim();
+    if (looksLikeHtmlDocument(trimmed)) {
+      throw this.htmlChallengeError('response');
+    }
 
     // Check if response is already a standard OpenAI ChatCompletionResponse
     try {
@@ -370,6 +396,35 @@ export class WebCookieProvider extends BaseProvider {
     options?: CompletionOptions,
     _quotaContext?: QuotaObservationContext,
   ): AsyncGenerator<ChatCompletionChunk> {
+    if (this.providerId === 'chatgpt-web') {
+      const text = await runChatGptWebChat({
+        credential: apiKey,
+        messages,
+        baseUrl: this.baseUrl,
+        platform: this.platform,
+        signal: options?.signal,
+      });
+      const chatGptId = this.makeId();
+      const chatGptCreated = Math.floor(Date.now() / 1000);
+      if (text) {
+        yield {
+          id: chatGptId,
+          object: 'chat.completion.chunk',
+          created: chatGptCreated,
+          model: modelId,
+          choices: [{ index: 0, delta: { content: text }, finish_reason: null }],
+        };
+      }
+      yield {
+        id: chatGptId,
+        object: 'chat.completion.chunk',
+        created: chatGptCreated,
+        model: modelId,
+        choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+      };
+      return;
+    }
+
     const { pathSuffix, body } = buildWebProviderPayload(this.providerId, messages, modelId, true, options);
     const url = resolveTargetUrl(this.baseUrl, pathSuffix);
     const headers = buildWebSessionHeaders(this.providerId, apiKey);
@@ -392,6 +447,10 @@ export class WebCookieProvider extends BaseProvider {
         `${this.name} web stream error (HTTP ${res.status}): ${errText.slice(0, 240) || res.statusText}`,
         errText,
       );
+    }
+
+    if ((res.headers.get('content-type') ?? '').includes('text/html')) {
+      throw this.htmlChallengeError('stream');
     }
 
     const reader = res.body?.getReader();
@@ -484,11 +543,73 @@ export class WebCookieProvider extends BaseProvider {
     }
   }
 
+  /** Non-streaming ChatGPT Web turn (session -> Sentinel -> prepare -> poll). */
+  private async chatGptWebCompletion(
+    apiKey: string,
+    messages: ChatMessage[],
+    modelId: string,
+    options?: CompletionOptions,
+  ): Promise<ChatCompletionResponse> {
+    const text = await runChatGptWebChat({
+      credential: apiKey,
+      messages,
+      baseUrl: this.baseUrl,
+      platform: this.platform,
+      signal: options?.signal,
+    });
+    const promptTokens = estimateInputTokens(messages);
+    const completionTokens = Math.max(1, Math.ceil(text.length / 4));
+    return {
+      id: this.makeId(),
+      object: 'chat.completion',
+      created: Math.floor(Date.now() / 1000),
+      model: modelId,
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: text },
+          finish_reason: 'stop',
+        },
+      ],
+      usage: {
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        total_tokens: promptTokens + completionTokens,
+      },
+    };
+  }
+
+  private htmlChallengeError(phase: string): Error {
+    return Object.assign(
+      new Error(`${this.name} returned an HTML challenge page (${phase}); refresh the web session cookie`),
+      { status: 403 },
+    );
+  }
+
   override async validateKey(apiKey: string): Promise<KeyValidationResult> {
     if (!apiKey || !apiKey.trim()) {
       return { valid: false, error: 'Empty web session cookie or token' };
     }
-    return true;
+    // Only ChatGPT Web exposes a cheap session probe. Other webCookie providers
+    // have no unauthenticated endpoint to validate against.
+    if (this.providerId !== 'chatgpt-web') return true;
+
+    try {
+      const cookie = normalizeChatGptWebCookie(apiKey);
+      await fetchChatGptWebAccessToken(cookie, BROWSER_USER_AGENT, this.baseUrl, this.platform);
+      return true;
+    } catch (err) {
+      const status = (err as { status?: unknown } | null)?.status;
+      // Only a definitive auth answer invalidates the key: an unreachable
+      // upstream must not mark a working account unhealthy.
+      if (status === 401 || status === 403) {
+        return {
+          valid: false,
+          error: err instanceof Error ? err.message : 'ChatGPT Web session is not signed in',
+        };
+      }
+      return true;
+    }
   }
 }
 

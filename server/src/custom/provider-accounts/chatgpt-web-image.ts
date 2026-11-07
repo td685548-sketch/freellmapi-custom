@@ -7,6 +7,7 @@
 import crypto from 'node:crypto';
 import type { Platform } from '@freellmapi/shared/types.js';
 import { proxyFetch } from '../../lib/proxy.js';
+import { looksLikeCookieHeader } from './cookie-format.js';
 
 const DEFAULT_BASE_URL = 'https://chatgpt.com';
 const DEFAULT_USER_AGENT =
@@ -131,8 +132,9 @@ export function normalizeChatGptWebCookie(rawCredential: string): string {
     return header;
   }
 
-  // Bare session-token value — no `name=` prefix at all.
-  if (!trimmed.includes('=')) {
+  // Bare session-token value — no `name=` prefix. Base64 padding is not a
+  // cookie pair, so only real `name=value` shapes pass through untouched.
+  if (!looksLikeCookieHeader(trimmed)) {
     return `__Secure-next-auth.session-token=${trimmed}`;
   }
 
@@ -141,22 +143,33 @@ export function normalizeChatGptWebCookie(rawCredential: string): string {
 }
 
 /** Exchange the web cookie for the access token /backend-api expects. */
-async function fetchAccessToken(
+export async function fetchChatGptWebAccessToken(
   cookie: string,
   userAgent: string,
   baseUrl: string,
   platform: Platform,
   signal?: AbortSignal,
 ): Promise<string> {
-  const res = await webFetch(
-    `${baseUrl}/api/auth/session`,
-    {
-      headers: { 'User-Agent': userAgent, Accept: 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
-    },
-    30_000,
-    platform,
-    signal,
-  );
+  let res: Response;
+  try {
+    res = await webFetch(
+      `${baseUrl}/api/auth/session`,
+      {
+        headers: { 'User-Agent': userAgent, Accept: 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
+      },
+      30_000,
+      platform,
+      signal,
+    );
+  } catch (err) {
+    // A signed-out session redirects to /auth/login. proxyFetch refuses to
+    // follow redirects for `custom` accounts, so surface that as expired auth
+    // instead of a generic transport failure.
+    if (err instanceof Error && /upstream redirected/i.test(err.message)) {
+      throw new ChatGptWebImageError('ChatGPT Web session expired (auth redirect)', 401);
+    }
+    throw err;
+  }
   if (!res.ok) {
     throw new ChatGptWebImageError(
       `ChatGPT session unavailable (HTTP ${res.status})`,
@@ -637,7 +650,7 @@ export async function generateChatGptWebImage(opts: ChatGptWebImageOptions): Pro
   const platform: Platform = opts.platform ?? 'custom';
   const cookie = normalizeChatGptWebCookie(opts.credential);
 
-  const accessToken = await fetchAccessToken(cookie, userAgent, baseUrl, platform, opts.signal);
+  const accessToken = await fetchChatGptWebAccessToken(cookie, userAgent, baseUrl, platform, opts.signal);
   if (opts.signal?.aborted) throw new Error('Request aborted');
 
   const sentinel = await fetchSentinelHeaders({ baseUrl, accessToken, userAgent, platform, signal: opts.signal });
