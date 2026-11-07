@@ -59,6 +59,19 @@ function readNonNegativeInt(name: string, defaultValue: number): number {
   return parsed;
 }
 
+/**
+ * Whether `table` may hold more than `maxRows` rows. Rowids are unique, so MAX - MIN + 1 bounds the row
+ * count; each end is one index lookup, so this costs two row reads instead of the full scan an
+ * `OFFSET maxRows` delete makes on every pass. On a remote database billed by rows read (Turso), the
+ * count-bound prunes below would otherwise scan their whole table every minute even when far below
+ * the cap.
+ */
+function mayExceed(db: RetentionDb, table: string, maxRows: number): boolean {
+  const r = db.prepare(`SELECT (SELECT MIN(rowid) FROM ${table}) AS lo, (SELECT MAX(rowid) FROM ${table}) AS hi`)
+    .get() as { lo: number | null; hi: number | null } | undefined;
+  return r?.hi != null && r.lo != null && r.hi - r.lo + 1 > maxRows;
+}
+
 function toSqliteTimestamp(date: Date): string {
   return date.toISOString().slice(0, 19).replace('T', ' ');
 }
@@ -179,7 +192,7 @@ export function pruneQuotaObservations(
     }
   }
 
-  if (maxRows > 0) {
+  if (maxRows > 0 && mayExceed(db, 'provider_quota_observations', maxRows)) {
     const byCount = db.prepare(`
       DELETE FROM provider_quota_observations
       WHERE rowid IN (
@@ -227,7 +240,7 @@ export function pruneServerLogs(db: RetentionDb, nowMs: number): number {
       .run(nowMs - retentionDays * DAY_MS).changes;
   }
 
-  if (maxRows > 0) {
+  if (maxRows > 0 && mayExceed(db, 'server_logs', maxRows)) {
     deleted += db.prepare(`
       DELETE FROM server_logs
       WHERE id IN (
@@ -302,7 +315,7 @@ export function pruneSearchLogs(db: RetentionDb, nowMs: number): number {
     deleted += db.prepare('DELETE FROM search_requests WHERE created_at < ?').run(cutoff).changes;
   }
 
-  if (maxRows > 0) {
+  if (maxRows > 0 && mayExceed(db, 'search_requests', maxRows)) {
     deleted += db.prepare(`
       DELETE FROM search_requests
       WHERE id IN (
@@ -340,7 +353,7 @@ export function pruneDecisionLogs(db: RetentionDb, nowMs: number): number {
     deleted += db.prepare('DELETE FROM decision_requests WHERE created_at < ?').run(cutoff).changes;
   }
 
-  if (maxRows > 0) {
+  if (maxRows > 0 && mayExceed(db, 'decision_requests', maxRows)) {
     deleted += db.prepare(`
       DELETE FROM decision_requests
       WHERE id IN (
@@ -377,7 +390,7 @@ export function pruneRequestAnalytics(options: {
     deleted += db.prepare('DELETE FROM requests WHERE created_at < ?').run(cutoff).changes;
   }
 
-  if (maxRows > 0) {
+  if (maxRows > 0 && mayExceed(db, 'requests', maxRows)) {
     deleted += db.prepare(`
       DELETE FROM requests
       WHERE id IN (
