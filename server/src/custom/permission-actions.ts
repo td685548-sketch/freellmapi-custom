@@ -70,6 +70,7 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
       return /^\/api\/x-gateway\/quota\/\d+\/tier$/.test(path) && !read ? 'edit_x_settings' : 'view_x_usage';
     }
     if (path.startsWith('/api/x-gateway/playground/')) return 'use_x_gateway';
+    if (path.startsWith('/api/x-gateway/tools')) return 'use_x_gateway';
     if (path.startsWith('/api/x-gateway/media/test')) return 'use_x_gateway';
     if (path.startsWith('/api/x-gateway/media')) return read ? 'use_x_gateway' : 'edit_x_settings';
     if (path.startsWith('/api/x-gateway/proxy-pool')) {
