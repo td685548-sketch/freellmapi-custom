@@ -7,6 +7,56 @@ import { accountsApi, callbackAddress, refreshAccounts, trustedLoginUrl } from '
 import { useXStrings } from './strings'
 import { ProviderMark } from './pages/Providers'
 
+const WEB_COOKIE_GUIDES: Record<string, {
+  siteUrl: string
+  tokenName: string
+  placeholder: string
+  storage: 'Cookies' | 'Local Storage'
+}> = {
+  'grok-web': {
+    siteUrl: 'https://grok.com/',
+    tokenName: 'sso',
+    placeholder: 'sso=eyJ... (or paste the raw sso cookie value)',
+    storage: 'Cookies',
+  },
+  'chatgpt-web': {
+    siteUrl: 'https://chatgpt.com/',
+    tokenName: '__Secure-next-auth.session-token',
+    placeholder: '__Secure-next-auth.session-token=eyJ...',
+    storage: 'Cookies',
+  },
+  'perplexity-web': {
+    siteUrl: 'https://www.perplexity.ai/',
+    tokenName: '__Secure-next-auth.session-token',
+    placeholder: '__Secure-next-auth.session-token=eyJ...',
+    storage: 'Cookies',
+  },
+  'gemini-web': {
+    siteUrl: 'https://gemini.google.com/',
+    tokenName: '__Secure-1PSID (and optional __Secure-1PSIDTS)',
+    placeholder: '__Secure-1PSID=g.a000...; __Secure-1PSIDTS=sidts-...',
+    storage: 'Cookies',
+  },
+  'deepseek-web': {
+    siteUrl: 'https://chat.deepseek.com/sign_in',
+    tokenName: 'userToken',
+    placeholder: '{"value":"...","__version":"0"} or raw userToken string',
+    storage: 'Local Storage',
+  },
+  'muse-web': {
+    siteUrl: 'https://muse.ai/',
+    tokenName: 'hatch_sess',
+    placeholder: 'hatch_sess=...',
+    storage: 'Cookies',
+  },
+  'uc-web': {
+    siteUrl: 'https://uncensored.com/',
+    tokenName: '__client; __client_uat',
+    placeholder: '__client=...; __client_uat=...',
+    storage: 'Cookies',
+  },
+}
+
 export function ConnectAccountDialog({ provider, account, onClose }: {
   provider: AccountProvider; account?: ProviderAccount; onClose: () => void
 }) {
@@ -83,6 +133,8 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
   }, [attempt, client, s.expired, s.callbackError])
 
   const isDirectCredential = method === 'api_key' || method === 'cookie'
+  const isCookieMethod = method === 'cookie'
+  const cookieGuide = isCookieMethod ? WEB_COOKIE_GUIDES[provider.id] : undefined
 
   async function submit(event: FormEvent) {
     event.preventDefault()
@@ -92,7 +144,14 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
     setBusy(true)
     try {
       if (isDirectCredential) {
-        await accountsApi.addKey(provider.id, key.trim(), label.trim(), provider.id === 'custom' ? baseUrl.trim() : undefined, proxyUrl.trim() || undefined)
+        await accountsApi.addKey(
+          provider.id,
+          key.trim(),
+          label.trim(),
+          provider.id === 'custom' ? baseUrl.trim() : undefined,
+          proxyUrl.trim() || undefined,
+          isCookieMethod ? 'cookie' : undefined,
+        )
         setKey('')
         if (active.current) connected()
       } else {
@@ -136,8 +195,18 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
       <button className="x-icon-button x-dialog-close" aria-label={s.close} onClick={onClose}><X size={18} /></button>
       <div className="x-dialog-icon"><ProviderMark id={provider.id} name={provider.name} /></div>
       <DialogTitle className="x-dialog-title">{account ? s.reconnect : s.addAccount} · {provider.name}</DialogTitle>
-      <DialogDescription className="x-muted">{s.oauthHelp}</DialogDescription>
+      <DialogDescription className="x-muted">{isCookieMethod ? s.cookieDialogHelp : s.oauthHelp}</DialogDescription>
       {provider.id === 'github-copilot' && <p className="x-notice">{s.copilotNotice}</p>}
+      {cookieGuide && (
+        <div className="x-notice" style={{ display: 'grid', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+            <span><strong>{s.cookieGuideLabel}:</strong> <code>{cookieGuide.storage} → {cookieGuide.tokenName}</code></span>
+            <a className="x-button x-small" href={cookieGuide.siteUrl} target="_blank" rel="noopener noreferrer">
+              {s.openProviderSite}<ExternalLink size={13} />
+            </a>
+          </div>
+        </div>
+      )}
       {error && <div className="x-error" role="alert">{error}</div>}
       {!attempt ? <form onSubmit={submit} className="x-form">
         {!account && provider.authMethods.length > 1 && <fieldset className="x-methods"><legend>{s.method}</legend>
@@ -148,7 +217,26 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
         </fieldset>}
         <label>{s.name}<input id="x-account-label" name="label" autoFocus maxLength={100} value={label} placeholder={s.namePlaceholder} onChange={event => setLabel(event.target.value)} disabled={busy} required /></label>
         {provider.id === 'custom' && <label>{s.baseUrl}<input id="x-account-base-url" name="baseUrl" type="url" value={baseUrl} placeholder="https://api.example.com/v1" onChange={event => setBaseUrl(event.target.value)} disabled={busy} required /></label>}
-        {isDirectCredential && <label>{s.credential}<input id="x-account-credential" name="credential" type="password" autoComplete="new-password" value={key} onChange={event => setKey(event.target.value)} placeholder={s.credentialPlaceholder} disabled={busy} required /></label>}
+        {isDirectCredential && (
+          isCookieMethod ? (
+            <label>
+              {s.cookieCredential}
+              <textarea
+                id="x-account-credential"
+                name="credential"
+                rows={3}
+                value={key}
+                onChange={event => setKey(event.target.value)}
+                placeholder={cookieGuide?.placeholder ?? s.cookieCredentialPlaceholder}
+                disabled={busy}
+                required
+                style={{ fontFamily: 'var(--x-mono)', fontSize: '0.84rem', resize: 'vertical' }}
+              />
+            </label>
+          ) : (
+            <label>{s.credential}<input id="x-account-credential" name="credential" type="password" autoComplete="new-password" value={key} onChange={event => setKey(event.target.value)} placeholder={s.credentialPlaceholder} disabled={busy} required /></label>
+          )
+        )}
         {isDirectCredential && <label>{s.accountProxy}<input id="x-account-proxy" name="proxyUrl" value={proxyUrl} onChange={event => setProxyUrl(event.target.value)} placeholder={s.accountProxyPlaceholder} disabled={busy} /></label>}
         <p className="x-security"><ShieldCheck size={16} />{s.encrypted}</p>
         <div className="x-dialog-actions"><button type="button" className="x-button" onClick={onClose}>{s.cancel}</button><button className="x-button x-primary" disabled={busy}>{busy && <LoaderCircle size={16} className="x-spin" />}{busy ? s.connecting : isDirectCredential ? s.addAccount : s.signIn}</button></div>
