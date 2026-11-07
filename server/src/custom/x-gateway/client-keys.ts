@@ -5,6 +5,11 @@ import type { ValidatedUserKey } from '../../services/user-keys.js';
 
 export const X_GATEWAY_KEY_PREFIX = 'sk-xgw-';
 
+export interface XGatewayKeyAccess {
+  restricted: boolean;
+  allowedModels: string[];
+}
+
 export interface XGatewayClientKeyRow {
   id: number;
   userId: number;
@@ -14,6 +19,12 @@ export interface XGatewayClientKeyRow {
   revoked: boolean;
   createdAt: string;
   lastUsedAt: string | null;
+  access?: XGatewayKeyAccess;
+}
+
+export interface ValidatedXGatewayClientKey extends ValidatedUserKey {
+  access?: XGatewayKeyAccess;
+  keyId?: number;
 }
 
 function sha256(val: string): string {
@@ -54,10 +65,67 @@ export function mintXGatewayClientKey(
   };
 }
 
+export type XGatewayKeyAccessInput = {
+  restricted: boolean;
+  allowedModels?: string[];
+  allow?: string[];
+};
+
+export function updateXGatewayClientKeyAccess(
+  keyIdOrUserId: number,
+  accessOrKeyId: number | XGatewayKeyAccessInput,
+  maybeAccess?: XGatewayKeyAccessInput
+): boolean {
+  const db = getDb();
+  let keyId: number;
+  let access: { restricted: boolean; allowedModels: string[] };
+  let userId: number | undefined;
+
+  if (typeof accessOrKeyId === 'number') {
+    userId = keyIdOrUserId;
+    keyId = accessOrKeyId;
+    const raw = maybeAccess || { restricted: false, allowedModels: [] };
+    access = {
+      restricted: Boolean(raw.restricted),
+      allowedModels: raw.allowedModels || raw.allow || [],
+    };
+  } else {
+    keyId = keyIdOrUserId;
+    const raw = accessOrKeyId;
+    access = {
+      restricted: Boolean(raw.restricted),
+      allowedModels: raw.allowedModels || raw.allow || [],
+    };
+  }
+
+  const query = userId !== undefined
+    ? 'UPDATE x_gateway_client_keys SET access_restricted = ?, allowed_models = ? WHERE id = ? AND user_id = ?'
+    : 'UPDATE x_gateway_client_keys SET access_restricted = ?, allowed_models = ? WHERE id = ?';
+
+  const params = userId !== undefined
+    ? [access.restricted ? 1 : 0, JSON.stringify(access.allowedModels), keyId, userId]
+    : [access.restricted ? 1 : 0, JSON.stringify(access.allowedModels), keyId];
+
+  const result = db.prepare(query).run(...params);
+  return result.changes > 0;
+}
+
+export function isModelAllowedForKey(access: XGatewayKeyAccess | undefined, requestedModel: string): boolean {
+  if (!access || !access.restricted) return true;
+  const clean = requestedModel.toLowerCase().trim();
+  const withoutCombo = clean.startsWith('combo:') ? clean.slice(6) : clean;
+  return access.allowedModels.some(m => {
+    const mClean = m.toLowerCase().trim();
+    const mWithoutCombo = mClean.startsWith('combo:') ? mClean.slice(6) : mClean;
+    return mClean === clean || mWithoutCombo === withoutCombo;
+  });
+}
+
 export function listXGatewayClientKeys(userId: number): XGatewayClientKeyRow[] {
   const db = getDb();
   const rows = db.prepare(`
-    SELECT id, user_id, name, key_prefix, rpm_limit, revoked, created_at, last_used_at
+    SELECT id, user_id, name, key_prefix, rpm_limit, revoked, created_at, last_used_at,
+           access_restricted, allowed_models
     FROM x_gateway_client_keys
     WHERE user_id = ?
     ORDER BY id DESC
@@ -70,18 +138,32 @@ export function listXGatewayClientKeys(userId: number): XGatewayClientKeyRow[] {
     revoked: number;
     created_at: string;
     last_used_at: string | null;
+    access_restricted?: number;
+    allowed_models?: string | null;
   }>;
 
-  return rows.map(r => ({
-    id: r.id,
-    userId: r.user_id,
-    name: r.name,
-    keyPrefix: r.key_prefix,
-    rpmLimit: r.rpm_limit,
-    revoked: Boolean(r.revoked),
-    createdAt: r.created_at,
-    lastUsedAt: r.last_used_at,
-  }));
+  return rows.map(r => {
+    let allowedModels: string[] = [];
+    try {
+      if (r.allowed_models) allowedModels = JSON.parse(r.allowed_models);
+    } catch {
+      allowedModels = [];
+    }
+    return {
+      id: r.id,
+      userId: r.user_id,
+      name: r.name,
+      keyPrefix: r.key_prefix,
+      rpmLimit: r.rpm_limit,
+      revoked: Boolean(r.revoked),
+      createdAt: r.created_at,
+      lastUsedAt: r.last_used_at,
+      access: {
+        restricted: Boolean(r.access_restricted),
+        allowedModels,
+      },
+    };
+  });
 }
 
 export function revokeXGatewayClientKey(userId: number, keyId: number): boolean {
@@ -111,13 +193,14 @@ function touchLastUsed(keyHash: string, keyId: number): void {
   }
 }
 
-export function validateXGatewayClientKey(token: string | undefined): ValidatedUserKey | null {
+export function validateXGatewayClientKey(token: string | undefined): ValidatedXGatewayClientKey | null {
   if (!token || !token.startsWith(X_GATEWAY_KEY_PREFIX)) return null;
   const db = getDb();
   const keyHash = sha256(token);
 
   const row = db.prepare(`
-    SELECT k.id as key_id, k.user_id, k.rpm_limit, k.revoked, u.email, u.role, u.is_primary, u.permissions
+    SELECT k.id as key_id, k.user_id, k.rpm_limit, k.revoked, k.access_restricted, k.allowed_models,
+           u.email, u.role, u.is_primary, u.permissions
     FROM x_gateway_client_keys k
     JOIN users u ON u.id = k.user_id
     WHERE k.key_hash = ?
@@ -126,6 +209,8 @@ export function validateXGatewayClientKey(token: string | undefined): ValidatedU
     user_id: number;
     rpm_limit: number;
     revoked: number;
+    access_restricted?: number;
+    allowed_models?: string | null;
     email: string;
     role: string;
     is_primary: number;
@@ -140,6 +225,13 @@ export function validateXGatewayClientKey(token: string | undefined): ValidatedU
   const isPrimary = Boolean(row.is_primary);
   const permissions = parseStoredPermissions(row.permissions, role, isPrimary);
 
+  let allowedModels: string[] = [];
+  try {
+    if (row.allowed_models) allowedModels = JSON.parse(row.allowed_models);
+  } catch {
+    allowedModels = [];
+  }
+
   return {
     userId: row.user_id,
     email: row.email,
@@ -147,6 +239,10 @@ export function validateXGatewayClientKey(token: string | undefined): ValidatedU
     rpmLimit: row.rpm_limit || 60,
     isPrimary,
     permissions,
+    keyId: row.key_id,
+    access: {
+      restricted: Boolean(row.access_restricted),
+      allowedModels,
+    },
   };
 }
-
