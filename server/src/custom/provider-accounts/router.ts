@@ -5,7 +5,7 @@ import { requireAuth } from '../../middleware/requireAuth.js';
 import { hasPermission, requirePermission } from '../../middleware/requirePermission.js';
 import { validateSession, type SessionUser } from '../../services/auth.js';
 import { decrypt } from '../../lib/crypto.js';
-import { decryptProxyUrl } from '../../lib/key-proxy.js';
+import { KEY_PROXY_URL_MAX } from '../../lib/key-proxy.js';
 import { withKeyProxy } from '../../lib/proxy.js';
 import { AccountError } from './http.js';
 import { resolveXGatewayProvider } from './catalog.js';
@@ -15,6 +15,7 @@ import {
   createApiKeyAccount,
   deleteAccount,
   listAccounts,
+  resolveXGatewayAccountProxy,
   updateAccount,
   type OAuthProvider,
 } from './store.js';
@@ -33,6 +34,7 @@ const createSchema = z.object({
   key: z.string().trim().min(1).max(8192),
   label: labelSchema.optional(),
   baseUrl: z.string().trim().max(2048).optional(),
+  proxyUrl: z.string().trim().max(KEY_PROXY_URL_MAX).optional(),
   authMethod: z.enum(['api_key', 'oauth_pkce', 'device_code', 'cookie']).optional(),
   models: z.array(z.object({
     id: z.string().trim().min(1).max(200),
@@ -44,6 +46,7 @@ const completeSchema = z.object({ code: z.string().trim().min(1).max(4096) }).st
 const updateSchema = z.object({
   label: labelSchema.optional(),
   enabled: z.boolean().optional(),
+  proxyUrl: z.string().trim().max(KEY_PROXY_URL_MAX).optional(),
   monthlyRequestCap: z.number().int().min(0).safe().optional(),
   monthlyTokenCap: z.number().int().min(0).safe().optional(),
 }).strict().refine(b => Object.keys(b).length > 0);
@@ -101,6 +104,7 @@ providerAccountsRouter.post('/', requirePermission('add_keys'), (req: SessionReq
     key: body.key,
     label: body.label,
     baseUrl: body.baseUrl,
+    proxyUrl: body.proxyUrl,
     authMethod: body.authMethod,
     models: body.models?.map(m => ({ id: m.id, name: m.name || m.id })),
     userId: req.user?.userId ?? null,
@@ -114,17 +118,23 @@ providerAccountsRouter.post('/auth/:provider/start', async (req: SessionRequest,
   const authorize = authCheck(req, provider, body.reconnectId);
   authorize();
   const origin = req.get('Origin') ?? `${req.protocol}://${req.get('Host') ?? ''}`;
-  res.json(await startAccountAuth({ ...body, provider }, actor(req), origin, authorize));
+  res.json(await withKeyProxy(resolveXGatewayAccountProxy(null), () =>
+    startAccountAuth({ ...body, provider }, actor(req), origin, authorize),
+  ));
 });
 providerAccountsRouter.post('/auth/:attemptId/complete', async (req: SessionRequest, res) => {
   const { code } = parse(completeSchema, req.body);
   const { attemptId, owner, authorize } = existingAttempt(req);
-  res.json(await completeAccountAuth(attemptId, owner, code, authorize));
+  res.json(await withKeyProxy(resolveXGatewayAccountProxy(null), () =>
+    completeAccountAuth(attemptId, owner, code, authorize),
+  ));
 });
 providerAccountsRouter.post('/auth/:attemptId/poll', async (req: SessionRequest, res) => {
   parse(emptySchema, req.body ?? {});
   const { attemptId, owner, authorize } = existingAttempt(req);
-  res.json(await pollAccountAuth(attemptId, owner, authorize));
+  res.json(await withKeyProxy(resolveXGatewayAccountProxy(null), () =>
+    pollAccountAuth(attemptId, owner, authorize),
+  ));
 });
 providerAccountsRouter.delete('/auth/:attemptId', (req: SessionRequest, res) => {
   parse(emptySchema, req.body ?? {});
@@ -159,7 +169,7 @@ providerAccountsRouter.post('/:id/test', requirePermission('test_keys'), async (
   if (body.message && (!model || !models.some(m => m.id === model))) throw new AccountError(400, 'Select an eligible account model.');
   try {
     const credential = decrypt(row.encrypted_key, row.iv, row.auth_tag);
-    const ok = await withKeyProxy(decryptProxyUrl(row), async () => {
+    const ok = await withKeyProxy(resolveXGatewayAccountProxy(row), async () => {
       if (!body.message) return await provider.validateKey(credential, { platform: row.platform, keyId: row.id }) === true;
       const result = await provider.chatCompletion(credential, [{ role: 'user', content: body.message }], model!, {
         max_tokens: 128, timeoutMs: 30_000,

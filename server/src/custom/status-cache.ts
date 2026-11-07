@@ -6,7 +6,7 @@ import type { NextFunction, Request, Response } from 'express';
 // most one real check per TTL no matter how many callers. Health stays honest to
 // within a few seconds, which is all a probe can tell anyway.
 
-const TTL_MS = 5_000;
+const TTL_MS = 15_000;
 
 // Bypassed under NODE_ENV=test like the other in-process caches: suites change the
 // database and probe straight away. A test that exercises the cache turns it on.

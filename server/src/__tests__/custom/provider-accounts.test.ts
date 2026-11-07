@@ -318,6 +318,13 @@ describe('GitHub Copilot device accounts', () => {
     expect(list.raw).not.toContain('encrypted_key');
     expect(list.body.providers.some((p: { id: string }) => p.id === 'custom')).toBe(true);
     expect(list.body.providers.find((p: { id: string }) => p.id === 'openrouter').authMethods).toEqual(['api_key', 'oauth_pkce']);
+
+    // Providers with keys in the main api_keys table are flagged with hasMainDbKey: true
+    const enc = encrypt('main-db-groq-key');
+    getDb().prepare(`INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled) VALUES ('groq', 'Main Groq', ?, ?, ?, 'valid', 1)`).run(enc.encrypted, enc.iv, enc.authTag);
+    const listWithMain = await call('GET', '/');
+    expect(listWithMain.body.providers.find((p: { id: string }) => p.id === 'groq').hasMainDbKey).toBe(true);
+    expect(listWithMain.body.providers.find((p: { id: string }) => p.id === 'openrouter').hasMainDbKey).toBeUndefined();
   });
 
   it('updates and deletes accounts directly in x_gateway_keys without touching api_keys or models', async () => {

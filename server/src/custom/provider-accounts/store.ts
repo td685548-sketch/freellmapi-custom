@@ -2,8 +2,10 @@ import type { Platform } from '@freellmapi/shared/types.js';
 import type { ProviderAccount, ProviderAccountAuthMethod, ProviderAccountsResponse } from '@freellmapi/shared/x-accounts.js';
 import { getDb } from '../../db/index.js';
 import { decrypt, encrypt } from '../../lib/crypto.js';
+import { decryptProxyUrl, encryptProxyUrl, isValidKeyProxyUrl, KEY_PROXY_URL_ERROR, maskProxyUrl } from '../../lib/key-proxy.js';
 import { parseModelScope } from '../../lib/model-scope.js';
 import { clearCooldownsForKey } from '../../services/ratelimit.js';
+import { getOutboundProxyUrl } from '../x-gateway/config.js';
 import { AccountError, COPILOT_BASE_URL } from './http.js';
 import { clearCopilotToken, type CopilotModel } from './copilot.js';
 import {
@@ -55,6 +57,9 @@ interface RawXGatewayKeyRow {
   monthly_request_cap: number;
   monthly_token_cap: number;
   created_by: number | null;
+  proxy_encrypted?: string | null;
+  proxy_iv?: string | null;
+  proxy_auth_tag?: string | null;
 }
 
 function hydrateAccountRow(raw: RawXGatewayKeyRow): AccountRow {
@@ -77,10 +82,19 @@ function hydrateAccountRow(raw: RawXGatewayKeyRow): AccountRow {
     subject: raw.subject ?? null,
     auth_method: raw.auth_method ?? 'api_key',
     created_by: raw.created_by == null ? null : Number(raw.created_by),
-    proxy_encrypted: null,
-    proxy_iv: null,
-    proxy_auth_tag: null,
+    proxy_encrypted: raw.proxy_encrypted ?? null,
+    proxy_iv: raw.proxy_iv ?? null,
+    proxy_auth_tag: raw.proxy_auth_tag ?? null,
   };
+}
+
+export function resolveXGatewayAccountProxy(
+  row?: Pick<AccountRow, 'proxy_encrypted' | 'proxy_iv' | 'proxy_auth_tag'> | null,
+): string | undefined {
+  const perAccount = decryptProxyUrl(row);
+  if (perAccount) return perAccount;
+  const gatewayWide = getOutboundProxyUrl();
+  return gatewayWide || undefined;
 }
 
 let cachedDb: unknown = null;
@@ -141,6 +155,53 @@ export function accountModels(
   return baseModels.filter(m => !scope || scope.has(m.id));
 }
 
+const MAIN_DB_PLATFORM_ALIASES: Record<string, string[]> = {
+  google: ['google', 'gemini'],
+  cloudflare: ['cloudflare-ai'],
+  zhipu: ['glm', 'glm-cn'],
+  kilo: ['kilo-gateway', 'kilocode'],
+  opencode: ['opencode', 'opencode-zen', 'opencode-go'],
+  airforce: ['api-airforce'],
+  brave: ['brave-search'],
+  serpsearch: ['serper', 'searchapi'],
+  qianfan: ['baidu'],
+  volcengine: ['volcengine-ark'],
+  modelscope: ['alims-intl'],
+};
+
+function getMainDbProviderIds(db: ReturnType<typeof getDb>): Set<string> {
+  const result = new Set<string>();
+  try {
+    const mainRows = db
+      .prepare('SELECT DISTINCT platform, base_url FROM api_keys')
+      .all() as Array<{ platform: string; base_url: string | null }>;
+    for (const row of mainRows) {
+      const platform = (row.platform ?? '').trim().toLowerCase();
+      if (!platform) continue;
+      const normalized = normalizeXGatewayProviderId(platform);
+      if (normalized) result.add(normalized);
+      const aliased = MAIN_DB_PLATFORM_ALIASES[platform];
+      if (aliased) {
+        for (const id of aliased) result.add(id);
+      }
+      if (row.base_url) {
+        const trimmedUrl = row.base_url.trim().replace(/\/+$/, '').toLowerCase();
+        if (trimmedUrl === COPILOT_BASE_URL.toLowerCase()) {
+          result.add('github-copilot');
+        }
+        for (const cat of X_GATEWAY_PROVIDERS) {
+          if (cat.baseUrl && cat.baseUrl.trim().replace(/\/+$/, '').toLowerCase() === trimmedUrl) {
+            result.add(cat.id);
+          }
+        }
+      }
+    }
+  } catch {
+    // Ignore if api_keys table is unavailable
+  }
+  return result;
+}
+
 export function listAccounts(): ProviderAccountsResponse['providers'] {
   const db = getDb();
   const month = new Date().toISOString().slice(0, 7);
@@ -151,12 +212,15 @@ export function listAccounts(): ProviderAccountsResponse['providers'] {
     ORDER BY k.id
   `).all(month) as Array<RawXGatewayKeyRow & { requests: number; tokens: number }>;
 
+  const mainDbProviderIds = getMainDbProviderIds(db);
+
   const providers: ProviderAccountsResponse['providers'] = X_GATEWAY_PROVIDERS.map(p => ({
     id: p.id,
     alias: p.alias,
     name: p.name,
     category: p.category,
     baseUrl: p.baseUrl || null,
+    ...(mainDbProviderIds.has(p.id) ? { hasMainDbKey: true } : {}),
     authMethods: [...p.authMethods],
     accounts: [],
   }));
@@ -165,6 +229,7 @@ export function listAccounts(): ProviderAccountsResponse['providers'] {
     const row = hydrateAccountRow(raw);
     const provider = providers.find(p => p.id === row.provider);
     if (!provider) continue;
+    const maskedProxy = maskProxyUrl(decryptProxyUrl(row));
     provider.accounts.push({
       id: row.id,
       provider: provider.id,
@@ -173,6 +238,7 @@ export function listAccounts(): ProviderAccountsResponse['providers'] {
       authMethod: row.auth_method,
       enabled: row.enabled === 1,
       status: row.status,
+      ...(maskedProxy ? { proxyUrl: maskedProxy } : {}),
       monthlyUsage: { requests: Number(raw.requests), tokens: Number(raw.tokens) },
       monthlyRequestCap: row.monthly_request_cap,
       monthlyTokenCap: row.monthly_token_cap,
@@ -323,6 +389,7 @@ export function createApiKeyAccount(input: {
   key: string;
   label?: string;
   baseUrl?: string | null;
+  proxyUrl?: string | null;
   authMethod?: ProviderAccountAuthMethod;
   models?: { id: string; name: string }[];
   userId?: number | null;
@@ -352,6 +419,12 @@ export function createApiKeyAccount(input: {
     baseUrl = baseUrl.replace(/\/+$/, '');
   }
 
+  const rawProxyUrl = input.proxyUrl?.trim() ?? '';
+  if (rawProxyUrl && !isValidKeyProxyUrl(rawProxyUrl)) {
+    throw new AccountError(400, KEY_PROXY_URL_ERROR);
+  }
+  const proxyEncrypted = encryptProxyUrl(rawProxyUrl);
+
   const authMethod: ProviderAccountAuthMethod = input.authMethod
     ?? (catalogEntry.category === 'webCookie' ? 'cookie' : 'api_key');
 
@@ -367,9 +440,10 @@ export function createApiKeyAccount(input: {
     getDb().prepare(`
       INSERT INTO x_gateway_keys (
         provider, label, subject, auth_method, encrypted_key, iv, auth_tag,
-        base_url, model_scope_json, models_json, status, enabled, created_by
+        base_url, model_scope_json, models_json, status, enabled, created_by,
+        proxy_encrypted, proxy_iv, proxy_auth_tag
       )
-      VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'unknown', 1, ?)
+      VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'unknown', 1, ?, ?, ?, ?)
     `).run(
       normalizedProvider,
       input.label?.trim() ?? '',
@@ -381,6 +455,9 @@ export function createApiKeyAccount(input: {
       modelScopeJson,
       modelsJson,
       input.userId ?? null,
+      proxyEncrypted.encrypted,
+      proxyEncrypted.iv,
+      proxyEncrypted.authTag,
     ).lastInsertRowid,
   );
 
@@ -390,7 +467,13 @@ export function createApiKeyAccount(input: {
 
 export function updateAccount(
   id: number,
-  patch: { label?: string; enabled?: boolean; monthlyRequestCap?: number; monthlyTokenCap?: number },
+  patch: {
+    label?: string;
+    enabled?: boolean;
+    proxyUrl?: string;
+    monthlyRequestCap?: number;
+    monthlyTokenCap?: number;
+  },
 ): AccountRow {
   const existing = accountRow(id);
   const nextLabel = patch.label !== undefined ? patch.label : existing.label;
@@ -398,11 +481,25 @@ export function updateAccount(
   const nextReqCap = patch.monthlyRequestCap !== undefined ? patch.monthlyRequestCap : existing.monthly_request_cap;
   const nextTokCap = patch.monthlyTokenCap !== undefined ? patch.monthlyTokenCap : existing.monthly_token_cap;
 
+  let nextProxyEnc = existing.proxy_encrypted;
+  let nextProxyIv = existing.proxy_iv;
+  let nextProxyTag = existing.proxy_auth_tag;
+  if (patch.proxyUrl !== undefined) {
+    if (!isValidKeyProxyUrl(patch.proxyUrl)) {
+      throw new AccountError(400, KEY_PROXY_URL_ERROR);
+    }
+    const enc = encryptProxyUrl(patch.proxyUrl);
+    nextProxyEnc = enc.encrypted;
+    nextProxyIv = enc.iv;
+    nextProxyTag = enc.authTag;
+  }
+
   getDb().prepare(`
     UPDATE x_gateway_keys
-    SET label = ?, enabled = ?, monthly_request_cap = ?, monthly_token_cap = ?
+    SET label = ?, enabled = ?, monthly_request_cap = ?, monthly_token_cap = ?,
+        proxy_encrypted = ?, proxy_iv = ?, proxy_auth_tag = ?
     WHERE id = ?
-  `).run(nextLabel, nextEnabled, nextReqCap, nextTokCap, id);
+  `).run(nextLabel, nextEnabled, nextReqCap, nextTokCap, nextProxyEnc, nextProxyIv, nextProxyTag, id);
 
   invalidateXGatewayKeyCache();
   return accountRow(id);

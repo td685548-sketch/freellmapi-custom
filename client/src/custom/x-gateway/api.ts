@@ -30,14 +30,20 @@ export const accountsApi = {
     apiFetch<ProviderAccountAuthResult>(`${base}/auth/${encodeURIComponent(attemptId)}/complete`, { method: 'POST', body: JSON.stringify({ code }) }),
   poll: (attemptId: string) => apiFetch<ProviderAccountPollResponse>(`${base}/auth/${encodeURIComponent(attemptId)}/poll`, { method: 'POST' }),
   cancel: (attemptId: string) => apiFetch<void>(`${base}/auth/${encodeURIComponent(attemptId)}`, { method: 'DELETE' }),
-  edit: (id: number, body: { label?: string; enabled?: boolean }) =>
+  edit: (id: number, body: { label?: string; enabled?: boolean; proxyUrl?: string }) =>
     apiFetch<void>(`${base}/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   remove: (id: number) => apiFetch<void>(`${base}/${id}`, { method: 'DELETE' }),
   test: (id: number) => apiFetch<ProviderAccountTestResponse>(`${base}/${id}/test`, { method: 'POST', body: '{}' }),
-  addKey: (provider: string, key: string, label: string, baseUrl?: string) =>
+  addKey: (provider: string, key: string, label: string, baseUrl?: string, proxyUrl?: string) =>
     apiFetch<{ id: number }>(base, {
       method: 'POST',
-      body: JSON.stringify({ provider, key, label, ...(baseUrl ? { baseUrl } : {}) }),
+      body: JSON.stringify({
+        provider,
+        key,
+        label,
+        ...(baseUrl ? { baseUrl } : {}),
+        ...(proxyUrl ? { proxyUrl } : {}),
+      }),
     }),
 }
 

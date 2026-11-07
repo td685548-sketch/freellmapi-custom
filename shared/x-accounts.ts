@@ -9,6 +9,7 @@ export interface ProviderAccount {
   authMethod: ProviderAccountAuthMethod;
   enabled: boolean;
   status: string;
+  proxyUrl?: string;
   monthlyUsage: { requests: number; tokens: number };
   monthlyRequestCap: number;
   monthlyTokenCap: number;
@@ -21,6 +22,7 @@ export interface AccountProvider {
   name: string;
   category?: ProviderCategory;
   baseUrl?: string | null;
+  hasMainDbKey?: boolean;
   authMethods: ProviderAccountAuthMethod[];
   accounts: ProviderAccount[];
 }
@@ -35,6 +37,7 @@ export interface ProviderAccountCreateRequest {
   key: string;
   label?: string;
   baseUrl?: string;
+  proxyUrl?: string;
   authMethod?: ProviderAccountAuthMethod;
   models?: { id: string; name: string }[];
 }
@@ -61,6 +64,6 @@ export type ProviderAccountAuthStartResponse = {
 
 export type ProviderAccountAuthResult = { status: 'connected'; accountId: number };
 export type ProviderAccountPollResponse = ProviderAccountAuthResult | { status: 'pending'; interval: number };
-export interface ProviderAccountUpdateRequest { label?: string; enabled?: boolean }
+export interface ProviderAccountUpdateRequest { label?: string; enabled?: boolean; proxyUrl?: string }
 export interface ProviderAccountTestRequest { model?: string; message?: string }
 export interface ProviderAccountTestResponse { ok: boolean; message?: string }

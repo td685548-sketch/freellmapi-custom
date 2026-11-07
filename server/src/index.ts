@@ -108,6 +108,14 @@ async function main() {
         const idle = Math.round(event.idleMs / 1000);
         console.log(`[wake] resumed after ~${idle}s (${event.reason}${event.signal ? `:${event.signal}` : ''}) — flushing stale sockets, re-probing keys`);
         flushProxyCache();
+        if (isTursoDatabase(getDb())) {
+          // On hosted runtimes (e.g. Render) with synchronous Turso storage,
+          // waking from container freeze coincides with the 5s HTTP health check.
+          // A forced immediate re-probe of every key blocks the event loop on
+          // remote SQL writes and triggers false health-check timeouts; let the
+          // scheduled jittered health pass handle key re-probes instead.
+          return;
+        }
         try {
           // Forced: every status predates the sleep, so the recency skip and
           // provider spacing of a scheduled pass would only delay the picture.
