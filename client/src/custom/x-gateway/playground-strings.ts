@@ -1,0 +1,36 @@
+import { useI18n } from '@/i18n';
+const en = {
+  title: 'Basic Chat / Playground', help: 'Chat with your connected models and combos.',
+  newChat: 'New chat', history: 'Conversations', deleteChat: 'Delete chat', deleteConfirm: 'Delete this conversation?',
+  model: 'Model', refresh: 'Refresh models', loading: 'Loading models…', loadError: 'Could not load models.',
+  empty: 'Start a conversation', emptyHelp: 'Choose a model, then send a message to try your gateway.',
+  prompt: 'Message', placeholder: 'Ask anything…', send: 'Send', stop: 'Stop', generating: 'Generating…',
+  settings: 'Chat settings', system: 'System instruction', temperature: 'Temperature', maxTokens: 'Maximum reply tokens',
+  attach: 'Attach images', remove: 'Remove image', copy: 'Copy reply', copied: 'Copied', you: 'You', assistant: 'Assistant',
+  imageError: 'Use up to 4 PNG, JPEG, WebP or GIF images, at most 1 MB each.',
+  imageNote: 'Images stay in this tab until you reload. Choose a model that supports images.',
+  storage: 'History could not be saved in this browser. Current chat is still available.',
+  local: 'History is saved on this browser for your account. Images are not saved.',
+  disabled: 'X Gateway is disabled. Enable it on the Endpoint page to chat.', endpoint: 'Open Endpoint',
+  noModels: 'No connected models yet. Connect a provider or configure a combo.', providers: 'Connect providers',
+  failed: 'Could not send the message.', tokens: 'tokens', shortcut: 'Enter to send · Shift+Enter for a new line',
+  limit: 'Start a new chat after 98 messages.',
+};
+const vi: Record<keyof typeof en, string> = {
+  title: 'Chat cơ bản / Playground', help: 'Trò chuyện với model và combo đã kết nối.',
+  newChat: 'Chat mới', history: 'Hội thoại', deleteChat: 'Xóa hội thoại', deleteConfirm: 'Xóa hội thoại này?',
+  model: 'Model', refresh: 'Tải lại model', loading: 'Đang tải model…', loadError: 'Không tải được model.',
+  empty: 'Bắt đầu trò chuyện', emptyHelp: 'Chọn model rồi gửi tin nhắn để thử gateway.',
+  prompt: 'Tin nhắn', placeholder: 'Bạn muốn hỏi gì…', send: 'Gửi', stop: 'Dừng', generating: 'Đang trả lời…',
+  settings: 'Cài đặt chat', system: 'Chỉ dẫn hệ thống', temperature: 'Độ sáng tạo', maxTokens: 'Token trả lời tối đa',
+  attach: 'Đính kèm ảnh', remove: 'Bỏ ảnh', copy: 'Sao chép trả lời', copied: 'Đã sao chép', you: 'Bạn', assistant: 'Trợ lý',
+  imageError: 'Tối đa 4 ảnh PNG, JPEG, WebP hoặc GIF, mỗi ảnh không quá 1 MB.',
+  imageNote: 'Ảnh chỉ giữ trong tab đến khi tải lại. Hãy chọn model hỗ trợ ảnh.',
+  storage: 'Không lưu được lịch sử trên trình duyệt. Bạn vẫn có thể chat trong phiên hiện tại.',
+  local: 'Lịch sử lưu trên trình duyệt theo tài khoản. Ảnh không được lưu.',
+  disabled: 'X Gateway đang tắt. Hãy bật ở trang Endpoint để chat.', endpoint: 'Mở Endpoint',
+  noModels: 'Chưa có model kết nối. Hãy kết nối nhà cung cấp hoặc tạo combo.', providers: 'Kết nối nhà cung cấp',
+  failed: 'Không gửi được tin nhắn.', tokens: 'token', shortcut: 'Enter để gửi · Shift+Enter để xuống dòng',
+  limit: 'Hãy tạo chat mới sau 98 tin nhắn.',
+};
+export const usePlaygroundStrings = () => useI18n().locale === 'vi' ? vi : en;

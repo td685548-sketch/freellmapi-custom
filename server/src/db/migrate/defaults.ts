@@ -69,6 +69,7 @@ import * as customXGateway from '../migrations/20261106_120000_custom_x_gateway.
 import * as customProviderAccounts from '../migrations/20261107_000001_custom_provider_accounts.js';
 import * as customXGatewayKeys from '../migrations/20261107_120000_custom_x_gateway_keys.js';
 import * as customXGatewayProxyAndApiKeys from '../migrations/20261107_130000_custom_x_gateway_proxy_and_api_keys.js';
+import * as customXGatewayProxyPool from '../migrations/20261107_150000_custom_x_gateway_proxy_pool.js';
 
 import * as migration20261031_155642_custom_user_roles_and_keys from '../migrations/20261031_155642_custom_user_roles_and_keys.js';
 import * as customRegistrationRequests from '../migrations/20261101_040000_custom_registration_requests.js';
@@ -240,4 +241,5 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: CUSTOM_X_GATEWAY_KEYS_FILENAME, module: customXGatewayKeys },
   { filename: CUSTOM_X_GATEWAY_PROXY_AND_API_KEYS_FILENAME, module: customXGatewayProxyAndApiKeys },
   { filename: '20261107_140000_custom_x_gateway_quota.ts', module: customXGatewayQuota },
+  { filename: '20261107_150000_custom_x_gateway_proxy_pool.ts', module: customXGatewayProxyPool },
 ];

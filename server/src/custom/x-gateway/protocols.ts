@@ -24,7 +24,7 @@ import {
   resolveXGatewayAccountProxy,
 } from '../provider-accounts/store.js';
 import { xGatewayAuth } from './auth.js';
-import { getConfigSnapshot } from './config.js';
+import { getConfigSnapshot, getMediaDefaults } from './config.js';
 import { runInGatewayScope } from './context.js';
 import {
   applyGatewaySavers,
@@ -1032,7 +1032,7 @@ xGatewayProtocolsRouter.post('/completions', xGatewayAuth, async (req: Request, 
 //    /x/v1/audio/speech, /x/v1/audio/transcriptions)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function accountBaseUrl(account: { provider: string; base_url: string | null }): string | null {
+export function accountBaseUrl(account: { provider: string; base_url: string | null }): string | null {
   const customUrl = account.base_url?.trim();
   if (customUrl) return customUrl.replace(/\/+$/, '');
   const entry = getXGatewayProvider(account.provider);
@@ -1047,7 +1047,8 @@ xGatewayProtocolsRouter.post('/embeddings', xGatewayAuth, async (req: Request, r
     return;
   }
 
-  const requestedModel = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'auto';
+  const rawModel = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'auto';
+  const requestedModel = rawModel === 'auto' ? (getMediaDefaults().embedding?.defaultModel || 'auto') : rawModel;
   const { candidates, notFoundError } = resolveCandidateRoutes(requestedModel);
   if (notFoundError) {
     res.status(404).json({ error: { message: notFoundError, type: 'invalid_request_error', code: 'model_not_found' } });
@@ -1119,7 +1120,8 @@ xGatewayProtocolsRouter.post('/images/generations', xGatewayAuth, async (req: Re
     return;
   }
 
-  const requestedModel = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'auto';
+  const rawModel = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'auto';
+  const requestedModel = rawModel === 'auto' ? (getMediaDefaults().image?.defaultModel || 'auto') : rawModel;
   const { candidates, notFoundError } = resolveCandidateRoutes(requestedModel);
   if (notFoundError) {
     res.status(404).json({ error: { message: notFoundError, type: 'invalid_request_error', code: 'model_not_found' } });
@@ -1190,7 +1192,8 @@ xGatewayProtocolsRouter.post('/audio/speech', xGatewayAuth, async (req: Request,
     return;
   }
 
-  const requestedModel = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'auto';
+  const rawModel = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'auto';
+  const requestedModel = rawModel === 'auto' ? (getMediaDefaults().tts?.defaultModel || 'auto') : rawModel;
   const { candidates, notFoundError } = resolveCandidateRoutes(requestedModel);
   if (notFoundError) {
     res.status(404).json({ error: { message: notFoundError, type: 'invalid_request_error', code: 'model_not_found' } });
@@ -1274,8 +1277,9 @@ xGatewayProtocolsRouter.post(
       return;
     }
 
-    const requestedModel =
+    const rawModel =
       typeof req.body?.model === 'string' && req.body.model.trim() ? req.body.model.trim() : 'auto';
+    const requestedModel = rawModel === 'auto' ? (getMediaDefaults().stt?.defaultModel || 'auto') : rawModel;
     const { candidates, notFoundError } = resolveCandidateRoutes(requestedModel);
     if (notFoundError) {
       res.status(404).json({ error: { message: notFoundError, type: 'invalid_request_error', code: 'model_not_found' } });

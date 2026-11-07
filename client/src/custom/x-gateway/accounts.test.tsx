@@ -87,6 +87,7 @@ beforeEach(() => {
     if (path.endsWith('/poll')) return pollResults.shift() ?? { status: 'pending', interval: 1 }
     if (path.endsWith('/complete')) return { status: 'connected', accountId: 99 }
     if (path.endsWith('/test')) return { ok: true }
+    if (path === '/api/x-gateway/proxy-pool') return { entries: [] }
     return undefined
   })
   container = document.createElement('div')

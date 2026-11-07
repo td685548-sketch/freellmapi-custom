@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Copy, ExternalLink, LoaderCircle, ShieldCheck, X } from 'lucide-react'
 import { Dialog, DialogPopup, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import type { AccountProvider, ProviderAccount, ProviderAccountAuthStartResponse } from '../../../../shared/x-accounts'
 import { accountsApi, callbackAddress, refreshAccounts, trustedLoginUrl } from './api'
+import { useSessionRevision } from '../session-state'
+import { proxyPoolApi } from './proxy-pool-api'
+import { usePoolStrings } from './proxy-pool-strings'
 import { useXStrings } from './strings'
 import { ProviderMark } from './pages/Providers'
 
@@ -224,13 +227,18 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
   provider: AccountProvider; account?: ProviderAccount; onClose: () => void
 }) {
   const s = useXStrings()
+  const p = usePoolStrings()
+  const revision = useSessionRevision()
   const client = useQueryClient()
+  const poolQuery = useQuery({ queryKey: ['x-proxy-pool', revision], queryFn: ({ signal }) => proxyPoolApi.list(signal), retry: false, staleTime: 15_000 })
+  const poolEntries = poolQuery.data?.entries ?? []
   const loginMethod = provider.authMethods.find(method => method === 'oauth_pkce' || method === 'device_code')
   const [method, setMethod] = useState(loginMethod ?? provider.authMethods[0] ?? 'api_key')
   const [label, setLabel] = useState(account?.label ?? '')
   const [key, setKey] = useState('')
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl ?? '')
   const [proxyUrl, setProxyUrl] = useState('')
+  const [poolChoice, setPoolChoice] = useState('')
   const [attempt, setAttempt] = useState<ProviderAccountAuthStartResponse | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -316,6 +324,7 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
           provider.id === 'custom' ? baseUrl.trim() : undefined,
           proxyUrl.trim() || undefined,
           isCookieMethod ? 'cookie' : undefined,
+          poolChoice === '' ? undefined : poolChoice === 'none' ? null : Number(poolChoice),
         )
         setKey('')
         if (active.current) connected()
@@ -413,6 +422,7 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
           )
         )}
         {isDirectCredential && <label>{s.accountProxy}<input id="x-account-proxy" name="proxyUrl" value={proxyUrl} onChange={event => setProxyUrl(event.target.value)} placeholder={s.accountProxyPlaceholder} disabled={busy} /></label>}
+        {isDirectCredential && <label>{p.accountPool}<select id="x-account-pool" name="proxyPoolId" value={poolChoice} onChange={event => setPoolChoice(event.target.value)} disabled={busy}><option value="">{p.accountPoolAuto}</option><option value="none">{p.accountPoolNone}</option>{poolEntries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}{entry.enabled ? '' : ` (${p.disabled})`}</option>)}</select><span className="x-caption">{p.accountPoolHint}</span></label>}
         <p className="x-security"><ShieldCheck size={16} />{s.encrypted}</p>
         <div className="x-dialog-actions"><button type="button" className="x-button" onClick={onClose}>{s.cancel}</button><button className="x-button x-primary" disabled={busy}>{busy && <LoaderCircle size={16} className="x-spin" />}{busy ? s.connecting : isDirectCredential ? s.addAccount : s.signIn}</button></div>
       </form> : <div className="x-auth-wait">

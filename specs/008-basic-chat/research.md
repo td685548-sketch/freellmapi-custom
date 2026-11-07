@@ -1,0 +1,3 @@
+# Research
+Reference: 9router/src/app/(dashboard)/dashboard/basic-chat/BasicChatPageClient.js.
+Adopt provider/model selection, progressive replies, AbortController Stop, new/select/delete conversations, local history, image attachment preview. Reuse FreeLLMAPI UI language/theme and gateway routing rather than importing Next.js components. Share one gateway handler to prevent playground drift. Return only model metadata, never account labels/keys. Persist text history per numeric userId, bounded to 20 chats/100 turns and 1 MB; images stay in memory. Browser storage failures remain nonfatal and visible.

@@ -1,4 +1,3 @@
-import { xQuotaRouter } from './quota/router.js';
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
 import type { SessionUser } from '../../services/auth.js';
@@ -15,6 +14,11 @@ import {
   mintXGatewayClientKey,
   revokeXGatewayClientKey,
 } from './client-keys.js';
+import { xGatewayManagementRouter } from './management-router.js';
+import { xQuotaRouter } from './quota/router.js';
+import { xPlaygroundRouter } from './playground-router.js';
+import { xProxyPoolRouter } from './proxy-pool-router.js';
+import { xGatewayMediaRouter } from './media-router.js';
 
 /** Console API for the gateway switch, outbound proxy, dedicated API keys, and default savers.
  *
@@ -127,7 +131,11 @@ xGatewayConsoleRouter.delete('/keys/:id', (req, res) => {
   res.json({ ok: true, id: Number(rawId) });
 });
 
+xGatewayConsoleRouter.use(xPlaygroundRouter);
+xGatewayConsoleRouter.use(xGatewayManagementRouter);
+xGatewayConsoleRouter.use(xGatewayMediaRouter);
 xGatewayConsoleRouter.use(xQuotaRouter);
+xGatewayConsoleRouter.use('/proxy-pool', xProxyPoolRouter);
 
 xGatewayConsoleRouter.use((_req, res) => {
   res.status(404).json({ error: { type: 'not_found', message: 'Not found' } });

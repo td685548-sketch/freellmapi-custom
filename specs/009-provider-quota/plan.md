@@ -9,6 +9,5 @@ PASS: standalone modules, timestamped migration, additive DTOs, minimal mounts a
 shared/x-quota.ts; server/src/custom/x-gateway/quota/{adapters,store,router,tracking}.ts; timestamped x quota migration + defaults registration; client/src/custom/x-gateway/pages/Quota.tsx with quota-api/strings/CSS. Existing gateway candidate resolver filters quota and orders auto; transport observer scoped only to X accounts.
 ## Validation
 Provider parsing, HTTP permission/refresh/tier, quota routing and header observations, migration up/down, UI countdown/error tests, full npm run test/build/lint. Review diff before commit/PR on shared integration branch.
-
 ## Release branch exception
 The user explicitly authorized a dedicated Quota PR to keep concurrent Media and Proxy Pool work outside this release.
