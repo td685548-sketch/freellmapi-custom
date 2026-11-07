@@ -9,7 +9,7 @@ import { apiFetch } from '@/lib/api'
 import type { ProviderAccountsResponse, ProviderAccount, ProviderAccountPollResponse } from '../../../../shared/x-accounts'
 import Providers from './pages/Providers'
 import ProviderAccounts from './pages/ProviderAccounts'
-import { ConnectAccountDialog } from './ConnectAccountDialog'
+import { ConnectAccountDialog, extractCookieCredential } from './ConnectAccountDialog'
 import { AccountCallback } from './AccountCallback'
 import { trustedLoginUrl } from './api'
 
@@ -389,5 +389,40 @@ describe('OAuth callback', () => {
     await flush()
     expect(container.textContent).toContain('Could not complete the connection.')
     expect(vi.mocked(apiFetch).mock.calls.some(([p]) => p.endsWith('/complete'))).toBe(false)
+  })
+})
+
+describe('extractCookieCredential', () => {
+  it('parses Cookie-Editor JSON array into standard cookie header string', () => {
+    const json = JSON.stringify([
+      { name: '__Secure-next-auth.session-token', value: 'token123', domain: 'chatgpt.com' },
+      { name: '_cfuvid', value: 'cf123', domain: '.chatgpt.com' },
+    ])
+    expect(extractCookieCredential(json)).toBe('__Secure-next-auth.session-token=token123; _cfuvid=cf123')
+  })
+
+  it('parses Playwright storage state JSON into cookie header string', () => {
+    const json = JSON.stringify({
+      cookies: [
+        { name: 'session', value: 'sess_abc' },
+        { name: 'csrf', value: 'csrf_xyz' },
+      ],
+    })
+    expect(extractCookieCredential(json)).toBe('session=sess_abc; csrf=csrf_xyz')
+  })
+
+  it('strips Cookie: or Authorization: header prefix', () => {
+    expect(extractCookieCredential('Cookie: foo=bar; baz=qux')).toBe('foo=bar; baz=qux')
+    expect(extractCookieCredential('Authorization: Bearer token-xyz')).toBe('token-xyz')
+  })
+
+  it('preserves raw cookie strings and tokens untouched', () => {
+    expect(extractCookieCredential('sso=my-secret-cookie')).toBe('sso=my-secret-cookie')
+    expect(extractCookieCredential('raw_token_value')).toBe('raw_token_value')
+  })
+
+  it('handles invalid or non-cookie JSON gracefully by returning trimmed raw text', () => {
+    expect(extractCookieCredential('{ "invalid": 123 }')).toBe('{ "invalid": 123 }')
+    expect(extractCookieCredential('invalid json {')).toBe('invalid json {')
   })
 })

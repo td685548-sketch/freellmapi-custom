@@ -31,7 +31,7 @@ type SessionRequest = Request & { user?: SessionUser; sessionToken?: string };
 const labelSchema = z.string().trim().max(200).refine(s => [...s].every(c => c.charCodeAt(0) >= 32 && c.charCodeAt(0) !== 127));
 const createSchema = z.object({
   provider: z.string().trim().min(1).max(100),
-  key: z.string().trim().min(1).max(8192),
+  key: z.string().trim().min(1).max(65536),
   label: labelSchema.optional(),
   baseUrl: z.string().trim().max(2048).optional(),
   proxyUrl: z.string().trim().max(KEY_PROXY_URL_MAX).optional(),
