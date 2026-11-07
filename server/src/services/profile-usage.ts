@@ -9,6 +9,8 @@ import { SETTINGS_COLUMNS as CONV_COLUMNS, settingsFromRow as conversationSettin
 import type { ConversationSettings } from '@freellmapi/shared/conversations.js';
 import { CONTENT_FILTER_COLUMNS, contentFilterFromRow, type ContentFilterRow } from './content-filter.js';
 import type { ContentFilterSettings } from '@freellmapi/shared/content-filter.js';
+import { QUICK_ANSWER_COLUMNS, quickAnswerSettingsFromRow } from './quick-answers.js';
+import type { QuickAnswerSettings } from '@freellmapi/shared/quick-answers.js';
 
 // Usage and per-minute limit of client profiles (`sk-cp-…` keys). The profile CRUD
 // itself lives in routes/client-profiles.ts (upstream); this module only adds the
@@ -30,6 +32,8 @@ export interface GateProfile {
   conversations: ConversationSettings;
   /** Content rules for the latest user message. */
   contentFilter: ContentFilterSettings;
+  /** Ready answers sent without an AI call. */
+  quickAnswers: QuickAnswerSettings;
 }
 
 /** The stored JSON list, tolerant of anything unexpected (an unreadable list restricts nothing it cannot name, so it reads as empty). */
@@ -47,8 +51,8 @@ export function profileForGate(token: string): GateProfile | null {
   const hash = hashClientProfileKey(token);
   const select = 'SELECT id, rpm_limit AS rpmLimit, allowed_models AS allowedModels, max_tokens_cap AS maxTokens, '
     + 'eu_daily_requests AS euDR, eu_daily_tokens AS euDT, eu_monthly_requests AS euMR, eu_monthly_tokens AS euMT, '
-    + `kb_enabled AS kbEnabled, kb_max_chars AS kbMaxChars, ${CONV_COLUMNS}, ${CONTENT_FILTER_COLUMNS} FROM client_profiles WHERE enabled = 1 AND `;
-  type Row = (Omit<GateProfile, 'allowedModels' | 'endUserQuota' | 'knowledge' | 'conversations' | 'contentFilter'> & Parameters<typeof conversationSettings>[0] & ContentFilterRow & { allowedModels: string | null; euDR: number | null; euDT: number | null; euMR: number | null; euMT: number | null; kbEnabled: number; kbMaxChars: number | null }) | undefined;
+    + `kb_enabled AS kbEnabled, kb_max_chars AS kbMaxChars, ${CONV_COLUMNS}, ${CONTENT_FILTER_COLUMNS}, ${QUICK_ANSWER_COLUMNS} FROM client_profiles WHERE enabled = 1 AND `;
+  type Row = (Omit<GateProfile, 'allowedModels' | 'endUserQuota' | 'knowledge' | 'conversations' | 'contentFilter' | 'quickAnswers'> & Parameters<typeof conversationSettings>[0] & ContentFilterRow & Parameters<typeof quickAnswerSettingsFromRow>[0] & { allowedModels: string | null; euDR: number | null; euDT: number | null; euMR: number | null; euMT: number | null; kbEnabled: number; kbMaxChars: number | null }) | undefined;
   let row = db.prepare(select + 'token_hash = ?').get(hash) as Row;
   if (!row) {
     // A key in its post-rotation grace period counts as its profile: same limits, same numbers.
@@ -62,6 +66,7 @@ export function profileForGate(token: string): GateProfile | null {
     knowledge: { enabled: row.kbEnabled === 1, maxChars: row.kbMaxChars ?? KNOWLEDGE_LIMITS.defaultMaxChars },
     conversations: conversationSettings(row),
     contentFilter: contentFilterFromRow(row),
+    quickAnswers: quickAnswerSettingsFromRow(row),
   };
 }
 

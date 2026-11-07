@@ -21,6 +21,7 @@ import { endUsersRouter } from '../routes/end-users.js';
 import { profileKnowledgeRouter } from '../routes/profile-knowledge.js';
 import { profileConversationsRouter, storedConversationsRouter } from '../routes/profile-conversations.js';
 import { contentFilterRouter } from '../routes/content-filter.js';
+import { quickAnswersRouter } from '../routes/quick-answers.js';
 import { maybeRollUp } from '../services/usage-daily.js';
 import { maybeSendWeeklyReport } from '../services/usage-report.js';
 import { usageReportSettingsRouter } from '../routes/usage-report-settings.js';
@@ -155,7 +156,7 @@ export function registerCustomRoutes(app: Express): void {
   for (const gate of PERMISSION_GATES) installGate(app, gate);
   app.use(['/api/keys', '/api/embeddings', '/api/media', '/api/decisions'], guardKeyAddition);
   // Usage and request cap per client profile; the manage_settings gate for this prefix is installed just above.
-  app.use('/api/client-profiles', profileAnalyticsRouter, profileQuotaRouter, profileRestrictionsRouter, profileTestRouter, profileKeyRotationRouter, profileRequestsRouter, endUsersRouter, profileKnowledgeRouter, profileConversationsRouter, contentFilterRouter);
+  app.use('/api/client-profiles', profileAnalyticsRouter, profileQuotaRouter, profileRestrictionsRouter, profileTestRouter, profileKeyRotationRouter, profileRequestsRouter, endUsersRouter, profileKnowledgeRouter, profileConversationsRouter, contentFilterRouter, quickAnswersRouter);
   // Where usage alerts go; the /api/settings gate above covers it (view_settings / edit_settings).
   app.use('/api/settings/usage-alerts', usageAlertSettingsRouter);
   // The weekly usage report; same gate (view_settings / edit_settings, see permission-actions.ts).

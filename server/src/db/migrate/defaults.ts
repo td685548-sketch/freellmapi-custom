@@ -60,6 +60,7 @@ import * as customProfileConversations from '../migrations/20261107_000004_custo
 import * as customContentFilter from '../migrations/20261107_000005_custom_content_filter.js';
 import * as customUsageDaily from '../migrations/20261107_000006_custom_usage_daily.js';
 import * as customAuditLog from '../migrations/20261107_000007_custom_audit_log.js';
+import * as customQuickAnswers from '../migrations/20261107_000008_custom_quick_answers.js';
 import * as cloudflareNeuronUsage from '../migrations/20261104_000001_cloudflare_neuron_usage.js';
 import * as customXGateway from '../migrations/20261106_120000_custom_x_gateway.js';
 import * as customProviderAccounts from '../migrations/20261107_000001_custom_provider_accounts.js';
@@ -150,6 +151,7 @@ export const CUSTOM_PROFILE_CONVERSATIONS_FILENAME = '20261107_000004_custom_pro
 export const CUSTOM_CONTENT_FILTER_FILENAME = '20261107_000005_custom_content_filter.ts';
 export const CUSTOM_USAGE_DAILY_FILENAME = '20261107_000006_custom_usage_daily.ts';
 export const CUSTOM_AUDIT_LOG_FILENAME = '20261107_000007_custom_audit_log.ts';
+export const CUSTOM_QUICK_ANSWERS_FILENAME = '20261107_000008_custom_quick_answers.ts';
 export const CLOUDFLARE_NEURON_USAGE_FILENAME = '20261104_000001_cloudflare_neuron_usage.ts';
 export const CUSTOM_X_GATEWAY_FILENAME = '20261106_120000_custom_x_gateway.ts';
 export const CUSTOM_PROVIDER_ACCOUNTS_FILENAME = '20261107_000001_custom_provider_accounts.ts';
@@ -225,5 +227,6 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: CUSTOM_CONTENT_FILTER_FILENAME, module: customContentFilter },
   { filename: CUSTOM_USAGE_DAILY_FILENAME, module: customUsageDaily },
   { filename: CUSTOM_AUDIT_LOG_FILENAME, module: customAuditLog },
+  { filename: CUSTOM_QUICK_ANSWERS_FILENAME, module: customQuickAnswers },
   { filename: CUSTOM_X_GATEWAY_KEYS_FILENAME, module: customXGatewayKeys },
 ];
