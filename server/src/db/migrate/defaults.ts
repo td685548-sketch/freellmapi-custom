@@ -57,6 +57,12 @@ import * as customProfilePreviousKeys from '../migrations/20261107_000001_custom
 import * as customEndUsers from '../migrations/20261107_000002_custom_end_users.js';
 import * as customProfileKnowledge from '../migrations/20261107_000003_custom_profile_knowledge.js';
 import * as customProfileConversations from '../migrations/20261107_000004_custom_profile_conversations.js';
+import * as customContentFilter from '../migrations/20261107_000005_custom_content_filter.js';
+import * as customUsageDaily from '../migrations/20261107_000006_custom_usage_daily.js';
+import * as customAuditLog from '../migrations/20261107_000007_custom_audit_log.js';
+import * as customQuickAnswers from '../migrations/20261107_000008_custom_quick_answers.js';
+import * as customConversationSummary from '../migrations/20261107_000009_custom_conversation_summary.js';
+import * as customFeedback from '../migrations/20261107_000010_custom_feedback.js';
 import * as cloudflareNeuronUsage from '../migrations/20261104_000001_cloudflare_neuron_usage.js';
 import * as customXGateway from '../migrations/20261106_120000_custom_x_gateway.js';
 import * as customProviderAccounts from '../migrations/20261107_000001_custom_provider_accounts.js';
@@ -145,6 +151,12 @@ export const CUSTOM_PROFILE_PREVIOUS_KEYS_FILENAME = '20261107_000001_custom_pro
 export const CUSTOM_END_USERS_FILENAME = '20261107_000002_custom_end_users.ts';
 export const CUSTOM_PROFILE_KNOWLEDGE_FILENAME = '20261107_000003_custom_profile_knowledge.ts';
 export const CUSTOM_PROFILE_CONVERSATIONS_FILENAME = '20261107_000004_custom_profile_conversations.ts';
+export const CUSTOM_CONTENT_FILTER_FILENAME = '20261107_000005_custom_content_filter.ts';
+export const CUSTOM_USAGE_DAILY_FILENAME = '20261107_000006_custom_usage_daily.ts';
+export const CUSTOM_AUDIT_LOG_FILENAME = '20261107_000007_custom_audit_log.ts';
+export const CUSTOM_QUICK_ANSWERS_FILENAME = '20261107_000008_custom_quick_answers.ts';
+export const CUSTOM_CONVERSATION_SUMMARY_FILENAME = '20261107_000009_custom_conversation_summary.ts';
+export const CUSTOM_FEEDBACK_FILENAME = '20261107_000010_custom_feedback.ts';
 export const CLOUDFLARE_NEURON_USAGE_FILENAME = '20261104_000001_cloudflare_neuron_usage.ts';
 export const CUSTOM_X_GATEWAY_FILENAME = '20261106_120000_custom_x_gateway.ts';
 export const CUSTOM_PROVIDER_ACCOUNTS_FILENAME = '20261107_000001_custom_provider_accounts.ts';
@@ -218,6 +230,12 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: CUSTOM_END_USERS_FILENAME, module: customEndUsers },
   { filename: CUSTOM_PROFILE_KNOWLEDGE_FILENAME, module: customProfileKnowledge },
   { filename: CUSTOM_PROFILE_CONVERSATIONS_FILENAME, module: customProfileConversations },
+  { filename: CUSTOM_CONTENT_FILTER_FILENAME, module: customContentFilter },
+  { filename: CUSTOM_USAGE_DAILY_FILENAME, module: customUsageDaily },
+  { filename: CUSTOM_AUDIT_LOG_FILENAME, module: customAuditLog },
+  { filename: CUSTOM_QUICK_ANSWERS_FILENAME, module: customQuickAnswers },
+  { filename: CUSTOM_CONVERSATION_SUMMARY_FILENAME, module: customConversationSummary },
+  { filename: CUSTOM_FEEDBACK_FILENAME, module: customFeedback },
   { filename: CUSTOM_X_GATEWAY_KEYS_FILENAME, module: customXGatewayKeys },
   { filename: CUSTOM_X_GATEWAY_PROXY_AND_API_KEYS_FILENAME, module: customXGatewayProxyAndApiKeys },
 ];

@@ -3,6 +3,7 @@ import type { Permission } from '@freellmapi/shared/user-access.js';
 import type { ParentPermission } from '@freellmapi/shared/permissions.js';
 import { hasPermission } from '../middleware/requirePermission.js';
 import type { SessionUser } from '../services/auth.js';
+import { isGuestRequest } from '../services/guest-access.js';
 
 /** Resolve known operations only. New/unrecognized endpoints require the old
  * parent capability, so a leaf cannot accidentally unlock future features. */
@@ -23,6 +24,7 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
     if (path === '/api/keys/custom/probe' && method === 'POST') return 'test_keys';
     if (/^\/api\/(embeddings|media|search|decisions)(\/|$)/.test(path)) return 'manage_key_models';
   }
+  if (parent === 'manage_users' && path === '/api/admin/guest-access') return read ? 'view_users' : method === 'PUT' ? 'edit_user_permissions' : parent;
   if (parent === 'manage_users' && path.startsWith('/api/admin/users')) {
     if (read && ['/api/admin/users', '/api/admin/users/usage'].includes(path)) return 'view_users';
     if (read && /^\/api\/admin\/users\/\d+\/analytics$/.test(path)) return 'view_users';
@@ -54,11 +56,14 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
   if (parent === 'view_logs') {
     if (path === '/api/logs' && read) return 'view_server_logs';
     if (path === '/api/logs/clear' && method === 'POST') return 'clear_server_logs';
+    if (path === '/api/audit' && read) return 'view_audit_log';
     if ((path.startsWith('/api/analytics/') || ['/api/analytics', '/api/fallback/token-usage', '/api/fallback/quota-forecast'].includes(path)) && read) return 'view_analytics';
   }
   if (parent === 'view_usage' && read) {
     if (path === '/api/usage/accounts') return 'view_usage_accounts';
     if (path === '/api/usage/profiles') return 'view_usage_profiles';
+    if (/^\/api\/usage\/(?:daily\/accounts|export\/accounts\.csv)$/.test(path)) return 'view_usage_accounts';
+    if (/^\/api\/usage\/(?:daily\/(?:profiles|end-users)|export\/(?:profiles|end-users)\.csv)$/.test(path)) return 'view_usage_profiles';
   }
   if (parent === 'manage_x_gateway') {
     if (path === '/api/x-gateway/enabled' || path === '/api/x-gateway/defaults' || path === '/api/x-gateway/proxy') {
@@ -85,13 +90,13 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
     if (path === '/api/settings/api-key/regenerate' && method === 'POST') return 'rotate_gateway_key';
     if (/^\/api\/settings\/url-tokens(?:\/[^/]+)?$/.test(path)) return read ? 'reveal_gateway_key' : 'rotate_gateway_key';
     // What end users wrote is more than a usage number: reading stored messages takes the edit permission.
-    if (read && /^\/api\/client-profiles\/\d+\/conversations\/[^/]+$/.test(path)) return 'edit_client_profiles';
+    if (read && /^\/api\/client-profiles\/\d+\/(?:conversations\/[^/]+|content-filter\/events|feedback\/comments)$/.test(path)) return 'edit_client_profiles';
     if (path.startsWith('/api/client-profiles')) return read ? 'view_client_profiles' : 'edit_client_profiles';
     if (path.startsWith('/api/update')) return 'manage_updates';
     if (path.startsWith('/api/compression') || path === '/api/settings/compression') return read ? 'view_settings' : 'manage_compression';
     if (path.startsWith('/api/savers')) return read ? 'view_settings' : 'manage_compression';
     if (/^\/api\/(models|profiles|fallback|premium)(\/|$)/.test(path)) return 'manage_routing';
-    if (['version', 'update-check', 'unify', 'fusion', 'enable-mcp', 'anthropic-map', 'gemini-map', 'agent-compatibility', 'output-limit', 'min-context-window', 'guardrails', 'headroom', 'task-weight-share', 'min-reliability-floor', 'provider-moment-attribution', 'proxy', 'proxy/test', 'usage-alerts', 'usage-alerts/test'].some(name => path === `/api/settings/${name}`)) return read ? 'view_settings' : 'edit_settings';
+    if (['version', 'update-check', 'unify', 'fusion', 'enable-mcp', 'anthropic-map', 'gemini-map', 'agent-compatibility', 'output-limit', 'min-context-window', 'guardrails', 'headroom', 'task-weight-share', 'min-reliability-floor', 'provider-moment-attribution', 'proxy', 'proxy/test', 'usage-alerts', 'usage-alerts/test', 'usage-report', 'usage-report/preview', 'usage-report/send'].some(name => path === `/api/settings/${name}`)) return read ? 'view_settings' : 'edit_settings';
   }
   return parent;
 }
@@ -100,6 +105,8 @@ export function requireActionPermission(parent: ParentPermission) {
   return (req: Request, res: Response, next: NextFunction): void => {
     const permission = permissionForAction(parent, req.method, req.originalUrl);
     const user = (req as Request & { user?: SessionUser }).user;
+    // Guest requests exist only for the read routes an administrator opened (services/guest-access.ts).
+    if (isGuestRequest(req)) { next(); return; }
     if ((req.method === 'GET' || req.method === 'HEAD') && req.originalUrl.split('?')[0] === '/api/cache/stats' && hasPermission(user, 'view_analytics')) { next(); return; }
     if ((req.method === 'GET' || req.method === 'HEAD') && ['/api/settings/version', '/api/settings/update-check'].includes(req.originalUrl.split('?')[0]!) && hasPermission(user, 'manage_updates')) { next(); return; }
     if (hasPermission(user, permission)) { next(); return; }

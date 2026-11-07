@@ -16,14 +16,15 @@ vi.mock('@/lib/api', () => ({ apiFetch: vi.fn() }))
 
 const row = (over: Partial<UsageRow>): UsageRow => ({
   kind: 'account', id: 1, name: 'a', role: 'member', requests: 0, success: 0, errors: 0, canceled: 0, inputTokens: 0, outputTokens: 0,
-  avgLatencyMs: null, p95LatencyMs: null, lastRequestAt: null, rpmLimit: null, ...over,
+  avgLatencyMs: null, p95LatencyMs: null, lastRequestAt: null, rpmLimit: null,
+  previous: { requests: 0, errors: 0, tokens: 0 }, allowance: null, ...over,
 })
-const accounts: UsageOverview = { kind: 'account', days: 30, since: '', rows: [
-  row({ id: 1, name: 'alice@x.com', requests: 100, success: 90, errors: 10, inputTokens: 500, outputTokens: 100, avgLatencyMs: 800, p95LatencyMs: 2000, lastRequestAt: '2026-11-06 10:00:00', rpmLimit: 60 }),
+const accounts: UsageOverview = { kind: 'account', days: 30, since: '', generatedAt: '2026-11-07T01:00:00.000Z', rows: [
+  row({ id: 1, name: 'alice@x.com', requests: 100, success: 90, errors: 10, inputTokens: 500, outputTokens: 100, avgLatencyMs: 800, p95LatencyMs: 2000, lastRequestAt: '2026-11-06 10:00:00', rpmLimit: 60, previous: { requests: 80, errors: 20, tokens: 600 }, allowance: { used: 0.85, period: 'day', metric: 'requests' } }),
   row({ id: 2, name: 'bob@x.com', requests: 40, success: 40, inputTokens: 90, outputTokens: 10, avgLatencyMs: 300, p95LatencyMs: 500 }),
   row({ id: 3, name: 'idle@x.com' }),
 ] }
-const profiles: UsageOverview = { kind: 'profile', days: 30, since: '', rows: [
+const profiles: UsageOverview = { kind: 'profile', days: 30, since: '', generatedAt: '2026-11-07T01:00:00.000Z', rows: [
   row({ kind: 'profile', id: 9, name: 'Shop widget', role: undefined, enabled: true, requests: 70, success: 70, avgLatencyMs: 1200, p95LatencyMs: 4000, rpmLimit: 120 }),
 ] }
 
@@ -55,6 +56,24 @@ const headerButton = (label: string) => [...container.querySelectorAll('th butto
 const click = (el: Element | null | undefined) => act(async () => { (el as HTMLElement).click() })
 
 describe('UsageRankingPage', () => {
+  it('shows the change against the previous period and the allowance used, and refreshes on demand', async () => {
+    await render()
+    const alice = [...container.querySelectorAll('tbody tr')].find(tr => tr.textContent?.includes('alice@x.com'))!
+    const cells = [...alice.querySelectorAll('td')].map(td => td.textContent)
+    expect(cells[2]).toBe('10025%')   // 100 requests, up 25%
+    expect(cells[4]).toBe('1050%')    // 10 errors, down 50%
+    expect(cells[6]).toContain('85%')
+    const bob = [...container.querySelectorAll('tbody tr')].find(tr => tr.textContent?.includes('bob@x.com'))!
+    expect(bob.querySelectorAll('td')[2]!.textContent).toBe('40new')
+    expect(bob.querySelectorAll('td')[6]!.textContent).toBe('—')
+    await click([...container.querySelectorAll('button')].find(b => b.textContent === 'Refresh'))
+    await flush()
+    expect(apiFetch).toHaveBeenCalledWith('/api/usage/accounts?days=30&fresh=1')
+    await click(headerButton('Allowance used'))
+    await click(headerButton('Allowance used'))
+    expect(order()[0]).toBe('alice@x.com')
+  })
+
   it('lists accounts and client keys together, busiest first, with totals', async () => {
     await render()
     expect(apiFetch).toHaveBeenCalledWith('/api/usage/accounts?days=30')

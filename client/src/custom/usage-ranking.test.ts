@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { UsageRow } from '../../../shared/usage-overview'
-import { DEFAULT_FILTERS, applyFilters, loadFilters, rankRows, saveFilters, successRate, totalsOf } from './usage-ranking'
+import { DEFAULT_FILTERS, applyFilters, changeOf, loadFilters, rankRows, saveFilters, successRate, totalsOf } from './usage-ranking'
 
 const row = (over: Partial<UsageRow>): UsageRow => ({
   kind: 'account', id: 1, name: 'a', requests: 0, success: 0, errors: 0, canceled: 0, inputTokens: 0, outputTokens: 0,
-  avgLatencyMs: null, p95LatencyMs: null, lastRequestAt: null, rpmLimit: null, ...over,
+  avgLatencyMs: null, p95LatencyMs: null, lastRequestAt: null, rpmLimit: null,
+  previous: { requests: 0, errors: 0, tokens: 0 }, allowance: null, ...over,
 })
 const rows = [
   row({ id: 1, name: 'alice@x.com', requests: 100, success: 90, errors: 10, inputTokens: 500, outputTokens: 100, avgLatencyMs: 800, p95LatencyMs: 2000, lastRequestAt: '2026-11-06 10:00:00' }),
@@ -16,6 +17,14 @@ const rows = [
 const names = (rs: UsageRow[]) => rs.map(r => r.name)
 
 describe('usage ranking helpers', () => {
+  it('expresses change against the previous period', () => {
+    expect(changeOf(150, 100)).toBe(0.5)
+    expect(changeOf(50, 100)).toBe(-0.5)
+    expect(changeOf(5, 0)).toBe('new')
+    expect(changeOf(0, 0)).toBeNull()
+    expect(changeOf(5, undefined)).toBeNull()
+  })
+
   it('ranks by a column in either direction, ties by name, missing values last both ways', () => {
     expect(names(rankRows(rows, { column: 'requests', direction: 'desc' }))).toEqual(['alice@x.com', 'Shop widget', 'bob@x.com', 'idle@x.com'])
     expect(names(rankRows(rows, { column: 'requests', direction: 'asc' }))).toEqual(['idle@x.com', 'bob@x.com', 'alice@x.com', 'Shop widget'])

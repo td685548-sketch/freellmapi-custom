@@ -38,7 +38,7 @@ export function setAlertSettings(next: { webhookUrl?: string; email?: string }):
 }
 
 export interface UsageAlert {
-  alert: 'allowance' | 'errors' | 'test';
+  alert: 'allowance' | 'errors' | 'test' | 'weekly_report';
   level: 'info' | 'warn';
   subject: { kind: SubjectKind; id: number; name: string } | null;
   message: string;

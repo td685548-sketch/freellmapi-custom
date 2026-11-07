@@ -41,6 +41,7 @@ describe('client key stored conversations', () => {
   let replies = 0;
   let failUpstream = false;
   let slowStream = false;
+  const summaryCalls: any[] = [];
   let ownerId: number;
   let ownerToken: string;
   let delegateId: number;
@@ -90,11 +91,16 @@ describe('client key stored conversations', () => {
     profileId = made.body.id;
     profileKey = made.body.key;
     otherKey = (await call('/api/client-profiles', ownerToken, 'POST', { name: 'blog' })).body.key;
+    await call(`/api/client-profiles/${profileId}/quota`, ownerToken, 'PUT', { rpmLimit: null }); // this file sends well over 60 a minute
     vi.spyOn(global, 'fetch').mockImplementation(async (url: any, init: any) => {
       if (String(url).startsWith(base)) return realFetch(url, init);
       const body = JSON.parse(String(init?.body ?? '{}'));
       sent.push(body);
       if (failUpstream) return new Response(JSON.stringify({ error: { message: 'upstream down' } }), { status: 500, headers: { 'content-type': 'application/json' } });
+      if ((body.messages ?? []).some((m: any) => typeof m.content === 'string' && m.content.includes('running summary'))) {
+        summaryCalls.push(body);
+        return new Response(JSON.stringify({ id: 's', object: 'chat.completion', created: 1, model: 'm', choices: [{ index: 0, message: { role: 'assistant', content: 'Khách tên Lan, thích trà.' }, finish_reason: 'stop' }], usage: { prompt_tokens: 50, completion_tokens: 10, total_tokens: 60 } }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
       replies += 1;
       const text = `reply ${replies}`;
       if (body.stream && slowStream) {
@@ -127,7 +133,8 @@ describe('client key stored conversations', () => {
     failUpstream = false;
     getDb().prepare('DELETE FROM custom_conversation_messages').run();
     getDb().prepare('DELETE FROM custom_conversations').run();
-    await settings({ enabled: false, ttlHours: 168, maxMessages: 20, maxChars: 12000 });
+    await settings({ enabled: false, ttlHours: 168, maxMessages: 20, maxChars: 12000, summarize: false });
+    summaryCalls.length = 0;
   });
 
   it('leaves requests without X-Conversation-Id alone', async () => {
@@ -236,6 +243,46 @@ describe('client key stored conversations', () => {
     expect(sentTurns[0]).toBe('user:next');
     expect(sentTurns.some((m: string) => m.includes('x'.repeat(900)))).toBe(false);
     expect(sentTurns.at(-1)).toBe('user:last');
+  });
+
+  it('folds turns that no longer fit into a running summary, made with the key itself', async () => {
+    await settings({ enabled: true, maxMessages: 2, summarize: true });
+    await chat('sum', 'Tên tôi là Lan');
+    await new Promise(r => setTimeout(r, 100));
+    expect(summaryCalls).toHaveLength(0); // everything still fits
+    await chat('sum', 'Tôi thích trà');
+    for (let i = 0; i < 40 && summaryCalls.length === 0; i++) await new Promise(r => setTimeout(r, 25));
+    expect(summaryCalls).toHaveLength(1);
+    const prompt = summaryCalls[0].messages.at(-1).content as string;
+    expect(prompt).toContain('User: Tên tôi là Lan');
+    expect(prompt).not.toContain('Tôi thích trà'); // still in the window
+    let row: any;
+    for (let i = 0; i < 40; i++) {
+      row = getDb().prepare("SELECT summary, summarized_through AS through FROM custom_conversations WHERE conv_key = 'sum'").get();
+      if (row.summary) break;
+      await new Promise(r => setTimeout(r, 25));
+    }
+    expect(row.summary).toBe('Khách tên Lan, thích trà.');
+    const ids = stored('sum').length;
+    expect(ids).toBe(4);
+    // the summary call went through the key: attributed to it, with its own user agent
+    const viaKey = getDb().prepare("SELECT COUNT(*) AS n FROM requests WHERE profile_id = ? AND client_user_agent = 'freellm-conversation-summary'").get(profileId) as { n: number };
+    expect(viaKey.n).toBe(1);
+
+    const third = await chat('sum', 'Tôi tên gì?');
+    expect(third.headers.get('x-conversation-summary')).toBe('1');
+    const sys = third.upstream.messages.filter((m: any) => m.role === 'system').map((m: any) => m.content).join('\n');
+    expect(sys).toContain('Summary of the earlier part of this conversation:\nKhách tên Lan, thích trà.');
+    expect(convoOf(third.upstream)).toEqual(['user:Tôi thích trà', expect.stringMatching(/^assistant:reply/), 'user:Tôi tên gì?']);
+    // the dashboard shows the summary too
+    expect((await call(`/api/client-profiles/${profileId}/conversations/sum`, ownerToken)).body.conversation.summary).toBe('Khách tên Lan, thích trà.');
+  });
+
+  it('makes no summary call while summaries are off', async () => {
+    await settings({ enabled: true, maxMessages: 2 });
+    for (const t of ['a', 'b', 'c']) await chat('nosum', t);
+    await new Promise(r => setTimeout(r, 150));
+    expect(summaryCalls).toHaveLength(0);
   });
 
   it('keeps storage bounded for long conversations', async () => {

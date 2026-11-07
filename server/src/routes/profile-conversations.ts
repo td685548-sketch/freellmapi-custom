@@ -25,6 +25,7 @@ const settingsSchema = z.object({
   ttlHours: z.number().int().min(L.minTtlHours).max(L.maxTtlHours).optional(),
   maxMessages: z.number().int().min(L.minMaxMessages).max(L.maxMaxMessages).optional(),
   maxChars: z.number().int().min(L.minMaxChars).max(L.maxMaxChars).optional(),
+  summarize: z.boolean().optional(),
 }).strict();
 
 const first = (raw: unknown): unknown => (Array.isArray(raw) ? raw[0] : raw);

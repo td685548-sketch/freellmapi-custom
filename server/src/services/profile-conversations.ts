@@ -22,7 +22,7 @@ export function normalizeConversationId(raw: unknown): string | null {
 const clamp = (v: number | null | undefined, min: number, max: number, fallback: number): number =>
   typeof v === 'number' && Number.isInteger(v) ? Math.max(min, Math.min(max, v)) : fallback;
 
-interface SettingsRow { convEnabled: number; ttl: number | null; maxMessages: number | null; maxChars: number | null }
+interface SettingsRow { convEnabled: number; ttl: number | null; maxMessages: number | null; maxChars: number | null; convSummarize?: number | null }
 
 export function settingsFromRow(row: SettingsRow): ConversationSettings {
   return {
@@ -30,10 +30,11 @@ export function settingsFromRow(row: SettingsRow): ConversationSettings {
     ttlHours: clamp(row.ttl, L.minTtlHours, L.maxTtlHours, L.defaultTtlHours),
     maxMessages: clamp(row.maxMessages, L.minMaxMessages, L.maxMaxMessages, L.defaultMaxMessages),
     maxChars: clamp(row.maxChars, L.minMaxChars, L.maxMaxChars, L.defaultMaxChars),
+    summarize: row.convSummarize === 1,
   };
 }
 
-export const SETTINGS_COLUMNS = 'conv_enabled AS convEnabled, conv_ttl_hours AS ttl, conv_max_messages AS maxMessages, conv_max_chars AS maxChars';
+export const SETTINGS_COLUMNS = 'conv_enabled AS convEnabled, conv_ttl_hours AS ttl, conv_max_messages AS maxMessages, conv_max_chars AS maxChars, conv_summarize AS convSummarize';
 
 /** Null when the profile does not exist. */
 export function getConversationSettings(profileId: number): ConversationSettings | null {
@@ -42,8 +43,8 @@ export function getConversationSettings(profileId: number): ConversationSettings
 }
 
 export function setConversationSettings(profileId: number, s: ConversationSettings): void {
-  getDb().prepare('UPDATE client_profiles SET conv_enabled = ?, conv_ttl_hours = ?, conv_max_messages = ?, conv_max_chars = ? WHERE id = ?')
-    .run(s.enabled ? 1 : 0, s.ttlHours, s.maxMessages, s.maxChars, profileId);
+  getDb().prepare('UPDATE client_profiles SET conv_enabled = ?, conv_ttl_hours = ?, conv_max_messages = ?, conv_max_chars = ?, conv_summarize = ? WHERE id = ?')
+    .run(s.enabled ? 1 : 0, s.ttlHours, s.maxMessages, s.maxChars, s.summarize ? 1 : 0, profileId);
 }
 
 const cutoff = (ttlHours: number, now: number) => new Date(now - ttlHours * HOUR_MS).toISOString();
@@ -61,7 +62,7 @@ function deleteConversationRows(ids: number[]): void {
 }
 
 export type HistoryResult =
-  | { ok: true; conversationId: number | null; history: Array<{ role: 'user' | 'assistant'; content: string }> }
+  | { ok: true; conversationId: number | null; history: Array<{ role: 'user' | 'assistant'; content: string }>; summary: string | null }
   | { ok: false; reason: 'end_user_mismatch' };
 
 /**
@@ -71,12 +72,12 @@ export type HistoryResult =
  */
 export function loadHistory(profileId: number, key: string, endUser: string | null, s: ConversationSettings, now = Date.now()): HistoryResult {
   const db = getDb();
-  const row = db.prepare('SELECT id, end_user AS endUser, updated_at AS updatedAt FROM custom_conversations WHERE profile_id = ? AND conv_key = ?')
-    .get(profileId, key) as ConvRow | undefined;
-  if (!row) return { ok: true, conversationId: null, history: [] };
+  const row = db.prepare('SELECT id, end_user AS endUser, updated_at AS updatedAt, summary FROM custom_conversations WHERE profile_id = ? AND conv_key = ?')
+    .get(profileId, key) as (ConvRow & { summary: string | null }) | undefined;
+  if (!row) return { ok: true, conversationId: null, history: [], summary: null };
   if (row.updatedAt < cutoff(s.ttlHours, now)) {
     deleteConversationRows([row.id]);
-    return { ok: true, conversationId: null, history: [] };
+    return { ok: true, conversationId: null, history: [], summary: null };
   }
   if (row.endUser !== null && row.endUser !== endUser) return { ok: false, reason: 'end_user_mismatch' };
 
@@ -91,14 +92,56 @@ export function loadHistory(profileId: number, key: string, endUser: string | nu
   }
   kept.reverse();
   while (kept.length > 0 && kept[0]!.role !== 'user') kept.shift();
-  return { ok: true, conversationId: row.id, history: kept };
+  return { ok: true, conversationId: row.id, history: kept, summary: s.summarize && row.summary ? row.summary : null };
+}
+
+/** Most characters of earlier turns folded into the summary in one call. */
+const MAX_FOLD_CHARS = 16_000;
+
+/**
+ * Turns that no longer fit the history window and are not in the summary yet, oldest first, within
+ * MAX_FOLD_CHARS; with the current summary. Null when there is nothing to fold.
+ */
+export function foldableTurns(conversationId: number, s: ConversationSettings): { summary: string | null; turns: Array<{ id: number; role: string; content: string }> } | null {
+  const db = getDb();
+  const conv = db.prepare('SELECT summary, summarized_through AS through FROM custom_conversations WHERE id = ?').get(conversationId) as { summary: string | null; through: number } | undefined;
+  if (!conv) return null;
+  // The oldest message still sent as history, by the same count and character rules as loadHistory;
+  // everything older (and newer than the summary) is foldable.
+  const newest = db.prepare('SELECT id, role, LENGTH(content) AS len FROM custom_conversation_messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?')
+    .all(conversationId, s.maxMessages + 1) as Array<{ id: number; role: string; len: number }>;
+  const kept: typeof newest = [];
+  let used = 0;
+  for (const m of newest.slice(0, s.maxMessages)) {
+    if (used + m.len > s.maxChars) break;
+    used += m.len;
+    kept.push(m);
+  }
+  while (kept.length > 0 && kept[kept.length - 1]!.role !== 'user') kept.pop(); // oldest first must be a user turn
+  if (kept.length === newest.length) return null; // everything still fits
+  const firstKept = kept.length ? kept[kept.length - 1]!.id : Number.MAX_SAFE_INTEGER;
+  const rows = db.prepare('SELECT id, role, content FROM custom_conversation_messages WHERE conversation_id = ? AND id > ? AND id < ? ORDER BY id LIMIT 200')
+    .all(conversationId, conv.through, firstKept) as Array<{ id: number; role: string; content: string }>;
+  const turns: typeof rows = [];
+  let chars = 0;
+  for (const r of rows) {
+    if (turns.length > 0 && chars + r.content.length > MAX_FOLD_CHARS) break;
+    chars += r.content.length;
+    turns.push(r);
+  }
+  return turns.length ? { summary: conv.summary, turns } : null;
+}
+
+export function saveSummary(conversationId: number, summary: string, throughId: number): void {
+  getDb().prepare('UPDATE custom_conversations SET summary = ?, summarized_through = MAX(summarized_through, ?) WHERE id = ?')
+    .run(summary.slice(0, 4_000), throughId, conversationId);
 }
 
 /** Store one completed turn: the request's new messages, then the reply. */
 export function appendTurn(
   profileId: number, key: string, endUser: string | null, conversationId: number | null,
   turn: Array<{ role: 'user' | 'assistant'; content: string }>, reply: string, s: ConversationSettings, now = Date.now(),
-): void {
+): number {
   const db = getDb();
   const at = new Date(now).toISOString();
   let id = conversationId;
@@ -121,19 +164,23 @@ export function appendTurn(
   runWriteGroup(db, writes);
   compact(id, s);
   maybePruneConversations(now);
+  return id;
 }
 
 // Only the newest `maxMessages` are ever sent, so once a conversation holds twice that many the older
 // ones are dropped. Amortized: one trim every `maxMessages` stored messages.
+// With summaries on, only messages already folded into the summary are dropped (unless a conversation
+// grows to ten times the limit, e.g. because summaries keep failing).
 function compact(id: number, s: ConversationSettings): void {
   const db = getDb();
-  const row = db.prepare('SELECT message_count AS n FROM custom_conversations WHERE id = ?').get(id) as { n: number } | undefined;
+  const row = db.prepare('SELECT message_count AS n, summarized_through AS through FROM custom_conversations WHERE id = ?').get(id) as { n: number; through: number } | undefined;
   if (!row || row.n <= Math.max(2 * s.maxMessages, 40)) return;
   const keep = Math.max(s.maxMessages, 20);
+  const onlyFolded = s.summarize && row.n <= 10 * Math.max(s.maxMessages, 20);
   runWriteGroup(db, [
     {
-      sql: 'DELETE FROM custom_conversation_messages WHERE conversation_id = ? AND id < (SELECT id FROM custom_conversation_messages WHERE conversation_id = ? ORDER BY id DESC LIMIT 1 OFFSET ?)',
-      params: [id, id, keep - 1],
+      sql: `DELETE FROM custom_conversation_messages WHERE conversation_id = ? AND id < (SELECT id FROM custom_conversation_messages WHERE conversation_id = ? ORDER BY id DESC LIMIT 1 OFFSET ?)${onlyFolded ? ' AND id <= ?' : ''}`,
+      params: onlyFolded ? [id, id, keep - 1, row.through] : [id, id, keep - 1],
     },
     {
       sql: 'UPDATE custom_conversations SET message_count = (SELECT COUNT(*) FROM custom_conversation_messages WHERE conversation_id = ?), chars = (SELECT COALESCE(SUM(LENGTH(content)), 0) FROM custom_conversation_messages WHERE conversation_id = ?) WHERE id = ?',
@@ -158,8 +205,8 @@ export function listConversations(profileId: number, s: ConversationSettings, op
 /** A live conversation and its stored messages, oldest first; null when there is none. */
 export function getConversation(profileId: number, key: string, s: ConversationSettings, now = Date.now()): { conversation: StoredConversation; messages: StoredMessage[] } | null {
   const db = getDb();
-  const row = db.prepare(`SELECT rowid AS rid, ${LIST_COLUMNS} FROM custom_conversations WHERE profile_id = ? AND conv_key = ?`)
-    .get(profileId, key) as (ListRow & { rid: number }) | undefined;
+  const row = db.prepare(`SELECT rowid AS rid, summary, ${LIST_COLUMNS} FROM custom_conversations WHERE profile_id = ? AND conv_key = ?`)
+    .get(profileId, key) as (ListRow & { rid: number; summary: string | null }) | undefined;
   if (!row || row.updatedAt < cutoff(s.ttlHours, now)) return null;
   const messages = db.prepare('SELECT role, content, created_at AS createdAt FROM custom_conversation_messages WHERE conversation_id = ? ORDER BY id')
     .all(row.rid) as StoredMessage[];

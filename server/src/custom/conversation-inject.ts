@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import type { ConversationSettings } from '@freellmapi/shared/conversations.js';
 import { appendTurn, loadHistory, normalizeConversationId } from '../services/profile-conversations.js';
+import { scheduleSummary } from './conversation-summary.js';
 
 // Server-side conversations for client keys. The web app sends `X-Conversation-Id` with only the new
 // message(s); the stored earlier turns are put in front of them, and once the reply has completed the
@@ -77,11 +78,22 @@ export function applyConversation(req: Request, res: Response, profileId: number
   const loaded = loadHistory(profileId, key, endUser, settings);
   if (!loaded.ok) return fail(res, 403, 'conversation_end_user_mismatch', 'This conversation belongs to another end user.');
 
-  body!.messages = [...messages.slice(0, lead), ...loaded.history, ...fresh];
+  // The running summary of turns that no longer fit goes after the web app's own instructions.
+  const summaryText = loaded.summary ? `Summary of the earlier part of this conversation:\n${loaded.summary}` : null;
+  const summaryMessages = summaryText && wire === 'chat' ? [{ role: 'system', content: summaryText }] : [];
+  if (summaryText && wire === 'anthropic') {
+    if (Array.isArray(body!.system)) (body!.system as unknown[]).push({ type: 'text', text: summaryText });
+    else body!.system = typeof body!.system === 'string' && body!.system ? `${body!.system}\n\n${summaryText}` : summaryText;
+  }
+  body!.messages = [...messages.slice(0, lead), ...summaryMessages, ...loaded.history, ...fresh];
   res.setHeader('X-Conversation-Id', key);
   res.setHeader('X-Conversation-History', String(loaded.history.length));
+  if (loaded.summary) res.setHeader('X-Conversation-Summary', '1');
 
-  captureReply(res, wire, (reply) => appendTurn(profileId, key, endUser, loaded.conversationId, turn, reply, settings));
+  captureReply(res, wire, (reply) => {
+    const id = appendTurn(profileId, key, endUser, loaded.conversationId, turn, reply, settings);
+    scheduleSummary(req, profileId, id, settings);
+  });
   return true;
 }
 

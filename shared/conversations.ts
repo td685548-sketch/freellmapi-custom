@@ -7,6 +7,8 @@ export interface ConversationSettings {
   maxMessages: number
   /** Most characters of earlier messages added to one request. */
   maxChars: number
+  /** Fold turns that no longer fit into a running summary (one extra model call through the key). */
+  summarize: boolean
 }
 
 /** A stored conversation, as the dashboard lists it. */
@@ -20,6 +22,8 @@ export interface StoredConversation {
   updatedAt: string
   /** When it is deleted unless it is used again. */
   expiresAt: string
+  /** The running summary of earlier turns, when there is one. */
+  summary?: string | null
 }
 
 export interface StoredMessage {

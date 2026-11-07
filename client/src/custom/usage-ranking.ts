@@ -2,7 +2,7 @@ import type { UsageRow } from '../../../shared/usage-overview'
 import { compareBy, type SortState } from '@/lib/table-sort'
 
 export const RANKING_COLUMNS = [
-  'name', 'requests', 'successRate', 'errors', 'tokens', 'avgLatency', 'p95Latency', 'lastRequest', 'rpmLimit',
+  'name', 'requests', 'successRate', 'errors', 'tokens', 'allowance', 'avgLatency', 'p95Latency', 'lastRequest', 'rpmLimit',
 ] as const
 export type RankingColumn = typeof RANKING_COLUMNS[number]
 
@@ -36,6 +36,7 @@ export function sortValue(r: UsageRow, col: RankingColumn): number | string | nu
     case 'successRate': return successRate(r)
     case 'errors': return r.errors
     case 'tokens': return tokensOf(r)
+    case 'allowance': return r.allowance?.used ?? null
     case 'avgLatency': return r.avgLatencyMs
     case 'p95Latency': return r.p95LatencyMs
     case 'lastRequest': return r.lastRequestAt
@@ -69,6 +70,13 @@ export function rankRows(rows: UsageRow[], sort: NonNullable<SortState<RankingCo
     }
     return a.name.localeCompare(b.name)
   })
+}
+
+/** Relative change against the previous window: a fraction (0.25 = +25%), 'new' when it was zero, null when both are zero or unknown. */
+export function changeOf(current: number, previous: number | undefined): number | 'new' | null {
+  if (previous === undefined) return null
+  if (previous === 0) return current > 0 ? 'new' : null
+  return (current - previous) / previous
 }
 
 export function totalsOf(rows: UsageRow[]) {

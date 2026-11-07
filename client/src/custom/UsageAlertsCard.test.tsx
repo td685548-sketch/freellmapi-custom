@@ -13,13 +13,18 @@ let stored = { webhookUrl: '', email: '', emailAvailable: false }
 let container: HTMLDivElement
 let root: Root
 let client: QueryClient
+let report = { enabled: false, lastSentWeek: null as string | null }
 beforeEach(() => {
   ;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   stored = { webhookUrl: '', email: '', emailAvailable: false }
+  report = { enabled: false, lastSentWeek: '2026-10-26' }
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   vi.mocked(apiFetch).mockReset()
   vi.mocked(apiFetch).mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/usage-report/preview')) return { text: 'Weekly usage report 2026-11-02 to 2026-11-08: 180 requests' } as never
+    if (url.endsWith('/usage-report/send')) return { delivery: { webhook: { sent: true, status: 200 }, email: null } } as never
+    if (url.endsWith('/usage-report')) { if (init?.method === 'PUT') report = JSON.parse(String(init.body)).enabled ? { enabled: true, lastSentWeek: null } : { enabled: false, lastSentWeek: null }; return report as never }
     if (url.endsWith('/test')) return { delivery: { webhook: stored.webhookUrl ? { sent: true, status: 204 } : null, email: null } } as never
     if (init?.method === 'PUT') { stored = { ...stored, ...JSON.parse(String(init.body)) }; return stored as never }
     return stored as never
@@ -51,6 +56,21 @@ describe('UsageAlertsCard', () => {
     await act(async () => { button('Send test alert')!.click() })
     await flush()
     expect(container.querySelector('[role=status]')?.textContent).toContain('webhook answered 204')
+  })
+
+  it('switches the weekly report on, previews and sends it', async () => {
+    await render(true)
+    await flush() // the section loads its own settings once the card is shown
+    expect(container.textContent).toContain('Last sent for the week of 2026-10-26')
+    await act(async () => { (container.querySelector('[aria-label="Send a weekly report"]') as HTMLElement).click() })
+    await flush()
+    expect(apiFetch).toHaveBeenCalledWith('/api/settings/usage-report', { method: 'PUT', body: JSON.stringify({ enabled: true }) })
+    await act(async () => { button('Preview')!.click() })
+    await flush()
+    expect(container.querySelector('[aria-label="Report preview"]')?.textContent).toContain('180 requests')
+    await act(async () => { button('Send now')!.click() })
+    await flush()
+    expect(container.textContent).toContain('webhook answered 200')
   })
 
   it('refuses bad values', async () => {

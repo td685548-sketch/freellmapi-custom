@@ -10,20 +10,20 @@ vi.mock('@/lib/api', () => ({ apiFetch: vi.fn() }))
 vi.mock('@/lib/toast', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 const conv = (id: string, endUser: string | null) => ({ id, endUser, messages: 4, chars: 120, createdAt: '2026-11-07T00:00:00.000Z', updatedAt: '2026-11-07T01:00:00.000Z', expiresAt: '2026-11-14T01:00:00.000Z' })
-let state: { settings: { enabled: boolean; ttlHours: number; maxMessages: number; maxChars: number }; conversations: ReturnType<typeof conv>[] }
+let state: { settings: { enabled: boolean; ttlHours: number; maxMessages: number; maxChars: number; summarize: boolean }; conversations: ReturnType<typeof conv>[] }
 let container: HTMLDivElement
 let root: Root
 let client: QueryClient
 beforeEach(() => {
   ;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-  state = { settings: { enabled: false, ttlHours: 168, maxMessages: 20, maxChars: 12000 }, conversations: [conv('chat-1', 'alice'), conv('chat-2', null)] }
+  state = { settings: { enabled: false, ttlHours: 168, maxMessages: 20, maxChars: 12000, summarize: false }, conversations: [conv('chat-1', 'alice'), conv('chat-2', null)] }
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   vi.mocked(apiFetch).mockReset()
   vi.mocked(apiFetch).mockImplementation(async (url: string, init?: RequestInit) => {
     if (url.endsWith('/conversation-settings')) { state.settings = { ...state.settings, ...JSON.parse(String(init!.body)) }; return { settings: state.settings } as never }
     if (init?.method === 'DELETE') return { deleted: 1 } as never
-    if (url.includes('/conversations/chat-1')) return { conversation: state.conversations[0], messages: [{ role: 'user', content: 'Xin chào', createdAt: '2026-11-07T00:00:00.000Z' }, { role: 'assistant', content: 'Chào bạn', createdAt: '2026-11-07T00:00:01.000Z' }] } as never
+    if (url.includes('/conversations/chat-1')) return { conversation: { ...state.conversations[0], summary: 'Khách tên Lan.' }, messages: [{ role: 'user', content: 'Xin chào', createdAt: '2026-11-07T00:00:00.000Z' }, { role: 'assistant', content: 'Chào bạn', createdAt: '2026-11-07T00:00:01.000Z' }] } as never
     if (url.includes('?endUser=alice')) return { ...state, conversations: [state.conversations[0]] } as never
     return state as never
   })
@@ -51,6 +51,12 @@ describe('ConversationsCard', () => {
     expect(apiFetch).toHaveBeenCalledWith('/api/client-profiles/5/conversation-settings', { method: 'PUT', body: JSON.stringify({ enabled: true }) })
   })
 
+  it('switches summaries on', async () => {
+    await render()
+    await click(container.querySelector('[aria-label="Summarize older turns"]'))
+    expect(apiFetch).toHaveBeenCalledWith('/api/client-profiles/5/conversation-settings', { method: 'PUT', body: JSON.stringify({ summarize: true }) })
+  })
+
   it('saves valid limits and blocks out-of-range ones', async () => {
     await render()
     await typeInto(container.querySelector('#conv-maxMessages') as HTMLInputElement, '1')
@@ -64,6 +70,7 @@ describe('ConversationsCard', () => {
     await render()
     await click(button('chat-1'))
     expect(container.querySelector('[aria-label="Messages of chat-1"]')?.textContent).toContain('Chào bạn')
+    expect(container.querySelector('[aria-label="Summary of chat-1"]')?.textContent).toContain('Khách tên Lan.')
     await typeInto(container.querySelector('[aria-label="Filter by end user"]') as HTMLInputElement, 'alice')
     await click(button('Filter'))
     expect(container.querySelector('[aria-label="Conversations"]')?.textContent).not.toContain('chat-2')

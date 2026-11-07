@@ -4,7 +4,8 @@ import { createApp } from '../../app.js';
 import { getDb, initDb } from '../../db/index.js';
 import { createSession, createUser } from '../../services/auth.js';
 import { mintUserApiKey } from '../../services/user-keys.js';
-import { getUsageOverview } from '../../services/usage-overview.js';
+import { getUsageOverview, resetUsageOverviewCache } from '../../services/usage-overview.js';
+import { windowsAt } from '../../services/usage-quotas.js';
 
 // The usage ranking: figures per account / client profile over a window (idle ones included),
 // split behind two leaf permissions of the view_usage group.
@@ -91,6 +92,40 @@ describe('usage ranking', () => {
     expect(by['Blog bot']).toMatchObject({ enabled: false, requests: 0, rpmLimit: null });
     expect(by['Shop widget']).not.toHaveProperty('role');
     expect(blogId).toBeGreaterThan(0);
+  });
+
+  it('compares with the window of the same length just before', () => {
+    const bob = getUsageOverview('account', 30).rows.find(r => r.id === bobId)!;
+    expect(bob.previous).toEqual({ requests: 1, errors: 0, tokens: 1998 }); // the request 40 days ago
+    const alice = getUsageOverview('account', 30).rows.find(r => r.id === aliceId)!;
+    expect(alice.previous).toEqual({ requests: 0, errors: 0, tokens: 0 });
+  });
+
+  it('shows the fullest current allowance, and reuses figures for 30 seconds unless asked fresh', async () => {
+    const db = getDb();
+    const w = windowsAt(Date.now());
+    db.prepare("INSERT INTO custom_usage_quotas (subject_kind, subject_id, daily_requests, daily_tokens, monthly_requests, monthly_tokens) VALUES ('profile', ?, 10, NULL, NULL, 1000)").run(shopId);
+    db.prepare("INSERT INTO custom_usage_counters (subject_kind, subject_id, period, requests, tokens) VALUES ('profile', ?, ?, 4, 0), ('profile', ?, ?, 4, 900)").run(shopId, w.day, shopId, w.month);
+    resetUsageOverviewCache();
+    const first = getUsageOverview('profile', 30);
+    const shop = first.rows.find(r => r.id === shopId)!;
+    expect(shop.allowance).toEqual({ used: 0.9, period: 'month', metric: 'tokens' });
+    expect(first.rows.find(r => r.id === blogId)!.allowance).toBeNull();
+
+    const later = Date.now() + 5_000;
+    expect(getUsageOverview('profile', 30, later).generatedAt).toBe(first.generatedAt); // nothing changed: reused
+    expect((await get('/api/usage/profiles?days=30&fresh=1', ownerToken)).body.overview.generatedAt).not.toBe(first.generatedAt);
+    const before = getUsageOverview('profile', 30, later);
+    // a change in what it depends on (today's totals here) is seen at once
+    db.prepare("UPDATE custom_usage_counters SET requests = 10 WHERE subject_kind = 'profile' AND subject_id = ? AND period = ?").run(shopId, w.day);
+    expect(getUsageOverview('profile', 30, later).rows.find(r => r.id === shopId)!.allowance).toEqual({ used: 1, period: 'day', metric: 'requests' });
+    // and nothing is reused past 30 seconds
+    const reused = getUsageOverview('profile', 30, later);
+    expect(getUsageOverview('profile', 30, later + 31_000).generatedAt).not.toBe(reused.generatedAt);
+    expect(before.generatedAt).toBeTruthy();
+    db.prepare('DELETE FROM custom_usage_counters').run();
+    db.prepare('DELETE FROM custom_usage_quotas').run();
+    resetUsageOverviewCache();
   });
 
   it('serves each kind only with its own permission', async () => {

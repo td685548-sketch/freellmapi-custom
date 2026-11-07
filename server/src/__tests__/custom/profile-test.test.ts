@@ -62,6 +62,14 @@ describe('client profile test message', () => {
       if (String(url).startsWith(base)) return realFetch(url, init);
       const sent = JSON.parse(String(init?.body ?? '{}'));
       upstream.push({ model: sent.model, text: sent.messages?.at(-1)?.content });
+      if (sent.stream) {
+        const frames = [
+          { id: 'x', object: 'chat.completion.chunk', created: 1, model: sent.model, choices: [{ index: 0, delta: { role: 'assistant', content: 'I am ' }, finish_reason: null }] },
+          { id: 'x', object: 'chat.completion.chunk', created: 1, model: sent.model, choices: [{ index: 0, delta: { content: 'streaming.' }, finish_reason: 'stop' }] },
+          { id: 'x', object: 'chat.completion.chunk', created: 1, model: sent.model, choices: [], usage: { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15 } },
+        ];
+        return new Response(frames.map(f => `data: ${JSON.stringify(f)}\n\n`).join('') + 'data: [DONE]\n\n', { status: 200, headers: { 'content-type': 'text/event-stream' } });
+      }
       return new Response(JSON.stringify({ id: 'x', object: 'chat.completion', created: 1, model: sent.model, choices: [{ index: 0, message: { role: 'assistant', content: 'I am working.' }, finish_reason: 'stop' }], usage: { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16 } }), { status: 200, headers: { 'content-type': 'application/json' } });
     });
   });
@@ -93,6 +101,18 @@ describe('client profile test message', () => {
     await test({ message: 'again' });
     expect((getDb().prepare('SELECT COUNT(*) AS n FROM requests WHERE profile_id = ?').get(profileId) as { n: number }).n).toBe(before.n + 2);
     expect((await call(`/api/client-profiles/${profileId}/usage-quota`, ownerToken)).body.usage.day.requests).toBe(2);
+  });
+
+  it('can stream, reporting the first-token time, the frames and a proper end', async () => {
+    const r = await call(`/api/client-profiles/${profileId}/test`, ownerToken, 'POST', { stream: true });
+    expect(r.status).toBe(200);
+    expect(r.body.result).toMatchObject({ status: 200, ok: true, reply: 'I am streaming.', usage: { inputTokens: 12, outputTokens: 3 }, error: null });
+    expect(r.body.result.stream).toMatchObject({ finished: true });
+    expect(r.body.result.stream.chunks).toBeGreaterThanOrEqual(2);
+    expect(r.body.result.stream.firstTokenMs).toEqual(expect.any(Number));
+    const plain = await call(`/api/client-profiles/${profileId}/test`, ownerToken, 'POST', {});
+    expect(plain.body.result.stream).toBeNull();
+    expect((await call(`/api/client-profiles/${profileId}/test`, ownerToken, 'POST', { stream: 'yes' })).status).toBe(400);
   });
 
   it('never returns the key', async () => {

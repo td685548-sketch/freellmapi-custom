@@ -5,31 +5,31 @@ import { UserAnalyticsView } from './UserAnalyticsView'
 import { QuotaCard } from './QuotaCard'
 import { RecentRequestsCard } from './RecentRequestsCard'
 import { useAdministrativeAccess } from './use-administrative-access'
+import { useCustomT } from './i18n/use-custom-t'
 
 // /users/:id/analytics - one account's usage, for operators who can view accounts.
 export function UserAnalyticsPage() {
+  const tc = useCustomT()
   const { id } = useParams()
   const { can, identity, isPending } = useAdministrativeAccess()
   const userId = Number(id)
 
-  if (isPending) return <p role="status">Loading permissions…</p>
+  if (isPending) return <p role="status">{tc('Loading permissions…')}</p>
   if (!can('view_users')) {
-    return <p role="alert" className="text-sm text-muted-foreground">Your account does not have permission to open this page.</p>
+    return <p role="alert" className="text-sm text-muted-foreground">{tc('Your account does not have permission to open this page.')}</p>
   }
   if (!Number.isInteger(userId) || userId <= 0) {
-    return <p role="alert" className="text-sm text-muted-foreground">Unknown account.</p>
+    return <p role="alert" className="text-sm text-muted-foreground">{tc('Unknown account.')}</p>
   }
 
   return (
     <div className="space-y-6" key={identity}>
       <PageHeader
-        title="Account usage"
-        description="Requests, tokens, errors and models for one account."
+        title={tc('Account usage')}
+        description={tc('Requests, tokens, errors and models for one account.')}
         actions={
           <Link to="/users" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="size-3.5" />
-            Users
-          </Link>
+            <ArrowLeft className="size-3.5" />{tc('Users')}</Link>
         }
       />
       <QuotaCard

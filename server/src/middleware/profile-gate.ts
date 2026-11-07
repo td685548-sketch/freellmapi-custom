@@ -3,6 +3,8 @@ import { setRequestAllowedModels, setRequestEndUser, setRequestProfile } from '.
 import { endUserOf, enforceEndUserQuota } from '../custom/end-user-gate.js';
 import { injectKnowledge } from '../custom/knowledge-inject.js';
 import { applyConversation } from '../custom/conversation-inject.js';
+import { screenContent } from '../custom/content-filter-gate.js';
+import { answerQuickly } from '../custom/quick-answer-gate.js';
 import { capOutputTokens, checkModel, refuse } from '../custom/profile-restrictions.js';
 import { enforceUsageQuota } from '../custom/quota-gate.js';
 import { CLIENT_PROFILE_KEY_PREFIX } from '../lib/system-prompt.js';
@@ -39,11 +41,15 @@ export function profileInferenceGate(req: Request, res: Response, next: NextFunc
     setRequestAllowedModels(allowed);
   }
   if (profile.maxTokens !== null) capOutputTokens(req, profile.maxTokens);
+  // Content rules next, for the same reason: a blocked message costs nothing.
+  if (!screenContent(req, res, profile.id, endUser, profile.contentFilter)) return;
 
   const tokens = () => context?.userTokens ?? 0;
   // Once admitted: add the stored conversation and the key's reference passages, then route.
   const proceed = () => {
     if (!applyConversation(req, res, profile.id, endUser, profile.conversations)) return;
+    // A ready answer ends the request here (a stored conversation still records it).
+    if (answerQuickly(req, res, profile.id, profile.quickAnswers)) return;
     if (profile.knowledge.enabled) injectKnowledge(req, profile.id, profile.knowledge.maxChars);
     next();
   };

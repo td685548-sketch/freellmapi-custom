@@ -20,6 +20,17 @@ import { usageAlertSettingsRouter } from '../routes/usage-alert-settings.js';
 import { endUsersRouter } from '../routes/end-users.js';
 import { profileKnowledgeRouter } from '../routes/profile-knowledge.js';
 import { profileConversationsRouter, storedConversationsRouter } from '../routes/profile-conversations.js';
+import { contentFilterRouter } from '../routes/content-filter.js';
+import { quickAnswersRouter } from '../routes/quick-answers.js';
+import { feedbackIngestRouter, profileFeedbackRouter } from '../routes/feedback.js';
+import { maybeRollUp } from '../services/usage-daily.js';
+import { maybeSendWeeklyReport } from '../services/usage-report.js';
+import { usageReportSettingsRouter } from '../routes/usage-report-settings.js';
+import { auditMiddleware } from '../services/audit-log.js';
+import { auditLogRouter } from '../routes/audit-log.js';
+import { playgroundAttribution } from './playground-attribution.js';
+import { guestAccessMiddleware } from '../services/guest-access.js';
+import { guestAccessAdminRouter, guestInfoRouter } from '../routes/guest-access.js';
 import { adminUserQuotaRouter, profileQuotaRouter, selfQuotaRouter } from '../routes/usage-quota.js';
 import { withRoutingSettingsScope } from '../db/routing-settings-scope.js';
 import { providerTiersRouter } from '../routes/provider-tiers.js';
@@ -116,6 +127,11 @@ export function registerCustomRoutes(app: Express): void {
   // Public probes answer from a 5 s copy so anonymous callers cannot turn them into database load.
   app.use(['/livez', '/readyz'], statusCache);
   app.use('/api', (_req, _res, next) => withRoutingSettingsScope(next));
+  // Change history: every successful dashboard write is recorded once its response has gone out.
+  app.use('/api', auditMiddleware);
+  // Signed-out visitors: read-only access to the views an administrator opened, before any gate.
+  app.use('/api', guestAccessMiddleware);
+  app.use('/api/auth/guest', guestInfoRouter);
   app.use(['/v1', '/x/v1'], (_req, _res, next) => withRoutingSettingsScope(next));
   // When the X Gateway is off, answer 404 immediately before any auth checks
   // so an inactive gateway leaks nothing about its existence.
@@ -128,9 +144,16 @@ export function registerCustomRoutes(app: Express): void {
   });
   // Rate-limiting and usage tracking gate for member personal API keys (/v1, /v1beta and /x/v1 inference)
   app.use(['/v1', '/v1beta', '/x/v1'], userInferenceGate);
+  // Playground chats (unified key + the dashboard session) are attributed to the signed-in account.
+  app.use('/v1', playgroundAttribution);
+  // Roll finished days of the request log into the long-term daily table, after an inference
+  // response has gone out (a time check per request; the work itself at most once a day).
+  app.use(['/v1', '/v1beta'], (_req, res, next) => { res.once('finish', () => { maybeRollUp(); maybeSendWeeklyReport(); }); next(); });
   // A web app's own view of the conversations kept for its key; ahead of the profile gate so reading or
   // erasing them costs no allowance.
   app.use('/v1/stored-conversations', storedConversationsRouter);
+  // Visitor votes on replies, reported by the web app's backend with its client key (no allowance used).
+  app.use('/v1/feedback', feedbackIngestRouter);
   // Same for client-profile (`sk-cp-…`) keys: attribution plus the profile's own RPM cap.
   app.use(['/v1', '/v1beta'], profileInferenceGate);
   // Safe preference metadata is usable by cache editors without granting
@@ -141,9 +164,11 @@ export function registerCustomRoutes(app: Express): void {
   for (const gate of PERMISSION_GATES) installGate(app, gate);
   app.use(['/api/keys', '/api/embeddings', '/api/media', '/api/decisions'], guardKeyAddition);
   // Usage and request cap per client profile; the manage_settings gate for this prefix is installed just above.
-  app.use('/api/client-profiles', profileAnalyticsRouter, profileQuotaRouter, profileRestrictionsRouter, profileTestRouter, profileKeyRotationRouter, profileRequestsRouter, endUsersRouter, profileKnowledgeRouter, profileConversationsRouter);
+  app.use('/api/client-profiles', profileAnalyticsRouter, profileQuotaRouter, profileRestrictionsRouter, profileTestRouter, profileKeyRotationRouter, profileRequestsRouter, endUsersRouter, profileKnowledgeRouter, profileConversationsRouter, contentFilterRouter, quickAnswersRouter, profileFeedbackRouter);
   // Where usage alerts go; the /api/settings gate above covers it (view_settings / edit_settings).
   app.use('/api/settings/usage-alerts', usageAlertSettingsRouter);
+  // The weekly usage report; same gate (view_settings / edit_settings, see permission-actions.ts).
+  app.use('/api/settings/usage-report', usageReportSettingsRouter);
   // Usage ranking of accounts and client keys; its view_usage gate is in PERMISSION_GATES.
   app.use('/api/usage', usageRouter);
 
@@ -167,6 +192,8 @@ export function registerCustomRoutes(app: Express): void {
   // Custom fork routes with their dedicated permission gates
   app.use('/api/auth', externalAuthRouter, customAuthRouter);
   app.use('/api/invites', requireAuth, requireActionPermission('manage_invites'), invitesRouter);
+  app.use('/api/audit', requireAuth, requireActionPermission('view_logs'), auditLogRouter);
+  app.use('/api/admin/guest-access', requireAuth, requireActionPermission('manage_users'), guestAccessAdminRouter);
   app.use('/api/admin/users', requireAuth, requireActionPermission('manage_users'), adminUsersRouter, adminUserAnalyticsRouter, adminUserQuotaRouter, adminUserRequestsRouter);
   app.use('/api/admin/registration-requests', requireAuth, requireActionPermission('manage_requests'), adminRegistrationRequestsRouter);
   app.use('/api/user', requireAuth, userKeysRouter, selfAnalyticsRouter, selfQuotaRouter, selfRequestsRouter);

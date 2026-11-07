@@ -188,6 +188,7 @@ describe('Granular permissions and cache preferences', () => {
         ['manage_x_gateway', 'POST', '/api/x-gateway/combos', 'edit_x_combos'],
         ['manage_x_gateway', 'GET', '/api/x-gateway/usage', 'view_x_usage'],
         ['manage_x_gateway', 'POST', '/api/x-gateway/test', 'use_x_gateway'],
+        ['view_logs', 'GET', '/api/audit', 'view_audit_log'],
       ] as const).map(([parent, method, path, permission]) => {
         expect(permissionForAction(parent, method, path)).toBe(permission);
         return permission;

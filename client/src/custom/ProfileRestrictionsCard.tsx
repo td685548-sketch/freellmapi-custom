@@ -6,6 +6,7 @@ import { toast } from '@/lib/toast'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { MAX_ALLOWED_MODELS, MAX_TOKENS_CAP_LIMIT, type ProfileRestrictions } from '../../../shared/profile-restrictions'
+import { useCustomT } from './i18n/use-custom-t'
 
 const fmt = (n: number) => n.toLocaleString()
 
@@ -16,6 +17,7 @@ interface Draft { models: string[]; maxTokens: string }
  * request may ask for (empty = no cap). Viewers see the settings; editors change them.
  */
 export function ProfileRestrictionsCard({ profileId, canEdit }: { profileId: number; canEdit: boolean }) {
+  const tc = useCustomT()
   const queryClient = useQueryClient()
   const key = ['profile-restrictions', profileId]
   const endpoint = `/api/client-profiles/${profileId}/restrictions`
@@ -26,8 +28,8 @@ export function ProfileRestrictionsCard({ profileId, canEdit }: { profileId: num
 
   const save = useMutation({
     mutationFn: (body: ProfileRestrictions) => apiFetch<{ restrictions: ProfileRestrictions }>(endpoint, { method: 'PUT', body: JSON.stringify(body) }),
-    onSuccess: (res) => { queryClient.setQueryData(key, res); setDraft(null); toast.success('Restrictions updated') },
-    onError: (err: Error) => toast.error(err.message || 'Failed to update the restrictions'),
+    onSuccess: (res) => { queryClient.setQueryData(key, res); setDraft(null); toast.success(tc('Restrictions updated')) },
+    onError: (err: Error) => toast.error(err.message || tc('Failed to update the restrictions')),
   })
 
   if (!data?.restrictions) return null
@@ -55,12 +57,12 @@ export function ProfileRestrictionsCard({ profileId, canEdit }: { profileId: num
       className="rounded-2xl border bg-card p-4 space-y-4"
       onSubmit={(e) => { e.preventDefault(); if (canEdit && validMax && dirty) save.mutate({ allowedModels: models, maxTokens }) }}
     >
-      <h3 className="text-sm font-semibold">Restrictions</h3>
+      <h3 className="text-sm font-semibold">{tc('Restrictions')}</h3>
 
       <div className="space-y-2">
-        <p className="text-xs font-medium text-muted-foreground">Models this key may use</p>
+        <p className="text-xs font-medium text-muted-foreground">{tc('Models this key may use')}</p>
         {models.length === 0 ? (
-          <p className="text-xs text-muted-foreground">Any model. Add some to limit the key to them.</p>
+          <p className="text-xs text-muted-foreground">{tc('Any model. Add some to limit the key to them.')}</p>
         ) : (
           <ul className="flex flex-wrap gap-1.5" aria-label="Allowed models">
             {models.map(m => (
@@ -82,37 +84,35 @@ export function ProfileRestrictionsCard({ profileId, canEdit }: { profileId: num
               onChange={(e) => setTyped(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add() } }}
               list="profile-model-suggestions"
-              placeholder="Model id, e.g. llama-3.3-70b-versatile"
+              placeholder={tc('Model id, e.g. llama-3.3-70b-versatile')}
               aria-label="Add a model"
               className="h-8 w-72 text-xs"
             />
             <datalist id="profile-model-suggestions">{suggestions.map(s => <option key={s} value={s} />)}</datalist>
-            <Button type="button" variant="outline" size="sm" className="h-8 text-xs" disabled={!typed.trim()} onClick={add}>Add</Button>
+            <Button type="button" variant="outline" size="sm" className="h-8 text-xs" disabled={!typed.trim()} onClick={add}>{tc('Add')}</Button>
           </div>
         )}
-        <p className="text-xs text-muted-foreground">
-          With a list, "auto" requests are routed only to these models, and naming any other model is refused. Endpoints that do not route automatically (embeddings, images, audio, Gemini) must name one of them.
-        </p>
+        <p className="text-xs text-muted-foreground">{tc('With a list, "auto" requests are routed only to these models, and naming any other model is refused. Endpoints that do not route automatically (embeddings, images, audio, Gemini) must name one of them.')}</p>
       </div>
 
       <div className="space-y-1.5">
-        <label htmlFor="profile-max-tokens" className="block text-xs font-medium text-muted-foreground">Largest max_tokens per request</label>
+        <label htmlFor="profile-max-tokens" className="block text-xs font-medium text-muted-foreground">{tc('Largest max_tokens per request')}</label>
         <Input
           id="profile-max-tokens"
           inputMode="numeric"
           value={maxText}
           onChange={(e) => update({ maxTokens: e.target.value })}
-          placeholder="No cap"
+          placeholder={tc('No cap')}
           disabled={!canEdit}
           className="h-8 w-40 text-xs"
         />
         <p className="text-xs text-muted-foreground">
-          {validMax ? 'A larger request is lowered to this, and one that asks for none gets it.' : `Use a whole number from 1 to ${fmt(MAX_TOKENS_CAP_LIMIT)}, or leave empty.`}
+          {validMax ? tc('A larger request is lowered to this, and one that asks for none gets it.') : tc('Use a whole number from 1 to {v}, or leave empty.', { v: fmt(MAX_TOKENS_CAP_LIMIT) })}
         </p>
       </div>
 
       {canEdit && (
-        <Button type="submit" size="sm" className="h-8 text-xs" disabled={!dirty || !validMax || save.isPending}>Save restrictions</Button>
+        <Button type="submit" size="sm" className="h-8 text-xs" disabled={!dirty || !validMax || save.isPending}>{tc('Save restrictions')}</Button>
       )}
     </form>
   )
