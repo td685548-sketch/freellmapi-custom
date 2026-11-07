@@ -11,10 +11,11 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
 }) {
   const s = useXStrings()
   const client = useQueryClient()
-  const loginMethod = provider.authMethods.find(method => method !== 'api_key')
-  const [method, setMethod] = useState(loginMethod ?? 'api_key')
+  const loginMethod = provider.authMethods.find(method => method === 'oauth_pkce' || method === 'device_code')
+  const [method, setMethod] = useState(loginMethod ?? provider.authMethods[0] ?? 'api_key')
   const [label, setLabel] = useState(account?.label ?? '')
   const [key, setKey] = useState('')
+  const [baseUrl, setBaseUrl] = useState(provider.baseUrl ?? '')
   const [attempt, setAttempt] = useState<ProviderAccountAuthStartResponse | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -79,15 +80,17 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
     }
   }, [attempt, client, s.expired, s.callbackError])
 
+  const isDirectCredential = method === 'api_key' || method === 'cookie'
+
   async function submit(event: FormEvent) {
     event.preventDefault()
     if (busy) return
-    if (!label.trim() || (method === 'api_key' && !key.trim())) { setError(s.required); return }
+    if (!label.trim() || (isDirectCredential && !key.trim()) || (provider.id === 'custom' && !baseUrl.trim())) { setError(s.required); return }
     setError('')
     setBusy(true)
     try {
-      if (method === 'api_key') {
-        await accountsApi.addKey(provider.id, key.trim(), label.trim())
+      if (isDirectCredential) {
+        await accountsApi.addKey(provider.id, key.trim(), label.trim(), provider.id === 'custom' ? baseUrl.trim() : undefined)
         setKey('')
         if (active.current) connected()
       } else {
@@ -138,13 +141,14 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
         {!account && provider.authMethods.length > 1 && <fieldset className="x-methods"><legend>{s.method}</legend>
           {provider.authMethods.map(value => <label key={value} className={method === value ? 'selected' : ''}>
             <input type="radio" name="connection-method" value={value} checked={method === value} onChange={() => { setMethod(value); setError('') }} />
-            {value === 'api_key' ? s.apiKey : value === 'device_code' ? s.device : s.oauth}
+            {value === 'api_key' ? s.apiKey : value === 'cookie' ? s.cookie : value === 'device_code' ? s.device : s.oauth}
           </label>)}
         </fieldset>}
         <label>{s.name}<input id="x-account-label" name="label" autoFocus maxLength={100} value={label} placeholder={s.namePlaceholder} onChange={event => setLabel(event.target.value)} disabled={busy} required /></label>
-        {method === 'api_key' && <label>{s.credential}<input id="x-account-credential" name="credential" type="password" autoComplete="new-password" value={key} onChange={event => setKey(event.target.value)} placeholder={s.credentialPlaceholder} disabled={busy} required /></label>}
+        {provider.id === 'custom' && <label>{s.baseUrl}<input id="x-account-base-url" name="baseUrl" type="url" value={baseUrl} placeholder="https://api.example.com/v1" onChange={event => setBaseUrl(event.target.value)} disabled={busy} required /></label>}
+        {isDirectCredential && <label>{s.credential}<input id="x-account-credential" name="credential" type="password" autoComplete="new-password" value={key} onChange={event => setKey(event.target.value)} placeholder={s.credentialPlaceholder} disabled={busy} required /></label>}
         <p className="x-security"><ShieldCheck size={16} />{s.encrypted}</p>
-        <div className="x-dialog-actions"><button type="button" className="x-button" onClick={onClose}>{s.cancel}</button><button className="x-button x-primary" disabled={busy}>{busy && <LoaderCircle size={16} className="x-spin" />}{busy ? s.connecting : method === 'api_key' ? s.addAccount : s.signIn}</button></div>
+        <div className="x-dialog-actions"><button type="button" className="x-button" onClick={onClose}>{s.cancel}</button><button className="x-button x-primary" disabled={busy}>{busy && <LoaderCircle size={16} className="x-spin" />}{busy ? s.connecting : isDirectCredential ? s.addAccount : s.signIn}</button></div>
       </form> : <div className="x-auth-wait">
         <h3>{s.waiting}</h3><p className="x-muted">{attempt.flow === 'device_code' ? s.deviceHelp : s.browserHelp}</p>
         {attempt.flow === 'device_code' && <div className="x-device-code"><code>{attempt.userCode}</code><button className="x-icon-button" aria-label={copied ? s.copied : s.copy} onClick={async () => {

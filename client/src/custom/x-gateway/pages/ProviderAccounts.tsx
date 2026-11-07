@@ -36,7 +36,7 @@ export default function ProviderAccounts() {
   const provider = query.data.providers.find(item => item.id === providerId)
   if (!provider) return <div className="x-empty"><h1>{s.providerNotFound}</h1><Link className="x-button" to="/x/providers">{s.returnProviders}</Link></div>
   const permissions = query.data.permissions
-  const canConnect = permissions.add && (provider.id !== 'github-copilot' || permissions.manageModels)
+  const canConnect = permissions.add && ((provider.id !== 'github-copilot' && provider.id !== 'custom') || permissions.manageModels)
   const models = Array.from(new Map(provider.accounts.flatMap(account => account.models).map(model => [model.id, model])).values())
   const count = (value: number) => value.toLocaleString()
 
@@ -47,9 +47,8 @@ export default function ProviderAccounts() {
 
   return <>
     <Link to="/x/providers" className="x-back-link"><ArrowLeft size={16} />{s.providers}</Link>
-    <div className="x-page-heading"><div className="x-provider-title"><ProviderMark id={provider.id} /><div><h1>{provider.name}</h1><p>{provider.accounts.length} {s.accounts.toLowerCase()} · {provider.authMethods.map(method => method === 'api_key' ? s.apiKey : method === 'device_code' ? s.device : s.oauth).join(' / ')}</p></div></div>{canConnect && provider.id !== 'custom' && <button className="x-button x-primary" onClick={() => { change.reset(); setConnect(true) }}><Plus size={16} />{s.addAccount}</button>}</div>
+    <div className="x-page-heading"><div className="x-provider-title"><ProviderMark id={provider.id} /><div><h1>{provider.name}</h1><p>{provider.accounts.length} {s.accounts.toLowerCase()} · {provider.authMethods.map(method => method === 'api_key' ? s.apiKey : method === 'cookie' ? s.cookie : method === 'device_code' ? s.device : s.oauth).join(' / ')}</p></div></div>{canConnect && <button className="x-button x-primary" onClick={() => { change.reset(); setConnect(true) }}><Plus size={16} />{s.addAccount}</button>}</div>
     {provider.id === 'github-copilot' && <p className="x-notice">{s.copilotNotice}</p>}
-    {provider.id === 'custom' && <div className="x-notice">{s.customHelp} <Link to="/keys">{s.configureCustom}</Link></div>}
     {change.isError && <div className="x-error" role="alert">{change.error.message}</div>}
     <div className="x-tabs" role="tablist" aria-label={provider.name} onKeyDown={event => {
       if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
@@ -59,7 +58,7 @@ export default function ProviderAccounts() {
       event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next === 'accounts' ? 0 : 1]?.focus()
     }}><button id="x-accounts-tab" role="tab" aria-selected={tab === 'accounts'} aria-controls="x-accounts-panel" tabIndex={tab === 'accounts' ? 0 : -1} className={tab === 'accounts' ? 'selected' : ''} onClick={() => setTab('accounts')}>{s.accounts}<span>{provider.accounts.length}</span></button><button id="x-models-tab" role="tab" aria-selected={tab === 'models'} aria-controls="x-models-panel" tabIndex={tab === 'models' ? 0 : -1} className={tab === 'models' ? 'selected' : ''} onClick={() => setTab('models')}>{s.models}<span>{models.length}</span></button></div>
     {tab === 'accounts' ? <section id="x-accounts-panel" role="tabpanel" aria-labelledby="x-accounts-tab">
-      {!provider.accounts.length && <div className="x-empty x-panel"><Unplug size={38} /><h2>{s.noAccounts}</h2><p>{s.noAccountsHelp}</p>{canConnect && provider.id !== 'custom' && <button className="x-button x-primary" onClick={() => setConnect(true)}><Plus size={16} />{s.addAccount}</button>}</div>}
+      {!provider.accounts.length && <div className="x-empty x-panel"><Unplug size={38} /><h2>{s.noAccounts}</h2><p>{s.noAccountsHelp}</p>{canConnect && <button className="x-button x-primary" onClick={() => setConnect(true)}><Plus size={16} />{s.addAccount}</button>}</div>}
       <div className="x-account-list">{provider.accounts.map(account => <article key={account.id} className={`x-account x-panel ${account.enabled ? '' : 'x-account-paused'}`}>
         <div className="x-account-top"><span className="x-account-icon"><KeyRound size={20} /></span><div className="x-account-identity"><h3>{account.label || provider.name}</h3><p>{account.identity ?? (account.authMethod === 'api_key' ? s.apiKey : s.oauth)}</p></div><span className={`x-badge ${!account.enabled ? '' : account.status === 'healthy' ? 'x-green' : account.status === 'error' ? 'x-red' : ''}`}><span className="x-dot" />{!account.enabled ? s.paused : account.status === 'healthy' ? s.healthy : account.status === 'error' ? s.needsLogin : s.unknown}</span>{permissions.edit && <button className="x-switch" role="switch" aria-checked={account.enabled} aria-label={`${account.enabled ? s.disable : s.enable}: ${account.label}`} disabled={change.isPending} onClick={() => change.mutate({ type: 'toggle', id: account.id, enabled: !account.enabled })}><span /></button>}</div>
         <div className="x-account-metrics"><div><span>{s.requests}</span><strong>{count(account.monthlyUsage.requests)}<small> / {account.monthlyRequestCap ? count(account.monthlyRequestCap) : '∞'}</small></strong></div><div><span>{s.tokens}</span><strong>{count(account.monthlyUsage.tokens)}<small> / {account.monthlyTokenCap ? count(account.monthlyTokenCap) : '∞'}</small></strong></div></div>

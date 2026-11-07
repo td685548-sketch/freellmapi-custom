@@ -1,4 +1,5 @@
-export type ProviderAccountAuthMethod = 'api_key' | 'oauth_pkce' | 'device_code';
+export type ProviderAccountAuthMethod = 'api_key' | 'oauth_pkce' | 'device_code' | 'cookie';
+export type ProviderCategory = 'oauth' | 'free' | 'freeTier' | 'apikey' | 'webCookie';
 
 export interface ProviderAccount {
   id: number;
@@ -16,7 +17,10 @@ export interface ProviderAccount {
 
 export interface AccountProvider {
   id: string;
+  alias?: string;
   name: string;
+  category?: ProviderCategory;
+  baseUrl?: string | null;
   authMethods: ProviderAccountAuthMethod[];
   accounts: ProviderAccount[];
 }
@@ -24,6 +28,15 @@ export interface AccountProvider {
 export interface ProviderAccountsResponse {
   providers: AccountProvider[];
   permissions: { add: boolean; edit: boolean; delete: boolean; test: boolean; manageModels: boolean };
+}
+
+export interface ProviderAccountCreateRequest {
+  provider: string;
+  key: string;
+  label?: string;
+  baseUrl?: string;
+  authMethod?: ProviderAccountAuthMethod;
+  models?: { id: string; name: string }[];
 }
 
 export interface ProviderAccountAuthStartRequest {

@@ -20,7 +20,7 @@ export function useAccounts(enabled = true) {
 }
 
 export async function refreshAccounts(client: QueryClient) {
-  await Promise.all(['x-accounts', 'keys', 'keys-providers', 'health'].map(key => client.invalidateQueries({ queryKey: [key] })))
+  await client.invalidateQueries({ queryKey: ['x-accounts'] })
 }
 
 export const accountsApi = {
@@ -34,7 +34,11 @@ export const accountsApi = {
     apiFetch<void>(`${base}/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   remove: (id: number) => apiFetch<void>(`${base}/${id}`, { method: 'DELETE' }),
   test: (id: number) => apiFetch<ProviderAccountTestResponse>(`${base}/${id}/test`, { method: 'POST', body: '{}' }),
-  addKey: (platform: string, key: string, label: string) => apiFetch('/api/keys', { method: 'POST', body: JSON.stringify({ platform, key, label }) }),
+  addKey: (provider: string, key: string, label: string, baseUrl?: string) =>
+    apiFetch<{ id: number }>(base, {
+      method: 'POST',
+      body: JSON.stringify({ provider, key, label, ...(baseUrl ? { baseUrl } : {}) }),
+    }),
 }
 
 export function callbackAddress() {

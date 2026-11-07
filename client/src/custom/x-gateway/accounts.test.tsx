@@ -78,7 +78,7 @@ beforeEach(() => {
       if (loadError) throw new Error('offline')
       return structuredClone(data)
     }
-    if (path === '/api/keys') return { id: 99 }
+    if (path === '/api/x-accounts' && init?.method === 'POST') return { id: 99 }
     if (path.endsWith('/start')) {
       return path.includes('/openrouter/')
         ? { flow: 'oauth_pkce', attemptId: 'attempt-1', authorizationUrl: 'https://openrouter.ai/auth?callback_url=http%3A%2F%2Flocalhost%3A3000%2Fx%2Faccounts%2Fcallback%3FattemptId%3Dattempt-1', expiresAt: Date.now() + startExpires }
@@ -234,7 +234,7 @@ describe('provider accounts', () => {
 })
 
 describe('connect dialog', () => {
-  it('stores an API key through the existing endpoint and clears it from the form', async () => {
+  it('stores an API key through the dedicated X Gateway endpoint and clears it from the form', async () => {
     const groq = data.providers[2]
     mount(<ConnectAccountDialog provider={groq} onClose={onClose} />)
     await flush()
@@ -242,8 +242,8 @@ describe('connect dialog', () => {
     enter(body().querySelector<HTMLInputElement>('input[type="password"]')!, '  gsk_fixture  ')
     submit(body().querySelector<HTMLFormElement>('.x-dialog form')!)
     await flush()
-    const call = vi.mocked(apiFetch).mock.calls.find(([p]) => p === '/api/keys')!
-    expect(JSON.parse(String(call[1]!.body))).toEqual({ platform: 'groq', key: 'gsk_fixture', label: 'My Groq' })
+    const call = vi.mocked(apiFetch).mock.calls.find(([p, i]) => p === '/api/x-accounts' && i?.method === 'POST')!
+    expect(JSON.parse(String(call[1]!.body))).toEqual({ provider: 'groq', key: 'gsk_fixture', label: 'My Groq' })
     expect(onClose).toHaveBeenCalled()
   })
 
