@@ -10,8 +10,11 @@ import { useXStrings } from '../strings'
 type GatewayStatus = {
   enabled: boolean
   combosCount: number
-  outboundProxyUrl?: string
-  hasOutboundProxy?: boolean
+}
+
+type GatewayProxyStatus = {
+  proxyUrl: string
+  configured: boolean
 }
 
 type XGatewayClientKey = {
@@ -50,6 +53,11 @@ export default function Endpoint() {
     queryFn: ({ signal }) => apiFetch<GatewayStatus>('/api/x-gateway/status', { signal }),
     retry: false,
   })
+  const proxyStatus = useQuery({
+    queryKey: ['x-gateway-proxy', revision],
+    queryFn: ({ signal }) => apiFetch<GatewayProxyStatus>('/api/x-gateway/proxy', { signal }),
+    retry: false,
+  })
   const xKeys = useQuery({
     queryKey: ['x-gateway-client-keys', revision],
     queryFn: ({ signal }) => apiFetch<{ keys: XGatewayClientKey[] }>('/api/x-gateway/keys', { signal }),
@@ -57,7 +65,7 @@ export default function Endpoint() {
   })
 
   const enabled = status.data?.enabled === true
-  const activeProxy = status.data?.outboundProxyUrl || ''
+  const activeProxy = proxyStatus.data?.proxyUrl || ''
 
   const toggle = useMutation({
     meta: { silenceToast: true },
@@ -70,7 +78,7 @@ export default function Endpoint() {
     mutationFn: (proxyUrl: string) => apiFetch<{ proxyUrl: string; configured: boolean }>('/api/x-gateway/proxy', { method: 'PUT', body: JSON.stringify({ proxyUrl }) }),
     onSuccess: async () => {
       setProxyInput('')
-      await client.invalidateQueries({ queryKey: ['x-gateway-status'] })
+      await client.invalidateQueries({ queryKey: ['x-gateway-proxy'] })
     },
   })
 

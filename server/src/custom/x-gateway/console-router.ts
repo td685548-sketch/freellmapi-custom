@@ -62,8 +62,6 @@ function status() {
     enabled: snapshot.enabled,
     defaults: snapshot.savers,
     combosCount: snapshot.combos.length,
-    outboundProxyUrl: snapshot.maskedOutboundProxyUrl,
-    hasOutboundProxy: Boolean(snapshot.outboundProxyUrl),
   };
 }
 

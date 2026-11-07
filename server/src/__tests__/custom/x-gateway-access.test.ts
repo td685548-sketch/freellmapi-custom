@@ -295,13 +295,15 @@ describe('X Gateway Access Control (US1 / Phase 3)', () => {
         configured: true,
       });
 
-      const statusRes = await requestX('/api/x-gateway/status', {
+      const proxyGetRes = await requestX('/api/x-gateway/proxy', {
         method: 'GET',
         key: adminSessionToken,
       });
-      expect(statusRes.status).toBe(200);
-      expect(statusRes.body.outboundProxyUrl).toBe('socks5://proxyuser:***@198.51.100.10:1080');
-      expect(statusRes.body.hasOutboundProxy).toBe(true);
+      expect(proxyGetRes.status).toBe(200);
+      expect(proxyGetRes.body).toEqual({
+        proxyUrl: 'socks5://proxyuser:***@198.51.100.10:1080',
+        configured: true,
+      });
 
       // Account without per-account proxy inherits X Gateway outbound proxy
       const inheritedId = createApiKeyAccount({
