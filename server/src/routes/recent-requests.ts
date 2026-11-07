@@ -18,7 +18,8 @@ function positiveInt(raw: unknown): number | null {
 function page(owner: RequestOwner, ownerId: number, req: Request, res: Response): void {
   const before = req.query.before === undefined ? null : positiveInt(req.query.before);
   if (req.query.before !== undefined && before === null) { res.status(400).json({ error: { message: 'Invalid before' } }); return; }
-  res.json(listRecentRequests(owner, ownerId, { onlyErrors: req.query.status === 'error', limit: clampPage(req.query.limit), before }));
+  const endUser = owner === 'profile_id' && typeof req.query.endUser === 'string' && req.query.endUser.trim() ? req.query.endUser.trim().slice(0, 128) : null;
+  res.json(listRecentRequests(owner, ownerId, { onlyErrors: req.query.status === 'error', limit: clampPage(req.query.limit), before, endUser }));
 }
 
 function attempts(owner: RequestOwner, ownerId: number, req: Request, res: Response): void {

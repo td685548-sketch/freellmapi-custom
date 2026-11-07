@@ -17,6 +17,7 @@ export function integrationSnippet(language: SnippetLanguage, baseUrl: string): 
       return `curl ${url}/chat/completions \\
   -H "Authorization: Bearer $FREELLM_KEY" \\
   -H "Content-Type: application/json" \\
+  -H "X-End-User: customer-42" \\
   -d '{
     "model": "auto",
     "messages": [
@@ -28,12 +29,14 @@ export function integrationSnippet(language: SnippetLanguage, baseUrl: string): 
     case 'node':
       return `// Runs on YOUR server (API route or backend), never in the browser.
 // Put the key in an environment variable: FREELLM_KEY=sk-cp-...
-export async function askAI(history, userMessage, pageData) {
+// endUserId: your own id for the visitor (no email needed); it gives per-visitor numbers and limits.
+export async function askAI(history, userMessage, pageData, endUserId) {
   const res = await fetch("${url}/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: \`Bearer \${process.env.FREELLM_KEY}\`,
+      "X-End-User": String(endUserId),
     },
     body: JSON.stringify({
       model: "auto",
@@ -57,8 +60,9 @@ from openai import OpenAI
 
 client = OpenAI(base_url="${url}", api_key=os.environ["FREELLM_KEY"])
 
-def ask_ai(history, user_message, page_data):
+def ask_ai(history, user_message, page_data, end_user_id):
     reply = client.chat.completions.create(
+        extra_headers={"X-End-User": str(end_user_id)},  # per-visitor numbers and limits
         model="auto",
         messages=[
             {"role": "system", "content": "You are the assistant of my website."},
