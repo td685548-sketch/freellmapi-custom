@@ -31,6 +31,7 @@ import { auditLogRouter } from '../routes/audit-log.js';
 import { playgroundAttribution } from './playground-attribution.js';
 import { guestAccessMiddleware } from '../services/guest-access.js';
 import { guestAccessAdminRouter, guestInfoRouter } from '../routes/guest-access.js';
+import { guestTrialRouter } from '../routes/guest-trial.js';
 import { adminUserQuotaRouter, profileQuotaRouter, selfQuotaRouter } from '../routes/usage-quota.js';
 import { withRoutingSettingsScope } from '../db/routing-settings-scope.js';
 import { providerTiersRouter } from '../routes/provider-tiers.js';
@@ -132,6 +133,8 @@ export function registerCustomRoutes(app: Express): void {
   // Signed-out visitors: read-only access to the views an administrator opened, before any gate.
   app.use('/api', guestAccessMiddleware);
   app.use('/api/auth/guest', guestInfoRouter);
+  // The chat signed-out visitors may try (guest permission try_playground; bounded, nothing stored).
+  app.use('/api/guest', guestTrialRouter);
   app.use(['/v1', '/x/v1'], (_req, _res, next) => withRoutingSettingsScope(next));
   // When the X Gateway is off, answer 404 immediately before any auth checks
   // so an inactive gateway leaks nothing about its existence.

@@ -17,7 +17,8 @@ import { ExternalAuthCallback } from '@/custom/ExternalAuthCallback'
 import { useExternalAuthLanding } from '@/custom/use-external-auth'
 import { RegistrationKeyNotice } from '@/custom/RegistrationKeyNotice'
 import { GuestShell } from '@/custom/GuestShell'
-import type { GuestPermission } from '../../../shared/guest-access'
+import type { GuestPermission, GuestTrialInfo } from '../../../shared/guest-access'
+import { useCustomT } from '@/custom/i18n/use-custom-t'
 
 // Matches the server rule (routes/auth.ts zod schema).
 const PASSWORD_MIN = 8
@@ -679,15 +680,16 @@ export function ChangeCredentialsModal({ mode, onClose }: ChangeCredentialsModal
 
 // Signed out: the guest views an administrator opened (custom/GuestShell), or the sign-in card.
 function SignedOut({ onAuthed }: { onAuthed: () => void }) {
-  const guest = useQuery<{ permissions: GuestPermission[] }>({ queryKey: ['guest-access'], queryFn: () => apiFetch('/api/auth/guest'), retry: false })
+  const tc = useCustomT()
+  const guest = useQuery<{ permissions: GuestPermission[]; trial?: GuestTrialInfo }>({ queryKey: ['guest-access'], queryFn: () => apiFetch('/api/auth/guest'), retry: false })
   const [view, setView] = useState<'browse' | 'login' | 'request'>('browse')
   const permissions = guest.data?.permissions ?? []
   if (guest.isLoading) return <Centered><Loader2 className="mx-auto size-4 animate-spin text-muted-foreground" aria-hidden /></Centered>
   if (permissions.length === 0) return <AuthForm mode="login" onAuthed={onAuthed} />
-  if (view === 'browse') return <GuestShell permissions={permissions} onSignIn={() => setView('login')} onRequest={() => setView('request')} />
+  if (view === 'browse') return <GuestShell permissions={permissions} trial={guest.data?.trial} onSignIn={() => setView('login')} onRequest={() => setView('request')} />
   return (
     <div className="relative">
-      <button type="button" onClick={() => setView('browse')} className="absolute left-4 top-4 z-10 text-sm text-muted-foreground hover:text-foreground">← Back to browsing</button>
+      <button type="button" onClick={() => setView('browse')} className="absolute left-4 top-4 z-10 text-sm text-muted-foreground hover:text-foreground">← {tc('Back to browsing')}</button>
       <AuthForm key={view} mode="login" start={view} onAuthed={onAuthed} />
     </div>
   )
