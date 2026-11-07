@@ -20,16 +20,18 @@ import { ContentFilterCard } from './ContentFilterCard'
 import { QuickAnswersCard } from './QuickAnswersCard'
 import { FeedbackCard } from './FeedbackCard'
 import { useAdministrativeAccess } from './use-administrative-access'
+import { useCustomT } from './i18n/use-custom-t'
 
 const MAX_RPM = 1000
 
 function QuotaEditor({ profile, canEdit, onSaved }: { profile: ProfileAnalytics; canEdit: boolean; onSaved: () => void }) {
+  const tc = useCustomT()
   const [value, setValue] = useState(profile.rpmLimit === null ? '' : String(profile.rpmLimit))
   const save = useMutation({
     mutationFn: (rpmLimit: number | null) =>
       apiFetch(`/api/client-profiles/${profile.profileId}/quota`, { method: 'PUT', body: JSON.stringify({ rpmLimit }) }),
-    onSuccess: () => { onSaved(); toast.success('Request limit updated') },
-    onError: (err: Error) => toast.error(err.message || 'Failed to update the limit'),
+    onSuccess: () => { onSaved(); toast.success(tc('Request limit updated')) },
+    onError: (err: Error) => toast.error(err.message || tc('Failed to update the limit')),
   })
   const trimmed = value.trim()
   const parsed = trimmed === '' ? null : Number(trimmed)
@@ -42,23 +44,21 @@ function QuotaEditor({ profile, canEdit, onSaved }: { profile: ProfileAnalytics;
       onSubmit={(e) => { e.preventDefault(); if (canEdit && valid && !unchanged) save.mutate(parsed) }}
     >
       <div className="space-y-1">
-        <label htmlFor="profile-rpm" className="block text-xs font-medium text-muted-foreground">Requests per minute</label>
+        <label htmlFor="profile-rpm" className="block text-xs font-medium text-muted-foreground">{tc('Requests per minute')}</label>
         <Input
           id="profile-rpm"
           inputMode="numeric"
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          placeholder="No limit"
+          placeholder={tc('No limit')}
           disabled={!canEdit}
           className="h-8 w-36 text-xs"
         />
       </div>
-      <Button type="submit" size="sm" className="h-8 text-xs" disabled={!canEdit || !valid || unchanged || save.isPending}>
-        Save
-      </Button>
+      <Button type="submit" size="sm" className="h-8 text-xs" disabled={!canEdit || !valid || unchanged || save.isPending}>{tc('Save')}</Button>
       <p className="text-xs text-muted-foreground">
-        {valid ? (profile.rpmLimit === null ? 'Currently unlimited.' : `Currently ${profile.rpmLimit} per minute.`) : `Enter a whole number from 1 to ${MAX_RPM}, or leave empty for no limit.`}
-        {!profile.enabled && ' This profile is disabled: its key is rejected.'}
+        {valid ? (profile.rpmLimit === null ? tc('Currently unlimited.') : tc('Currently {rpmLimit} per minute.', { rpmLimit: profile.rpmLimit })) : tc('Enter a whole number from 1 to {MAX_RPM}, or leave empty for no limit.', { MAX_RPM: MAX_RPM })}
+        {!profile.enabled && tc(' This profile is disabled: its key is rejected.')}
       </p>
     </form>
   )
@@ -66,30 +66,29 @@ function QuotaEditor({ profile, canEdit, onSaved }: { profile: ProfileAnalytics;
 
 // /profiles/:id/usage - traffic and request cap of one client profile (`sk-cp-…` key).
 export function ProfileUsagePage() {
+  const tc = useCustomT()
   const { id } = useParams()
   const queryClient = useQueryClient()
   const { can, identity, isPending } = useAdministrativeAccess()
   const profileId = Number(id)
 
-  if (isPending) return <p role="status">Loading permissions…</p>
+  if (isPending) return <p role="status">{tc('Loading permissions…')}</p>
   if (!can('view_client_profiles')) {
-    return <p role="alert" className="text-sm text-muted-foreground">Your account does not have permission to open this page.</p>
+    return <p role="alert" className="text-sm text-muted-foreground">{tc('Your account does not have permission to open this page.')}</p>
   }
   if (!Number.isInteger(profileId) || profileId <= 0) {
-    return <p role="alert" className="text-sm text-muted-foreground">Unknown client profile.</p>
+    return <p role="alert" className="text-sm text-muted-foreground">{tc('Unknown client profile.')}</p>
   }
 
   const queryKey = ['profile-analytics', profileId]
   return (
     <div className="space-y-6" key={identity}>
       <PageHeader
-        title="Client profile usage"
-        description="Requests, tokens, errors and models for one client key, and its request limit."
+        title={tc('Client profile usage')}
+        description={tc('Requests, tokens, errors and models for one client key, and its request limit.')}
         actions={
           <Link to="/keys" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="size-3.5" />
-            Keys
-          </Link>
+            <ArrowLeft className="size-3.5" />{tc('Keys')}</Link>
         }
       />
       <UserAnalyticsView

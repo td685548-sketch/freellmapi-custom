@@ -6,6 +6,7 @@ import { toast } from '@/lib/toast'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { useCustomT, type CustomT } from './i18n/use-custom-t'
 
 interface AlertSettings { webhookUrl: string; email: string; emailAvailable: boolean }
 interface Delivery { webhook: { sent: boolean; status: number | null } | null; email: { sent: boolean } | null }
@@ -16,10 +17,13 @@ const validUrl = (v: string) => {
 }
 const validEmail = (v: string) => v.trim() === '' || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim())
 
-function describe(d: Delivery): string {
-  const parts = ['Written to the Logs page']
-  if (d.webhook) parts.push(d.webhook.sent ? `webhook answered ${d.webhook.status}` : `webhook failed${d.webhook.status ? ` (${d.webhook.status})` : ' (no answer)'}`)
-  if (d.email) parts.push(d.email.sent ? 'email sent' : 'email failed')
+function describe(d: Delivery, tc: CustomT): string {
+  const parts = [tc('Written to the Logs page')]
+  if (d.webhook) {
+    parts.push(d.webhook.sent ? tc('webhook answered {status}', { status: d.webhook.status ?? '' })
+      : d.webhook.status ? tc('webhook failed ({status})', { status: d.webhook.status }) : tc('webhook failed (no answer)'))
+  }
+  if (d.email) parts.push(d.email.sent ? tc('email sent') : tc('email failed'))
   return parts.join(' · ')
 }
 
@@ -27,6 +31,7 @@ interface ReportSettings { enabled: boolean; lastSentWeek: string | null }
 
 /** The weekly summary sent to the same destinations: on/off, a preview and "send now". */
 function WeeklyReportSection({ canEdit }: { canEdit: boolean }) {
+  const tc = useCustomT()
   const queryClient = useQueryClient()
   const key = ['usage-report-settings']
   const { data } = useQuery<ReportSettings>({ queryKey: key, queryFn: () => apiFetch('/api/settings/usage-report') })
@@ -35,7 +40,7 @@ function WeeklyReportSection({ canEdit }: { canEdit: boolean }) {
   const toggle = useMutation({
     mutationFn: (enabled: boolean) => apiFetch<ReportSettings>('/api/settings/usage-report', { method: 'PUT', body: JSON.stringify({ enabled }) }),
     onSuccess: (s) => queryClient.setQueryData(key, s),
-    onError: (err: Error) => toast.error(err.message || 'Could not save'),
+    onError: (err: Error) => toast.error(err.message || tc('Could not save')),
   })
   const show = useMutation({
     mutationFn: () => apiFetch<{ text: string }>('/api/settings/usage-report/preview'),
@@ -44,26 +49,22 @@ function WeeklyReportSection({ canEdit }: { canEdit: boolean }) {
   const send = useMutation({
     mutationFn: () => apiFetch<{ delivery: Delivery }>('/api/settings/usage-report/send', { method: 'POST', body: '{}' }),
     onSuccess: (r) => setSent(r.delivery),
-    onError: (err: Error) => toast.error(err.message || 'Could not send the report'),
+    onError: (err: Error) => toast.error(err.message || tc('Could not send the report')),
   })
   if (!data || typeof data.enabled !== 'boolean') return null
   return (
     <div className="space-y-2 border-t pt-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <label className="inline-flex items-center gap-2 text-xs font-medium">
-          <Switch size="sm" checked={data.enabled} disabled={!canEdit} onCheckedChange={(enabled) => toggle.mutate(enabled)} aria-label="Send a weekly report" />
-          Weekly report
-        </label>
+          <Switch size="sm" checked={data.enabled} disabled={!canEdit} onCheckedChange={(enabled) => toggle.mutate(enabled)} aria-label="Send a weekly report" />{tc('Weekly report')}</label>
         <div className="flex gap-2">
-          <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={() => show.mutate()} disabled={show.isPending}>Preview</Button>
-          {canEdit && <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={() => send.mutate()} disabled={send.isPending}>{send.isPending ? 'Sending…' : 'Send now'}</Button>}
+          <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={() => show.mutate()} disabled={show.isPending}>{tc('Preview')}</Button>
+          {canEdit && <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={() => send.mutate()} disabled={send.isPending}>{send.isPending ? tc('Sending…') : tc('Send now')}</Button>}
         </div>
       </div>
-      <p className="text-[11px] text-muted-foreground">
-        Every Monday (UTC): last week&apos;s requests, tokens and errors against the week before, and the busiest accounts, client keys and end users.
-        {data.lastSentWeek ? ` Last sent for the week of ${data.lastSentWeek}.` : ''}
+      <p className="text-[11px] text-muted-foreground">{tc('Every Monday (UTC): last week\'s requests, tokens and errors against the week before, and the busiest accounts, client keys and end users.')}{data.lastSentWeek ? tc(' Last sent for the week of {lastSentWeek}.', { lastSentWeek: data.lastSentWeek }) : ''}
       </p>
-      {sent && <p role="status" className="text-xs text-muted-foreground">{describe(sent)}</p>}
+      {sent && <p role="status" className="text-xs text-muted-foreground">{describe(sent, tc)}</p>}
       {preview && <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-muted/50 p-3 text-[11px]" aria-label="Report preview">{preview}</pre>}
     </div>
   )
@@ -74,6 +75,7 @@ function WeeklyReportSection({ canEdit }: { canEdit: boolean }) {
  * work as they are) and an optional email through the configured Gmail sender.
  */
 export function UsageAlertsCard({ canEdit }: { canEdit: boolean }) {
+  const tc = useCustomT()
   const queryClient = useQueryClient()
   const key = ['usage-alert-settings']
   const { data } = useQuery<AlertSettings>({ queryKey: key, queryFn: () => apiFetch('/api/settings/usage-alerts') })
@@ -82,13 +84,13 @@ export function UsageAlertsCard({ canEdit }: { canEdit: boolean }) {
 
   const save = useMutation({
     mutationFn: (body: { webhookUrl: string; email: string }) => apiFetch<AlertSettings>('/api/settings/usage-alerts', { method: 'PUT', body: JSON.stringify(body) }),
-    onSuccess: (s) => { queryClient.setQueryData(key, s); setDraft({}); toast.success('Alert destinations saved') },
-    onError: (err: Error) => toast.error(err.message || 'Could not save'),
+    onSuccess: (s) => { queryClient.setQueryData(key, s); setDraft({}); toast.success(tc('Alert destinations saved')) },
+    onError: (err: Error) => toast.error(err.message || tc('Could not save')),
   })
   const test = useMutation({
     mutationFn: () => apiFetch<{ delivery: Delivery }>('/api/settings/usage-alerts/test', { method: 'POST', body: '{}' }),
     onSuccess: (r) => setResult(r.delivery),
-    onError: (err: Error) => toast.error(err.message || 'Could not send the test'),
+    onError: (err: Error) => toast.error(err.message || tc('Could not send the test')),
   })
 
   if (!data || typeof data.webhookUrl !== 'string') return null
@@ -101,36 +103,33 @@ export function UsageAlertsCard({ canEdit }: { canEdit: boolean }) {
     <section className="rounded-2xl border bg-card p-4 space-y-3" aria-label="Usage alerts">
       <div className="flex items-center gap-1.5">
         <BellRing className="size-4" />
-        <h2 className="text-sm font-semibold">Alerts</h2>
+        <h2 className="text-sm font-semibold">{tc('Alerts')}</h2>
       </div>
-      <p className="text-xs text-muted-foreground">
-        Sent when an account or client key reaches 80% and 100% of a daily or monthly allowance (once per window), and when at
-        least half of its requests fail over 15 minutes (at most once an hour). Every alert is written to the Logs page.
-      </p>
+      <p className="text-xs text-muted-foreground">{tc('Sent when an account or client key reaches 80% and 100% of a daily or monthly allowance (once per window), and when at least half of its requests fail over 15 minutes (at most once an hour). Every alert is written to the Logs page.')}</p>
       <form
         className="grid gap-3 sm:grid-cols-2"
         onSubmit={(e) => { e.preventDefault(); if (canEdit && valid && dirty) save.mutate({ webhookUrl: webhookUrl.trim(), email: email.trim() }) }}
       >
         <div className="space-y-1">
-          <label htmlFor="alert-webhook" className="block text-xs font-medium text-muted-foreground">Webhook URL</label>
-          <Input id="alert-webhook" value={webhookUrl} disabled={!canEdit} placeholder="https://hooks.slack.com/services/…" onChange={(e) => setDraft(d => ({ ...d, webhookUrl: e.target.value }))} className="h-8 text-xs" />
-          <p className="text-[11px] text-muted-foreground">Receives a JSON POST; the message is also in <code>text</code> and <code>content</code>, so Slack and Discord show it as is.</p>
+          <label htmlFor="alert-webhook" className="block text-xs font-medium text-muted-foreground">{tc('Webhook URL')}</label>
+          <Input id="alert-webhook" value={webhookUrl} disabled={!canEdit} placeholder={tc('https://hooks.slack.com/services/…')} onChange={(e) => setDraft(d => ({ ...d, webhookUrl: e.target.value }))} className="h-8 text-xs" />
+          <p className="text-[11px] text-muted-foreground">{tc('Receives a JSON POST; the message is also in')}{' '}<code>{tc('text')}</code>{' '}{tc('and')}{' '}<code>{tc('content')}</code>{tc(', so Slack and Discord show it as is.')}</p>
         </div>
         <div className="space-y-1">
-          <label htmlFor="alert-email" className="block text-xs font-medium text-muted-foreground">Email</label>
-          <Input id="alert-email" type="email" value={email} disabled={!canEdit} placeholder="ops@example.com" onChange={(e) => setDraft(d => ({ ...d, email: e.target.value }))} className="h-8 text-xs" />
+          <label htmlFor="alert-email" className="block text-xs font-medium text-muted-foreground">{tc('Email')}</label>
+          <Input id="alert-email" type="email" value={email} disabled={!canEdit} placeholder={tc('ops@example.com')} onChange={(e) => setDraft(d => ({ ...d, email: e.target.value }))} className="h-8 text-xs" />
           <p className="text-[11px] text-muted-foreground">
-            {data.emailAvailable ? 'Sent through the configured Gmail sender.' : 'No Gmail sender is configured, so emails are not sent; the log and the webhook still work.'}
+            {data.emailAvailable ? tc('Sent through the configured Gmail sender.') : tc('No Gmail sender is configured, so emails are not sent; the log and the webhook still work.')}
           </p>
         </div>
         {canEdit && (
           <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
-            <Button type="submit" size="sm" className="h-8 text-xs" disabled={!valid || !dirty || save.isPending}>Save</Button>
-            <Button type="button" variant="outline" size="sm" className="h-8 text-xs" disabled={dirty || test.isPending} onClick={() => test.mutate()} title={dirty ? 'Save first' : undefined}>
-              {test.isPending ? 'Sending…' : 'Send test alert'}
+            <Button type="submit" size="sm" className="h-8 text-xs" disabled={!valid || !dirty || save.isPending}>{tc('Save')}</Button>
+            <Button type="button" variant="outline" size="sm" className="h-8 text-xs" disabled={dirty || test.isPending} onClick={() => test.mutate()} title={dirty ? tc('Save first') : undefined}>
+              {test.isPending ? tc('Sending…') : tc('Send test alert')}
             </Button>
-            {!valid && <span className="text-xs text-destructive">Use an http(s) address and a valid email, or leave them empty.</span>}
-            {result && <span role="status" className="text-xs text-muted-foreground">{describe(result)}</span>}
+            {!valid && <span className="text-xs text-destructive">{tc('Use an http(s) address and a valid email, or leave them empty.')}</span>}
+            {result && <span role="status" className="text-xs text-muted-foreground">{describe(result, tc)}</span>}
           </div>
         )}
       </form>

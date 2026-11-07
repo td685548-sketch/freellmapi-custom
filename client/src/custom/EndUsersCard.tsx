@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { SegmentedControl } from '@/components/ui/segmented-control'
 import type { EndUserOverview, EndUserQuota, EndUserRow } from '../../../shared/end-users'
 import { RecentRequestsCard } from './RecentRequestsCard'
+import { useCustomT } from './i18n/use-custom-t'
 
 const FIELDS: Array<{ field: keyof EndUserQuota; label: string }> = [
   { field: 'dailyRequests', label: 'Requests per day' },
@@ -25,6 +26,7 @@ const parse = (t: string): number | null | undefined => {
 }
 
 function QuotaEditor({ profileId, quota, canEdit }: { profileId: number; quota: EndUserQuota; canEdit: boolean }) {
+  const tc = useCustomT()
   const queryClient = useQueryClient()
   const [draft, setDraft] = useState<Partial<Record<keyof EndUserQuota, string>>>({})
   const shown = (f: keyof EndUserQuota) => draft[f] ?? (quota[f] === null ? '' : String(quota[f]))
@@ -33,26 +35,26 @@ function QuotaEditor({ profileId, quota, canEdit }: { profileId: number; quota: 
   const dirty = FIELDS.some(({ field }) => draft[field] !== undefined && parsed[field] !== quota[field])
   const save = useMutation({
     mutationFn: () => apiFetch(`/api/client-profiles/${profileId}/end-user-quota`, { method: 'PUT', body: JSON.stringify(parsed) }),
-    onSuccess: () => { setDraft({}); void queryClient.invalidateQueries({ queryKey: ['end-users', profileId] }); toast.success('Per-user allowance saved') },
-    onError: (err: Error) => toast.error(err.message || 'Could not save'),
+    onSuccess: () => { setDraft({}); void queryClient.invalidateQueries({ queryKey: ['end-users', profileId] }); toast.success(tc('Per-user allowance saved')) },
+    onError: (err: Error) => toast.error(err.message || tc('Could not save')),
   })
   return (
     <form className="space-y-2" onSubmit={(e) => { e.preventDefault(); if (canEdit && valid && dirty) save.mutate() }}>
-      <p className="text-xs font-medium text-muted-foreground">Allowance for each end user</p>
+      <p className="text-xs font-medium text-muted-foreground">{tc('Allowance for each end user')}</p>
       <div className="grid gap-2 sm:grid-cols-4">
         {FIELDS.map(({ field, label }) => (
           <div key={field} className="space-y-1">
-            <label htmlFor={`eu-${field}`} className="block text-[11px] text-muted-foreground">{label}</label>
-            <Input id={`eu-${field}`} inputMode="numeric" value={shown(field)} disabled={!canEdit} placeholder="No limit"
+            <label htmlFor={`eu-${field}`} className="block text-[11px] text-muted-foreground">{tc(label)}</label>
+            <Input id={`eu-${field}`} inputMode="numeric" value={shown(field)} disabled={!canEdit} placeholder={tc('No limit')}
               onChange={(e) => setDraft(d => ({ ...d, [field]: e.target.value }))} className="h-8 text-xs" />
           </div>
         ))}
       </div>
       {canEdit && (
         <div className="flex flex-wrap items-center gap-2">
-          <Button type="submit" size="sm" className="h-8 text-xs" disabled={!valid || !dirty || save.isPending}>Save</Button>
+          <Button type="submit" size="sm" className="h-8 text-xs" disabled={!valid || !dirty || save.isPending}>{tc('Save')}</Button>
           <span className="text-[11px] text-muted-foreground">
-            {valid ? 'Each visitor gets this much on their own; an end user over it gets 429 end_user_quota_exceeded. Empty = no limit.' : 'Use whole numbers from 1, or leave empty.'}
+            {valid ? tc('Each visitor gets this much on their own; an end user over it gets 429 end_user_quota_exceeded. Empty = no limit.') : tc('Use whole numbers from 1, or leave empty.')}
           </span>
         </div>
       )}
@@ -65,6 +67,7 @@ function QuotaEditor({ profileId, quota, canEdit }: { profileId: number; quota: 
  * allowance each of them gets. Needs the web app's backend to send X-End-User (or the OpenAI `user` field).
  */
 export function EndUsersCard({ profileId, canEdit }: { profileId: number; canEdit: boolean }) {
+  const tc = useCustomT()
   const [days, setDays] = useState<'7' | '30' | '90'>('30')
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState<string | null>(null)
@@ -78,38 +81,35 @@ export function EndUsersCard({ profileId, canEdit }: { profileId: number; canEdi
   return (
     <section className="rounded-2xl border bg-card p-4 space-y-4" aria-label="End users">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5"><Users className="size-4" /><h3 className="text-sm font-semibold">End users</h3></div>
-        <SegmentedControl ariaLabel="End users range" value={days} onValueChange={setDays} options={[...RANGES]} />
+        <div className="flex items-center gap-1.5"><Users className="size-4" /><h3 className="text-sm font-semibold">{tc('End users')}</h3></div>
+        <SegmentedControl ariaLabel="End users range" value={days} onValueChange={setDays} options={RANGES.map(o => ({ ...o, label: tc(o.label) }))} />
       </div>
-      <p className="text-xs text-muted-foreground">
-        Your web app&apos;s own visitors. Send their id in the <code>X-End-User</code> header (or the OpenAI <code>user</code> field) from your
-        backend: an id of your own, no email needed.
-      </p>
+      <p className="text-xs text-muted-foreground">{tc('Your web app\'s own visitors. Send their id in the')}{' '}<code>{tc('X-End-User')}</code>{' '}{tc('header (or the OpenAI')}{' '}<code>{tc('user')}</code>{' '}{tc('field) from your backend: an id of your own, no email needed.')}</p>
 
-      {isLoading ? <p className="text-xs text-muted-foreground" role="status">Loading…</p>
-        : isError || !o ? <p className="text-xs text-destructive" role="alert">Could not load the end users.</p>
+      {isLoading ? <p className="text-xs text-muted-foreground" role="status">{tc('Loading…')}</p>
+        : isError || !o ? <p className="text-xs text-destructive" role="alert">{tc('Could not load the end users.')}</p>
         : (
           <>
             <QuotaEditor key={JSON.stringify(o.quota)} profileId={profileId} quota={o.quota} canEdit={canEdit} />
             {o.unattributedRequests > 0 && (
-              <p className="text-xs text-amber-700 dark:text-amber-400">{fmt(o.unattributedRequests)} request(s) in this window named no end user.</p>
+              <p className="text-xs text-amber-700 dark:text-amber-400">{fmt(o.unattributedRequests)}{' '}{tc('request(s) in this window named no end user.')}</p>
             )}
             {o.endUsers.length === 0 ? (
-              <p className="text-xs text-muted-foreground">No end user yet in this window.</p>
+              <p className="text-xs text-muted-foreground">{tc('No end user yet in this window.')}</p>
             ) : (
               <>
-                <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search end user…" aria-label="Search end user" className="h-8 w-60 text-xs" />
+                <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={tc('Search end user…')} aria-label="Search end user" className="h-8 w-60 text-xs" />
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="border-b text-left text-muted-foreground">
-                        <th className="py-1.5 pr-3 font-medium">End user</th>
-                        <th className="py-1.5 pr-3 text-right font-medium">Requests</th>
-                        <th className="py-1.5 pr-3 text-right font-medium">Errors</th>
-                        <th className="py-1.5 pr-3 text-right font-medium">Tokens</th>
-                        <th className="py-1.5 pr-3 text-right font-medium">Avg latency</th>
-                        {o.endUsers[0]?.today && <th className="py-1.5 pr-3 text-right font-medium">Today</th>}
-                        <th className="py-1.5 text-right font-medium">Last request</th>
+                        <th className="py-1.5 pr-3 font-medium">{tc('End user')}</th>
+                        <th className="py-1.5 pr-3 text-right font-medium">{tc('Requests')}</th>
+                        <th className="py-1.5 pr-3 text-right font-medium">{tc('Errors')}</th>
+                        <th className="py-1.5 pr-3 text-right font-medium">{tc('Tokens')}</th>
+                        <th className="py-1.5 pr-3 text-right font-medium">{tc('Avg latency')}</th>
+                        {o.endUsers[0]?.today && <th className="py-1.5 pr-3 text-right font-medium">{tc('Today')}</th>}
+                        <th className="py-1.5 text-right font-medium">{tc('Last request')}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
@@ -119,22 +119,22 @@ export function EndUsersCard({ profileId, canEdit }: { profileId: number; canEdi
                           <td className="py-1.5 pr-3 text-right tabular-nums">{fmt(r.requests)}</td>
                           <td className={`py-1.5 pr-3 text-right tabular-nums ${r.errors > 0 ? 'text-destructive' : ''}`}>{fmt(r.errors)}</td>
                           <td className="py-1.5 pr-3 text-right tabular-nums">{fmt(r.tokens)}</td>
-                          <td className="py-1.5 pr-3 text-right tabular-nums">{r.avgLatencyMs === null ? '—' : `${fmt(r.avgLatencyMs)} ms`}</td>
-                          {r.today && <td className="py-1.5 pr-3 text-right tabular-nums">{fmt(r.today.requests)} req · {fmt(r.today.tokens)} tok</td>}
-                          <td className="py-1.5 text-right">{r.lastRequestAt ? `${r.lastRequestAt.slice(5, 16)} UTC` : '—'}</td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums">{r.avgLatencyMs === null ? '—' : tc('{v} ms', { v: fmt(r.avgLatencyMs) })}</td>
+                          {r.today && <td className="py-1.5 pr-3 text-right tabular-nums">{fmt(r.today.requests)}{' '}{tc('req ·')}{' '}{fmt(r.today.tokens)}{' '}{tc('tok')}</td>}
+                          <td className="py-1.5 text-right">{r.lastRequestAt ? tc('{lastRequestAt} UTC', { lastRequestAt: r.lastRequestAt.slice(5, 16) }) : '—'}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-                {rows.length === 0 && <p className="text-xs text-muted-foreground">No end user matches.</p>}
+                {rows.length === 0 && <p className="text-xs text-muted-foreground">{tc('No end user matches.')}</p>}
               </>
             )}
             {open && (
               <RecentRequestsCard
                 endpoint={`/api/client-profiles/${profileId}/requests`}
                 query={`&endUser=${encodeURIComponent(open)}`}
-                title={`Requests of ${open}`}
+                title={tc('Requests of {open}', { open: open })}
               />
             )}
           </>

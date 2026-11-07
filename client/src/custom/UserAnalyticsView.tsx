@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { SegmentedControl } from '@/components/ui/segmented-control'
 
 import type { RequestAnalytics } from '../../../shared/user-analytics'
+import { useCustomT } from './i18n/use-custom-t'
 export type { RequestAnalytics, UserAnalytics, ProfileAnalytics } from '../../../shared/user-analytics'
 
 const RANGES = [
@@ -51,6 +52,7 @@ export function UserAnalyticsView({
   scope?: string
   header?: (analytics: RequestAnalytics) => ReactNode
 }) {
+  const tc = useCustomT()
   const [days, setDays] = useState<'7' | '30' | '90'>('30')
 
   const { data, isLoading, isError, error, refetch } = useQuery<{ analytics: RequestAnalytics }>({
@@ -60,15 +62,15 @@ export function UserAnalyticsView({
 
   const a = data?.analytics
   const range = (
-    <SegmentedControl ariaLabel="Time range" value={days} onValueChange={setDays} options={[...RANGES]} />
+    <SegmentedControl ariaLabel="Time range" value={days} onValueChange={setDays} options={RANGES.map(o => ({ ...o, label: tc(o.label) }))} />
   )
 
-  if (isLoading) return <p className="text-sm text-muted-foreground" role="status">Loading usage…</p>
+  if (isLoading) return <p className="text-sm text-muted-foreground" role="status">{tc('Loading usage…')}</p>
   if (isError || !a) {
     return (
       <div className="space-y-3" role="alert">
-        <p className="text-sm font-medium text-destructive">{error?.message || 'Could not load usage.'}</p>
-        <Button variant="outline" size="sm" onClick={() => refetch()}>Retry</Button>
+        <p className="text-sm font-medium text-destructive">{error?.message || tc('Could not load usage.')}</p>
+        <Button variant="outline" size="sm" onClick={() => refetch()}>{tc('Retry')}</Button>
       </div>
     )
   }
@@ -83,9 +85,7 @@ export function UserAnalyticsView({
     <div className="space-y-6">
       {header?.(a)}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-muted-foreground">
-          Requests made with {scope}, last {a.days} days (UTC).
-          {a.retainedSince ? ` Oldest retained request: ${a.retainedSince.slice(0, 10)}.` : ''}
+        <p className="text-xs text-muted-foreground">{tc('Requests made with {scope}, last {days} days (UTC).', { scope: tc(scope), days: a.days })}{a.retainedSince ? tc(' Oldest retained request: {retainedSince}.', { retainedSince: a.retainedSince.slice(0, 10) }) : ''}
         </p>
         {range}
       </div>
@@ -93,23 +93,21 @@ export function UserAnalyticsView({
       {t.requests === 0 ? (
         <div className="rounded-2xl border bg-card p-8 text-center space-y-1">
           <Activity className="size-8 mx-auto text-muted-foreground opacity-50" />
-          <p className="text-sm font-medium">No requests in this window</p>
-          <p className="text-xs text-muted-foreground">
-            Only traffic sent with {scope} is counted here.
-          </p>
+          <p className="text-sm font-medium">{tc('No requests in this window')}</p>
+          <p className="text-xs text-muted-foreground">{tc('Only traffic sent with {scope} is counted here.', { scope: tc(scope) })}</p>
         </div>
       ) : (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-            <Tile icon={Activity} label="Requests" value={fmt(t.requests)} hint={t.canceled > 0 ? `${fmt(t.canceled)} canceled` : undefined} />
-            <Tile icon={CircleAlert} label="Success rate" value={successRate} hint={`${fmt(t.errors)} errors`} />
-            <Tile icon={Coins} label="Tokens" value={fmt(tokens)} hint={`${fmt(t.inputTokens)} in · ${fmt(t.outputTokens)} out`} />
-            <Tile icon={Gauge} label="Avg latency" value={t.avgLatencyMs == null ? '—' : `${fmt(t.avgLatencyMs)} ms`} hint="successful requests" />
-            <Tile icon={Clock} label="Last request" value={t.lastRequestAt ? t.lastRequestAt.slice(0, 10) : '—'} hint={t.lastRequestAt ? `${t.lastRequestAt.slice(11, 16)} UTC` : undefined} />
+            <Tile icon={Activity} label={tc('Requests')} value={fmt(t.requests)} hint={t.canceled > 0 ? tc('{canceled} canceled', { canceled: fmt(t.canceled) }) : undefined} />
+            <Tile icon={CircleAlert} label={tc('Success rate')} value={successRate} hint={tc('{errors} errors', { errors: fmt(t.errors) })} />
+            <Tile icon={Coins} label={tc('Tokens')} value={fmt(tokens)} hint={tc('{input} in · {output} out', { input: fmt(t.inputTokens), output: fmt(t.outputTokens) })} />
+            <Tile icon={Gauge} label={tc('Avg latency')} value={t.avgLatencyMs == null ? '—' : `${fmt(t.avgLatencyMs)} ms`} hint={tc('successful requests')} />
+            <Tile icon={Clock} label={tc('Last request')} value={t.lastRequestAt ? t.lastRequestAt.slice(0, 10) : '—'} hint={t.lastRequestAt ? `${t.lastRequestAt.slice(11, 16)} UTC` : undefined} />
           </div>
 
           <div className="rounded-2xl border bg-card p-4 space-y-3">
-            <h3 className="text-sm font-semibold">Requests per day</h3>
+            <h3 className="text-sm font-semibold">{tc('Requests per day')}</h3>
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={daily} margin={{ top: 6, right: 6, left: -12, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="2 4" stroke="var(--border)" />
@@ -117,22 +115,22 @@ export function UserAnalyticsView({
                 <YAxis tick={axisStyle} tickLine={false} axisLine={false} allowDecimals={false} />
                 <Tooltip contentStyle={tooltipStyle} />
                 <Legend wrapperStyle={{ fontSize: 12 }} iconType="rect" />
-                <Bar dataKey="ok" name="Succeeded / other" stackId="r" fill="var(--series-a)" maxBarSize={24} />
-                <Bar dataKey="errors" name="Errors" stackId="r" fill="var(--destructive)" radius={[3, 3, 0, 0]} maxBarSize={24} />
+                <Bar dataKey="ok" name={tc('Succeeded / other')} stackId="r" fill="var(--series-a)" maxBarSize={24} />
+                <Bar dataKey="errors" name={tc('Errors')} stackId="r" fill="var(--destructive)" radius={[3, 3, 0, 0]} maxBarSize={24} />
               </BarChart>
             </ResponsiveContainer>
           </div>
 
           <div className="rounded-2xl border bg-card overflow-hidden">
-            <h3 className="text-sm font-semibold px-4 py-3 border-b">Models used</h3>
+            <h3 className="text-sm font-semibold px-4 py-3 border-b">{tc('Models used')}</h3>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs text-muted-foreground border-b">
-                    <th className="px-4 py-2 font-medium">Model</th>
-                    <th className="px-4 py-2 font-medium text-right">Requests</th>
-                    <th className="px-4 py-2 font-medium text-right">Errors</th>
-                    <th className="px-4 py-2 font-medium text-right">Tokens</th>
+                    <th className="px-4 py-2 font-medium">{tc('Model')}</th>
+                    <th className="px-4 py-2 font-medium text-right">{tc('Requests')}</th>
+                    <th className="px-4 py-2 font-medium text-right">{tc('Errors')}</th>
+                    <th className="px-4 py-2 font-medium text-right">{tc('Tokens')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">

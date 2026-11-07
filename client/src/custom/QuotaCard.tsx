@@ -5,6 +5,7 @@ import { toast } from '@/lib/toast'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { UsageQuota, UsageQuotaState } from '../../../shared/usage-quota'
+import { useCustomT } from './i18n/use-custom-t'
 
 const MAX = 1_000_000_000_000
 type Field = keyof UsageQuota
@@ -40,6 +41,7 @@ function Bar({ used, limit }: { used: number; limit: number }) {
  * read-only viewer is shown nothing at all when no limit is set.
  */
 export function QuotaCard({ endpoint, queryKey, canEdit }: { endpoint: string; queryKey: unknown[]; canEdit: boolean }) {
+  const tc = useCustomT()
   const queryClient = useQueryClient()
   const { data } = useQuery<UsageQuotaState>({ queryKey, queryFn: () => apiFetch<UsageQuotaState>(endpoint) })
   const [draft, setDraft] = useState<Partial<Record<Field, string>>>({})
@@ -49,9 +51,9 @@ export function QuotaCard({ endpoint, queryKey, canEdit }: { endpoint: string; q
     onSuccess: (state) => {
       queryClient.setQueryData(queryKey, state)
       setDraft({})
-      toast.success('Allowances updated')
+      toast.success(tc('Allowances updated'))
     },
-    onError: (err: Error) => toast.error(err.message || 'Failed to update the allowances'),
+    onError: (err: Error) => toast.error(err.message || tc('Failed to update the allowances')),
   })
 
   if (!data?.quota || !data.usage) return null
@@ -68,10 +70,8 @@ export function QuotaCard({ endpoint, queryKey, canEdit }: { endpoint: string; q
       onSubmit={(e) => { e.preventDefault(); if (canEdit && valid && dirty) save.mutate(parsed as UsageQuota) }}
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-sm font-semibold">Allowances</h3>
-        <p className="text-xs text-muted-foreground">
-          Resets {new Date(data.resetsAt.day).toISOString().slice(0, 16).replace('T', ' ')} UTC (day) · {new Date(data.resetsAt.month).toISOString().slice(0, 10)} (month)
-        </p>
+        <h3 className="text-sm font-semibold">{tc('Allowances')}</h3>
+        <p className="text-xs text-muted-foreground">{tc('Resets')}{' '}{new Date(data.resetsAt.day).toISOString().slice(0, 16).replace('T', ' ')}{' '}{tc('UTC (day) ·')}{' '}{new Date(data.resetsAt.month).toISOString().slice(0, 10)}{' '}{tc('(month)')}</p>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         {ROWS.map(({ field, label, window, metric }) => {
@@ -79,23 +79,23 @@ export function QuotaCard({ endpoint, queryKey, canEdit }: { endpoint: string; q
           const used = data.usage[window][metric]
           return (
             <div key={field} className="space-y-1.5">
-              <label htmlFor={`quota-${field}`} className="block text-xs font-medium text-muted-foreground">{label}</label>
+              <label htmlFor={`quota-${field}`} className="block text-xs font-medium text-muted-foreground">{tc(label)}</label>
               {canEdit ? (
                 <Input
                   id={`quota-${field}`}
                   inputMode="numeric"
                   value={shown(field)}
                   onChange={(e) => setDraft(d => ({ ...d, [field]: e.target.value }))}
-                  placeholder="No limit"
+                  placeholder={tc('No limit')}
                   className="h-8 text-xs"
                 />
               ) : (
-                <div className="text-sm font-medium tabular-nums">{limit === null ? 'No limit' : fmt(limit)}</div>
+                <div className="text-sm font-medium tabular-nums">{limit === null ? tc('No limit') : fmt(limit)}</div>
               )}
               {limit !== null && data.tracked && (
                 <>
                   <Bar used={used} limit={limit} />
-                  <p className="text-xs text-muted-foreground tabular-nums">{fmt(used)} of {fmt(limit)} used</p>
+                  <p className="text-xs text-muted-foreground tabular-nums">{fmt(used)}{' '}{tc('of')}{' '}{fmt(limit)}{' '}{tc('used')}</p>
                 </>
               )}
             </div>
@@ -104,9 +104,9 @@ export function QuotaCard({ endpoint, queryKey, canEdit }: { endpoint: string; q
       </div>
       {canEdit && (
         <div className="flex flex-wrap items-center gap-3">
-          <Button type="submit" size="sm" className="h-8 text-xs" disabled={!valid || !dirty || save.isPending}>Save allowances</Button>
+          <Button type="submit" size="sm" className="h-8 text-xs" disabled={!valid || !dirty || save.isPending}>{tc('Save allowances')}</Button>
           <p className="text-xs text-muted-foreground">
-            {valid ? 'Leave a field empty for no limit. A request is refused once its window is full; token limits stop the next request.' : `Use whole numbers from 1 to ${fmt(MAX)}.`}
+            {valid ? tc('Leave a field empty for no limit. A request is refused once its window is full; token limits stop the next request.') : tc('Use whole numbers from 1 to {v}.', { v: fmt(MAX) })}
           </p>
         </div>
       )}

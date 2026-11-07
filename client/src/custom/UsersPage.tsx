@@ -12,10 +12,12 @@ import { UsageLink } from './UsageLink'
 import { GuestAccessCard } from './GuestAccessCard'
 
 import type { AdminUser, RegistrationRequest } from '../../../shared/user-access'
+import { useCustomT } from './i18n/use-custom-t'
 export type { AdminUser, RegistrationRequest } from '../../../shared/user-access'
 
 export interface UserPageCapabilities { viewUsers: boolean; viewRequests: boolean; roles: boolean; permissions: boolean; quotas: boolean; sessions: boolean; keys: boolean; approve: boolean; reject: boolean }
 export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilities } = {}) {
+  const tc = useCustomT()
   const can = (action: keyof UserPageCapabilities) => capabilities?.[action] !== false
   const queryClient = useQueryClient()
   const [filter, setFilter] = useState('')
@@ -80,10 +82,10 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
       }),
     onSuccess: () => {
       refreshAll()
-      toast.success('RPM quota limit updated')
+      toast.success(tc('RPM quota limit updated'))
     },
     onError: (err: Error) => {
-      toast.error(err.message || 'Failed to update RPM limit')
+      toast.error(err.message || tc('Failed to update RPM limit'))
     },
   })
 
@@ -95,10 +97,10 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
       }),
     onSuccess: (_res, vars) => {
       refreshAll()
-      toast.success(vars.role === 'admin' ? 'Account promoted to admin' : 'Account demoted to member')
+      toast.success(vars.role === 'admin' ? tc('Account promoted to admin') : tc('Account demoted to member'))
     },
     onError: (err: Error) => {
-      toast.error(err.message || 'Failed to change role')
+      toast.error(err.message || tc('Failed to change role'))
     },
   })
 
@@ -107,10 +109,10 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
       apiFetch<{ revoked: number }>(`/api/admin/users/${id}/revoke-sessions`, { method: 'POST' }),
     onSuccess: (res) => {
       refreshAll()
-      toast.success(res.revoked === 1 ? 'Session signed out' : `Signed out ${res.revoked} sessions`)
+      toast.success(res.revoked === 1 ? tc('Session signed out') : tc('Signed out {revoked} sessions', { revoked: res.revoked }))
     },
     onError: (err: Error) => {
-      toast.error(err.message || 'Failed to sign out sessions')
+      toast.error(err.message || tc('Failed to sign out sessions'))
     },
   })
 
@@ -119,10 +121,10 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
       apiFetch<{ revoked: number }>(`/api/admin/users/${id}/revoke-keys`, { method: 'POST' }),
     onSuccess: (res) => {
       refreshAll()
-      toast.success(res.revoked === 1 ? 'API key revoked' : `Revoked ${res.revoked} API keys`)
+      toast.success(res.revoked === 1 ? tc('API key revoked') : tc('Revoked {revoked} API keys', { revoked: res.revoked }))
     },
     onError: (err: Error) => {
-      toast.error(err.message || 'Failed to revoke API keys')
+      toast.error(err.message || tc('Failed to revoke API keys'))
     },
   })
 
@@ -134,10 +136,10 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
       ),
     onSuccess: (res) => {
       refreshAll()
-      toast.success(`Account approved for ${res.user.email}!`)
+      toast.success(tc('Account approved for {email}!', { email: res.user.email }))
     },
     onError: (err: Error) => {
-      toast.error(err.message || 'Failed to approve registration request')
+      toast.error(err.message || tc('Failed to approve registration request'))
     },
   })
 
@@ -146,10 +148,10 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
       apiFetch<{ success: boolean }>(`/api/admin/registration-requests/${id}/reject`, { method: 'POST' }),
     onSuccess: () => {
       refreshAll()
-      toast.success('Registration request rejected')
+      toast.success(tc('Registration request rejected'))
     },
     onError: (err: Error) => {
-      toast.error(err.message || 'Failed to reject registration request')
+      toast.error(err.message || tc('Failed to reject registration request'))
     },
   })
 
@@ -163,8 +165,8 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Users"
-        description="Every account on this instance. Roles decide which dashboard surfaces an account can reach; approve pending access requests or manage active members."
+        title={tc('Users')}
+        description={tc('Every account on this instance. Roles decide which dashboard surfaces an account can reach; approve pending access requests or manage active members.')}
       />
 
       <div className="flex items-center gap-2 border-b pb-4">
@@ -179,7 +181,7 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
           }`}
         >
           <Users className="size-3.5" />
-          <span>Active Accounts ({users.length})</span>
+          <span>{tc('Active Accounts (')}{users.length})</span>
         </button>
 
         <button
@@ -193,7 +195,7 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
           }`}
         >
           <Clock className="size-3.5" />
-          <span>Pending Requests ({requests.length})</span>
+          <span>{tc('Pending Requests (')}{requests.length})</span>
           {requests.length > 0 && (
             <span
               className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
@@ -211,12 +213,12 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
       <div className="rounded-2xl border bg-card overflow-hidden">
         <div className="border-b px-5 py-3.5 flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-sm font-semibold">
-            {activeTab === 'accounts' ? `Accounts (${shownUsers.length})` : `Registration Requests (${shownRequests.length})`}
+            {activeTab === 'accounts' ? tc('Accounts ({length})', { length: shownUsers.length }) : tc('Registration Requests ({length})', { length: shownRequests.length })}
           </h2>
           <Input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter by email…"
+            placeholder={tc('Filter by email…')}
             className="h-8 w-full max-w-xs text-xs"
             aria-label="Filter accounts by email"
           />
@@ -224,23 +226,21 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
 
         {activeTab === 'accounts' ? (
           isLoading ? (
-            <p className="p-8 text-center text-sm text-muted-foreground" role="status">Loading accounts…</p>
+            <p className="p-8 text-center text-sm text-muted-foreground" role="status">{tc('Loading accounts…')}</p>
           ) : isError ? (
             <div className="p-8 text-center space-y-3" role="alert">
               <p className="text-sm font-medium text-destructive">
-                {error?.message || 'Could not load accounts.'}
+                {error?.message || tc('Could not load accounts.')}
               </p>
-              <Button variant="outline" size="sm" onClick={() => refetch()}>Retry</Button>
+              <Button variant="outline" size="sm" onClick={() => refetch()}>{tc('Retry')}</Button>
             </div>
           ) : shownUsers.length === 0 ? (
             <div className="p-8 text-center space-y-2">
               <Users className="size-8 mx-auto text-muted-foreground opacity-50" />
               <p className="text-sm font-medium">
-                {users.length === 0 ? 'No accounts yet' : 'No account matches that filter'}
+                {users.length === 0 ? tc('No accounts yet') : tc('No account matches that filter')}
               </p>
-              <p className="text-xs text-muted-foreground">
-                Invite codes or approved registration requests are how new members get created.
-              </p>
+              <p className="text-xs text-muted-foreground">{tc('Invite codes or approved registration requests are how new members get created.')}</p>
             </div>
           ) : (
             <div className="divide-y">
@@ -254,9 +254,7 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
                       <span className="text-sm font-medium text-foreground truncate">{u.email}</span>
                       {u.isPrimary ? (
                         <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
-                          <Crown className="size-3" />
-                          Primary Admin
-                        </span>
+                          <Crown className="size-3" />{tc('Primary Admin')}</span>
                       ) : (
                         <span
                           className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${
@@ -265,13 +263,11 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
                               : 'bg-muted text-muted-foreground border-transparent'
                           }`}
                         >
-                          {u.role === 'admin' ? 'Admin' : 'Member'}
+                          {u.role === 'admin' ? tc('Admin') : tc('Member')}
                         </span>
                       )}
                       {u.isSelf && (
-                        <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
-                          You
-                        </span>
+                        <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">{tc('You')}</span>
                       )}
                     </div>
                     {!u.isPrimary && u.role !== 'admin' && (u.permissions?.length ?? 0) > 0 && (
@@ -287,12 +283,11 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
                       </div>
                     )}
                     <div className="text-xs text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
-                      <span>Joined: {new Date(u.createdAt).toLocaleDateString()}</span>
-                      <span>Active keys: <strong>{u.activeKeys}</strong></span>
-                      <span>Sessions: <strong>{u.sessions}</strong></span>
-                      <span>This month: <strong className="text-foreground">{usageMap.get(u.id)?.requests ?? 0} successful reqs</strong> ({usageMap.get(u.id)?.tokens ?? 0} tokens)</span>
-                      <span className="flex items-center gap-1">
-                        Limit: <strong className="text-foreground">{usageMap.get(u.id)?.rpmLimit ?? 60} RPM</strong>
+                      <span>{tc('Joined:')}{' '}{new Date(u.createdAt).toLocaleDateString()}</span>
+                      <span>{tc('Active keys:')}{' '}<strong>{u.activeKeys}</strong></span>
+                      <span>{tc('Sessions:')}{' '}<strong>{u.sessions}</strong></span>
+                      <span>{tc('This month:')}{' '}<strong className="text-foreground">{usageMap.get(u.id)?.requests ?? 0}{' '}{tc('successful reqs')}</strong> ({usageMap.get(u.id)?.tokens ?? 0}{' '}{tc('tokens)')}</span>
+                      <span className="flex items-center gap-1">{tc('Limit:')}{' '}<strong className="text-foreground">{usageMap.get(u.id)?.rpmLimit ?? 60}{' '}{tc('RPM')}</strong>
                         {!u.isSelf && !u.isPrimary && can('quotas') && (
                           <button
                             type="button"
@@ -304,14 +299,12 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
                                 if (!isNaN(val) && val >= 1 && val <= 1000) {
                                   quotaMutation.mutate({ id: u.id, rpmLimit: val })
                                 } else {
-                                  toast.error('Limit must be an integer between 1 and 1000')
+                                  toast.error(tc('Limit must be an integer between 1 and 1000'))
                                 }
                               }
                             }}
                             className="text-[11px] text-primary hover:underline underline-offset-2 ml-1"
-                          >
-                            Edit
-                          </button>
+                          >{tc('Edit')}</button>
                         )}
                       </span>
                     </div>
@@ -325,17 +318,15 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
                       disabled={!can('permissions')}
                       onClick={() => setPermissionsUser(u)}
                       className="text-xs h-8"
-                      title={u.isPrimary ? 'Primary Admin has full permissions' : 'Manage granular permissions'}
+                      title={u.isPrimary ? tc('Primary Admin has full permissions') : tc('Manage granular permissions')}
                     >
-                      <Shield className="size-3.5 mr-1" />
-                      Permissions
-                    </Button>
+                      <Shield className="size-3.5 mr-1" />{tc('Permissions')}</Button>
 
                     {!u.isPrimary && (
                       <>
                         {u.isSelf ? (
                           <Button variant="ghost" size="sm" disabled className="text-xs h-8">
-                            {u.role === 'admin' ? 'Demote to member' : 'Promote to admin'}
+                            {u.role === 'admin' ? tc('Demote to member') : tc('Promote to admin')}
                           </Button>
                         ) : (
                           <ConfirmButton
@@ -347,13 +338,13 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
                             variant="ghost"
                             size="sm"
                             armedSize="sm"
-                            confirmLabel={u.role === 'admin' ? 'Confirm demote' : 'Confirm promote'}
+                            confirmLabel={u.role === 'admin' ? tc('Confirm demote') : tc('Confirm promote')}
                             className={`text-xs h-8 ${u.role === 'admin' ? 'text-destructive hover:bg-destructive/10 hover:text-destructive' : ''}`}
                             title={u.role === 'admin'
-                              ? 'Downgrade to member: their dashboard loses the admin surfaces on the next request.'
-                              : 'Change role. Full-access operators grant full access on promotion; restricted operators cannot widen existing grants.'}
+                              ? tc('Downgrade to member: their dashboard loses the admin surfaces on the next request.')
+                              : tc('Change role. Full-access operators grant full access on promotion; restricted operators cannot widen existing grants.')}
                           >
-                            {u.role === 'admin' ? 'Demote to member' : 'Promote to admin'}
+                            {u.role === 'admin' ? tc('Demote to member') : tc('Promote to admin')}
                           </ConfirmButton>
                         )}
 
@@ -365,8 +356,8 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
                           armedSize="xs"
                           aria-label={`Sign out ${u.email}`}
                           title={u.isSelf
-                            ? 'Signs every device out — including this tab.'
-                            : 'Ends this account’s dashboard sessions. They can sign in again.'}
+                            ? tc('Signs every device out — including this tab.')
+                            : tc('Ends this account’s dashboard sessions. They can sign in again.')}
                           className="text-muted-foreground"
                         >
                           <LogOut className="size-3.5" />
@@ -379,7 +370,7 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
                           size="icon"
                           armedSize="xs"
                           aria-label={`Revoke API keys of ${u.email}`}
-                          title="Revokes every personal gateway key. Clients using them start failing immediately; the keys cannot be restored."
+                          title={tc('Revokes every personal gateway key. Clients using them start failing immediately; the keys cannot be restored.')}
                           className="text-destructive hover:bg-destructive/10"
                         >
                           <KeyRound className="size-3.5" />
@@ -393,23 +384,21 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
           )
         ) : (
           requestsLoading ? (
-            <p className="p-8 text-center text-sm text-muted-foreground" role="status">Loading requests…</p>
+            <p className="p-8 text-center text-sm text-muted-foreground" role="status">{tc('Loading requests…')}</p>
           ) : requestsError ? (
             <div className="p-8 text-center space-y-3" role="alert">
               <p className="text-sm font-medium text-destructive">
-                {reqError?.message || 'Could not load registration requests.'}
+                {reqError?.message || tc('Could not load registration requests.')}
               </p>
-              <Button variant="outline" size="sm" onClick={() => refetchRequests()}>Retry</Button>
+              <Button variant="outline" size="sm" onClick={() => refetchRequests()}>{tc('Retry')}</Button>
             </div>
           ) : shownRequests.length === 0 ? (
             <div className="p-8 text-center space-y-2">
               <Clock className="size-8 mx-auto text-muted-foreground opacity-50" />
               <p className="text-sm font-medium">
-                {requests.length === 0 ? 'No pending requests' : 'No requests match that filter'}
+                {requests.length === 0 ? tc('No pending requests') : tc('No requests match that filter')}
               </p>
-              <p className="text-xs text-muted-foreground">
-                When prospective users submit access requests without invite codes, they will show up here for your approval.
-              </p>
+              <p className="text-xs text-muted-foreground">{tc('When prospective users submit access requests without invite codes, they will show up here for your approval.')}</p>
             </div>
           ) : (
             <div className="divide-y">
@@ -421,9 +410,7 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
                   <div className="min-w-0 space-y-1.5">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-foreground truncate">{r.email}</span>
-                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                        Pending Approval
-                      </span>
+                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">{tc('Pending Approval')}</span>
                     </div>
                     {r.note && (
                       <div className="flex items-start gap-1.5 text-xs text-muted-foreground bg-muted/30 rounded-lg p-2 border">
@@ -431,8 +418,7 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
                         <span className="italic">{r.note}</span>
                       </div>
                     )}
-                    <div className="text-xs text-muted-foreground">
-                      Requested: {new Date(r.createdAt).toLocaleString()}
+                    <div className="text-xs text-muted-foreground">{tc('Requested:')}{' '}{new Date(r.createdAt).toLocaleString()}
                     </div>
                   </div>
 
@@ -442,11 +428,9 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
                       disabled={busy || !can('approve')}
                       onClick={() => approveRequestMutation.mutate(r.id)}
                       className="text-xs h-8 bg-emerald-600 hover:bg-emerald-700 text-white"
-                      title="Approve this account: creates member user and default personal API key"
+                      title={tc('Approve this account: creates member user and default personal API key')}
                     >
-                      <Check className="size-3.5 mr-1" />
-                      Approve
-                    </Button>
+                      <Check className="size-3.5 mr-1" />{tc('Approve')}</Button>
 
                     <ConfirmButton
                       onConfirm={() => rejectRequestMutation.mutate(r.id)}
@@ -454,13 +438,11 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
                       variant="ghost"
                       size="sm"
                       armedSize="sm"
-                      confirmLabel="Confirm reject"
+                      confirmLabel={tc('Confirm reject')}
                       className="text-xs h-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                      title="Reject this request"
+                      title={tc('Reject this request')}
                     >
-                      <X className="size-3.5 mr-1" />
-                      Reject
-                    </ConfirmButton>
+                      <X className="size-3.5 mr-1" />{tc('Reject')}</ConfirmButton>
                   </div>
                 </div>
               ))}
@@ -478,9 +460,7 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
 
       {can('viewUsers') && <GuestAccessCard canEdit={can('permissions')} />}
 
-      <p className="text-xs text-muted-foreground">
-        Creating accounts directly without invitation or approval is not allowed to protect system capacity.
-      </p>
+      <p className="text-xs text-muted-foreground">{tc('Creating accounts directly without invitation or approval is not allowed to protect system capacity.')}</p>
     </div>
   )
 }

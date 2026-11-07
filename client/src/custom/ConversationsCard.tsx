@@ -9,6 +9,7 @@ import { Switch } from '@/components/ui/switch'
 import { ConfirmButton } from '@/components/confirm-button'
 import type { ConversationSettings, StoredConversation, StoredMessage } from '../../../shared/conversations'
 import { CONVERSATION_LIMITS as L } from '../../../shared/conversations'
+import { useCustomT } from './i18n/use-custom-t'
 
 interface ConvState { settings: ConversationSettings; conversations: StoredConversation[] }
 type NumberField = 'ttlHours' | 'maxMessages' | 'maxChars'
@@ -42,6 +43,7 @@ const when = (iso: string) => new Date(iso).toLocaleString()
  * live conversations, their messages (edit permission) and erasing them per conversation or end user.
  */
 export function ConversationsCard({ profileId, canEdit }: { profileId: number; canEdit: boolean }) {
+  const tc = useCustomT()
   const queryClient = useQueryClient()
   const [endUser, setEndUser] = useState('')
   const [filter, setFilter] = useState('')
@@ -63,12 +65,12 @@ export function ConversationsCard({ profileId, canEdit }: { profileId: number; c
   const save = useMutation({
     mutationFn: (body: Partial<ConversationSettings>) => apiFetch(`${base}/conversation-settings`, { method: 'PUT', body: JSON.stringify(body) }),
     onSuccess: () => { setDraft({}); void refresh() },
-    onError: (err: Error) => toast.error(err.message || 'Could not save'),
+    onError: (err: Error) => toast.error(err.message || tc('Could not save')),
   })
   const remove = useMutation({
     mutationFn: (path: string) => apiFetch<{ deleted: number }>(`${base}/conversations${path}`, { method: 'DELETE' }),
-    onSuccess: (r) => { toast.success(`Deleted ${r.deleted} conversation${r.deleted === 1 ? '' : 's'}`); setOpen(null); void refresh() },
-    onError: (err: Error) => toast.error(err.message || 'Could not delete'),
+    onSuccess: (r) => { toast.success(tc('Deleted {deleted} conversation{v}', { deleted: r.deleted, v: r.deleted === 1 ? '' : 's' })); setOpen(null); void refresh() },
+    onError: (err: Error) => toast.error(err.message || tc('Could not delete')),
   })
 
   if (!data?.settings || !Array.isArray(data.conversations)) return null
@@ -80,55 +82,51 @@ export function ConversationsCard({ profileId, canEdit }: { profileId: number; c
   return (
     <section className="rounded-2xl border bg-card p-4 space-y-4" aria-label="Stored conversations">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5"><MessagesSquare className="size-4" /><h3 className="text-sm font-semibold">Stored conversations</h3></div>
+        <div className="flex items-center gap-1.5"><MessagesSquare className="size-4" /><h3 className="text-sm font-semibold">{tc('Stored conversations')}</h3></div>
         <label className="inline-flex items-center gap-2 text-xs">
           <Switch size="sm" checked={settings.enabled} disabled={!canEdit} onCheckedChange={(enabled) => save.mutate({ enabled })} aria-label="Keep conversations on the server" />
-          {settings.enabled ? 'On' : 'Off'}
+          {settings.enabled ? tc('On') : tc('Off')}
         </label>
       </div>
-      <p className="text-xs text-muted-foreground">
-        Your backend sends an <code>X-Conversation-Id</code> header with only the new message; the earlier turns are added here, within
-        the limits below. A turn is kept once the reply has finished. Works on <code>/v1/chat/completions</code> and <code>/v1/messages</code>, plain text only.
-      </p>
+      <p className="text-xs text-muted-foreground">{tc('Your backend sends an')}{' '}<code>{tc('X-Conversation-Id')}</code>{' '}{tc('header with only the new message; the earlier turns are added here, within the limits below. A turn is kept once the reply has finished. Works on')}{' '}<code>{tc('/v1/chat/completions')}</code>{' '}{tc('and')}{' '}<code>{tc('/v1/messages')}</code>{tc(', plain text only.')}</p>
 
       <form className="flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); if (canEdit && valid && dirty) save.mutate(parsed) }}>
         {FIELDS.map(f => (
           <div key={f.key} className="space-y-1">
-            <label htmlFor={`conv-${f.key}`} className="block text-[11px] text-muted-foreground">{f.label}</label>
+            <label htmlFor={`conv-${f.key}`} className="block text-[11px] text-muted-foreground">{tc(f.label)}</label>
             <Input id={`conv-${f.key}`} inputMode="numeric" value={draft[f.key] ?? String(settings[f.key])} disabled={!canEdit}
               onChange={(e) => setDraft(d => ({ ...d, [f.key]: e.target.value }))} className="h-8 w-36 text-xs" />
           </div>
         ))}
-        {canEdit && dirty && <Button type="submit" size="sm" className="h-8 text-xs" disabled={!valid || save.isPending}>Save</Button>}
+        {canEdit && dirty && <Button type="submit" size="sm" className="h-8 text-xs" disabled={!valid || save.isPending}>{tc('Save')}</Button>}
         {!valid && <span className="text-xs text-destructive">{FIELDS.map(f => `${f.min.toLocaleString()}–${f.max.toLocaleString()}`).join(' · ')}</span>}
       </form>
 
       <label className="flex items-start gap-2 text-xs">
         <Switch size="sm" checked={settings.summarize} disabled={!canEdit} onCheckedChange={(summarize) => save.mutate({ summarize })} aria-label="Summarize older turns" className="mt-0.5" />
         <span>
-          <span className="font-medium">Summarize older turns</span>
-          <span className="block text-muted-foreground">Turns that no longer fit the limits are folded into a short summary sent ahead of the history, so the assistant still remembers them. Each summary is one extra request with this key and counts against its limits.</span>
+          <span className="font-medium">{tc('Summarize older turns')}</span>
+          <span className="block text-muted-foreground">{tc('Turns that no longer fit the limits are folded into a short summary sent ahead of the history, so the assistant still remembers them. Each summary is one extra request with this key and counts against its limits.')}</span>
         </span>
       </label>
 
       <details className="text-xs">
-        <summary className="cursor-pointer text-muted-foreground">Example for your backend</summary>
+        <summary className="cursor-pointer text-muted-foreground">{tc('Example for your backend')}</summary>
         <pre className="mt-2 overflow-x-auto rounded-lg bg-muted/50 p-3 text-[11px] leading-relaxed">{EXAMPLE}</pre>
       </details>
 
       <div className="space-y-2 border-t pt-3">
         <form className="flex flex-wrap items-center gap-2" onSubmit={(e) => { e.preventDefault(); setFilter(endUser.trim()); setOpen(null) }}>
-          <Input value={endUser} onChange={(e) => setEndUser(e.target.value)} placeholder="End user id" aria-label="Filter by end user" className="h-8 w-48 text-xs" />
-          <Button type="submit" variant="outline" size="sm" className="h-8 text-xs">Filter</Button>
-          {filter && <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={() => { setEndUser(''); setFilter('') }}>Clear</Button>}
+          <Input value={endUser} onChange={(e) => setEndUser(e.target.value)} placeholder={tc('End user id')} aria-label="Filter by end user" className="h-8 w-48 text-xs" />
+          <Button type="submit" variant="outline" size="sm" className="h-8 text-xs">{tc('Filter')}</Button>
+          {filter && <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={() => { setEndUser(''); setFilter('') }}>{tc('Clear')}</Button>}
           {canEdit && filter && (
-            <ConfirmButton onConfirm={() => remove.mutate(`?endUser=${encodeURIComponent(filter)}`)} size="xs" armedSize="xs" armedClassName="text-destructive" aria-label={`Delete every conversation of ${filter}`}>
-              Delete all of {filter}
+            <ConfirmButton onConfirm={() => remove.mutate(`?endUser=${encodeURIComponent(filter)}`)} size="xs" armedSize="xs" armedClassName="text-destructive" aria-label={`Delete every conversation of ${filter}`}>{tc('Delete all of')}{' '}{filter}
             </ConfirmButton>
           )}
         </form>
 
-        {conversations.length === 0 ? <p className="text-xs text-muted-foreground">No stored conversations{filter ? ` for ${filter}` : ''}.</p> : (
+        {conversations.length === 0 ? <p className="text-xs text-muted-foreground">{tc('No stored conversations')}{filter ? tc(' for {filter}', { filter: filter }) : ''}.</p> : (
           <ul className="divide-y rounded-xl border" aria-label="Conversations">
             {conversations.map(c => (
               <li key={c.id} className="px-3 py-2 text-xs">
@@ -137,7 +135,7 @@ export function ConversationsCard({ profileId, canEdit }: { profileId: number; c
                     ? <button type="button" className="font-mono font-medium underline-offset-2 hover:underline" onClick={() => setOpen(open === c.id ? null : c.id)} aria-expanded={open === c.id}>{c.id}</button>
                     : <span className="font-mono font-medium">{c.id}</span>}
                   <span className="text-muted-foreground">
-                    {c.endUser ?? 'no end user'} · {c.messages} message{c.messages === 1 ? '' : 's'} · last {when(c.updatedAt)} · deleted {when(c.expiresAt)}
+                    {c.endUser ?? tc('no end user')} · {c.messages}{' '}{tc('message')}{c.messages === 1 ? '' : 's'}{' '}{tc('· last')}{' '}{when(c.updatedAt)}{' '}{tc('· deleted')}{' '}{when(c.expiresAt)}
                   </span>
                   {canEdit && (
                     <ConfirmButton onConfirm={() => remove.mutate(`/${encodeURIComponent(c.id)}`)} size="icon-xs" armedSize="xs" aria-label={`Delete ${c.id}`} armedClassName="text-destructive"><Trash2 className="size-3.5" /></ConfirmButton>
@@ -145,14 +143,14 @@ export function ConversationsCard({ profileId, canEdit }: { profileId: number; c
                 </div>
                 {open === c.id && messages.data?.conversation?.summary && (
                   <p className="mt-2 rounded-lg border border-dashed p-2 whitespace-pre-wrap" aria-label={`Summary of ${c.id}`}>
-                    <strong>Summary of earlier turns:</strong> {messages.data.conversation.summary}
+                    <strong>{tc('Summary of earlier turns:')}</strong> {messages.data.conversation.summary}
                   </p>
                 )}
                 {open === c.id && (
                   <ol className="mt-2 space-y-1" aria-label={`Messages of ${c.id}`}>
                     {(messages.data?.messages ?? []).map((m, i) => (
                       <li key={i} className={`rounded-lg p-2 ${m.role === 'user' ? 'bg-muted/40' : 'bg-primary/5'}`}>
-                        <strong>{m.role === 'user' ? 'User' : 'Assistant'}</strong> <span className="text-muted-foreground">{when(m.createdAt)}</span>
+                        <strong>{m.role === 'user' ? tc('User') : tc('Assistant')}</strong> <span className="text-muted-foreground">{when(m.createdAt)}</span>
                         <p className="mt-1 whitespace-pre-wrap break-words">{m.content}</p>
                       </li>
                     ))}

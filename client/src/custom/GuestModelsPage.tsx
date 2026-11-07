@@ -13,6 +13,7 @@ import { TableSkeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { askToSignIn } from './guest-prompt'
+import { useCustomT } from './i18n/use-custom-t'
 
 // The Models page as a signed-out visitor sees it: the monthly token budget and the ranked chain, built
 // with the same helpers as the admin page, with every switch and link turned into "sign in to use this".
@@ -22,6 +23,7 @@ const REFRESH_MS = 60_000
 const CHUNK = 100
 
 export function GuestModelsPage() {
+  const tc = useCustomT()
   const { t } = useI18n()
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<SortState<ModelSortCol>>(null)
@@ -55,7 +57,7 @@ export function GuestModelsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title={t('nav.models')} description="The models this gateway routes chat requests to, ranked, and how much of their monthly token budget is left. Sign in to use them." />
+      <PageHeader title={tc('Models')} description={tc('The models this gateway routes chat requests to, ranked, and how much of their monthly token budget is left. Sign in to use them.')} />
       {tokenUsage && tokenUsage.totalBudget > 0 && <TokenUsageBar data={tokenUsage} />}
 
       <div className="relative w-full max-w-sm">
@@ -66,8 +68,7 @@ export function GuestModelsPage() {
       {activePending || entriesLoading ? <TableSkeleton rows={8} /> : (
         <>
           <p className="text-xs text-muted-foreground" data-testid="guest-models-count">
-            {visible.length} of {ordered.length} models
-          </p>
+            {visible.length}{' '}{tc('of')}{' '}{ordered.length}{' '}{tc('models')}</p>
           <div className="rounded-2xl border overflow-x-auto">
             {/* The last column holds the on/off switches: a guest cannot use them, so it is not shown. */}
             <table className="w-full text-sm [&_th:last-child]:hidden [&_td:last-child]:hidden" data-testid="guest-models-table">
@@ -88,7 +89,7 @@ export function GuestModelsPage() {
             </table>
           </div>
           {sorted.length > limit && (
-            <Button variant="outline" size="sm" onClick={() => setLimit(l => l + CHUNK)}>Show more ({sorted.length - limit} left)</Button>
+            <Button variant="outline" size="sm" onClick={() => setLimit(l => l + CHUNK)}>{tc('Show more (')}{sorted.length - limit}{' '}{tc('left)')}</Button>
           )}
         </>
       )}

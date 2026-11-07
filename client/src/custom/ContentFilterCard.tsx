@@ -10,6 +10,7 @@ import { Switch } from '@/components/ui/switch'
 import { SegmentedControl } from '@/components/ui/segmented-control'
 import type { ContentFilterEvent, ContentFilterMode, ContentFilterSettings } from '../../../shared/content-filter'
 import { CONTENT_FILTER_LIMITS as L } from '../../../shared/content-filter'
+import { useCustomT } from './i18n/use-custom-t'
 
 const MODES: Array<{ value: ContentFilterMode; label: string }> = [
   { value: 'off', label: 'Off' },
@@ -35,6 +36,7 @@ function limit(text: string, min: number, max: number): number | null | undefine
  * provider, whether a flag blocks or is only recorded, and the recent flags (edit permission).
  */
 export function ContentFilterCard({ profileId, canEdit }: { profileId: number; canEdit: boolean }) {
+  const tc = useCustomT()
   const queryClient = useQueryClient()
   const base = `/api/client-profiles/${profileId}/content-filter`
   const { data } = useQuery<{ settings: ContentFilterSettings }>({ queryKey: ['content-filter', profileId], queryFn: () => apiFetch(base) })
@@ -44,8 +46,8 @@ export function ContentFilterCard({ profileId, canEdit }: { profileId: number; c
 
   const save = useMutation({
     mutationFn: (body: ContentFilterSettings) => apiFetch(base, { method: 'PUT', body: JSON.stringify(body) }),
-    onSuccess: () => { toast.success('Content rules saved'); void queryClient.invalidateQueries({ queryKey: ['content-filter', profileId] }) },
-    onError: (err: Error) => toast.error(err.message || 'Could not save'),
+    onSuccess: () => { toast.success(tc('Content rules saved')); void queryClient.invalidateQueries({ queryKey: ['content-filter', profileId] }) },
+    onError: (err: Error) => toast.error(err.message || tc('Could not save')),
   })
 
   if (!data?.settings || !draft) return null
@@ -61,60 +63,53 @@ export function ContentFilterCard({ profileId, canEdit }: { profileId: number; c
   return (
     <section className="rounded-2xl border bg-card p-4 space-y-4" aria-label="Content rules">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5"><ShieldAlert className="size-4" /><h3 className="text-sm font-semibold">Content rules</h3></div>
+        <div className="flex items-center gap-1.5"><ShieldAlert className="size-4" /><h3 className="text-sm font-semibold">{tc('Content rules')}</h3></div>
         {canEdit
-          ? <SegmentedControl ariaLabel="What a flag does" value={draft.mode} onValueChange={(mode) => set({ mode })} options={MODES} />
-          : <span className="text-xs text-muted-foreground">{MODES.find(m => m.value === data.settings.mode)?.label}</span>}
+          ? <SegmentedControl ariaLabel="What a flag does" value={draft.mode} onValueChange={(mode) => set({ mode })} options={MODES.map(o => ({ ...o, label: tc(o.label) }))} />
+          : <span className="text-xs text-muted-foreground">{tc(MODES.find(m => m.value === data.settings.mode)?.label ?? '')}</span>}
       </div>
-      <p className="text-xs text-muted-foreground">
-        Checks the visitor&apos;s latest message before it uses a provider or this key&apos;s limits. <strong>Record only</strong> lets it through and
-        notes it below; <strong>Block</strong> answers with an error (<code>content_blocked</code>) instead.
-      </p>
+      <p className="text-xs text-muted-foreground">{tc('Checks the visitor\'s latest message before it uses a provider or this key\'s limits.')}{' '}<strong>{tc('Record only')}</strong>{' '}{tc('lets it through and notes it below;')}{' '}<strong>{tc('Block')}</strong>{' '}{tc('answers with an error (')}<code>{tc('content_blocked')}</code>{tc(') instead.')}</p>
 
       <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (canEdit && next && dirty) save.mutate(next) }}>
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1">
-            <label htmlFor="cf-max" className="block text-[11px] text-muted-foreground">Longest message (characters)</label>
-            <Input id="cf-max" inputMode="numeric" placeholder="No limit" value={draft.maxInputChars} disabled={!canEdit} onChange={(e) => set({ maxInputChars: e.target.value })} className="h-8 w-36 text-xs" />
+            <label htmlFor="cf-max" className="block text-[11px] text-muted-foreground">{tc('Longest message (characters)')}</label>
+            <Input id="cf-max" inputMode="numeric" placeholder={tc('No limit')} value={draft.maxInputChars} disabled={!canEdit} onChange={(e) => set({ maxInputChars: e.target.value })} className="h-8 w-36 text-xs" />
           </div>
           <div className="space-y-1">
-            <label htmlFor="cf-repeat" className="block text-[11px] text-muted-foreground">Same message, times in {L.repeatWindowMinutes} min</label>
-            <Input id="cf-repeat" inputMode="numeric" placeholder="Off" value={draft.repeatLimit} disabled={!canEdit} onChange={(e) => set({ repeatLimit: e.target.value })} className="h-8 w-36 text-xs" />
+            <label htmlFor="cf-repeat" className="block text-[11px] text-muted-foreground">{tc('Same message, times in')}{' '}{L.repeatWindowMinutes}{' '}{tc('min')}</label>
+            <Input id="cf-repeat" inputMode="numeric" placeholder={tc('Off')} value={draft.repeatLimit} disabled={!canEdit} onChange={(e) => set({ repeatLimit: e.target.value })} className="h-8 w-36 text-xs" />
           </div>
           <label className="inline-flex h-8 items-center gap-2 text-xs">
-            <Switch size="sm" checked={draft.blockInjection} disabled={!canEdit} onCheckedChange={(blockInjection) => set({ blockInjection })} aria-label="Flag prompt injection" />
-            Flag attempts to override the instructions
-          </label>
+            <Switch size="sm" checked={draft.blockInjection} disabled={!canEdit} onCheckedChange={(blockInjection) => set({ blockInjection })} aria-label="Flag prompt injection" />{tc('Flag attempts to override the instructions')}</label>
         </div>
         <div className="space-y-1">
-          <label htmlFor="cf-keywords" className="block text-[11px] text-muted-foreground">Keywords or phrases, one per line (whole words, any case)</label>
+          <label htmlFor="cf-keywords" className="block text-[11px] text-muted-foreground">{tc('Keywords or phrases, one per line (whole words, any case)')}</label>
           <Textarea id="cf-keywords" rows={3} value={draft.keywords} disabled={!canEdit} onChange={(e) => set({ keywords: e.target.value })} className="text-xs" />
         </div>
         {!valid && (
-          <p className="text-xs text-destructive">
-            Longest message {L.minInputChars}–{L.maxInputChars.toLocaleString()}, repeats {L.minRepeatLimit}–{L.maxRepeatLimit}, up to {L.maxKeywords} keywords of {L.maxKeywordLength} characters.
-          </p>
+          <p className="text-xs text-destructive">{tc('Longest message')}{' '}{L.minInputChars}–{L.maxInputChars.toLocaleString()}{tc(', repeats')}{' '}{L.minRepeatLimit}–{L.maxRepeatLimit}{tc(', up to')}{' '}{L.maxKeywords}{' '}{tc('keywords of')}{' '}{L.maxKeywordLength}{' '}{tc('characters.')}</p>
         )}
         {canEdit && (
           <div className="flex gap-2">
-            <Button type="submit" size="sm" className="h-8 text-xs" disabled={!next || !dirty || save.isPending}>Save</Button>
-            {dirty && <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setDraft(toDraft(data.settings))}>Discard</Button>}
+            <Button type="submit" size="sm" className="h-8 text-xs" disabled={!next || !dirty || save.isPending}>{tc('Save')}</Button>
+            {dirty && <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setDraft(toDraft(data.settings))}>{tc('Discard')}</Button>}
           </div>
         )}
       </form>
 
       {canEdit && (
         <div className="space-y-2 border-t pt-3">
-          <p className="text-xs font-medium text-muted-foreground">Recent flags (kept {L.eventRetentionDays} days)</p>
-          {(events.data?.events ?? []).length === 0 ? <p className="text-xs text-muted-foreground">Nothing flagged.</p> : (
+          <p className="text-xs font-medium text-muted-foreground">{tc('Recent flags (kept')}{' '}{L.eventRetentionDays}{' '}{tc('days)')}</p>
+          {(events.data?.events ?? []).length === 0 ? <p className="text-xs text-muted-foreground">{tc('Nothing flagged.')}</p> : (
             <ul className="divide-y rounded-xl border" aria-label="Flagged messages">
               {events.data!.events.map(e => (
                 <li key={e.id} className="space-y-0.5 px-3 py-2 text-xs">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className={e.action === 'blocked' ? 'font-medium text-destructive' : 'font-medium'}>{e.action === 'blocked' ? 'Blocked' : 'Recorded'}</span>
-                    <span>{REASONS[e.reason] ?? e.reason}</span>
+                    <span className={e.action === 'blocked' ? 'font-medium text-destructive' : 'font-medium'}>{e.action === 'blocked' ? tc('Blocked') : tc('Recorded')}</span>
+                    <span>{tc(REASONS[e.reason] ?? e.reason)}</span>
                     <span className="text-muted-foreground">{e.detail}</span>
-                    <span className="text-muted-foreground">{e.endUser ?? 'no end user'} · {new Date(e.createdAt).toLocaleString()}</span>
+                    <span className="text-muted-foreground">{e.endUser ?? tc('no end user')} · {new Date(e.createdAt).toLocaleString()}</span>
                   </div>
                   <p className="truncate text-muted-foreground" title={e.excerpt}>{e.excerpt}</p>
                 </li>

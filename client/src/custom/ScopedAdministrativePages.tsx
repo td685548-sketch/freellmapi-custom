@@ -7,10 +7,12 @@ import AnalyticsPage from '@/pages/AnalyticsPage'
 import LogsPage from '@/pages/LogsPage'
 import { ConfirmButton } from '@/components/confirm-button'
 import { apiFetch } from '@/lib/api'
+import { useCustomT } from './i18n/use-custom-t'
 
 const denied = <p role="alert" className="text-sm text-muted-foreground">Your account does not have permission to open this page.</p>
 function Ready({ pending, allowed, children }: { pending: boolean; allowed: boolean; children: ReactNode }) {
-  return pending ? <p role="status">Loading permissions…</p> : allowed ? children : denied
+  const tc = useCustomT()
+  return pending ? <p role="status">{tc('Loading permissions…')}</p> : allowed ? children : denied
 }
 export function UsersAccessPage() {
   const { can, group, identity, isPending, session } = useAdministrativeAccess()
@@ -27,10 +29,11 @@ export function AnalyticsAccessPage() {
   return <Ready pending={isPending} allowed={can('view_analytics')}><AnalyticsPage key={identity} /></Ready>
 }
 function ClearOnlyLogs() {
+  const tc = useCustomT()
   const clear = useMutation({ mutationFn: () => apiFetch('/api/logs/clear', { method: 'POST' }) })
-  return <div className="space-y-3"><p>Viewing log contents requires View server logs. You can clear retained logs.</p>
-    <ConfirmButton onConfirm={() => clear.mutate()} disabled={clear.isPending}>Clear logs</ConfirmButton>
-    {clear.isSuccess && <p role="status">Logs cleared.</p>}{clear.isError && <p role="alert">{clear.error.message}</p>}
+  return <div className="space-y-3"><p>{tc('Viewing log contents requires View server logs. You can clear retained logs.')}</p>
+    <ConfirmButton onConfirm={() => clear.mutate()} disabled={clear.isPending}>{tc('Clear logs')}</ConfirmButton>
+    {clear.isSuccess && <p role="status">{tc('Logs cleared.')}</p>}{clear.isError && <p role="alert">{clear.error.message}</p>}
   </div>
 }
 export function LogsAccessPage() {
