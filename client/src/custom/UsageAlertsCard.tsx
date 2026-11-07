@@ -5,6 +5,7 @@ import { apiFetch } from '@/lib/api'
 import { toast } from '@/lib/toast'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 
 interface AlertSettings { webhookUrl: string; email: string; emailAvailable: boolean }
 interface Delivery { webhook: { sent: boolean; status: number | null } | null; email: { sent: boolean } | null }
@@ -20,6 +21,52 @@ function describe(d: Delivery): string {
   if (d.webhook) parts.push(d.webhook.sent ? `webhook answered ${d.webhook.status}` : `webhook failed${d.webhook.status ? ` (${d.webhook.status})` : ' (no answer)'}`)
   if (d.email) parts.push(d.email.sent ? 'email sent' : 'email failed')
   return parts.join(' · ')
+}
+
+interface ReportSettings { enabled: boolean; lastSentWeek: string | null }
+
+/** The weekly summary sent to the same destinations: on/off, a preview and "send now". */
+function WeeklyReportSection({ canEdit }: { canEdit: boolean }) {
+  const queryClient = useQueryClient()
+  const key = ['usage-report-settings']
+  const { data } = useQuery<ReportSettings>({ queryKey: key, queryFn: () => apiFetch('/api/settings/usage-report') })
+  const [preview, setPreview] = useState<string | null>(null)
+  const [sent, setSent] = useState<Delivery | null>(null)
+  const toggle = useMutation({
+    mutationFn: (enabled: boolean) => apiFetch<ReportSettings>('/api/settings/usage-report', { method: 'PUT', body: JSON.stringify({ enabled }) }),
+    onSuccess: (s) => queryClient.setQueryData(key, s),
+    onError: (err: Error) => toast.error(err.message || 'Could not save'),
+  })
+  const show = useMutation({
+    mutationFn: () => apiFetch<{ text: string }>('/api/settings/usage-report/preview'),
+    onSuccess: (r) => setPreview(r.text),
+  })
+  const send = useMutation({
+    mutationFn: () => apiFetch<{ delivery: Delivery }>('/api/settings/usage-report/send', { method: 'POST', body: '{}' }),
+    onSuccess: (r) => setSent(r.delivery),
+    onError: (err: Error) => toast.error(err.message || 'Could not send the report'),
+  })
+  if (!data || typeof data.enabled !== 'boolean') return null
+  return (
+    <div className="space-y-2 border-t pt-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <label className="inline-flex items-center gap-2 text-xs font-medium">
+          <Switch size="sm" checked={data.enabled} disabled={!canEdit} onCheckedChange={(enabled) => toggle.mutate(enabled)} aria-label="Send a weekly report" />
+          Weekly report
+        </label>
+        <div className="flex gap-2">
+          <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={() => show.mutate()} disabled={show.isPending}>Preview</Button>
+          {canEdit && <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={() => send.mutate()} disabled={send.isPending}>{send.isPending ? 'Sending…' : 'Send now'}</Button>}
+        </div>
+      </div>
+      <p className="text-[11px] text-muted-foreground">
+        Every Monday (UTC): last week&apos;s requests, tokens and errors against the week before, and the busiest accounts, client keys and end users.
+        {data.lastSentWeek ? ` Last sent for the week of ${data.lastSentWeek}.` : ''}
+      </p>
+      {sent && <p role="status" className="text-xs text-muted-foreground">{describe(sent)}</p>}
+      {preview && <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-muted/50 p-3 text-[11px]" aria-label="Report preview">{preview}</pre>}
+    </div>
+  )
 }
 
 /**
@@ -87,6 +134,7 @@ export function UsageAlertsCard({ canEdit }: { canEdit: boolean }) {
           </div>
         )}
       </form>
+      <WeeklyReportSection canEdit={canEdit} />
     </section>
   )
 }
