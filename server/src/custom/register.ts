@@ -24,6 +24,8 @@ import { contentFilterRouter } from '../routes/content-filter.js';
 import { maybeRollUp } from '../services/usage-daily.js';
 import { maybeSendWeeklyReport } from '../services/usage-report.js';
 import { usageReportSettingsRouter } from '../routes/usage-report-settings.js';
+import { auditMiddleware } from '../services/audit-log.js';
+import { auditLogRouter } from '../routes/audit-log.js';
 import { adminUserQuotaRouter, profileQuotaRouter, selfQuotaRouter } from '../routes/usage-quota.js';
 import { withRoutingSettingsScope } from '../db/routing-settings-scope.js';
 import { providerTiersRouter } from '../routes/provider-tiers.js';
@@ -120,6 +122,8 @@ export function registerCustomRoutes(app: Express): void {
   // Public probes answer from a 5 s copy so anonymous callers cannot turn them into database load.
   app.use(['/livez', '/readyz'], statusCache);
   app.use('/api', (_req, _res, next) => withRoutingSettingsScope(next));
+  // Change history: every successful dashboard write is recorded once its response has gone out.
+  app.use('/api', auditMiddleware);
   app.use(['/v1', '/x/v1'], (_req, _res, next) => withRoutingSettingsScope(next));
   // When the X Gateway is off, answer 404 immediately before any auth checks
   // so an inactive gateway leaks nothing about its existence.
@@ -176,6 +180,7 @@ export function registerCustomRoutes(app: Express): void {
   // Custom fork routes with their dedicated permission gates
   app.use('/api/auth', externalAuthRouter, customAuthRouter);
   app.use('/api/invites', requireAuth, requireActionPermission('manage_invites'), invitesRouter);
+  app.use('/api/audit', requireAuth, requireActionPermission('view_logs'), auditLogRouter);
   app.use('/api/admin/users', requireAuth, requireActionPermission('manage_users'), adminUsersRouter, adminUserAnalyticsRouter, adminUserQuotaRouter, adminUserRequestsRouter);
   app.use('/api/admin/registration-requests', requireAuth, requireActionPermission('manage_requests'), adminRegistrationRequestsRouter);
   app.use('/api/user', requireAuth, userKeysRouter, selfAnalyticsRouter, selfQuotaRouter, selfRequestsRouter);

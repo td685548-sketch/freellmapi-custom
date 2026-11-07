@@ -48,6 +48,7 @@ import { UsersNavBadge } from '@/custom/UsersNavBadge'
 import { UserAnalyticsPage } from '@/custom/UserAnalyticsPage'
 import { ProfileUsagePage } from '@/custom/ProfileUsagePage'
 import { UsageRankingPage } from '@/custom/UsageRankingPage'
+import { AuditLogPage } from '@/custom/AuditLogPage'
 import PremiumPage from '@/pages/PremiumPage'
 import NotFoundPage from '@/pages/NotFoundPage'
 import AgentsPage from '@/pages/AgentsPage'
@@ -286,6 +287,7 @@ function Navbar() {
     ...(canManageInvites ? [{ to: '/invites', labelKey: 'nav.invites', customLabel: 'Invites' }] : []),
     ...(canManageUsers ? [{ to: '/users', labelKey: 'nav.users', customLabel: 'Users' }] : []),
     ...(canViewUsage ? [{ to: '/usage', labelKey: 'nav.usage', customLabel: 'Usage' }] : []),
+    ...(hasPermission('view_audit_log') ? [{ to: '/audit', labelKey: 'nav.audit', customLabel: 'History' }] : []),
     ...(hasPermission('use_x_gateway') ? [{ to: '/x/providers', labelKey: 'nav.xGateway', customLabel: 'X Gateway' }] : []),
   ]
 
@@ -542,6 +544,7 @@ function App() {
                       <Route path="/users/:id/analytics" element={<UserAnalyticsPage />} />
                       <Route path="/profiles/:id/usage" element={<ProfileUsagePage />} />
                       <Route path="/usage" element={<UsageRankingPage />} />
+                      <Route path="/audit" element={<AuditLogPage />} />
                       <Route path="/agents" element={<AgentsPage />} />
                       <Route path="/fallback" element={<Navigate to="/models/chat" replace />} />
                       <Route path="/analytics" element={<AnalyticsAccessPage />} />

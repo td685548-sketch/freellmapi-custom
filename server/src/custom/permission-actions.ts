@@ -54,6 +54,7 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
   if (parent === 'view_logs') {
     if (path === '/api/logs' && read) return 'view_server_logs';
     if (path === '/api/logs/clear' && method === 'POST') return 'clear_server_logs';
+    if (path === '/api/audit' && read) return 'view_audit_log';
     if ((path.startsWith('/api/analytics/') || ['/api/analytics', '/api/fallback/token-usage', '/api/fallback/quota-forecast'].includes(path)) && read) return 'view_analytics';
   }
   if (parent === 'view_usage' && read) {
