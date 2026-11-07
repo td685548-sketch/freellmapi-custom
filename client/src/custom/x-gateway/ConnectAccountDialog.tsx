@@ -57,6 +57,169 @@ const WEB_COOKIE_GUIDES: Record<string, {
   },
 }
 
+const OAUTH_CLI_GUIDES: Record<string, {
+  siteUrl: string
+  steps: string
+  placeholder: string
+}> = {
+  claude: {
+    siteUrl: 'https://claude.ai/login',
+    steps: 'Run `claude setup-token` in terminal (or open ~/.claude/.credentials.json) and paste the OAuth token / JSON.',
+    placeholder: 'sk-ant-oat01-... or paste ~/.claude/.credentials.json',
+  },
+  codex: {
+    siteUrl: 'https://chatgpt.com/auth/login',
+    steps: 'Run `codex login` in terminal and paste `~/.codex/auth.json` (or your OpenAI access_token / API key).',
+    placeholder: 'Paste ~/.codex/auth.json or eyJhbGci...',
+  },
+  antigravity: {
+    siteUrl: 'https://idx.google.com/',
+    steps: 'Sign in with Google in Antigravity IDE or gcloud (`gcloud auth print-access-token`) and paste the OAuth access token.',
+    placeholder: 'ya29.a0... or oauth_creds.json',
+  },
+  'gemini-cli': {
+    siteUrl: 'https://aistudio.google.com/apikey',
+    steps: 'Run `gemini` CLI to sign in via browser and paste `~/.gemini/oauth_creds.json`, or paste a Gemini API key.',
+    placeholder: 'Paste ~/.gemini/oauth_creds.json or AIzaSy...',
+  },
+  cursor: {
+    siteUrl: 'https://www.cursor.com/settings',
+    steps: 'Sign in on cursor.com or extract `cursorAuth/accessToken` from Cursor local state.vscdb.',
+    placeholder: 'eyJhbGci... (Cursor accessToken)',
+  },
+  windsurf: {
+    siteUrl: 'https://windsurf.com/account',
+    steps: 'Sign in at windsurf.com and copy your Windsurf / Codeium auth token.',
+    placeholder: 'Windsurf OAuth / API token',
+  },
+  qwen: {
+    siteUrl: 'https://chat.qwen.ai/',
+    steps: 'Run `qwen` CLI to sign in with Qwen OAuth and paste `~/.qwen/oauth_creds.json`, or DashScope API key.',
+    placeholder: 'Paste ~/.qwen/oauth_creds.json or sk-...',
+  },
+  kiro: {
+    siteUrl: 'https://kiro.dev/',
+    steps: 'Sign in via Kiro IDE (AWS Builder ID / Social) and paste `~/.aws/sso/cache/kiro-auth-token.json`.',
+    placeholder: 'Paste kiro-auth-token.json or accessToken',
+  },
+  cline: {
+    siteUrl: 'https://app.cline.bot/',
+    steps: 'Sign in at app.cline.bot and copy your Cline account token from settings.',
+    placeholder: 'Cline OAuth / account token',
+  },
+  clinepass: {
+    siteUrl: 'https://app.cline.bot/',
+    steps: 'Sign in at app.cline.bot and copy your ClinePass token.',
+    placeholder: 'ClinePass token',
+  },
+  kilocode: {
+    siteUrl: 'https://kilocode.ai/',
+    steps: 'Sign in at kilocode.ai and copy your KiloCode token from your profile.',
+    placeholder: 'KiloCode OAuth / API token',
+  },
+  kimi: {
+    siteUrl: 'https://platform.moonshot.ai/',
+    steps: 'Sign in to Kimi Coding / Moonshot and copy your token or API key.',
+    placeholder: 'sk-... (Kimi Coding token)',
+  },
+  trae: {
+    siteUrl: 'https://www.trae.ai/',
+    steps: 'Sign in via Trae IDE and copy your Trae session / OAuth token.',
+    placeholder: 'Trae OAuth token',
+  },
+  zed: {
+    siteUrl: 'https://zed.dev/account',
+    steps: 'Sign in at zed.dev/account and copy your Zed Pro / LLM token.',
+    placeholder: 'Zed auth token',
+  },
+  gitlab: {
+    siteUrl: 'https://gitlab.com/-/user_settings/personal_access_tokens',
+    steps: 'Sign in to GitLab and create a Personal Access Token or OAuth token with `ai_features` / `api` scope.',
+    placeholder: 'glpat-... or OAuth access token',
+  },
+  'grok-cli': {
+    siteUrl: 'https://console.x.ai/',
+    steps: 'Sign in at console.x.ai or Grok CLI and copy your xAI / Grok token.',
+    placeholder: 'xai-... or Grok CLI token',
+  },
+  iflow: {
+    siteUrl: 'https://platform.iflow.cn/',
+    steps: 'Sign in via iFlow CLI (`~/.iflow/oauth_creds.json`) or copy your iFlow API key.',
+    placeholder: 'Paste ~/.iflow/oauth_creds.json or sk-...',
+  },
+  'codebuddy-intl': {
+    siteUrl: 'https://www.codebuddy.ai/',
+    steps: 'Sign in at codebuddy.ai and copy your CodeBuddy OAuth token.',
+    placeholder: 'CodeBuddy OAuth token',
+  },
+  'codebuddy-cn': {
+    siteUrl: 'https://copilot.tencent.com/',
+    steps: 'Sign in to Tencent CodeBuddy and copy your OAuth token.',
+    placeholder: 'CodeBuddy CN OAuth token',
+  },
+  qoder: {
+    siteUrl: 'https://qoder.com/',
+    steps: 'Sign in at qoder.com and copy your Qoder token.',
+    placeholder: 'Qoder OAuth / API token',
+  },
+  'qoder-cn': {
+    siteUrl: 'https://qoder.com/',
+    steps: 'Sign in to Qoder CN and copy your Qoder token.',
+    placeholder: 'Qoder CN token',
+  },
+  'minimax-code': {
+    siteUrl: 'https://platform.minimaxi.com/',
+    steps: 'Sign in to MiniMax Coding Plan and copy your Coding token / API key.',
+    placeholder: 'eyJ... or MiniMax Coding key',
+  },
+  'minimax-code-global': {
+    siteUrl: 'https://www.minimax.io/',
+    steps: 'Sign in to MiniMax Global Coding Plan and copy your token / API key.',
+    placeholder: 'eyJ... or MiniMax Global key',
+  },
+  glm: {
+    siteUrl: 'https://open.bigmodel.cn/',
+    steps: 'Sign in to Zhipu GLM Coding and copy your GLM Coding token / API key.',
+    placeholder: 'GLM Coding token / API key',
+  },
+  'devin-cli': {
+    siteUrl: 'https://app.devin.ai/',
+    steps: 'Sign in to Devin and copy your Devin CLI / API token.',
+    placeholder: 'Devin CLI token',
+  },
+  opencode: {
+    siteUrl: 'https://opencode.ai/',
+    steps: 'Run `opencode auth login` or copy your OpenCode Zen token.',
+    placeholder: 'OpenCode token / API key',
+  },
+}
+
+export function extractOAuthCredential(raw: string): string {
+  const trimmed = raw.trim()
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>
+      const claudeOauth = parsed.claudeAiOauth as Record<string, unknown> | undefined
+      if (claudeOauth && typeof claudeOauth.accessToken === 'string' && claudeOauth.accessToken.trim()) {
+        return claudeOauth.accessToken.trim()
+      }
+      const tokens = parsed.tokens as Record<string, unknown> | undefined
+      if (tokens && typeof tokens.access_token === 'string' && tokens.access_token.trim()) {
+        return tokens.access_token.trim()
+      }
+      for (const field of ['accessToken', 'access_token', 'token', 'api_key', 'apiKey', 'OPENAI_API_KEY', 'value']) {
+        const val = parsed[field]
+        if (typeof val === 'string' && val.trim()) {
+          return val.trim()
+        }
+      }
+    } catch {
+      // Fall through and return raw trimmed string
+    }
+  }
+  return trimmed
+}
+
 export function ConnectAccountDialog({ provider, account, onClose }: {
   provider: AccountProvider; account?: ProviderAccount; onClose: () => void
 }) {
@@ -135,6 +298,7 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
   const isDirectCredential = method === 'api_key' || method === 'cookie'
   const isCookieMethod = method === 'cookie'
   const cookieGuide = isCookieMethod ? WEB_COOKIE_GUIDES[provider.id] : undefined
+  const oauthCliGuide = !isCookieMethod && isDirectCredential ? OAUTH_CLI_GUIDES[provider.id] : undefined
 
   async function submit(event: FormEvent) {
     event.preventDefault()
@@ -144,9 +308,10 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
     setBusy(true)
     try {
       if (isDirectCredential) {
+        const finalKey = oauthCliGuide ? extractOAuthCredential(key) : key.trim()
         await accountsApi.addKey(
           provider.id,
-          key.trim(),
+          finalKey,
           label.trim(),
           provider.id === 'custom' ? baseUrl.trim() : undefined,
           proxyUrl.trim() || undefined,
@@ -195,13 +360,23 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
       <button className="x-icon-button x-dialog-close" aria-label={s.close} onClick={onClose}><X size={18} /></button>
       <div className="x-dialog-icon"><ProviderMark id={provider.id} name={provider.name} /></div>
       <DialogTitle className="x-dialog-title">{account ? s.reconnect : s.addAccount} · {provider.name}</DialogTitle>
-      <DialogDescription className="x-muted">{isCookieMethod ? s.cookieDialogHelp : s.oauthHelp}</DialogDescription>
+      <DialogDescription className="x-muted">{isCookieMethod ? s.cookieDialogHelp : oauthCliGuide ? s.oauthCliDialogHelp : s.oauthHelp}</DialogDescription>
       {provider.id === 'github-copilot' && <p className="x-notice">{s.copilotNotice}</p>}
       {cookieGuide && (
         <div className="x-notice" style={{ display: 'grid', gap: 6 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
             <span><strong>{s.cookieGuideLabel}:</strong> <code>{cookieGuide.storage} → {cookieGuide.tokenName}</code></span>
             <a className="x-button x-small" href={cookieGuide.siteUrl} target="_blank" rel="noopener noreferrer">
+              {s.openProviderSite}<ExternalLink size={13} />
+            </a>
+          </div>
+        </div>
+      )}
+      {oauthCliGuide && (
+        <div className="x-notice" style={{ display: 'grid', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+            <span><strong>{s.oauthCliGuideLabel}:</strong> {oauthCliGuide.steps}</span>
+            <a className="x-button x-small" href={oauthCliGuide.siteUrl} target="_blank" rel="noopener noreferrer">
               {s.openProviderSite}<ExternalLink size={13} />
             </a>
           </div>
@@ -218,16 +393,16 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
         <label>{s.name}<input id="x-account-label" name="label" autoFocus maxLength={100} value={label} placeholder={s.namePlaceholder} onChange={event => setLabel(event.target.value)} disabled={busy} required /></label>
         {provider.id === 'custom' && <label>{s.baseUrl}<input id="x-account-base-url" name="baseUrl" type="url" value={baseUrl} placeholder="https://api.example.com/v1" onChange={event => setBaseUrl(event.target.value)} disabled={busy} required /></label>}
         {isDirectCredential && (
-          isCookieMethod ? (
+          isCookieMethod || oauthCliGuide ? (
             <label>
-              {s.cookieCredential}
+              {isCookieMethod ? s.cookieCredential : s.oauthCliCredential}
               <textarea
                 id="x-account-credential"
                 name="credential"
                 rows={3}
                 value={key}
                 onChange={event => setKey(event.target.value)}
-                placeholder={cookieGuide?.placeholder ?? s.cookieCredentialPlaceholder}
+                placeholder={isCookieMethod ? (cookieGuide?.placeholder ?? s.cookieCredentialPlaceholder) : (oauthCliGuide?.placeholder ?? s.oauthCliPlaceholder)}
                 disabled={busy}
                 required
                 style={{ fontFamily: 'var(--x-mono)', fontSize: '0.84rem', resize: 'vertical' }}

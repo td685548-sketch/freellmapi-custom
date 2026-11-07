@@ -872,7 +872,6 @@ xGatewayProtocolsRouter.post('/responses', xGatewayAuth, async (req: Request, re
 // ─────────────────────────────────────────────────────────────────────────────
 
 xGatewayProtocolsRouter.post('/completions', xGatewayAuth, async (req: Request, res: Response) => {
-  const startMs = Date.now();
   const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, any>) : {};
   const prompt = typeof body.prompt === 'string' ? body.prompt : Array.isArray(body.prompt) ? body.prompt.join('\n') : '';
   if (!prompt) {

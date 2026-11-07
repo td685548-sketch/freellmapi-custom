@@ -334,6 +334,24 @@ describe('connect dialog', () => {
     expect(vi.mocked(apiFetch).mock.calls.filter(([p]) => p.endsWith('/poll')).length).toBe(2)
   })
 
+  it('extracts accessToken from pasted CLI credentials JSON for OAuth CLI providers', async () => {
+    const claudeProvider = { id: 'claude', name: 'Claude Code', category: 'oauth' as const, authMethods: ['api_key' as const], accounts: [] }
+    mount(<ConnectAccountDialog provider={claudeProvider} onClose={onClose} />)
+    await flush()
+    expect(body().textContent).toContain('claude setup-token')
+    enter(body().querySelector<HTMLInputElement>('.x-dialog input[maxlength="100"]')!, 'My Claude')
+    const textarea = body().querySelector<HTMLTextAreaElement>('#x-account-credential')!
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, '{"claudeAiOauth":{"accessToken":"sk-ant-oat01-fixture"}}')
+      textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    submit(body().querySelector<HTMLFormElement>('.x-dialog form')!)
+    await flush()
+    const call = vi.mocked(apiFetch).mock.calls.find(([p, i]) => p === '/api/x-accounts' && i?.method === 'POST')!
+    expect(JSON.parse(String(call[1]!.body))).toEqual({ provider: 'claude', key: 'sk-ant-oat01-fixture', label: 'My Claude' })
+    expect(onClose).toHaveBeenCalled()
+  })
+
   it('shows expiry and stops polling when the attempt expires', async () => {
     startExpires = 40
     pollResults = [{ status: 'pending', interval: 1 }]
