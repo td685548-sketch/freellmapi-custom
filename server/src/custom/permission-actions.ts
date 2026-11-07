@@ -85,7 +85,7 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
     if (path === '/api/settings/api-key/regenerate' && method === 'POST') return 'rotate_gateway_key';
     if (/^\/api\/settings\/url-tokens(?:\/[^/]+)?$/.test(path)) return read ? 'reveal_gateway_key' : 'rotate_gateway_key';
     // What end users wrote is more than a usage number: reading stored messages takes the edit permission.
-    if (read && /^\/api\/client-profiles\/\d+\/(?:conversations\/[^/]+|content-filter\/events)$/.test(path)) return 'edit_client_profiles';
+    if (read && /^\/api\/client-profiles\/\d+\/(?:conversations\/[^/]+|content-filter\/events|feedback\/comments)$/.test(path)) return 'edit_client_profiles';
     if (path.startsWith('/api/client-profiles')) return read ? 'view_client_profiles' : 'edit_client_profiles';
     if (path.startsWith('/api/update')) return 'manage_updates';
     if (path.startsWith('/api/compression') || path === '/api/settings/compression') return read ? 'view_settings' : 'manage_compression';
