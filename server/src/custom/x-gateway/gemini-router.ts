@@ -1,4 +1,4 @@
-import { Router, type Request, type Response } from 'express';
+import { Router, type Request, type Response, type NextFunction } from 'express';
 import type { ChatMessage } from '@freellmapi/shared/types.js';
 import type { CompletionOptions } from '../../providers/base.js';
 import { decrypt } from '../../lib/crypto.js';
@@ -117,12 +117,12 @@ function parseGeminiRequest(body: Record<string, unknown>, model: string, isStre
  * GET /v1beta/models
  * Returns model catalog in Google Gemini API format
  */
-geminiRouter.get('/models', (req, res) => {
+geminiRouter.get('/models', (req: Request, res: Response, next: NextFunction) => {
   const token = extractGeminiApiKey(req);
-  const user = token ? (validateXGatewayClientKey(token) ?? validateUserApiKey(token)) : null;
+  if (!token) return next();
+  const user = validateXGatewayClientKey(token) ?? validateUserApiKey(token);
   if (!user || !permissionGranted(user, 'use_x_gateway')) {
-    res.status(401).json({ error: { message: 'Authentication required', code: 401 } });
-    return;
+    return next();
   }
 
   const keys = getUsableXGatewayKeys();
@@ -149,21 +149,15 @@ geminiRouter.get('/models', (req, res) => {
  * POST /v1beta/models/:path*
  * Handles :generateContent and :streamGenerateContent
  */
-geminiRouter.post(/^\/models\/(.+)$/, async (req: Request, res: Response): Promise<void> => {
+geminiRouter.post(/^\/models\/(.+)$/, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   const token = extractGeminiApiKey(req);
-  const user: ValidatedXGatewayClientKey | null = token
-    ? (validateXGatewayClientKey(token) ?? (validateUserApiKey(token) as ValidatedXGatewayClientKey | null))
-    : null;
+  if (!token) return next();
+  const user: ValidatedXGatewayClientKey | null =
+    validateXGatewayClientKey(token) ?? (validateUserApiKey(token) as ValidatedXGatewayClientKey | null);
 
-  if (!user) {
-    res.status(401).json({ error: { message: 'API key required', code: 401, status: 'UNAUTHENTICATED' } });
-    return;
-  }
-
-  if (!permissionGranted(user, 'use_x_gateway')) {
-    res.status(403).json({ error: { message: 'Permission denied: use_x_gateway required', code: 403, status: 'PERMISSION_DENIED' } });
-    return;
+  if (!user || !permissionGranted(user, 'use_x_gateway')) {
+    return next();
   }
 
   const rawPath = String((req.params as Record<string, any>)[0] || (req.params as Record<string, any>).modelPath || '');
