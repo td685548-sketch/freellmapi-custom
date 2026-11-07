@@ -11,7 +11,8 @@ import type {
 import type { CompletionOptions } from '../../providers/base.js';
 import { decrypt } from '../../lib/crypto.js';
 import { contentToString, estimateInputTokens } from '../../lib/content.js';
-import { proxyFetch, withKeyProxy } from '../../lib/proxy.js';
+import { proxyFetch } from '../../lib/proxy.js';
+import { withQuotaTracking } from './quota/tracking.js';
 import { logRequest } from '../../lib/request-log.js';
 import {
   getXGatewayProvider,
@@ -23,7 +24,7 @@ import {
   resolveXGatewayAccountProxy,
 } from '../provider-accounts/store.js';
 import { xGatewayAuth } from './auth.js';
-import { getConfigSnapshot } from './config.js';
+import { getConfigSnapshot, getMediaDefaults } from './config.js';
 import { runInGatewayScope } from './context.js';
 import {
   applyGatewaySavers,
@@ -299,7 +300,7 @@ xGatewayProtocolsRouter.post('/messages', xGatewayAuth, async (req: Request, res
 
       if (!isStream) {
         try {
-          const completion = await withKeyProxy(effectiveProxy, () =>
+          const completion = await withQuotaTracking(account, modelId, effectiveProxy, () =>
             provider.chatCompletion(credential, messages, modelId, options, {
               platform: account.platform,
               keyId: account.id,
@@ -374,7 +375,7 @@ xGatewayProtocolsRouter.post('/messages', xGatewayAuth, async (req: Request, res
         }
       } else {
         try {
-          await withKeyProxy(effectiveProxy, async () => {
+          await withQuotaTracking(account, modelId, effectiveProxy, async () => {
             const stream = provider.streamChatCompletion(credential, messages, modelId, options, {
               platform: account.platform,
               keyId: account.id,
@@ -688,7 +689,7 @@ xGatewayProtocolsRouter.post('/responses', xGatewayAuth, async (req: Request, re
 
       if (!isStream) {
         try {
-          const completion = await withKeyProxy(effectiveProxy, () =>
+          const completion = await withQuotaTracking(account, modelId, effectiveProxy, () =>
             provider.chatCompletion(credential, messages, modelId, options, {
               platform: account.platform,
               keyId: account.id,
@@ -738,7 +739,7 @@ xGatewayProtocolsRouter.post('/responses', xGatewayAuth, async (req: Request, re
         }
       } else {
         try {
-          await withKeyProxy(effectiveProxy, async () => {
+          await withQuotaTracking(account, modelId, effectiveProxy, async () => {
             const stream = provider.streamChatCompletion(credential, messages, modelId, options, {
               platform: account.platform,
               keyId: account.id,
@@ -936,7 +937,7 @@ xGatewayProtocolsRouter.post('/completions', xGatewayAuth, async (req: Request, 
     const effectiveProxy = resolveXGatewayAccountProxy(account);
     if (!isStream) {
       try {
-        const completion = await withKeyProxy(effectiveProxy, () =>
+        const completion = await withQuotaTracking(account, modelId, effectiveProxy, () =>
           provider.chatCompletion(credential, rawMessages, modelId, options),
         );
         const text = contentToString(completion.choices?.[0]?.message?.content ?? '');
@@ -970,7 +971,7 @@ xGatewayProtocolsRouter.post('/completions', xGatewayAuth, async (req: Request, 
       }
     } else {
       try {
-        await withKeyProxy(effectiveProxy, async () => {
+        await withQuotaTracking(account, modelId, effectiveProxy, async () => {
           const stream = provider.streamChatCompletion(credential, rawMessages, modelId, options);
           const iterator = stream[Symbol.asyncIterator]();
           const first = await iterator.next();
@@ -1031,7 +1032,7 @@ xGatewayProtocolsRouter.post('/completions', xGatewayAuth, async (req: Request, 
 //    /x/v1/audio/speech, /x/v1/audio/transcriptions)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function accountBaseUrl(account: { provider: string; base_url: string | null }): string | null {
+export function accountBaseUrl(account: { provider: string; base_url: string | null }): string | null {
   const customUrl = account.base_url?.trim();
   if (customUrl) return customUrl.replace(/\/+$/, '');
   const entry = getXGatewayProvider(account.provider);
@@ -1046,7 +1047,8 @@ xGatewayProtocolsRouter.post('/embeddings', xGatewayAuth, async (req: Request, r
     return;
   }
 
-  const requestedModel = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'auto';
+  const rawModel = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'auto';
+  const requestedModel = rawModel === 'auto' ? (getMediaDefaults().embedding?.defaultModel || 'auto') : rawModel;
   const { candidates, notFoundError } = resolveCandidateRoutes(requestedModel);
   if (notFoundError) {
     res.status(404).json({ error: { message: notFoundError, type: 'invalid_request_error', code: 'model_not_found' } });
@@ -1071,7 +1073,7 @@ xGatewayProtocolsRouter.post('/embeddings', xGatewayAuth, async (req: Request, r
 
     const effectiveProxy = resolveXGatewayAccountProxy(account);
     try {
-      const upstreamRes = await withKeyProxy(effectiveProxy, () =>
+      const upstreamRes = await withQuotaTracking(account, modelId, effectiveProxy, () =>
         proxyFetch(
           `${baseUrl}/embeddings`,
           {
@@ -1118,7 +1120,8 @@ xGatewayProtocolsRouter.post('/images/generations', xGatewayAuth, async (req: Re
     return;
   }
 
-  const requestedModel = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'auto';
+  const rawModel = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'auto';
+  const requestedModel = rawModel === 'auto' ? (getMediaDefaults().image?.defaultModel || 'auto') : rawModel;
   const { candidates, notFoundError } = resolveCandidateRoutes(requestedModel);
   if (notFoundError) {
     res.status(404).json({ error: { message: notFoundError, type: 'invalid_request_error', code: 'model_not_found' } });
@@ -1143,7 +1146,7 @@ xGatewayProtocolsRouter.post('/images/generations', xGatewayAuth, async (req: Re
 
     const effectiveProxy = resolveXGatewayAccountProxy(account);
     try {
-      const upstreamRes = await withKeyProxy(effectiveProxy, () =>
+      const upstreamRes = await withQuotaTracking(account, modelId, effectiveProxy, () =>
         proxyFetch(
           `${baseUrl}/images/generations`,
           {
@@ -1189,7 +1192,8 @@ xGatewayProtocolsRouter.post('/audio/speech', xGatewayAuth, async (req: Request,
     return;
   }
 
-  const requestedModel = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'auto';
+  const rawModel = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'auto';
+  const requestedModel = rawModel === 'auto' ? (getMediaDefaults().tts?.defaultModel || 'auto') : rawModel;
   const { candidates, notFoundError } = resolveCandidateRoutes(requestedModel);
   if (notFoundError) {
     res.status(404).json({ error: { message: notFoundError, type: 'invalid_request_error', code: 'model_not_found' } });
@@ -1214,7 +1218,7 @@ xGatewayProtocolsRouter.post('/audio/speech', xGatewayAuth, async (req: Request,
 
     const effectiveProxy = resolveXGatewayAccountProxy(account);
     try {
-      const upstreamRes = await withKeyProxy(effectiveProxy, () =>
+      const upstreamRes = await withQuotaTracking(account, modelId, effectiveProxy, () =>
         proxyFetch(
           `${baseUrl}/audio/speech`,
           {
@@ -1273,8 +1277,9 @@ xGatewayProtocolsRouter.post(
       return;
     }
 
-    const requestedModel =
+    const rawModel =
       typeof req.body?.model === 'string' && req.body.model.trim() ? req.body.model.trim() : 'auto';
+    const requestedModel = rawModel === 'auto' ? (getMediaDefaults().stt?.defaultModel || 'auto') : rawModel;
     const { candidates, notFoundError } = resolveCandidateRoutes(requestedModel);
     if (notFoundError) {
       res.status(404).json({ error: { message: notFoundError, type: 'invalid_request_error', code: 'model_not_found' } });
@@ -1313,7 +1318,7 @@ xGatewayProtocolsRouter.post(
           form.append('response_format', req.body.response_format);
         }
 
-        const upstreamRes = await withKeyProxy(effectiveProxy, () =>
+        const upstreamRes = await withQuotaTracking(account, modelId, effectiveProxy, () =>
           proxyFetch(
             `${baseUrl}/audio/transcriptions`,
             {

@@ -19,13 +19,28 @@ export interface XGatewayCombo {
   updatedAt?: string;
 }
 
+export interface XGatewayMediaDefaults {
+  image?: { defaultModel?: string };
+  tts?: { defaultModel?: string; defaultVoice?: string; defaultFormat?: string };
+  stt?: { defaultModel?: string; defaultLanguage?: string };
+  embedding?: { defaultModel?: string; defaultDimensions?: number | null };
+}
+
 export interface XGatewayConfigSnapshot {
   enabled: boolean;
   savers: XGatewaySaverDefaults;
   combos: XGatewayCombo[];
+  mediaDefaults: XGatewayMediaDefaults;
   outboundProxyUrl: string;
   maskedOutboundProxyUrl: string;
 }
+
+export const DEFAULT_MEDIA_DEFAULTS: XGatewayMediaDefaults = {
+  image: { defaultModel: 'auto' },
+  tts: { defaultModel: 'auto', defaultVoice: 'alloy', defaultFormat: 'mp3' },
+  stt: { defaultModel: 'auto', defaultLanguage: '' },
+  embedding: { defaultModel: 'auto', defaultDimensions: null },
+};
 
 const DEFAULT_SAVERS: XGatewaySaverDefaults = {
   caveman: false,
@@ -40,6 +55,31 @@ const CACHE_TTL_MS = 5000;
 export function invalidateConfigCache(): void {
   cachedSnapshot = null;
   cacheExpiry = 0;
+}
+
+function parseMediaDefaults(raw: string | undefined): XGatewayMediaDefaults {
+  if (!raw) return { ...DEFAULT_MEDIA_DEFAULTS };
+  try {
+    const parsed = JSON.parse(raw);
+    return {
+      image: { defaultModel: typeof parsed.image?.defaultModel === 'string' ? parsed.image.defaultModel : 'auto' },
+      tts: {
+        defaultModel: typeof parsed.tts?.defaultModel === 'string' ? parsed.tts.defaultModel : 'auto',
+        defaultVoice: typeof parsed.tts?.defaultVoice === 'string' ? parsed.tts.defaultVoice : 'alloy',
+        defaultFormat: typeof parsed.tts?.defaultFormat === 'string' ? parsed.tts.defaultFormat : 'mp3',
+      },
+      stt: {
+        defaultModel: typeof parsed.stt?.defaultModel === 'string' ? parsed.stt.defaultModel : 'auto',
+        defaultLanguage: typeof parsed.stt?.defaultLanguage === 'string' ? parsed.stt.defaultLanguage : '',
+      },
+      embedding: {
+        defaultModel: typeof parsed.embedding?.defaultModel === 'string' ? parsed.embedding.defaultModel : 'auto',
+        defaultDimensions: typeof parsed.embedding?.defaultDimensions === 'number' ? parsed.embedding.defaultDimensions : null,
+      },
+    };
+  } catch {
+    return { ...DEFAULT_MEDIA_DEFAULTS };
+  }
 }
 
 function parseSavers(raw: string | undefined): XGatewaySaverDefaults {
@@ -114,6 +154,7 @@ export function getConfigSnapshot(): XGatewayConfigSnapshot {
     const db = getDb();
     const enabledRow = db.prepare("SELECT value FROM x_gateway_config WHERE key = 'enabled'").get() as { value: string } | undefined;
     const saversRow = db.prepare("SELECT value FROM x_gateway_config WHERE key = 'default_savers'").get() as { value: string } | undefined;
+    const mediaRow = db.prepare("SELECT value FROM x_gateway_config WHERE key = 'media_defaults'").get() as { value: string } | undefined;
     const proxyRow = db.prepare("SELECT value FROM x_gateway_config WHERE key = 'outbound_proxy'").get() as { value: string } | undefined;
     const combos = loadCombosFromDb(db);
     const outboundProxyUrl = parseOutboundProxy(proxyRow?.value);
@@ -122,6 +163,7 @@ export function getConfigSnapshot(): XGatewayConfigSnapshot {
       enabled: enabledRow?.value === 'true' || enabledRow?.value === '1',
       savers: parseSavers(saversRow?.value),
       combos,
+      mediaDefaults: parseMediaDefaults(mediaRow?.value),
       outboundProxyUrl,
       maskedOutboundProxyUrl: maskProxyUrl(outboundProxyUrl),
     };
@@ -130,6 +172,7 @@ export function getConfigSnapshot(): XGatewayConfigSnapshot {
       enabled: false,
       savers: { ...DEFAULT_SAVERS },
       combos: [],
+      mediaDefaults: { ...DEFAULT_MEDIA_DEFAULTS },
       outboundProxyUrl: '',
       maskedOutboundProxyUrl: '',
     };
@@ -155,6 +198,14 @@ export function setEnabled(enabled: boolean, updatedBy?: number): void {
 
 export function setDefaultSavers(savers: XGatewaySaverDefaults, updatedBy?: number): void {
   setConfigValue('default_savers', JSON.stringify(savers), updatedBy);
+}
+
+export function getMediaDefaults(): XGatewayMediaDefaults {
+  return getConfigSnapshot().mediaDefaults;
+}
+
+export function setMediaDefaults(defaults: XGatewayMediaDefaults, updatedBy?: number): void {
+  setConfigValue('media_defaults', JSON.stringify(defaults), updatedBy);
 }
 
 export function getOutboundProxyUrl(): string {
