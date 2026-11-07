@@ -2,6 +2,7 @@ import { useQuery, type QueryClient } from '@tanstack/react-query'
 import { apiFetch } from '@/lib/api'
 import { useSessionRevision } from '../session-state'
 import type {
+  ProviderAccountAuthMethod,
   ProviderAccountsResponse,
   ProviderAccountAuthStartResponse,
   ProviderAccountAuthResult,
@@ -34,7 +35,7 @@ export const accountsApi = {
     apiFetch<void>(`${base}/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   remove: (id: number) => apiFetch<void>(`${base}/${id}`, { method: 'DELETE' }),
   test: (id: number) => apiFetch<ProviderAccountTestResponse>(`${base}/${id}/test`, { method: 'POST', body: '{}' }),
-  addKey: (provider: string, key: string, label: string, baseUrl?: string, proxyUrl?: string) =>
+  addKey: (provider: string, key: string, label: string, baseUrl?: string, proxyUrl?: string, authMethod?: ProviderAccountAuthMethod) =>
     apiFetch<{ id: number }>(base, {
       method: 'POST',
       body: JSON.stringify({
@@ -43,6 +44,7 @@ export const accountsApi = {
         label,
         ...(baseUrl ? { baseUrl } : {}),
         ...(proxyUrl ? { proxyUrl } : {}),
+        ...(authMethod ? { authMethod } : {}),
       }),
     }),
 }
