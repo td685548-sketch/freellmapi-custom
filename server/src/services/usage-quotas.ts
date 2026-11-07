@@ -31,8 +31,10 @@ export function resetQuotaCaches(): void { quotaCache.clear(); counters.clear();
 
 const subject = (kind: SubjectKind, id: number): string => `${kind}:${id}`;
 
-interface Windows { day: string; month: string; dayResetMs: number; monthResetMs: number }
-function windowsAt(now: number): Windows {
+export interface Windows { day: string; month: string; dayResetMs: number; monthResetMs: number }
+/** The current time as the allowance code sees it (tests can move it with setQuotaClock). */
+export const quotaNow = (): number => clock();
+export function windowsAt(now: number): Windows {
   const d = new Date(now);
   const iso = d.toISOString();
   return {

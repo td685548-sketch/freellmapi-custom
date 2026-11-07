@@ -13,6 +13,8 @@ export interface RecentRequest {
   inputTokens: number
   outputTokens: number
   error: string | null
+  /** The web app's end user, for client-key traffic that named one. */
+  endUser: string | null
 }
 
 export interface RecentRequestsPage {

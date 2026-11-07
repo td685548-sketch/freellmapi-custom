@@ -1,4 +1,6 @@
 import { getDb } from '../db/index.js';
+import type { EndUserQuota } from '@freellmapi/shared/end-users.js';
+import { KNOWLEDGE_LIMITS } from '@freellmapi/shared/knowledge.js';
 import type { ProfileAnalytics } from '@freellmapi/shared/user-analytics.js';
 import { getRequestAnalytics } from './user-analytics.js';
 import { hashClientProfileKey } from '../lib/system-prompt.js';
@@ -16,6 +18,10 @@ export interface GateProfile {
   /** Lowercase model ids the key may use; empty = any. */
   allowedModels: string[];
   maxTokens: number | null;
+  /** The allowance each end user of this key gets. */
+  endUserQuota: EndUserQuota;
+  /** Reference passages from the key's knowledge base, when switched on. */
+  knowledge: { enabled: boolean; maxChars: number };
 }
 
 /** The stored JSON list, tolerant of anything unexpected (an unreadable list restricts nothing it cannot name, so it reads as empty). */
@@ -31,15 +37,22 @@ export function parseAllowedModels(raw: string | null): string[] {
 export function profileForGate(token: string): GateProfile | null {
   const db = getDb();
   const hash = hashClientProfileKey(token);
-  const select = 'SELECT id, rpm_limit AS rpmLimit, allowed_models AS allowedModels, max_tokens_cap AS maxTokens FROM client_profiles WHERE enabled = 1 AND ';
-  type Row = (Omit<GateProfile, 'allowedModels'> & { allowedModels: string | null }) | undefined;
+  const select = 'SELECT id, rpm_limit AS rpmLimit, allowed_models AS allowedModels, max_tokens_cap AS maxTokens, '
+    + 'eu_daily_requests AS euDR, eu_daily_tokens AS euDT, eu_monthly_requests AS euMR, eu_monthly_tokens AS euMT, '
+    + 'kb_enabled AS kbEnabled, kb_max_chars AS kbMaxChars FROM client_profiles WHERE enabled = 1 AND ';
+  type Row = (Omit<GateProfile, 'allowedModels' | 'endUserQuota' | 'knowledge'> & { allowedModels: string | null; euDR: number | null; euDT: number | null; euMR: number | null; euMT: number | null; kbEnabled: number; kbMaxChars: number | null }) | undefined;
   let row = db.prepare(select + 'token_hash = ?').get(hash) as Row;
   if (!row) {
     // A key in its post-rotation grace period counts as its profile: same limits, same numbers.
     const id = profileIdForPreviousKey(hash);
     if (id !== undefined) row = db.prepare(select + 'id = ?').get(id) as Row;
   }
-  return row ? { ...row, allowedModels: parseAllowedModels(row.allowedModels) } : null;
+  if (!row) return null;
+  return {
+    id: row.id, rpmLimit: row.rpmLimit, maxTokens: row.maxTokens, allowedModels: parseAllowedModels(row.allowedModels),
+    endUserQuota: { dailyRequests: row.euDR, dailyTokens: row.euDT, monthlyRequests: row.euMR, monthlyTokens: row.euMT },
+    knowledge: { enabled: row.kbEnabled === 1, maxChars: row.kbMaxChars ?? KNOWLEDGE_LIMITS.defaultMaxChars },
+  };
 }
 
 /** Set (1..1000) or clear (null = unlimited) a profile's requests-per-minute cap. False when the profile does not exist. */
