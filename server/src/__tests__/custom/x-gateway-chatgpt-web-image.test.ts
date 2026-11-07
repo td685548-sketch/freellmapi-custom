@@ -1,16 +1,20 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Server } from 'http';
 
-vi.mock('../../custom/provider-accounts/chatgpt-web-image.js', () => ({
-  generateChatGptWebImages: vi.fn(async () => ({
-    created: 42,
-    data: [{ b64_json: 'QUJD', mime_type: 'image/png' }],
-  })),
-}));
+vi.mock('../../custom/provider-accounts/chatgpt-web-image.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../custom/provider-accounts/chatgpt-web-image.js')>();
+  return {
+    ...actual,
+    generateChatGptWebImages: vi.fn(async () => ({
+      created: 42,
+      data: [{ b64_json: 'QUJD', mime_type: 'image/png' }],
+    })),
+  };
+});
 
 import { initDb } from '../../db/index.js';
 import { createApp } from '../../app.js';
-import { createUser } from '../../services/auth.js';
+import { createSession, createUser } from '../../services/auth.js';
 import { mintUserApiKey } from '../../services/user-keys.js';
 import { setEnabled } from '../../custom/x-gateway/config.js';
 import { createApiKeyAccount } from '../../custom/provider-accounts/store.js';
@@ -22,6 +26,7 @@ describe('X Gateway ChatGPT Web image routing', () => {
   let server: Server;
   let base: string;
   let adminKey: string;
+  let adminSessionToken: string;
 
   beforeAll(async () => {
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
@@ -29,6 +34,7 @@ describe('X Gateway ChatGPT Web image routing', () => {
 
     const admin = createUser('images-admin@example.com', 'AdminPass123!');
     adminKey = mintUserApiKey(admin.userId, 'Admin Key').key;
+    adminSessionToken = createSession(admin.userId);
     createApiKeyAccount({
       provider: 'chatgpt-web',
       key: '__Secure-next-auth.session-token=test-cookie',
@@ -68,5 +74,59 @@ describe('X Gateway ChatGPT Web image routing', () => {
       baseUrl: 'https://chatgpt.com',
       platform: 'custom',
     }));
+  });
+
+  it('returns 429 when the ChatGPT account is out of image quota', async () => {
+    vi.mocked(generateChatGptWebImages).mockRejectedValueOnce(Object.assign(
+      new Error('ChatGPT account has hit its image generation quota'),
+      { status: 429 },
+    ));
+
+    const res = await realFetch(`${base}/x/v1/images/generations`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'gpt-image-2', prompt: 'a red cube' }),
+    });
+
+    expect(res.status).toBe(429);
+    await expect(res.json()).resolves.toMatchObject({
+      error: { message: expect.stringContaining('quota') },
+    });
+  });
+
+  it('returns 401 when the stored cookie is no longer signed in', async () => {
+    vi.mocked(generateChatGptWebImages).mockRejectedValueOnce(Object.assign(
+      new Error('ChatGPT session is not signed in'),
+      { status: 401 },
+    ));
+
+    const res = await realFetch(`${base}/x/v1/images/generations`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'gpt-image-2', prompt: 'a red cube' }),
+    });
+
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toMatchObject({
+      error: { message: expect.stringContaining('not signed in') },
+    });
+  });
+
+  it('propagates the same status through the Playground image tester', async () => {
+    vi.mocked(generateChatGptWebImages).mockRejectedValueOnce(Object.assign(
+      new Error('ChatGPT account has hit its image generation quota'),
+      { status: 429 },
+    ));
+
+    const res = await realFetch(`${base}/api/x-gateway/media/test/image`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminSessionToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'gpt-image-2', prompt: 'a red cube' }),
+    });
+
+    expect(res.status).toBe(429);
+    await expect(res.json()).resolves.toMatchObject({
+      error: { message: expect.stringContaining('quota') },
+    });
   });
 });
