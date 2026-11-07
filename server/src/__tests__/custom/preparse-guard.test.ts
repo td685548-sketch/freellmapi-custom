@@ -38,16 +38,30 @@ describe('pre-parse guard and public probes', () => {
       // loopback connection is the operator's own machine and is deliberately not guarded.
       const headers: Record<string, string | number> = { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.9', ...opts.headers };
       if (opts.body !== undefined && !opts.chunked) headers['content-length'] = Buffer.byteLength(opts.body);
+      if (opts.chunked) headers['transfer-encoding'] = 'chunked';
+      let responseStarted = false;
       const req = http.request({ host: '127.0.0.1', port, path, method: opts.method ?? 'POST', headers, agent: false }, res => {
+        responseStarted = true;
         let data = '';
         res.on('data', c => { data += c; });
         res.on('end', () => { let body: any = null; try { body = JSON.parse(data); } catch { /* not json */ } resolve({ status: res.statusCode ?? 0, body }); });
       });
-      req.on('error', err => { if ((err as NodeJS.ErrnoException).code === 'ECONNRESET' || (err as NodeJS.ErrnoException).code === 'EPIPE') return; reject(err); });
-      if (opts.body !== undefined) {
-        if (opts.chunked) { for (let i = 0; i < opts.body.length; i += 64 * 1024) req.write(opts.body.slice(i, i + 64 * 1024)); } else req.write(opts.body);
-      }
-      req.end();
+      req.on('error', err => {
+        if (responseStarted && ['ECONNRESET', 'EPIPE'].includes((err as NodeJS.ErrnoException).code ?? '')) return;
+        reject(err);
+      });
+      // Let the guard answer from headers before uploading a large body. Sending
+      // it in one write can reset the socket before Windows delivers the reply.
+      req.flushHeaders();
+      let offset = 0;
+      const writeNext = () => {
+        if (responseStarted || req.destroyed) return;
+        if (opts.body === undefined || offset >= opts.body.length) { req.end(); return; }
+        const chunk = opts.body.slice(offset, offset + 16 * 1024);
+        offset += chunk.length;
+        req.write(chunk, () => setImmediate(writeNext));
+      };
+      setTimeout(writeNext, 25);
     });
   }
 
