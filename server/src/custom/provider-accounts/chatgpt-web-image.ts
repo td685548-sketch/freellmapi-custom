@@ -81,6 +81,20 @@ class ChatGptWebImageError extends Error {
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
+/**
+ * Upstream HTTP status carried by a chatgpt-web image failure, if any.
+ *
+ * The route handlers report `err.status` instead of a blanket 502 so callers
+ * see 401 (expired cookie), 429 (image quota) or 400 (content policy) exactly
+ * like 9Router's image handler does.
+ */
+export function chatGptWebImageErrorStatus(error: unknown): number | undefined {
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === 'number' && Number.isInteger(status) && status >= 400 && status < 600
+    ? status
+    : undefined;
+}
+
 /** Normalize whatever the operator pasted into a Cookie header. */
 export function normalizeChatGptWebCookie(rawCredential: string): string {
   const trimmed = rawCredential

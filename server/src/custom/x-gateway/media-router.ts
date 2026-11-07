@@ -11,7 +11,7 @@ import {
   recordXGatewayKeyUsage,
   resolveXGatewayAccountProxy,
 } from '../provider-accounts/store.js';
-import { generateChatGptWebImages } from '../provider-accounts/chatgpt-web-image.js';
+import { generateChatGptWebImages, chatGptWebImageErrorStatus } from '../provider-accounts/chatgpt-web-image.js';
 import {
   getMediaDefaults,
   setMediaDefaults,
@@ -305,7 +305,7 @@ xGatewayMediaRouter.post('/media/test/image', async (req: Request, res: Response
   }
 
   const message = lastError instanceof Error ? lastError.message : 'All X Gateway image generation accounts failed.';
-  res.status(502).json({ error: { message } });
+  res.status(chatGptWebImageErrorStatus(lastError) ?? 502).json({ error: { message } });
 });
 
 xGatewayMediaRouter.post('/media/test/tts', async (req: Request, res: Response) => {
