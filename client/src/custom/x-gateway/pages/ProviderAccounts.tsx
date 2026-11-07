@@ -47,7 +47,7 @@ export default function ProviderAccounts() {
 
   return <>
     <Link to="/x/providers" className="x-back-link"><ArrowLeft size={16} />{s.providers}</Link>
-    <div className="x-page-heading"><div className="x-provider-title"><ProviderMark id={provider.id} /><div><h1>{provider.name}</h1><p>{provider.accounts.length} {s.accounts.toLowerCase()} · {provider.authMethods.map(method => method === 'api_key' ? s.apiKey : method === 'cookie' ? s.cookie : method === 'device_code' ? s.device : s.oauth).join(' / ')}</p></div></div>{canConnect && <button className="x-button x-primary" onClick={() => { change.reset(); setConnect(true) }}><Plus size={16} />{s.addAccount}</button>}</div>
+    <div className="x-page-heading"><div className="x-provider-title"><ProviderMark id={provider.id} name={provider.name} /><div><h1>{provider.name}</h1><p>{provider.accounts.length} {s.accounts.toLowerCase()} · {provider.authMethods.map(method => method === 'api_key' ? s.apiKey : method === 'cookie' ? s.cookie : method === 'device_code' ? s.device : s.oauth).join(' / ')}</p></div></div>{canConnect && <button className="x-button x-primary" onClick={() => { change.reset(); setConnect(true) }}><Plus size={16} />{s.addAccount}</button>}</div>
     {provider.id === 'github-copilot' && <p className="x-notice">{s.copilotNotice}</p>}
     {change.isError && <div className="x-error" role="alert">{change.error.message}</div>}
     <div className="x-tabs" role="tablist" aria-label={provider.name} onKeyDown={event => {

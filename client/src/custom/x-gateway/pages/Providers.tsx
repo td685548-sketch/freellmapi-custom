@@ -5,8 +5,54 @@ import { useAccounts } from '../api'
 import { useXStrings } from '../strings'
 import type { AccountProvider } from '../../../../../shared/x-accounts'
 
-export function ProviderMark({ id }: { id: string }) {
+const PROVIDER_ICON_FILES: Record<string, string> = {
+  'github-copilot': 'copilot.png',
+  google: 'gemini.png',
+  'perplexity-agent': 'perplexity-agent.png',
+  'gitlab-duo': 'gitlab.png',
+  'vercel-ai-gateway': 'vercel-ai-gateway.png',
+  'ollama-search': 'ollama.png',
+  'minimax-code': 'minimax.png',
+  'minimax-code-global': 'minimax.png',
+  'opencode-zen': 'opencode.png',
+  'deepseek-web': 'deepseek.png',
+  'muse-web': 'muse.png',
+  'gemini-web': 'gemini.png',
+  'chatgpt-web': 'openai.png',
+  codewhale: 'codewhale.svg',
+  pi: 'pi.svg',
+  smelt: 'smelt.svg',
+}
+const NO_ICON_PROVIDERS = new Set(['custom', 'runcrate'])
+const failedIconIds = new Set<string>()
+
+export function getProviderIconSrc(providerId: string): string | null {
+  const id = providerId.trim().toLowerCase()
+  if (!id || NO_ICON_PROVIDERS.has(id) || failedIconIds.has(id)) return null
+  const file = PROVIDER_ICON_FILES[id] ?? `${id}.png`
+  return `/providers/${file}`
+}
+
+export function ProviderMark({ id, name }: { id: string; name?: string }) {
+  const src = getProviderIconSrc(id)
+  const [errored, setErrored] = useState(false)
   const colors: Record<string, string> = { openrouter: 'violet', 'github-copilot': 'slate', groq: 'orange', google: 'blue', nvidia: 'green', mistral: 'orange', anthropic: 'sand', custom: 'slate' }
+  if (src && !errored) {
+    return (
+      <span className="x-provider-mark x-provider-mark-logo" aria-hidden="true">
+        <img
+          src={src}
+          alt={name ?? id}
+          loading="lazy"
+          decoding="async"
+          onError={() => {
+            failedIconIds.add(id.trim().toLowerCase())
+            setErrored(true)
+          }}
+        />
+      </span>
+    )
+  }
   return <span className={`x-provider-mark ${colors[id] ?? 'blue'}`} aria-hidden="true">{id === 'github-copilot' ? <GitBranch size={26} /> : id === 'openrouter' ? <Waypoints size={27} /> : <span>{id.slice(0, 2).toUpperCase()}</span>}</span>
 }
 
@@ -21,7 +67,7 @@ function ProviderCard({ provider }: { provider: AccountProvider }) {
   const login = provider.authMethods.some(method => method === 'oauth_pkce' || method === 'device_code')
   const isCookie = provider.authMethods.includes('cookie') && !login
   return <Link to={`/x/providers/${encodeURIComponent(provider.id)}`} className="x-provider-card">
-    <div className="x-card-top"><ProviderMark id={provider.id} /><span className={`x-badge ${provider.accounts.length ? 'x-green' : ''}`}>{provider.accounts.length ? <><span className="x-dot" />{s.connected}</> : s.available}</span></div>
+    <div className="x-card-top"><ProviderMark id={provider.id} name={provider.name} /><span className={`x-badge ${provider.accounts.length ? 'x-green' : ''}`}>{provider.accounts.length ? <><span className="x-dot" />{s.connected}</> : s.available}</span></div>
     <h3>{provider.name}<ArrowUpRight size={16} /></h3>
     <p className="x-muted">{login ? (provider.id === 'github-copilot' ? s.device : s.oauth) : isCookie ? s.cookie : s.apiKey}</p>
     <div className="x-card-bottom"><span>{provider.accounts.length} {s.accounts.toLowerCase()}</span><span>{enabled > 0 ? <><Check size={13} />{enabled} {s.active.toLowerCase()}</> : <KeyRound size={14} />}</span></div>

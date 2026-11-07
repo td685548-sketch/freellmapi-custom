@@ -168,6 +168,10 @@ describe('provider catalog', () => {
     const groqCard = [...container.querySelectorAll('a')].find(a => a.textContent?.includes('Groq'))!
     expect(groqCard.textContent).toContain('API key')
     expect(groqCard.textContent).not.toContain('Browser login')
+    const logoSources = [...container.querySelectorAll<HTMLImageElement>('.x-provider-mark-logo img')].map(img => img.getAttribute('src'))
+    expect(logoSources).toContain('/providers/openrouter.png')
+    expect(logoSources).toContain('/providers/copilot.png')
+    expect(logoSources).toContain('/providers/groq.png')
   })
 
   it('surfaces a load error with a working retry', async () => {
