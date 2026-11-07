@@ -68,6 +68,7 @@ function resolveModelDbId(
   modelId: string,
   keyId: number | null,
 ): number | null {
+  if (getGatewayScope()?.gateway === 'x') return null;
   if (platform !== 'custom') {
     const row = db.prepare('SELECT id FROM models WHERE platform = ? AND model_id = ? LIMIT 1')
       .get(platform, modelId) as { id: number } | undefined;

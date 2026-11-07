@@ -52,11 +52,16 @@ describe('X Gateway round-trip statement budget (SC-007)', () => {
 
     setRoutingStrategy('priority');
 
-    // Seed provider key
+    // Seed provider key for /v1 and dedicated X Gateway key for /x/v1
     const key = encrypt('gsk_steady_x');
     getDb()
       .prepare(
         `INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled) VALUES ('groq', 's', ?, ?, ?, 'healthy', 1)`
+      )
+      .run(key.encrypted, key.iv, key.authTag);
+    getDb()
+      .prepare(
+        `INSERT INTO x_gateway_keys (provider, label, auth_method, encrypted_key, iv, auth_tag, status, enabled) VALUES ('groq', 's', 'api_key', ?, ?, ?, 'healthy', 1)`
       )
       .run(key.encrypted, key.iv, key.authTag);
 

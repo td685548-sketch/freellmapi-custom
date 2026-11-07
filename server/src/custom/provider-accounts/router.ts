@@ -4,14 +4,20 @@ import type { Permission } from '@freellmapi/shared/user-access.js';
 import { requireAuth } from '../../middleware/requireAuth.js';
 import { hasPermission, requirePermission } from '../../middleware/requirePermission.js';
 import { validateSession, type SessionUser } from '../../services/auth.js';
-import { keysRouter } from '../../routes/keys.js';
-import { resolveProvider } from '../../providers/index.js';
 import { decrypt } from '../../lib/crypto.js';
 import { decryptProxyUrl } from '../../lib/key-proxy.js';
 import { withKeyProxy } from '../../lib/proxy.js';
 import { AccountError } from './http.js';
-import { clearCopilotToken } from './copilot.js';
-import { accountModels, accountRow, listAccounts, type OAuthProvider } from './store.js';
+import { resolveXGatewayProvider } from './catalog.js';
+import {
+  accountModels,
+  accountRow,
+  createApiKeyAccount,
+  deleteAccount,
+  listAccounts,
+  updateAccount,
+  type OAuthProvider,
+} from './store.js';
 import {
   attemptAction, cancelAccountAuth, completeAccountAuth, pollAccountAuth, startAccountAuth, type AccountActor,
 } from './attempts.js';
@@ -22,9 +28,25 @@ providerAccountsRouter.use((_req, res, next) => { res.set('Cache-Control', 'no-s
 
 type SessionRequest = Request & { user?: SessionUser; sessionToken?: string };
 const labelSchema = z.string().trim().max(200).refine(s => [...s].every(c => c.charCodeAt(0) >= 32 && c.charCodeAt(0) !== 127));
+const createSchema = z.object({
+  provider: z.string().trim().min(1).max(100),
+  key: z.string().trim().min(1).max(8192),
+  label: labelSchema.optional(),
+  baseUrl: z.string().trim().max(2048).optional(),
+  authMethod: z.enum(['api_key', 'oauth_pkce', 'device_code', 'cookie']).optional(),
+  models: z.array(z.object({
+    id: z.string().trim().min(1).max(200),
+    name: z.string().trim().min(1).max(200).optional().default(''),
+  })).max(200).optional(),
+}).strict();
 const startSchema = z.object({ label: labelSchema, callbackUrl: z.string().max(2048).optional(), reconnectId: z.number().int().positive().safe().optional() }).strict();
 const completeSchema = z.object({ code: z.string().trim().min(1).max(4096) }).strict();
-const updateSchema = z.object({ label: labelSchema.optional(), enabled: z.boolean().optional() }).strict().refine(b => Object.keys(b).length > 0);
+const updateSchema = z.object({
+  label: labelSchema.optional(),
+  enabled: z.boolean().optional(),
+  monthlyRequestCap: z.number().int().min(0).safe().optional(),
+  monthlyTokenCap: z.number().int().min(0).safe().optional(),
+}).strict().refine(b => Object.keys(b).length > 0);
 const testSchema = z.object({ model: z.string().trim().min(1).max(200).optional(), message: z.string().trim().min(1).max(4000).optional() }).strict();
 const emptySchema = z.object({}).strict();
 
@@ -69,6 +91,23 @@ providerAccountsRouter.get('/', requirePermission('view_keys'), (req: SessionReq
   } });
 });
 
+providerAccountsRouter.post('/', requirePermission('add_keys'), (req: SessionRequest, res) => {
+  const body = parse(createSchema, req.body);
+  if ((body.provider === 'custom' || body.baseUrl || (body.models && body.models.length > 0)) && !hasPermission(req.user, 'manage_key_models')) {
+    throw new AccountError(403, 'Permission denied.');
+  }
+  const accountId = createApiKeyAccount({
+    provider: body.provider,
+    key: body.key,
+    label: body.label,
+    baseUrl: body.baseUrl,
+    authMethod: body.authMethod,
+    models: body.models?.map(m => ({ id: m.id, name: m.name || m.id })),
+    userId: req.user?.userId ?? null,
+  });
+  res.status(201).json({ id: accountId });
+});
+
 providerAccountsRouter.post('/auth/:provider/start', async (req: SessionRequest, res) => {
   const provider = parse(z.enum(['openrouter', 'github-copilot']), req.params.provider);
   const body = parse(startSchema, req.body);
@@ -94,22 +133,22 @@ providerAccountsRouter.delete('/auth/:attemptId', (req: SessionRequest, res) => 
   res.status(204).end();
 });
 
-providerAccountsRouter.patch('/:id', requirePermission('edit_keys'), (req, res, next) => {
-  id(req);
-  req.body = parse(updateSchema, req.body);
-  keysRouter(req, res, next);
+providerAccountsRouter.patch('/:id', requirePermission('edit_keys'), (req, res) => {
+  const accountId = id(req);
+  const patch = parse(updateSchema, req.body);
+  const updated = updateAccount(accountId, patch);
+  res.json({ id: updated.id, label: updated.label, enabled: updated.enabled === 1 });
 });
-providerAccountsRouter.delete('/:id', requirePermission('delete_keys'), (req, res, next) => {
+providerAccountsRouter.delete('/:id', requirePermission('delete_keys'), (req, res) => {
   const accountId = id(req);
   parse(emptySchema, req.body ?? {});
-  const row = accountRow(accountId);
-  if (row.provider === 'github-copilot') clearCopilotToken(decrypt(row.encrypted_key, row.iv, row.auth_tag));
-  keysRouter(req, res, next);
+  deleteAccount(accountId);
+  res.json({ ok: true, id: accountId });
 });
 providerAccountsRouter.post('/:id/test', requirePermission('test_keys'), async (req, res) => {
   const row = accountRow(id(req));
   const body = parse(testSchema, req.body ?? {});
-  const provider = resolveProvider(row.platform, row.base_url);
+  const provider = resolveXGatewayProvider(row.provider, row.base_url);
   if (!provider) throw new AccountError(400, 'Account provider is unavailable.');
   if (!body.message && !provider.supportsKeyValidation) {
     res.json({ ok: false, message: 'This provider does not support credential health checks.' });
