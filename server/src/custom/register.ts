@@ -45,6 +45,8 @@ import { xGatewayConsoleRouter } from './x-gateway/console-router.js';
 import { xSkillsPublicRouter } from './x-gateway/skills-router.js';
 import { getConfigSnapshot } from './x-gateway/config.js';
 import { providerAccountsRouter } from './provider-accounts/router.js';
+import { autoPingRouter } from './provider-accounts/auto-ping.js';
+import { consoleStreamRouter } from './x-gateway/console-stream-router.js';
 
 // Everything this fork adds to the HTTP surface is wired here, so upstream's
 // app.ts keeps a handful of added lines instead of edited mount statements.
@@ -189,6 +191,9 @@ export function registerCustomRoutes(app: Express): void {
   app.use('/x/v1', xGatewayRouter);
   // Account logins manage shared credentials with the router's granular key permissions.
   app.use('/api/x-accounts', providerAccountsRouter);
+  app.use('/api/x-accounts', autoPingRouter);
+  // Real-time terminal log stream for console logs
+  app.use('/api/translator', consoleStreamRouter);
   // Gateway switch and default savers. The manage_x_gateway gate above maps each
   // path to its leaf (edit_x_settings for writes, use_x_gateway for reads).
   app.use('/api/x-gateway', xGatewayConsoleRouter);
