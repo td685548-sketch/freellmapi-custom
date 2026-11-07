@@ -4,8 +4,10 @@ import type { ChatMessage } from '@freellmapi/shared/types.js';
 import type { CompletionOptions } from '../../providers/base.js';
 import { decrypt } from '../../lib/crypto.js';
 import { estimateInputTokens } from '../../lib/content.js';
-import { withKeyProxy } from '../../lib/proxy.js';
+import { withQuotaTracking } from './quota/tracking.js';
+import { applyQuotaRouting } from './quota/store.js';
 import { logRequest } from '../../lib/request-log.js';
+import { sanitizeProviderErrorMessage } from '../../lib/error-redaction.js';
 import { applyOutputSavers } from '../output-savers/apply.js';
 import { buildSaverBlock } from '../output-savers/prompts.js';
 import {
@@ -23,10 +25,11 @@ import {
 import { xGatewayAuth } from './auth.js';
 import { getConfigSnapshot } from './config.js';
 import { runInGatewayScope } from './context.js';
+import { xGatewayProtocolsRouter } from './protocols.js';
 
 export const xGatewayRouter = Router();
 
-interface CandidateRoute {
+export interface CandidateRoute {
   account: AccountRow & { requests: number; tokens: number };
   modelId: string;
 }
@@ -37,13 +40,13 @@ function isWithinAccountCaps(account: AccountRow & { requests: number; tokens: n
   return true;
 }
 
-function resolveCandidateRoutes(requestedModel: string | undefined): {
+export function resolveCandidateRoutes(requestedModel: string | undefined): {
   candidates: CandidateRoute[];
   notFoundError?: string;
 } {
-  const usable = getUsableXGatewayKeys().filter(isWithinAccountCaps);
   const rawModel = (requestedModel ?? 'auto').trim() || 'auto';
   const lower = rawModel.toLowerCase();
+  const usable = applyQuotaRouting(getUsableXGatewayKeys().filter(isWithinAccountCaps), lower === 'auto' || lower.startsWith('auto:'));
 
   if (lower === 'auto' || lower.startsWith('auto:')) {
     const candidates: CandidateRoute[] = [];
@@ -80,11 +83,9 @@ function resolveCandidateRoutes(requestedModel: string | undefined): {
     const matchedProvider = normalizeXGatewayProviderId(prefix);
     if (matchedProvider && suffix) {
       const providerAccounts = usable.filter(a => a.provider === matchedProvider);
-      if (providerAccounts.length > 0) {
-        return {
-          candidates: providerAccounts.map(account => ({ account, modelId: suffix })),
-        };
-      }
+      return {
+        candidates: providerAccounts.map(account => ({ account, modelId: suffix })),
+      };
     }
   }
 
@@ -104,7 +105,7 @@ function resolveCandidateRoutes(requestedModel: string | undefined): {
   };
 }
 
-function applyGatewaySavers(req: Request, messages: ChatMessage[]): {
+export function applyGatewaySavers(req: Request, messages: ChatMessage[]): {
   messages: ChatMessage[];
   appliedSavers: string[];
 } {
@@ -135,7 +136,7 @@ function applyGatewaySavers(req: Request, messages: ChatMessage[]): {
 }
 
 // POST /x/v1/chat/completions — dispatch exclusively over x_gateway_keys
-xGatewayRouter.post('/chat/completions', xGatewayAuth, async (req: Request, res: Response) => {
+export async function handleXGatewayChat(req: Request, res: Response): Promise<void> {
   const startMs = Date.now();
   const body = (req.body && typeof req.body === 'object') ? req.body as Record<string, unknown> : {};
   const rawMessages = Array.isArray(body.messages) ? (body.messages as ChatMessage[]) : [];
@@ -161,6 +162,10 @@ xGatewayRouter.post('/chat/completions', xGatewayAuth, async (req: Request, res:
   res.setHeader('X-Output-Saver-Applied', appliedSavers.join(','));
   res.setHeader('X-Input-Tokens-Saved', '0');
 
+  const controller = new AbortController();
+  const onClose = () => { if (!res.writableEnded) controller.abort(); };
+  res.once('close', onClose);
+  try {
   await runInGatewayScope(scope, async () => {
     const { candidates, notFoundError } = resolveCandidateRoutes(requestedModel);
     if (notFoundError) {
@@ -181,6 +186,7 @@ xGatewayRouter.post('/chat/completions', xGatewayAuth, async (req: Request, res:
     }
 
     const options: CompletionOptions = {
+      signal: controller.signal,
       temperature: typeof body.temperature === 'number' ? body.temperature : undefined,
       max_tokens: typeof body.max_tokens === 'number' ? body.max_tokens : undefined,
       top_p: typeof body.top_p === 'number' ? body.top_p : undefined,
@@ -197,6 +203,7 @@ xGatewayRouter.post('/chat/completions', xGatewayAuth, async (req: Request, res:
     let lastError: unknown = null;
 
     for (const { account, modelId } of candidates) {
+      if (controller.signal.aborted) return;
       const provider = resolveXGatewayProvider(account.provider, account.base_url);
       if (!provider) continue;
 
@@ -212,7 +219,7 @@ xGatewayRouter.post('/chat/completions', xGatewayAuth, async (req: Request, res:
 
       if (!isStream) {
         try {
-          const completion = await withKeyProxy(effectiveProxy, () =>
+          const completion = await withQuotaTracking(account, modelId, effectiveProxy, () =>
             provider.chatCompletion(
               credential,
               messages,
@@ -250,7 +257,7 @@ xGatewayRouter.post('/chat/completions', xGatewayAuth, async (req: Request, res:
         }
       } else {
         try {
-          await withKeyProxy(effectiveProxy, async () => {
+          await withQuotaTracking(account, modelId, effectiveProxy, async () => {
             const stream = provider.streamChatCompletion(
               credential,
               messages,
@@ -258,32 +265,24 @@ xGatewayRouter.post('/chat/completions', xGatewayAuth, async (req: Request, res:
               options,
               { platform: account.platform, keyId: account.id, modelId },
             );
-            const iterator = stream[Symbol.asyncIterator]();
-            const first = await iterator.next();
-
-            res.setHeader('Content-Type', 'text/event-stream');
-            res.setHeader('Cache-Control', 'no-cache');
-            res.setHeader('Connection', 'keep-alive');
-            res.setHeader('X-Routed-Via', `${account.provider}/${modelId}`);
-
-            const ttfbMs = Date.now() - startMs;
+            let ttfbMs = 0;
             let promptTokens = estimatedPromptTokens;
             let completionTokens = 0;
-
-            if (!first.done && first.value) {
-              if (first.value.usage?.prompt_tokens) promptTokens = first.value.usage.prompt_tokens;
-              if (first.value.usage?.completion_tokens) completionTokens = first.value.usage.completion_tokens;
-              res.write(`data: ${JSON.stringify(first.value)}\n\n`);
+            for await (const chunk of stream) {
+              if (controller.signal.aborted) return;
+              if (!res.headersSent) {
+                res.setHeader('Content-Type', 'text/event-stream');
+                res.setHeader('Cache-Control', 'no-cache');
+                res.setHeader('X-Accel-Buffering', 'no');
+                res.setHeader('X-Routed-Via', `${account.provider}/${modelId}`);
+                ttfbMs = Date.now() - startMs;
+              }
+              if (chunk.usage?.prompt_tokens != null) promptTokens = chunk.usage.prompt_tokens;
+              if (chunk.usage?.completion_tokens != null) completionTokens = chunk.usage.completion_tokens;
+              res.write(`data: ${JSON.stringify(chunk)}\n\n`);
             }
-
-            while (true) {
-              const next = await iterator.next();
-              if (next.done) break;
-              if (next.value.usage?.prompt_tokens) promptTokens = next.value.usage.prompt_tokens;
-              if (next.value.usage?.completion_tokens) completionTokens = next.value.usage.completion_tokens;
-              res.write(`data: ${JSON.stringify(next.value)}\n\n`);
-            }
-
+            if (controller.signal.aborted) return;
+            if (!res.headersSent) throw new Error('Provider returned an empty stream.');
             res.write('data: [DONE]\n\n');
             res.end();
 
@@ -306,7 +305,9 @@ xGatewayRouter.post('/chat/completions', xGatewayAuth, async (req: Request, res:
           });
           return;
         } catch (err) {
+          if (controller.signal.aborted) return;
           if (res.headersSent) {
+            res.write(`data: ${JSON.stringify({ error: { message: sanitizeProviderErrorMessage(err instanceof Error ? err.message : 'Stream interrupted') } })}\n\n`);
             res.end();
             return;
           }
@@ -316,7 +317,7 @@ xGatewayRouter.post('/chat/completions', xGatewayAuth, async (req: Request, res:
       }
     }
 
-    const message = lastError instanceof Error ? lastError.message : 'All X Gateway provider accounts failed.';
+    const message = sanitizeProviderErrorMessage(lastError instanceof Error ? lastError.message : 'All X Gateway provider accounts failed.');
     const firstCandidate = candidates[0];
     if (firstCandidate) {
       logRequest(
@@ -338,10 +339,15 @@ xGatewayRouter.post('/chat/completions', xGatewayAuth, async (req: Request, res:
       error: { message, type: 'upstream_error' },
     });
   });
-});
+  } finally {
+    res.off('close', onClose);
+  }
+}
+
+xGatewayRouter.post('/chat/completions', xGatewayAuth, handleXGatewayChat);
 
 // GET /x/v1/models — list models from enabled X Gateway accounts and combos
-xGatewayRouter.get('/models', xGatewayAuth, (_req: Request, res: Response) => {
+xGatewayRouter.get('/models', xGatewayAuth, (req: Request, res: Response) => {
   res.setHeader('X-Gateway', 'x');
   const snapshot = getConfigSnapshot();
   const seen = new Set<string>();
@@ -371,8 +377,35 @@ xGatewayRouter.get('/models', xGatewayAuth, (_req: Request, res: Response) => {
     }
   }
 
+  // Content-negotiation for Anthropic SDK / Claude Code (`anthropic-version` header)
+  if (req.headers['anthropic-version']) {
+    const createdAt = '2026-01-01T00:00:00Z';
+    const anthropicModels = [
+      { type: 'model' as const, id: 'auto', display_name: 'X Gateway Auto', created_at: createdAt },
+      { type: 'model' as const, id: 'claude-sonnet-4-5-20250929', display_name: 'Claude Sonnet 4.5 (X Gateway)', created_at: createdAt },
+      { type: 'model' as const, id: 'claude-opus-4-6', display_name: 'Claude Opus 4.6 (X Gateway)', created_at: createdAt },
+      { type: 'model' as const, id: 'claude-haiku-4-5-20251001', display_name: 'Claude Haiku 4.5 (X Gateway)', created_at: createdAt },
+      ...data.map(m => ({
+        type: 'model' as const,
+        id: m.id,
+        display_name: m.id,
+        created_at: createdAt,
+      })),
+    ];
+    res.json({
+      data: anthropicModels,
+      has_more: false,
+      first_id: anthropicModels[0]?.id ?? null,
+      last_id: anthropicModels[anthropicModels.length - 1]?.id ?? null,
+    });
+    return;
+  }
+
   res.json({ object: 'list', data });
 });
+
+// Mount Anthropic Messages, OpenAI Responses, Legacy Completions, Embeddings, Image & Audio routes
+xGatewayRouter.use(xGatewayProtocolsRouter);
 
 // Catch-all: any other path under /x/v1 returns JSON 404
 xGatewayRouter.use((_req: Request, res: Response) => {

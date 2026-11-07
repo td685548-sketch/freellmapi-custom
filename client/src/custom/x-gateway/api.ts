@@ -2,6 +2,7 @@ import { useQuery, type QueryClient } from '@tanstack/react-query'
 import { apiFetch } from '@/lib/api'
 import { useSessionRevision } from '../session-state'
 import type {
+  ProviderAccountAuthMethod,
   ProviderAccountsResponse,
   ProviderAccountAuthStartResponse,
   ProviderAccountAuthResult,
@@ -30,11 +31,11 @@ export const accountsApi = {
     apiFetch<ProviderAccountAuthResult>(`${base}/auth/${encodeURIComponent(attemptId)}/complete`, { method: 'POST', body: JSON.stringify({ code }) }),
   poll: (attemptId: string) => apiFetch<ProviderAccountPollResponse>(`${base}/auth/${encodeURIComponent(attemptId)}/poll`, { method: 'POST' }),
   cancel: (attemptId: string) => apiFetch<void>(`${base}/auth/${encodeURIComponent(attemptId)}`, { method: 'DELETE' }),
-  edit: (id: number, body: { label?: string; enabled?: boolean; proxyUrl?: string }) =>
+  edit: (id: number, body: { label?: string; enabled?: boolean; proxyUrl?: string; proxyPoolId?: number | null }) =>
     apiFetch<void>(`${base}/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   remove: (id: number) => apiFetch<void>(`${base}/${id}`, { method: 'DELETE' }),
   test: (id: number) => apiFetch<ProviderAccountTestResponse>(`${base}/${id}/test`, { method: 'POST', body: '{}' }),
-  addKey: (provider: string, key: string, label: string, baseUrl?: string, proxyUrl?: string) =>
+  addKey: (provider: string, key: string, label: string, baseUrl?: string, proxyUrl?: string, authMethod?: ProviderAccountAuthMethod, proxyPoolId?: number | null) =>
     apiFetch<{ id: number }>(base, {
       method: 'POST',
       body: JSON.stringify({
@@ -43,6 +44,8 @@ export const accountsApi = {
         label,
         ...(baseUrl ? { baseUrl } : {}),
         ...(proxyUrl ? { proxyUrl } : {}),
+        ...(authMethod ? { authMethod } : {}),
+        ...(proxyPoolId !== undefined ? { proxyPoolId } : {}),
       }),
     }),
 }

@@ -1,0 +1,3 @@
+# Playground API
+GET /api/x-gateway/playground/models: session + use_x_gateway, returns { enabled, models: [{id,name,provider}] }. Includes auto, configured combos and usable provider models; no credentials.
+POST /api/x-gateway/playground/chat: same permission; gateway must be enabled. Body: model, messages, temperature [0,2], max_tokens [1,32768]. Server sets stream=true. Images: inline base64 PNG/JPEG/WebP/GIF only, four per turn, 1 MB each; body stays within existing 10 MB limit. Response: OpenAI SSE, X-Routed-Via header. 400 invalid, 401 unauthenticated, 403 unauthorized, 404 disabled/missing combo, 503 no accounts, 502 provider failure. Provider errors sanitized.

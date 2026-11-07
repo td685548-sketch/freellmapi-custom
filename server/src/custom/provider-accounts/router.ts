@@ -35,6 +35,7 @@ const createSchema = z.object({
   label: labelSchema.optional(),
   baseUrl: z.string().trim().max(2048).optional(),
   proxyUrl: z.string().trim().max(KEY_PROXY_URL_MAX).optional(),
+  proxyPoolId: z.number().int().positive().safe().nullable().optional(),
   authMethod: z.enum(['api_key', 'oauth_pkce', 'device_code', 'cookie']).optional(),
   models: z.array(z.object({
     id: z.string().trim().min(1).max(200),
@@ -47,6 +48,7 @@ const updateSchema = z.object({
   label: labelSchema.optional(),
   enabled: z.boolean().optional(),
   proxyUrl: z.string().trim().max(KEY_PROXY_URL_MAX).optional(),
+  proxyPoolId: z.number().int().positive().safe().nullable().optional(),
   monthlyRequestCap: z.number().int().min(0).safe().optional(),
   monthlyTokenCap: z.number().int().min(0).safe().optional(),
 }).strict().refine(b => Object.keys(b).length > 0);
@@ -105,6 +107,7 @@ providerAccountsRouter.post('/', requirePermission('add_keys'), (req: SessionReq
     label: body.label,
     baseUrl: body.baseUrl,
     proxyUrl: body.proxyUrl,
+    proxyPoolId: body.proxyPoolId,
     authMethod: body.authMethod,
     models: body.models?.map(m => ({ id: m.id, name: m.name || m.id })),
     userId: req.user?.userId ?? null,

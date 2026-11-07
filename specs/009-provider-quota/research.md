@@ -1,0 +1,2 @@
+# Research
+9router/README.md defines Subscription → Cheap → Free. Reference adapters: open-sse/services/usage/{claude,codex,github,groq,deepseek}. Unknown is not unlimited. Preserve reset provenance and never infer provider limits from local counts. Use official fixed endpoints only when the account has no custom base URL. No background inference/pings or paid reset calls. Header observations use isolated X account IDs rather than upstream key IDs to avoid collisions.

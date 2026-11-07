@@ -64,8 +64,8 @@ export function AccountLoadState({ error, retry }: { error?: boolean; retry?: ()
 function ProviderCard({ provider }: { provider: AccountProvider }) {
   const s = useXStrings()
   const enabled = provider.accounts.filter(account => account.enabled).length
-  const login = provider.authMethods.some(method => method === 'oauth_pkce' || method === 'device_code')
-  const isCookie = provider.authMethods.includes('cookie') && !login
+  const login = provider.category === 'oauth' || provider.authMethods.some(method => method === 'oauth_pkce' || method === 'device_code')
+  const isCookie = (provider.category === 'webCookie' || provider.authMethods.includes('cookie')) && !login
   return <Link to={`/x/providers/${encodeURIComponent(provider.id)}`} className="x-provider-card">
     <div className="x-card-top"><ProviderMark id={provider.id} name={provider.name} /><div className="x-card-badges">{provider.hasMainDbKey && <span className="x-badge x-main-db-badge">{s.inMainDb}</span>}<span className={`x-badge ${provider.accounts.length ? 'x-green' : ''}`}>{provider.accounts.length ? <><span className="x-dot" />{s.connected}</> : s.available}</span></div></div>
     <h3>{provider.name}<ArrowUpRight size={16} /></h3>

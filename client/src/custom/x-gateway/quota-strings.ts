@@ -1,0 +1,36 @@
+import { useI18n } from '@/i18n';
+const en = {
+  title: 'Quota', help: 'Provider-reported allowance and reset windows, separate from local usage.',
+  refresh: 'Refresh quota', refreshAll: 'Refresh supported accounts', refreshing: 'Refreshing…', retry: 'Try again',
+  subscription: 'Subscription', cheap: 'Cheap', free: 'Free', tiers: 'Auto fallback',
+  tiersHelp: 'Auto tries Subscription → Cheap → Free. Fresh, exhausted account-wide windows are skipped. Combos keep their configured order.',
+  tierNote: 'Tiers are routing preferences, not a pricing guarantee. Administrators can change each account’s tier.',
+  all: 'All providers', search: 'Search accounts…', unknown: 'Unknown', remaining: 'Remaining', limit: 'Limit',
+  resetIn: 'Resets in', awaiting: 'Reset time passed — refresh to confirm', noReset: 'Reset not reported',
+  stale: 'Stale / needs refresh', live: 'Recent observation', unavailable: 'No quota endpoint for this provider or custom URL. Inference headers can still supply observations.',
+  never: 'Not checked yet', checked: 'Last checked', observed: 'Last observed', api: 'Provider API', header: 'Response headers',
+  local: 'Local monthly usage / configured cap', localHelp: 'These counters are internal limits, not the provider’s remaining quota.',
+  requests: 'Requests', tokens: 'Tokens', noCap: 'No local cap', account: 'Account', tier: 'Routing tier',
+  empty: 'No connected accounts yet.', connect: 'Connect providers', disabled: 'Disabled',
+  error: 'Could not load quota.', refreshError: 'Could not refresh quota.', saveError: 'Could not save routing tier.',
+  auto: 'Auto refresh supported accounts every minute', noWindows: 'Provider quota not reported yet.',
+  readOnly: 'Viewing quota only', modelOnly: 'Model-specific / optional pool',
+};
+const vi: Record<keyof typeof en, string> = {
+  title: 'Quota', help: 'Hạn mức và thời điểm reset do provider báo, tách biệt với mức sử dụng nội bộ.',
+  refresh: 'Cập nhật quota', refreshAll: 'Cập nhật tài khoản hỗ trợ', refreshing: 'Đang cập nhật…', retry: 'Thử lại',
+  subscription: 'Gói đăng ký', cheap: 'Chi phí thấp', free: 'Miễn phí', tiers: 'Fallback tự động',
+  tiersHelp: 'Auto thử Gói đăng ký → Chi phí thấp → Miễn phí. Bỏ qua tài khoản có quota toàn tài khoản vừa xác nhận cạn. Combo giữ thứ tự đã cấu hình.',
+  tierNote: 'Tầng là ưu tiên định tuyến, không phải cam kết giá. Quản trị viên có thể đổi tầng của từng tài khoản.',
+  all: 'Tất cả provider', search: 'Tìm tài khoản…', unknown: 'Chưa xác định', remaining: 'Còn lại', limit: 'Hạn mức',
+  resetIn: 'Reset sau', awaiting: 'Đã đến giờ reset — cập nhật để xác nhận', noReset: 'Provider chưa báo thời gian reset',
+  stale: 'Dữ liệu cũ / cần cập nhật', live: 'Dữ liệu mới ghi nhận', unavailable: 'Provider hoặc URL tùy chỉnh chưa có API quota. Header khi gọi model vẫn có thể cung cấp dữ liệu.',
+  never: 'Chưa kiểm tra', checked: 'Kiểm tra gần nhất', observed: 'Ghi nhận gần nhất', api: 'API provider', header: 'Header phản hồi',
+  local: 'Sử dụng tháng này / hạn mức nội bộ', localHelp: 'Đây là giới hạn nội bộ, không phải quota còn lại của provider.',
+  requests: 'Request', tokens: 'Token', noCap: 'Không đặt giới hạn', account: 'Tài khoản', tier: 'Tầng định tuyến',
+  empty: 'Chưa có tài khoản kết nối.', connect: 'Kết nối provider', disabled: 'Đang tắt',
+  error: 'Không tải được quota.', refreshError: 'Không cập nhật được quota.', saveError: 'Không lưu được tầng định tuyến.',
+  auto: 'Tự cập nhật tài khoản hỗ trợ mỗi phút', noWindows: 'Chưa ghi nhận quota từ provider.',
+  readOnly: 'Chỉ xem quota', modelOnly: 'Hạn mức riêng model / nhóm tùy chọn',
+};
+export const useQuotaStrings = () => useI18n().locale === 'vi' ? vi : en;
