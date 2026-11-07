@@ -114,4 +114,121 @@ describe('ChatGPT Web image generation (9Router picture_v2 parity)', () => {
       prompt: 'a red cube',
     })).rejects.toMatchObject({ status: 401 });
   });
+
+  it('ignores file_upload placeholder in SSE and polls conversation for real file id', async () => {
+    vi.mocked(proxyFetch).mockImplementation(async (url, init) => {
+      const target = String(url);
+      const method = init?.method ?? 'GET';
+      if (target.endsWith('/api/auth/session')) return json({ accessToken: 'access-token' });
+      if (target.endsWith('/sentinel/chat-requirements/prepare')) return json({ prepare_token: 'prepare-token' });
+      if (target.endsWith('/sentinel/chat-requirements')) return json({ token: 'requirements-token' });
+      if (target.endsWith('/backend-api/f/conversation/prepare')) return json({ conduit_token: 'conduit-token' });
+      if (target.endsWith('/backend-api/f/conversation') && method === 'POST') {
+        const sse = [
+          'data: {"conversation_id":"22222222-2222-2222-2222-222222222222"}',
+          'data: {"message":{"content":{"parts":["file-service://file_upload"]}}}',
+          '',
+        ].join('\n');
+        return new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+      }
+      if (target.includes('/backend-api/conversation/22222222-2222-2222-2222-222222222222')) {
+        return json({
+          mapping: {
+            node1: {
+              message: {
+                author: { role: 'assistant' },
+                content: { parts: ['file-service://file-real1234567890123456'] },
+              },
+            },
+          },
+        });
+      }
+      if (target.endsWith('/backend-api/files/file-real1234567890123456/download')) {
+        return json({ download_url: 'https://files.example.test/real.png' });
+      }
+      if (target === 'https://files.example.test/real.png') {
+        return new Response(PNG, { status: 200, headers: { 'content-type': 'image/png' } });
+      }
+      return new Response('not found', { status: 404 });
+    });
+
+    const result = await generateChatGptWebImages({
+      credential: '__Secure-next-auth.session-token=valid',
+      prompt: 'a blue sphere',
+      n: 1,
+    });
+
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]?.b64_json).toBe(PNG.toString('base64'));
+  }, 15_000);
+
+  it('handles 307 redirect from files download endpoint', async () => {
+    vi.mocked(proxyFetch).mockImplementation(async (url, init) => {
+      const target = String(url);
+      const method = init?.method ?? 'GET';
+      if (target.endsWith('/api/auth/session')) return json({ accessToken: 'access-token' });
+      if (target.endsWith('/sentinel/chat-requirements/prepare')) return json({ prepare_token: 'prepare-token' });
+      if (target.endsWith('/sentinel/chat-requirements')) return json({ token: 'requirements-token' });
+      if (target.endsWith('/backend-api/f/conversation/prepare')) return json({ conduit_token: 'conduit-token' });
+      if (target.endsWith('/backend-api/f/conversation') && method === 'POST') {
+        const sse = [
+          'data: {"conversation_id":"33333333-3333-3333-3333-333333333333"}',
+          'data: {"message":{"content":{"parts":["file-service://file-redirect12345678"]}}}',
+          '',
+        ].join('\n');
+        return new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+      }
+      if (target.endsWith('/backend-api/files/file-redirect12345678/download')) {
+        return new Response(null, {
+          status: 307,
+          headers: { location: 'https://files.oaiusercontent.com/file-redirect12345678.png' },
+        });
+      }
+      if (target === 'https://files.oaiusercontent.com/file-redirect12345678.png') {
+        return new Response(PNG, { status: 200, headers: { 'content-type': 'image/png' } });
+      }
+      return new Response('not found', { status: 404 });
+    });
+
+    const result = await generateChatGptWebImages({
+      credential: '__Secure-next-auth.session-token=valid',
+      prompt: 'a yellow triangle',
+      n: 1,
+    });
+
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]?.b64_json).toBe(PNG.toString('base64'));
+  }, 15_000);
+
+  it('downloads directly from oaiusercontent CDN url discovered in conversation stream', async () => {
+    vi.mocked(proxyFetch).mockImplementation(async (url, init) => {
+      const target = String(url);
+      const method = init?.method ?? 'GET';
+      if (target.endsWith('/api/auth/session')) return json({ accessToken: 'access-token' });
+      if (target.endsWith('/sentinel/chat-requirements/prepare')) return json({ prepare_token: 'prepare-token' });
+      if (target.endsWith('/sentinel/chat-requirements')) return json({ token: 'requirements-token' });
+      if (target.endsWith('/backend-api/f/conversation/prepare')) return json({ conduit_token: 'conduit-token' });
+      if (target.endsWith('/backend-api/f/conversation') && method === 'POST') {
+        const sse = [
+          'data: {"conversation_id":"44444444-4444-4444-4444-444444444444"}',
+          'data: {"message":{"content":{"parts":["Check image https:\\/\\/files.oaiusercontent.com\\/file-direct123456789.png"]}}}',
+          '',
+        ].join('\n');
+        return new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+      }
+      if (target === 'https://files.oaiusercontent.com/file-direct123456789.png') {
+        return new Response(PNG, { status: 200, headers: { 'content-type': 'image/png' } });
+      }
+      return new Response('not found', { status: 404 });
+    });
+
+    const result = await generateChatGptWebImages({
+      credential: '__Secure-next-auth.session-token=valid',
+      prompt: 'a green star',
+      n: 1,
+    });
+
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]?.b64_json).toBe(PNG.toString('base64'));
+  }, 15_000);
 });
