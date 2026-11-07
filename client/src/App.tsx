@@ -103,6 +103,8 @@ const modelItems = [
 const analyticsItems = [
   { to: '/analytics', labelKey: 'nav.analytics' },
   { to: '/logs', labelKey: 'nav.logs' },
+  { to: '/usage', labelKey: 'nav.usage', customLabel: 'Usage' },
+  { to: '/audit', labelKey: 'nav.audit', customLabel: 'History' },
 ]
 
 // Nav entries rendered as a split control: the label still navigates, and a
@@ -111,7 +113,7 @@ const analyticsItems = [
 // special cases.
 const navMenus: Record<
   string,
-  { ariaKey: string; items: { to: string; labelKey: string }[]; isActive: (pathname: string) => boolean }
+  { ariaKey: string; items: { to: string; labelKey: string; customLabel?: string }[]; isActive: (pathname: string) => boolean }
 > = {
   '/models': {
     ariaKey: 'nav.modelsMenu',
@@ -121,7 +123,7 @@ const navMenus: Record<
   '/analytics': {
     ariaKey: 'nav.analyticsMenu',
     items: analyticsItems,
-    isActive: (pathname) => pathname.startsWith('/analytics') || pathname.startsWith('/logs'),
+    isActive: (pathname) => pathname.startsWith('/analytics') || pathname.startsWith('/logs') || pathname.startsWith('/usage') || pathname.startsWith('/audit'),
   },
 }
 
@@ -275,6 +277,10 @@ function Navbar() {
   const canViewUsage = typeof hasPermission === 'function' ? group('view_usage') : isAdmin
   const canManageKeys = typeof hasPermission === 'function' ? (group('manage_keys') || group('manage_backups') || group('manage_settings')) : isAdmin
 
+  const analyticsFolded = Boolean(group('view_logs')) && hasPermission('view_analytics')
+  const analyticsMenuEntries = (items: typeof analyticsItems) => items.filter((e) =>
+    e.to === '/usage' ? canViewUsage : e.to === '/audit' ? hasPermission('view_audit_log') : true)
+
   const visibleNavItems: Array<{ to: string; labelKey: string; customLabel?: string }> = [
     ...navItems.filter((i) => {
       if (i.to === '/analytics' && !group('view_logs')) return false
@@ -286,8 +292,10 @@ function Navbar() {
     }).map(i => i.to === '/analytics' && !hasPermission('view_analytics') ? { ...i, to: '/logs', labelKey: 'nav.logs' } : i),
     ...(canManageInvites ? [{ to: '/invites', labelKey: 'nav.invites', customLabel: 'Invites' }] : []),
     ...(canManageUsers ? [{ to: '/users', labelKey: 'nav.users', customLabel: 'Users' }] : []),
-    ...(canViewUsage ? [{ to: '/usage', labelKey: 'nav.usage', customLabel: 'Usage' }] : []),
-    ...(hasPermission('view_audit_log') ? [{ to: '/audit', labelKey: 'nav.audit', customLabel: 'History' }] : []),
+    // Usage and History live in the Analytics dropdown; keep them as top-level
+    // tabs only when the Analytics tab itself is hidden for this account.
+    ...(!analyticsFolded && canViewUsage ? [{ to: '/usage', labelKey: 'nav.usage', customLabel: 'Usage' }] : []),
+    ...(!analyticsFolded && hasPermission('view_audit_log') ? [{ to: '/audit', labelKey: 'nav.audit', customLabel: 'History' }] : []),
     ...(hasPermission('use_x_gateway') ? [{ to: '/x/providers', labelKey: 'nav.xGateway', customLabel: 'X Gateway' }] : []),
   ]
 
@@ -326,9 +334,9 @@ function Navbar() {
                       <ChevronDown className="size-3.5" />
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start" className="w-44">
-                      {menu.items.map((entry) => (
+                      {(item.to === '/analytics' ? analyticsMenuEntries(menu.items) : menu.items).map((entry) => (
                         <DropdownMenuItem key={entry.to} onClick={() => navigate(entry.to)}>
-                          {t(entry.labelKey)}
+                          {entry.customLabel || t(entry.labelKey)}
                         </DropdownMenuItem>
                       ))}
                     </DropdownMenuContent>
@@ -402,9 +410,9 @@ function Navbar() {
                           {item.customLabel || t(item.labelKey)}
                         </DropdownMenuSubTrigger>
                         <DropdownMenuSubContent>
-                          {menu.items.map((entry) => (
+                          {(item.to === '/analytics' ? analyticsMenuEntries(menu.items) : menu.items).map((entry) => (
                             <DropdownMenuItem key={entry.to} onClick={() => navigate(entry.to)}>
-                              {t(entry.labelKey)}
+                              {entry.customLabel || t(entry.labelKey)}
                             </DropdownMenuItem>
                           ))}
                         </DropdownMenuSubContent>
