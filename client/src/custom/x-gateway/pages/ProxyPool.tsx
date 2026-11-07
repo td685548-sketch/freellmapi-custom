@@ -55,22 +55,32 @@ export default function ProxyPool() {
       <div className="x-mgmt-actions"><button className="x-button x-primary" disabled={save.isPending || !draft.name.trim() || (!draft.id && !draft.proxyUrl.trim())}>{save.isPending ? s.saving : s.save}</button><button type="button" className="x-button" onClick={() => setDraft(null)}>{s.cancel}</button></div>
     </form>}
     {query.data && !query.data.entries.length && !draft && <div className="x-empty"><p>{s.noEntries}</p></div>}
-    <div className="x-mgmt-list">{query.data?.entries.map(entry => <section className="x-panel x-mgmt-card" key={entry.id}>
-      <header><h2>{entry.name}</h2><div className="x-mgmt-actions">
-        <span className={`x-badge ${entry.enabled ? 'x-green' : ''}`}><span className="x-dot" />{entry.enabled ? s.enabled : s.disabled}</span>
-        {canEdit && <>
-          <button className="x-switch" role="switch" aria-checked={entry.enabled} aria-label={`${entry.enabled ? s.disabled : s.enabled}: ${entry.name}`} disabled={toggle.isPending} onClick={() => toggle.mutate(entry)}><span /></button>
-          <button className="x-button" aria-label={`${s.edit}: ${entry.name}`} onClick={() => { save.reset(); setDraft({ id: entry.id, name: entry.name, proxyUrl: '' }) }}><Pencil size={15} /></button>
-          <button className="x-button" aria-label={`${s.remove}: ${entry.name}`} disabled={remove.isPending} onClick={() => { if (window.confirm(s.deleteConfirm)) remove.mutate(entry.id) }}><Trash2 size={15} /></button>
-        </>}
-      </div></header>
-      <p className="x-caption"><code>{entry.proxyUrl}</code></p>
-      <p className="x-caption">{entry.boundAccounts} {s.boundAccounts}</p>
-      {canEdit && <div className="x-mgmt-actions">
+    <div className="x-mgmt-list">{query.data?.entries.map(entry => <section className="x-panel x-mgmt-card" key={entry.id} style={{ display: 'flex', flexDirection: 'column' }}>
+      <header style={{ alignItems: 'flex-start', gap: 12 }}>
+        <div>
+          <h2 style={{ fontSize: '15px', fontWeight: 600, margin: 0, wordBreak: 'break-word' }}>{entry.name}</h2>
+          <p className="x-caption" style={{ marginTop: 3 }}>{entry.boundAccounts} {s.boundAccounts}</p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          <span className={`x-badge ${entry.enabled ? 'x-green' : ''}`}><span className="x-dot" />{entry.enabled ? s.enabled : s.disabled}</span>
+          {canEdit && <button className="x-switch" role="switch" aria-checked={entry.enabled} aria-label={`${entry.enabled ? s.disabled : s.enabled}: ${entry.name}`} disabled={toggle.isPending} onClick={() => toggle.mutate(entry)}><span /></button>}
+        </div>
+      </header>
+
+      <div style={{ margin: '12px 0 8px', padding: '8px 10px', background: 'var(--x-alt)', border: '1px solid var(--x-border)', borderRadius: '7px', fontSize: '12px', fontFamily: 'monospace', overflowWrap: 'anywhere', color: 'var(--x-text)' }}>
+        <code>{entry.proxyUrl}</code>
+      </div>
+
+      {testResult && testResult.id === entry.id && <div style={{ margin: '6px 0 10px', fontSize: '12px' }} className={testResult.ok ? 'x-test-ok' : 'x-error'} role="status">{testResult.ok ? `${s.testOk} · ${testResult.latencyMs} ms` : testResult.message ?? s.testFailed}</div>}
+      {test.isError && test.variables === entry.id && <p className="x-error" role="alert" style={{ margin: '6px 0 10px' }}>{test.error.message}</p>}
+
+      {canEdit && <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 'auto', paddingTop: 12, borderTop: '1px solid var(--x-border)' }}>
         <button className="x-button x-small" disabled={test.isPending} onClick={() => { setTestResult(null); test.mutate(entry.id) }}><ShieldCheck size={14} />{test.isPending && test.variables === entry.id ? s.testing : s.test}</button>
-        {testResult && testResult.id === entry.id && <span className={testResult.ok ? 'x-test-ok' : 'x-error'} role="status">{testResult.ok ? `${s.testOk} · ${testResult.latencyMs} ms` : testResult.message ?? s.testFailed}</span>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <button type="button" className="x-icon-button" aria-label={`${s.edit}: ${entry.name}`} title={s.edit} onClick={() => { save.reset(); setDraft({ id: entry.id, name: entry.name, proxyUrl: '' }) }}><Pencil size={15} /></button>
+          <button type="button" className="x-icon-button x-danger" aria-label={`${s.remove}: ${entry.name}`} title={s.remove} disabled={remove.isPending} onClick={() => { if (window.confirm(s.deleteConfirm)) remove.mutate(entry.id) }}><Trash2 size={15} /></button>
+        </div>
       </div>}
-      {test.isError && test.variables === entry.id && <p className="x-error" role="alert">{test.error.message}</p>}
     </section>)}</div>
   </>
 }
