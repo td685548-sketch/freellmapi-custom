@@ -48,11 +48,15 @@ export function userInferenceGate(req: Request, res: Response, next: NextFunctio
 }
 
 function gate(token: string, req: Request, res: Response, next: NextFunction): void {
-  const isXGateway = req.originalUrl?.startsWith('/x/v1') || req.baseUrl === '/x/v1';
+  const isXGateway =
+    req.originalUrl?.startsWith('/x/') ||
+    req.baseUrl?.startsWith('/x') ||
+    req.originalUrl?.startsWith('/v1beta') ||
+    req.baseUrl === '/v1beta';
   if (isXGatewayClientKey(token) && !isXGateway) {
     res.status(401).json({
       error: {
-        message: 'X Gateway API keys (sk-xgw-...) are scoped exclusively to /x/v1 endpoints.',
+        message: 'X Gateway API keys (sk-xgw-...) are scoped exclusively to /x/v1 and /v1beta endpoints.',
         type: 'invalid_request_error',
         code: 'invalid_api_key',
       },

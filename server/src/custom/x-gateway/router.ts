@@ -23,6 +23,8 @@ import {
   type AccountRow,
 } from '../provider-accounts/store.js';
 import { xGatewayAuth } from './auth.js';
+import { isModelAllowedForKey, type ValidatedXGatewayClientKey } from './client-keys.js';
+import { augmentCandidatesWithCapacityAdapter } from './capacity-adapter.js';
 import { getConfigSnapshot } from './config.js';
 import { runInGatewayScope } from './context.js';
 import { xGatewayProtocolsRouter } from './protocols.js';
@@ -170,6 +172,17 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
   }
 
   const requestedModel = typeof body.model === 'string' ? body.model : 'auto';
+  const authUser = (req as Request & { user?: ValidatedXGatewayClientKey }).user;
+  if (authUser?.access?.restricted && !isModelAllowedForKey(authUser.access, requestedModel)) {
+    res.status(403).json({
+      error: {
+        message: `Model or combo '${requestedModel}' is not allowed for this API key.`,
+        type: 'permission_error',
+        code: 'model_not_allowed',
+      },
+    });
+    return;
+  }
   const isStream = body.stream === true;
   const { messages, appliedSavers } = applyGatewaySavers(req, rawMessages);
 
@@ -189,13 +202,14 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
   res.once('close', onClose);
   try {
   await runInGatewayScope(scope, async () => {
-    const { candidates, notFoundError } = resolveCandidateRoutes(requestedModel);
+    const { candidates: rawCandidates, notFoundError } = resolveCandidateRoutes(requestedModel);
     if (notFoundError) {
       res.status(404).json({
         error: { message: notFoundError, type: 'invalid_request_error', code: 'model_not_found' },
       });
       return;
     }
+    const candidates = augmentCandidatesWithCapacityAdapter(rawCandidates, messages);
     if (candidates.length === 0) {
       res.status(503).json({
         error: {

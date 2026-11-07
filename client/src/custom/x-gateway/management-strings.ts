@@ -14,6 +14,16 @@ const en = {
   logsHelp: 'Recent requests that went through X Gateway, plus an hourly breakdown.',
   last24h: 'Last 24 hours', hourly: 'Hourly usage', requests: 'Requests', errors: 'Errors',
   time: 'Time', status: 'Status', all: 'All', success: 'Success', failed: 'Failed', noLogs: 'No requests yet', refresh: 'Refresh',
+  capacityAdapters: 'Capacity Adapters (Multimodal Fallback)',
+  capacityHelp: 'Global fallback pools per input modality. When a text-only target model receives an image or audio, traffic seamlessly falls back to these models.',
+  visionPool: 'Vision Fallback Pool (Images)',
+  audioPool: 'Audio Fallback Pool (Audio Input)',
+  enablePool: 'Enable fallback pool',
+  roundRobinStrategy: 'Rotate (Round Robin)',
+  fallbackStrategy: 'Try in order (Fallback)',
+  noPoolModels: 'No models configured in pool.',
+  addModelToPool: 'Add model (e.g. oc/mimo-v2.6-flash-free, gpt-4o)',
+  poolSaved: 'Capacity adapter settings saved',
 } as const
 
 const vi: Record<keyof typeof en, string> = {
@@ -30,6 +40,16 @@ const vi: Record<keyof typeof en, string> = {
   logsHelp: 'Các request gần đây đi qua X Gateway và thống kê theo giờ.',
   last24h: '24 giờ qua', hourly: 'Sử dụng theo giờ', requests: 'Request', errors: 'Lỗi',
   time: 'Thời gian', status: 'Trạng thái', all: 'Tất cả', success: 'Thành công', failed: 'Thất bại', noLogs: 'Chưa có request', refresh: 'Làm mới',
+  capacityAdapters: 'Capacity Adapters (Dự phòng đa phương tiện)',
+  capacityHelp: 'Nhóm model dự phòng theo modality đầu vào. Khi prompt có ảnh hoặc audio gửi tới model thuần text, Gateway tự động chuyển tiếp sang nhóm model này.',
+  visionPool: 'Nhóm dự phòng Vision (Hình ảnh)',
+  audioPool: 'Nhóm dự phòng Audio (Âm thanh)',
+  enablePool: 'Kích hoạt nhóm dự phòng',
+  roundRobinStrategy: 'Xoay vòng (Round Robin)',
+  fallbackStrategy: 'Thử theo thứ tự (Fallback)',
+  noPoolModels: 'Chưa có model trong nhóm.',
+  addModelToPool: 'Thêm model (vd: oc/mimo-v2.6-flash-free, gpt-4o)',
+  poolSaved: 'Đã lưu cấu hình Capacity Adapter',
 }
 
 export function useMgmtStrings() {
