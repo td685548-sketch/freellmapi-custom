@@ -6,6 +6,7 @@ import { wrapTursoDatabase } from '../../db/turso.js';
 import { encrypt } from '../../lib/crypto.js';
 import { createSession, createUser } from '../../services/auth.js';
 import { setKeyCacheTestOverride } from '../../services/key-cache.js';
+import { clearAllCooldowns } from '../../services/ratelimit.js';
 import { setUserPermissions } from '../../services/users.js';
 import { normalizeConversationId, pruneConversations, resetConversationPruning } from '../../services/profile-conversations.js';
 import { replyText } from '../../custom/conversation-inject.js';
@@ -134,6 +135,8 @@ describe('client key stored conversations', () => {
   afterAll(() => { server?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); setKeyCacheTestOverride(null); });
   afterEach(async () => {
     failUpstream = false;
+    // The upstream-failure case benches models; later cases must start healthy.
+    clearAllCooldowns();
     getDb().prepare('DELETE FROM custom_conversation_messages').run();
     getDb().prepare('DELETE FROM custom_conversations').run();
     await settings({ enabled: false, ttlHours: 168, maxMessages: 20, maxChars: 12000, summarize: false });
