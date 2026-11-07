@@ -98,6 +98,19 @@ describe('Granular permissions and cache preferences', () => {
     expect(getDb().prepare("SELECT value FROM settings WHERE key = 'response_cache_enabled'").get()).toBeUndefined();
   }, 20000);
 
+  it('lets the token budget card be read with its own permission, or with View analytics', async () => {
+    for (const path of ['/api/fallback/token-usage', '/api/fallback/quota-forecast']) {
+      grant(['view_server_logs']);
+      expect((await hit(path)).status, `view_server_logs must not unlock ${path}`).toBe(403);
+      grant(['view_token_budget']);
+      expect((await hit(path)).status, `view_token_budget on ${path}`).not.toBe(403);
+      grant(['view_analytics']);
+      expect((await hit(path)).status, `view_analytics on ${path}`).not.toBe(403);
+    }
+    grant(['view_token_budget']);
+    expect((await hit('/api/analytics/provider-tiers')).status).toBe(403);
+  });
+
   it('lets add-only submit new-key validation without listing other keys', async () => {
     grant(['add_keys']);
     expect((await hit('/api/keys', 'POST', {})).status).toBe(400);
@@ -189,6 +202,8 @@ describe('Granular permissions and cache preferences', () => {
         ['manage_x_gateway', 'GET', '/api/x-gateway/usage', 'view_x_usage'],
         ['manage_x_gateway', 'POST', '/api/x-gateway/test', 'use_x_gateway'],
         ['view_logs', 'GET', '/api/audit', 'view_audit_log'],
+        ['view_logs', 'GET', '/api/fallback/token-usage', 'view_token_budget'],
+        ['view_logs', 'GET', '/api/fallback/quota-forecast', 'view_token_budget'],
       ] as const).map(([parent, method, path, permission]) => {
         expect(permissionForAction(parent, method, path)).toBe(permission);
         return permission;
