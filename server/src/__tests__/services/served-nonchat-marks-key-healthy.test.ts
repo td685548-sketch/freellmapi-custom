@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import dns from 'node:dns';
 import { initDb, getDb } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
 import { clearAllCooldowns } from '../../services/ratelimit.js';
@@ -47,6 +48,9 @@ function mockFetch(handler: (url: string, init: RequestInit) => Response) {
 
 describe('a served non-chat request marks its key as working (#1493, #1612)', () => {
   beforeEach(() => {
+    // Custom-provider URL checks resolve DNS before reaching the HTTP mock.
+    // Keep this health-state suite independent of the runner's DNS latency.
+    vi.spyOn(dns.promises, 'lookup').mockResolvedValue([{ address: '203.0.113.10', family: 4 }]);
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     initDb(':memory:');
     clearAllCooldowns(Number.MAX_SAFE_INTEGER);
@@ -75,9 +79,10 @@ describe('a served non-chat request marks its key as working (#1493, #1612)', ()
     const keyId = addKey('custom', 'unknown', 'https://embeddings.example/v1');
     getDb().prepare(`INSERT INTO embedding_models (family, platform, model_id, display_name, dimensions, priority, enabled, quota_label, key_id)
       VALUES ('probe-embed', 'custom', 'probe-embed', 'Probe embedding', 2, 1, 1, '', ?)`).run(keyId);
-    mockFetch(() => new Response('boom', { status: 500 }));
+    const fetch = mockFetch(() => new Response('boom', { status: 500 }));
 
     await expect(runEmbeddings('probe-embed', ['hello'])).rejects.toThrow();
+    expect(fetch).toHaveBeenCalledOnce();
     expect(keyState(keyId)).toEqual({ status: 'unknown', last_healthy_at: null });
   });
 
