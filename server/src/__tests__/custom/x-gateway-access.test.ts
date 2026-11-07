@@ -21,11 +21,11 @@ describe('X Gateway Access Control (US1 / Phase 3)', () => {
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     initDb(':memory:');
 
-    // Seed a provider key so chat completions can succeed
+    // Seed a dedicated X Gateway provider key so chat completions can succeed
     const key = encrypt('gsk_access_test');
     getDb()
       .prepare(
-        `INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled) VALUES ('groq', 'test-key', ?, ?, ?, 'healthy', 1)`
+        `INSERT INTO x_gateway_keys (provider, label, auth_method, encrypted_key, iv, auth_tag, status, enabled) VALUES ('groq', 'test-key', 'api_key', ?, ?, ?, 'healthy', 1)`
       )
       .run(key.encrypted, key.iv, key.authTag);
 
