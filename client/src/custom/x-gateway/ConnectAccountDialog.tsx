@@ -17,6 +17,7 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
   const [label, setLabel] = useState(account?.label ?? '')
   const [key, setKey] = useState('')
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl ?? '')
+  const [proxyUrl, setProxyUrl] = useState('')
   const [attempt, setAttempt] = useState<ProviderAccountAuthStartResponse | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -91,7 +92,7 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
     setBusy(true)
     try {
       if (isDirectCredential) {
-        await accountsApi.addKey(provider.id, key.trim(), label.trim(), provider.id === 'custom' ? baseUrl.trim() : undefined)
+        await accountsApi.addKey(provider.id, key.trim(), label.trim(), provider.id === 'custom' ? baseUrl.trim() : undefined, proxyUrl.trim() || undefined)
         setKey('')
         if (active.current) connected()
       } else {
@@ -148,6 +149,7 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
         <label>{s.name}<input id="x-account-label" name="label" autoFocus maxLength={100} value={label} placeholder={s.namePlaceholder} onChange={event => setLabel(event.target.value)} disabled={busy} required /></label>
         {provider.id === 'custom' && <label>{s.baseUrl}<input id="x-account-base-url" name="baseUrl" type="url" value={baseUrl} placeholder="https://api.example.com/v1" onChange={event => setBaseUrl(event.target.value)} disabled={busy} required /></label>}
         {isDirectCredential && <label>{s.credential}<input id="x-account-credential" name="credential" type="password" autoComplete="new-password" value={key} onChange={event => setKey(event.target.value)} placeholder={s.credentialPlaceholder} disabled={busy} required /></label>}
+        {isDirectCredential && <label>{s.accountProxy}<input id="x-account-proxy" name="proxyUrl" value={proxyUrl} onChange={event => setProxyUrl(event.target.value)} placeholder={s.accountProxyPlaceholder} disabled={busy} /></label>}
         <p className="x-security"><ShieldCheck size={16} />{s.encrypted}</p>
         <div className="x-dialog-actions"><button type="button" className="x-button" onClick={onClose}>{s.cancel}</button><button className="x-button x-primary" disabled={busy}>{busy && <LoaderCircle size={16} className="x-spin" />}{busy ? s.connecting : isDirectCredential ? s.addAccount : s.signIn}</button></div>
       </form> : <div className="x-auth-wait">

@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
-import { validateUserApiKey, withUserKeyMemo } from '../services/user-keys.js';
+import { validateUserApiKey, withUserKeyMemo, type ValidatedUserKey } from '../services/user-keys.js';
+import { isXGatewayClientKey, validateXGatewayClientKey } from '../custom/x-gateway/client-keys.js';
 import { setRequestUser } from '../lib/client-context.js';
 import { enforceUsageQuota } from '../custom/quota-gate.js';
 import { checkUserRateLimit, recordUserUsage } from '../services/user-quotas.js';
@@ -26,11 +27,14 @@ export function extractInferenceToken(req: Request): string | undefined {
 
 function extractUserKey(req: Request): string | undefined {
   const token = extractInferenceToken(req);
-  return token && token.startsWith('sk-flm-') ? token : undefined;
+  if (!token) return undefined;
+  if (token.startsWith('sk-flm-') || isXGatewayClientKey(token)) return token;
+  return undefined;
 }
 
 /**
- * Intercepts /v1 and /v1beta inference calls using user API keys (`sk-flm-...`).
+ * Intercepts /v1, /v1beta, and /x/v1 inference calls using user API keys (`sk-flm-...`)
+ * or dedicated X Gateway keys (`sk-xgw-...`).
  * Enforces per-user sliding window RPM limit and records monthly usage.
  * Non-user keys (Unified key, client profiles) pass through seamlessly to upstream.
  */
@@ -44,10 +48,23 @@ export function userInferenceGate(req: Request, res: Response, next: NextFunctio
 }
 
 function gate(token: string, req: Request, res: Response, next: NextFunction): void {
-  const userKey = validateUserApiKey(token);
+  const isXGateway = req.originalUrl?.startsWith('/x/v1') || req.baseUrl === '/x/v1';
+  if (isXGatewayClientKey(token) && !isXGateway) {
+    res.status(401).json({
+      error: {
+        message: 'X Gateway API keys (sk-xgw-...) are scoped exclusively to /x/v1 endpoints.',
+        type: 'invalid_request_error',
+        code: 'invalid_api_key',
+      },
+    });
+    return;
+  }
+
+  const userKey = isXGatewayClientKey(token)
+    ? validateXGatewayClientKey(token)
+    : validateUserApiKey(token);
   if (!userKey) {
     // If a user key was provided but is revoked or invalid, reject with 401
-    const isXGateway = req.originalUrl?.startsWith('/x/v1') || req.baseUrl === '/x/v1';
     res.status(401).json({
       error: {
         message: 'Incorrect or revoked API key provided.',
@@ -57,6 +74,8 @@ function gate(token: string, req: Request, res: Response, next: NextFunction): v
     });
     return;
   }
+
+  (req as Request & { user?: ValidatedUserKey }).user = userKey;
 
   // Check RPM limit
   const limit = checkUserRateLimit(userKey.userId, userKey.rpmLimit);

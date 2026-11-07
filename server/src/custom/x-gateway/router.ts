@@ -4,6 +4,7 @@ import type { ChatMessage } from '@freellmapi/shared/types.js';
 import type { CompletionOptions } from '../../providers/base.js';
 import { decrypt } from '../../lib/crypto.js';
 import { estimateInputTokens } from '../../lib/content.js';
+import { withKeyProxy } from '../../lib/proxy.js';
 import { logRequest } from '../../lib/request-log.js';
 import { applyOutputSavers } from '../output-savers/apply.js';
 import { buildSaverBlock } from '../output-savers/prompts.js';
@@ -16,6 +17,7 @@ import {
   accountModels,
   getUsableXGatewayKeys,
   recordXGatewayKeyUsage,
+  resolveXGatewayAccountProxy,
   type AccountRow,
 } from '../provider-accounts/store.js';
 import { xGatewayAuth } from './auth.js';
@@ -206,14 +208,18 @@ xGatewayRouter.post('/chat/completions', xGatewayAuth, async (req: Request, res:
         continue;
       }
 
+      const effectiveProxy = resolveXGatewayAccountProxy(account);
+
       if (!isStream) {
         try {
-          const completion = await provider.chatCompletion(
-            credential,
-            messages,
-            modelId,
-            options,
-            { platform: account.platform, keyId: account.id, modelId },
+          const completion = await withKeyProxy(effectiveProxy, () =>
+            provider.chatCompletion(
+              credential,
+              messages,
+              modelId,
+              options,
+              { platform: account.platform, keyId: account.id, modelId },
+            ),
           );
           const latencyMs = Date.now() - startMs;
           const promptTokens = completion.usage?.prompt_tokens ?? estimatedPromptTokens;
@@ -244,58 +250,60 @@ xGatewayRouter.post('/chat/completions', xGatewayAuth, async (req: Request, res:
         }
       } else {
         try {
-          const stream = provider.streamChatCompletion(
-            credential,
-            messages,
-            modelId,
-            options,
-            { platform: account.platform, keyId: account.id, modelId },
-          );
-          const iterator = stream[Symbol.asyncIterator]();
-          const first = await iterator.next();
+          await withKeyProxy(effectiveProxy, async () => {
+            const stream = provider.streamChatCompletion(
+              credential,
+              messages,
+              modelId,
+              options,
+              { platform: account.platform, keyId: account.id, modelId },
+            );
+            const iterator = stream[Symbol.asyncIterator]();
+            const first = await iterator.next();
 
-          res.setHeader('Content-Type', 'text/event-stream');
-          res.setHeader('Cache-Control', 'no-cache');
-          res.setHeader('Connection', 'keep-alive');
-          res.setHeader('X-Routed-Via', `${account.provider}/${modelId}`);
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('X-Routed-Via', `${account.provider}/${modelId}`);
 
-          const ttfbMs = Date.now() - startMs;
-          let promptTokens = estimatedPromptTokens;
-          let completionTokens = 0;
+            const ttfbMs = Date.now() - startMs;
+            let promptTokens = estimatedPromptTokens;
+            let completionTokens = 0;
 
-          if (!first.done && first.value) {
-            if (first.value.usage?.prompt_tokens) promptTokens = first.value.usage.prompt_tokens;
-            if (first.value.usage?.completion_tokens) completionTokens = first.value.usage.completion_tokens;
-            res.write(`data: ${JSON.stringify(first.value)}\n\n`);
-          }
+            if (!first.done && first.value) {
+              if (first.value.usage?.prompt_tokens) promptTokens = first.value.usage.prompt_tokens;
+              if (first.value.usage?.completion_tokens) completionTokens = first.value.usage.completion_tokens;
+              res.write(`data: ${JSON.stringify(first.value)}\n\n`);
+            }
 
-          while (true) {
-            const next = await iterator.next();
-            if (next.done) break;
-            if (next.value.usage?.prompt_tokens) promptTokens = next.value.usage.prompt_tokens;
-            if (next.value.usage?.completion_tokens) completionTokens = next.value.usage.completion_tokens;
-            res.write(`data: ${JSON.stringify(next.value)}\n\n`);
-          }
+            while (true) {
+              const next = await iterator.next();
+              if (next.done) break;
+              if (next.value.usage?.prompt_tokens) promptTokens = next.value.usage.prompt_tokens;
+              if (next.value.usage?.completion_tokens) completionTokens = next.value.usage.completion_tokens;
+              res.write(`data: ${JSON.stringify(next.value)}\n\n`);
+            }
 
-          res.write('data: [DONE]\n\n');
-          res.end();
+            res.write('data: [DONE]\n\n');
+            res.end();
 
-          const latencyMs = Date.now() - startMs;
-          recordXGatewayKeyUsage(account.id, promptTokens + completionTokens);
-          logRequest(
-            account.provider,
-            modelId,
-            null,
-            'success',
-            promptTokens,
-            completionTokens,
-            latencyMs,
-            null,
-            ttfbMs,
-            requestedModel === 'auto' ? null : requestedModel,
-            null,
-            'x-gateway',
-          );
+            const latencyMs = Date.now() - startMs;
+            recordXGatewayKeyUsage(account.id, promptTokens + completionTokens);
+            logRequest(
+              account.provider,
+              modelId,
+              null,
+              'success',
+              promptTokens,
+              completionTokens,
+              latencyMs,
+              null,
+              ttfbMs,
+              requestedModel === 'auto' ? null : requestedModel,
+              null,
+              'x-gateway',
+            );
+          });
           return;
         } catch (err) {
           if (res.headersSent) {

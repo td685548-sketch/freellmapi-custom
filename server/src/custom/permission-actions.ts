@@ -61,8 +61,11 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
     if (path === '/api/usage/profiles') return 'view_usage_profiles';
   }
   if (parent === 'manage_x_gateway') {
-    if (path === '/api/x-gateway/enabled' || path === '/api/x-gateway/defaults') {
+    if (path === '/api/x-gateway/enabled' || path === '/api/x-gateway/defaults' || path === '/api/x-gateway/proxy') {
       return read ? 'use_x_gateway' : 'edit_x_settings';
+    }
+    if (path === '/api/x-gateway/keys' || /^\/api\/x-gateway\/keys\/\d+$/.test(path)) {
+      return 'use_x_gateway';
     }
     if (path === '/api/x-gateway/models') return 'edit_x_combos';
     if (path.startsWith('/api/x-gateway/combos')) {

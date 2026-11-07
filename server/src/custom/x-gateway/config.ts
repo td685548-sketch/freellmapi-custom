@@ -1,4 +1,6 @@
 import { getDb } from '../../db/index.js';
+import { decrypt, encrypt } from '../../lib/crypto.js';
+import { maskProxyUrl } from '../../lib/key-proxy.js';
 import type { SaverLevel } from '../output-savers/prompts.js';
 import type { ComboEntry } from './combos.js';
 
@@ -21,6 +23,8 @@ export interface XGatewayConfigSnapshot {
   enabled: boolean;
   savers: XGatewaySaverDefaults;
   combos: XGatewayCombo[];
+  outboundProxyUrl: string;
+  maskedOutboundProxyUrl: string;
 }
 
 const DEFAULT_SAVERS: XGatewaySaverDefaults = {
@@ -86,6 +90,22 @@ function loadCombosFromDb(db: ReturnType<typeof getDb>): XGatewayCombo[] {
   }
 }
 
+function parseOutboundProxy(raw: string | undefined): string {
+  if (!raw) return '';
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  try {
+    const parsed = JSON.parse(trimmed) as { encrypted?: string; iv?: string; authTag?: string };
+    if (parsed && typeof parsed.encrypted === 'string' && typeof parsed.iv === 'string' && typeof parsed.authTag === 'string') {
+      return decrypt(parsed.encrypted, parsed.iv, parsed.authTag).trim();
+    }
+  } catch {
+    // Fallback if stored as plain URL
+    return trimmed;
+  }
+  return '';
+}
+
 export function getConfigSnapshot(): XGatewayConfigSnapshot {
   const now = Date.now();
   if (cachedSnapshot && now < cacheExpiry) return cachedSnapshot;
@@ -94,15 +114,25 @@ export function getConfigSnapshot(): XGatewayConfigSnapshot {
     const db = getDb();
     const enabledRow = db.prepare("SELECT value FROM x_gateway_config WHERE key = 'enabled'").get() as { value: string } | undefined;
     const saversRow = db.prepare("SELECT value FROM x_gateway_config WHERE key = 'default_savers'").get() as { value: string } | undefined;
+    const proxyRow = db.prepare("SELECT value FROM x_gateway_config WHERE key = 'outbound_proxy'").get() as { value: string } | undefined;
     const combos = loadCombosFromDb(db);
+    const outboundProxyUrl = parseOutboundProxy(proxyRow?.value);
 
     cachedSnapshot = {
       enabled: enabledRow?.value === 'true' || enabledRow?.value === '1',
       savers: parseSavers(saversRow?.value),
       combos,
+      outboundProxyUrl,
+      maskedOutboundProxyUrl: maskProxyUrl(outboundProxyUrl),
     };
   } catch {
-    cachedSnapshot = { enabled: false, savers: { ...DEFAULT_SAVERS }, combos: [] };
+    cachedSnapshot = {
+      enabled: false,
+      savers: { ...DEFAULT_SAVERS },
+      combos: [],
+      outboundProxyUrl: '',
+      maskedOutboundProxyUrl: '',
+    };
   }
 
   cacheExpiry = now + CACHE_TTL_MS;
@@ -125,6 +155,20 @@ export function setEnabled(enabled: boolean, updatedBy?: number): void {
 
 export function setDefaultSavers(savers: XGatewaySaverDefaults, updatedBy?: number): void {
   setConfigValue('default_savers', JSON.stringify(savers), updatedBy);
+}
+
+export function getOutboundProxyUrl(): string {
+  return getConfigSnapshot().outboundProxyUrl;
+}
+
+export function setOutboundProxyUrl(proxyUrl: string, updatedBy?: number): void {
+  const trimmed = proxyUrl.trim();
+  if (!trimmed) {
+    setConfigValue('outbound_proxy', '', updatedBy);
+    return;
+  }
+  const encrypted = encrypt(trimmed);
+  setConfigValue('outbound_proxy', JSON.stringify(encrypted), updatedBy);
 }
 
 export function listCombos(): XGatewayCombo[] {
