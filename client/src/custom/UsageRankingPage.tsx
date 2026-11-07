@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { RotateCcw, Search } from 'lucide-react'
+import { ArrowDownRight, ArrowUpRight, RefreshCw, RotateCcw, Search } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { PageHeader } from '@/components/page-header'
 import { SegmentedControl } from '@/components/ui/segmented-control'
@@ -14,7 +14,7 @@ import type { UsageOverview, UsageRow } from '../../../shared/usage-overview'
 import { useAdministrativeAccess } from './use-administrative-access'
 import { UsageAlertsCard } from './UsageAlertsCard'
 import {
-  DEFAULT_FILTERS, DEFAULT_SORT, RANKING_COLUMNS, applyFilters, loadFilters, rankRows, saveFilters, successRate, tokensOf, totalsOf,
+  DEFAULT_FILTERS, DEFAULT_SORT, RANKING_COLUMNS, applyFilters, changeOf, loadFilters, rankRows, saveFilters, successRate, tokensOf, totalsOf,
   type KindFilter, type RankingColumn, type RankingFilters,
 } from './usage-ranking'
 
@@ -34,12 +34,46 @@ function Toggle({ id, checked, onChange, label }: { id: string; checked: boolean
   )
 }
 
-function useOverview(kind: 'accounts' | 'profiles', days: string, enabled: boolean) {
+function useOverview(kind: 'accounts' | 'profiles', days: string, enabled: boolean, fresh: number) {
   return useQuery<{ overview: UsageOverview }>({
-    queryKey: ['usage-overview', kind, days],
-    queryFn: () => apiFetch<{ overview: UsageOverview }>(`/api/usage/${kind}?days=${days}`),
+    queryKey: ['usage-overview', kind, days, fresh],
+    // The server reuses its figures for 30 s; "Refresh" asks it to recompute.
+    queryFn: () => apiFetch<{ overview: UsageOverview }>(`/api/usage/${kind}?days=${days}${fresh ? '&fresh=1' : ''}`),
     enabled,
+    placeholderData: (previous) => previous,
   })
+}
+
+/** Change against the previous window of the same length, as a small arrow and percentage. */
+function Change({ current, previous, invert = false }: { current: number; previous: number | undefined; invert?: boolean }) {
+  const c = changeOf(current, previous)
+  if (c === null) return null
+  if (c === 'new') return <span className="ml-1 text-[10px] text-muted-foreground">new</span>
+  if (Math.abs(c) < 0.005) return <span className="ml-1 text-[10px] text-muted-foreground">±0%</span>
+  const up = c > 0
+  const good = invert ? !up : up
+  const Icon = up ? ArrowUpRight : ArrowDownRight
+  return (
+    <span className={`ml-1 inline-flex items-center text-[10px] ${good ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}
+      title={`Previous period: ${previous!.toLocaleString()}`}>
+      <Icon className="size-3" aria-hidden="true" />{Math.round(Math.abs(c) * 100)}%
+    </span>
+  )
+}
+
+function AllowanceCell({ allowance }: { allowance: UsageRow['allowance'] | undefined }) {
+  if (!allowance) return <span className="text-muted-foreground">—</span>
+  const pct = Math.round(allowance.used * 100)
+  const tone = allowance.used >= 1 ? 'bg-destructive' : allowance.used >= 0.8 ? 'bg-amber-500' : 'bg-primary'
+  return (
+    <span className="inline-flex items-center justify-end gap-1.5" title={`${allowance.period === 'day' ? 'Today' : 'This month'}, ${allowance.metric}`}>
+      <span className="hidden h-1.5 w-12 overflow-hidden rounded-full bg-muted sm:inline-block" aria-hidden="true">
+        <span className={`block h-full ${tone}`} style={{ width: `${Math.min(100, pct)}%` }} />
+      </span>
+      <span className="tabular-nums">{pct}%</span>
+      <span className="text-[10px] text-muted-foreground">{allowance.period === 'day' ? 'day' : 'mo'}</span>
+    </span>
+  )
 }
 
 // /usage - one table for every account and client key: rank, sort by any column, filter freely.
@@ -56,8 +90,10 @@ export function UsageRankingPage() {
   const toggleSort = (col: RankingColumn) => setSort((cur) => nextSort(cur, col) ?? DEFAULT_SORT)
   const patch = (p: Partial<RankingFilters>) => setFilters((f) => ({ ...f, ...p }))
 
-  const accounts = useOverview('accounts', days, canAccounts)
-  const profiles = useOverview('profiles', days, canProfiles)
+  const [fresh, setFresh] = useState(0)
+  const accounts = useOverview('accounts', days, canAccounts, fresh)
+  const profiles = useOverview('profiles', days, canProfiles, fresh)
+  const generatedAt = accounts.data?.overview.generatedAt ?? profiles.data?.overview.generatedAt
 
   const all: UsageRow[] = useMemo(
     () => [...(accounts.data?.overview.rows ?? []), ...(profiles.data?.overview.rows ?? [])],
@@ -124,6 +160,11 @@ export function UsageRankingPage() {
         </label>
         <Toggle id="usage-hide-idle" checked={filters.hideIdle} onChange={(hideIdle) => patch({ hideIdle })} label="Hide idle" />
         <Toggle id="usage-only-errors" checked={filters.onlyErrors} onChange={(onlyErrors) => patch({ onlyErrors })} label="Only with errors" />
+        <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setFresh(n => n + 1)} disabled={accounts.isFetching || profiles.isFetching}
+          title={generatedAt ? `Figures from ${new Date(generatedAt).toLocaleTimeString()}` : undefined}>
+          <RefreshCw className="size-3.5 mr-1" />
+          Refresh
+        </Button>
         {filtered && (
           <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setFilters(DEFAULT_FILTERS)}>
             <RotateCcw className="size-3.5 mr-1" />
@@ -157,6 +198,7 @@ export function UsageRankingPage() {
                 {head('successRate', 'Success')}
                 {head('errors', 'Errors')}
                 {head('tokens', 'Tokens')}
+                {head('allowance', 'Allowance used')}
                 {head('avgLatency', 'Avg latency')}
                 {head('p95Latency', 'p95 latency')}
                 {head('lastRequest', 'Last request')}
@@ -178,10 +220,11 @@ export function UsageRankingPage() {
                         </span>
                       </div>
                     </TableCell>
-                    <TableCell className="text-right tabular-nums">{fmt(r.requests)}</TableCell>
+                    <TableCell className="text-right tabular-nums whitespace-nowrap">{fmt(r.requests)}<Change current={r.requests} previous={r.previous?.requests} /></TableCell>
                     <TableCell className="text-right tabular-nums">{rate === null ? '—' : `${(rate * 100).toFixed(1)}%`}</TableCell>
-                    <TableCell className={`text-right tabular-nums ${r.errors > 0 ? 'text-destructive' : ''}`}>{fmt(r.errors)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{fmt(tokensOf(r))}</TableCell>
+                    <TableCell className={`text-right tabular-nums whitespace-nowrap ${r.errors > 0 ? 'text-destructive' : ''}`}>{fmt(r.errors)}<Change current={r.errors} previous={r.previous?.errors} invert /></TableCell>
+                    <TableCell className="text-right tabular-nums whitespace-nowrap">{fmt(tokensOf(r))}<Change current={tokensOf(r)} previous={r.previous?.tokens} /></TableCell>
+                    <TableCell className="text-right text-xs whitespace-nowrap"><AllowanceCell allowance={r.allowance} /></TableCell>
                     <TableCell className="text-right tabular-nums">{ms(r.avgLatencyMs)}</TableCell>
                     <TableCell className="text-right tabular-nums">{ms(r.p95LatencyMs)}</TableCell>
                     <TableCell className="text-right text-xs">{r.lastRequestAt ? `${r.lastRequestAt.slice(0, 16)} UTC` : '—'}</TableCell>
@@ -198,7 +241,7 @@ export function UsageRankingPage() {
                 <TableCell />
                 <TableCell className="text-right tabular-nums">{fmt(totals.errors)}</TableCell>
                 <TableCell className="text-right tabular-nums">{fmt(totals.tokens)}</TableCell>
-                <TableCell colSpan={4} />
+                <TableCell colSpan={5} />
               </TableRow>
             </TableFooter>
           </Table>
@@ -206,7 +249,7 @@ export function UsageRankingPage() {
       )}
       {can('view_settings') && <UsageAlertsCard canEdit={can('edit_settings')} />}
       <p className="text-xs text-muted-foreground">
-        Last {days} days (UTC). Only traffic sent with a personal key or a client key is attributed; the shared key and dashboard sessions are not counted.
+        Last {days} days (UTC); arrows compare with the {days} days before. Allowance used is the fullest daily or monthly allowance right now. Only traffic sent with a personal key or a client key is attributed; the shared key and dashboard sessions are not counted.
       </p>
     </div>
   )

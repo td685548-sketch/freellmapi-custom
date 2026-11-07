@@ -23,6 +23,10 @@ export interface UsageRow {
   lastRequestAt: string | null
   /** Per-minute request cap; null means unlimited (or no key yet for an account). */
   rpmLimit: number | null
+  /** The same figures over the window of the same length just before this one. */
+  previous: { requests: number; errors: number; tokens: number }
+  /** The fullest daily / monthly allowance right now (share used, 0..1+); null when none is set. */
+  allowance: { used: number; period: 'day' | 'month'; metric: 'requests' | 'tokens' } | null
 }
 
 export interface UsageOverview {
@@ -32,4 +36,6 @@ export interface UsageOverview {
   since: string
   /** Every account / profile, including idle ones, in no particular order. */
   rows: UsageRow[]
+  /** When these figures were computed (they are reused for up to 30 seconds). */
+  generatedAt: string
 }

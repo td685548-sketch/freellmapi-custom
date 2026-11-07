@@ -8,12 +8,12 @@ import { getUsageOverview } from '../services/usage-overview.js';
 
 export const usageRouter = Router();
 
-// GET /api/usage/accounts?days=
+// GET /api/usage/accounts?days=&fresh=1 (fresh skips the 30-second reuse)
 usageRouter.get('/accounts', (req: Request, res: Response) => {
-  res.json({ overview: getUsageOverview('account', clampAnalyticsDays(req.query.days)) });
+  res.json({ overview: getUsageOverview('account', clampAnalyticsDays(req.query.days), Date.now(), req.query.fresh === '1') });
 });
 
 // GET /api/usage/profiles?days=
 usageRouter.get('/profiles', (req: Request, res: Response) => {
-  res.json({ overview: getUsageOverview('profile', clampAnalyticsDays(req.query.days)) });
+  res.json({ overview: getUsageOverview('profile', clampAnalyticsDays(req.query.days), Date.now(), req.query.fresh === '1') });
 });
