@@ -19,12 +19,13 @@ export function ProfileIntegrationCard({ profileId, canTest }: { profileId: numb
   const [language, setLanguage] = useState<SnippetLanguage>('node')
   const [message, setMessage] = useState(DEFAULT_MESSAGE)
   const [model, setModel] = useState('')
+  const [stream, setStream] = useState(false)
   const snippet = integrationSnippet(language, baseUrl)
 
   const send = useMutation({
     mutationFn: () => apiFetch<{ result: TestResultView; profileEnabled: boolean }>(`/api/client-profiles/${profileId}/test`, {
       method: 'POST',
-      body: JSON.stringify({ message: message.trim() || DEFAULT_MESSAGE, ...(model.trim() ? { model: model.trim() } : {}) }),
+      body: JSON.stringify({ message: message.trim() || DEFAULT_MESSAGE, ...(model.trim() ? { model: model.trim() } : {}), ...(stream ? { stream: true } : {}) }),
     }),
   })
   const result = send.data?.result
@@ -65,6 +66,10 @@ export function ProfileIntegrationCard({ profileId, canTest }: { profileId: numb
           <div className="flex flex-wrap items-center gap-2">
             <Input value={message} onChange={(e) => setMessage(e.target.value)} aria-label="Test message" maxLength={1000} className="h-8 min-w-64 flex-1 text-xs" />
             <Input value={model} onChange={(e) => setModel(e.target.value)} aria-label="Test model" placeholder="auto" maxLength={200} className="h-8 w-48 text-xs" />
+            <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+              <input type="checkbox" checked={stream} onChange={(e) => setStream(e.target.checked)} className="size-3.5" aria-label="Stream the answer" />
+              Stream
+            </label>
             <Button type="submit" size="sm" className="h-8 text-xs" disabled={send.isPending}>
               <Send className="size-3.5 mr-1" />
               {send.isPending ? 'Sending…' : 'Send test'}
@@ -81,6 +86,12 @@ export function ProfileIntegrationCard({ profileId, canTest }: { profileId: numb
                 <span className="font-normal text-muted-foreground">· {result.latencyMs.toLocaleString()} ms</span>
               </div>
               {result.model && <p>Routed to <strong>{result.model}</strong>{result.platform ? ` (${result.platform})` : ''}{result.usage ? ` · ${result.usage.inputTokens} in / ${result.usage.outputTokens} out tokens` : ''}</p>}
+              {result.stream && (
+                <p data-testid="stream-stats">
+                  Streamed: first text after <strong>{result.stream.firstTokenMs === null ? '—' : `${result.stream.firstTokenMs.toLocaleString()} ms`}</strong>
+                  {' · '}{result.stream.chunks} frames{' · '}{result.stream.finished ? 'ended properly' : 'did not end properly'}
+                </p>
+              )}
               {result.reply && <p className="rounded-lg bg-background/70 p-2 whitespace-pre-wrap">{result.reply}</p>}
               {result.error && <p><strong>{result.error.code ?? 'Error'}:</strong> {result.error.message}</p>}
               {hint && <p className="text-muted-foreground">{hint}</p>}

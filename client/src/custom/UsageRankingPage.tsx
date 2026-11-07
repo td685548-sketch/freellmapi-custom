@@ -251,7 +251,7 @@ export function UsageRankingPage() {
       <UsageExportCard canAccounts={canAccounts} canProfiles={canProfiles} />
       {can('view_settings') && <UsageAlertsCard canEdit={can('edit_settings')} />}
       <p className="text-xs text-muted-foreground">
-        Last {days} days (UTC); arrows compare with the {days} days before. Allowance used is the fullest daily or monthly allowance right now. Only traffic sent with a personal key or a client key is attributed; the shared key and dashboard sessions are not counted.
+        Last {days} days (UTC); arrows compare with the {days} days before. Allowance used is the fullest daily or monthly allowance right now. Traffic sent with a personal key or a client key is attributed, and so are Playground chats (to the account signed in); other use of the shared key is not counted.
       </p>
     </div>
   )

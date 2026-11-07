@@ -85,6 +85,8 @@ export interface TestResultView {
   usage: { inputTokens: number; outputTokens: number } | null
   error: { message: string; code: string | null; type: string | null } | null
   retryAfter: number | null
+  /** Streamed tests only. */
+  stream?: { firstTokenMs: number | null; chunks: number; finished: boolean } | null
 }
 
 /** One sentence on what a failed test means and what to change. */

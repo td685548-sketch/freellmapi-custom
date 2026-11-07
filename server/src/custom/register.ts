@@ -26,6 +26,7 @@ import { maybeSendWeeklyReport } from '../services/usage-report.js';
 import { usageReportSettingsRouter } from '../routes/usage-report-settings.js';
 import { auditMiddleware } from '../services/audit-log.js';
 import { auditLogRouter } from '../routes/audit-log.js';
+import { playgroundAttribution } from './playground-attribution.js';
 import { adminUserQuotaRouter, profileQuotaRouter, selfQuotaRouter } from '../routes/usage-quota.js';
 import { withRoutingSettingsScope } from '../db/routing-settings-scope.js';
 import { providerTiersRouter } from '../routes/provider-tiers.js';
@@ -136,6 +137,8 @@ export function registerCustomRoutes(app: Express): void {
   });
   // Rate-limiting and usage tracking gate for member personal API keys (/v1, /v1beta and /x/v1 inference)
   app.use(['/v1', '/v1beta', '/x/v1'], userInferenceGate);
+  // Playground chats (unified key + the dashboard session) are attributed to the signed-in account.
+  app.use('/v1', playgroundAttribution);
   // Roll finished days of the request log into the long-term daily table, after an inference
   // response has gone out (a time check per request; the work itself at most once a day).
   app.use(['/v1', '/v1beta'], (_req, res, next) => { res.once('finish', () => { maybeRollUp(); maybeSendWeeklyReport(); }); next(); });

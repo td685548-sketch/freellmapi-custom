@@ -18,6 +18,8 @@ const REPLY_LIMIT = 600;
 const bodySchema = z.object({
   message: z.string().trim().min(1).max(1000).optional(),
   model: z.string().trim().min(1).max(200).optional(),
+  /** Ask for a streamed answer, as a chat widget would, and report how the stream behaved. */
+  stream: z.boolean().optional(),
 }).strict();
 
 interface Row { encrypted_key: string; iv: string; auth_tag: string; enabled: number }
@@ -41,6 +43,52 @@ export interface TestResult {
   error: { message: string; code: string | null; type: string | null } | null;
   /** Seconds to wait when the call was refused for rate or allowance. */
   retryAfter: number | null;
+  /** Streamed tests only: time to the first text, number of data frames, and whether the stream ended properly. */
+  stream: { firstTokenMs: number | null; chunks: number; finished: boolean } | null;
+}
+
+/** Read a chat-completions event stream, noting when the first text arrived. */
+async function readStream(response: globalThis.Response, started: number, result: TestResult): Promise<void> {
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let text = '';
+  const stream = { firstTokenMs: null as number | null, chunks: 0, finished: false };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, nl).trim();
+      buffer = buffer.slice(nl + 1);
+      if (!line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      if (data === '[DONE]') { stream.finished = true; continue; }
+      let frame: any;
+      try { frame = JSON.parse(data); } catch { continue; }
+      stream.chunks += 1;
+      if (frame?.error) {
+        const e = frame.error;
+        result.ok = false;
+        result.error = { message: String(e?.message ?? e).slice(0, 500), code: typeof e?.code === 'string' ? e.code : null, type: typeof e?.type === 'string' ? e.type : null };
+      }
+      const delta = frame?.choices?.[0]?.delta?.content;
+      if (typeof delta === 'string' && delta) {
+        if (stream.firstTokenMs === null) stream.firstTokenMs = Date.now() - started;
+        text += delta;
+      }
+      if (typeof frame?.model === 'string') result.model = frame._routed_via?.model ?? frame.model;
+      if (frame?._routed_via?.platform) result.platform = frame._routed_via.platform;
+      if (frame?.usage) result.usage = { inputTokens: Number(frame.usage.prompt_tokens) || 0, outputTokens: Number(frame.usage.completion_tokens) || 0 };
+    }
+  }
+  result.reply = text ? text.slice(0, REPLY_LIMIT) : null;
+  result.stream = stream;
+  if (!stream.finished && !result.error) {
+    result.ok = false;
+    result.error = { message: 'The stream ended without its final [DONE] frame.', code: 'stream_incomplete', type: null };
+  }
 }
 
 profileTestRouter.post('/:id/test', async (req: Request, res: Response) => {
@@ -49,7 +97,7 @@ profileTestRouter.post('/:id/test', async (req: Request, res: Response) => {
   if (!Number.isInteger(id) || id <= 0) { res.status(400).json({ error: { message: 'Invalid profile id' } }); return; }
   const parsed = bodySchema.safeParse(req.body ?? {});
   if (!parsed.success) {
-    res.status(400).json({ error: { message: 'message is up to 1000 characters and model up to 200' } });
+    res.status(400).json({ error: { message: 'message is up to 1000 characters, model up to 200, stream true or false' } });
     return;
   }
   const row = getDb().prepare('SELECT encrypted_key, iv, auth_tag, enabled FROM client_profiles WHERE id = ?').get(id) as Row | undefined;
@@ -63,7 +111,8 @@ profileTestRouter.post('/:id/test', async (req: Request, res: Response) => {
 
   const port = req.socket.localPort;
   const started = Date.now();
-  const result: TestResult = { status: 0, ok: false, latencyMs: 0, model: null, platform: null, reply: null, usage: null, error: null, retryAfter: null };
+  const result: TestResult = { status: 0, ok: false, latencyMs: 0, model: null, platform: null, reply: null, usage: null, error: null, retryAfter: null, stream: null };
+  const streamed = parsed.data.stream === true;
   try {
     const response = await fetch(`http://${selfHost(req)}:${port}/v1/chat/completions`, {
       method: 'POST',
@@ -76,6 +125,7 @@ profileTestRouter.post('/:id/test', async (req: Request, res: Response) => {
       body: JSON.stringify({
         model: parsed.data.model ?? 'auto',
         max_tokens: 64,
+        ...(streamed ? { stream: true, stream_options: { include_usage: true } } : {}),
         messages: [{ role: 'user', content: parsed.data.message ?? 'Reply with one short sentence confirming you are working.' }],
       }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
@@ -84,6 +134,12 @@ profileTestRouter.post('/:id/test', async (req: Request, res: Response) => {
     result.ok = response.ok;
     const retry = Number(response.headers.get('retry-after'));
     result.retryAfter = Number.isFinite(retry) && retry > 0 ? retry : null;
+    if (streamed && response.ok && (response.headers.get('content-type') ?? '').includes('text/event-stream')) {
+      await readStream(response, started, result);
+      result.latencyMs = Date.now() - started;
+      res.json({ result, profileEnabled: row.enabled === 1 });
+      return;
+    }
     const body = await response.json().catch(() => null) as any;
     result.model = body?._routed_via?.model ?? (typeof body?.model === 'string' ? body.model : null);
     result.platform = body?._routed_via?.platform ?? null;

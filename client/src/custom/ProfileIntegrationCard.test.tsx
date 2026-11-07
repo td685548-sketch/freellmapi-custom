@@ -67,6 +67,15 @@ describe('ProfileIntegrationCard', () => {
     expect(status).toContain('I am working.')
   })
 
+  it('can ask for a streamed answer and shows how the stream behaved', async () => {
+    vi.mocked(apiFetch).mockResolvedValue({ result: { ...good.result, stream: { firstTokenMs: 180, chunks: 7, finished: true } }, profileEnabled: true })
+    await render(true)
+    await act(async () => { (container.querySelector('[aria-label="Stream the answer"]') as HTMLInputElement).click() })
+    await send()
+    expect(JSON.parse((vi.mocked(apiFetch).mock.calls[0]![1] as { body: string }).body).stream).toBe(true)
+    expect(container.querySelector('[data-testid="stream-stats"]')!.textContent).toBe('Streamed: first text after 180 ms · 7 frames · ended properly')
+  })
+
   it('leaves the model out when it is blank', async () => {
     vi.mocked(apiFetch).mockResolvedValue(good)
     await render(true)
