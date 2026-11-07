@@ -34,3 +34,7 @@ backups/
 
 scripts/backup.mjs
 
+# CodeGraph index directory
+.codegraph/
+
+

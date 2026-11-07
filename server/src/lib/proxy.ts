@@ -988,7 +988,25 @@ async function fetchRelayFetch(
   if (relayToken) headers.set(FETCH_RELAY_AUTH_HEADER, `Bearer ${relayToken}`);
   else headers.delete(FETCH_RELAY_AUTH_HEADER);
 
-  return fetch(relayUrl, {
+  // Strip embedded credentials from the relay URL if any to comply with WHATWG
+  // fetch restriction and convert them to Basic auth header if not already set.
+  let cleanRelayUrl = relayUrl;
+  try {
+    const parsed = new URL(relayUrl);
+    if (parsed.username || parsed.password) {
+      if (!headers.has('authorization') && !headers.has('Authorization')) {
+        const creds = `${decodeURIComponent(parsed.username)}:${decodeURIComponent(parsed.password)}`;
+        headers.set('authorization', `Basic ${Buffer.from(creds).toString('base64')}`);
+      }
+      parsed.username = '';
+      parsed.password = '';
+      cleanRelayUrl = parsed.toString();
+    }
+  } catch {
+    // If not a parseable URL, fetch will surface the format error.
+  }
+
+  return fetch(cleanRelayUrl, {
     ...init,
     headers,
     redirect: 'manual',
@@ -1115,7 +1133,10 @@ export async function probeProxyUrl(
   // routes/settings.ts); the constant is only the no-providers fallback.
   const target = (options.targetUrl ?? '').trim() || DEFAULT_PROXY_PROBE_TARGET;
 
-  const relayMode = Boolean(url) && (options.mode ?? getProxyMode()) === 'fetch-relay';
+  const explicitProxy = Boolean((proxyUrl ?? '').trim());
+  const hasCredentials = /:\/\/[^@]+@/.test(url);
+  const defaultMode = (explicitProxy || hasCredentials || isSocksProxyUrl(url)) ? 'forward' : getProxyMode();
+  const relayMode = Boolean(url) && (options.mode ?? defaultMode) === 'fetch-relay';
 
   try {
     let response: Response;

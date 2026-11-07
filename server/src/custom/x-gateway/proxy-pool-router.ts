@@ -72,9 +72,14 @@ function redactProbeError(error: string | undefined): string {
 
 // Probe the proxy with a tiny no-content endpoint; any HTTP answer proves the
 // tunnel works. Credentials are stripped before returning any probe error message.
+// The pool consists strictly of forward proxies, so mode must always be forward.
 xProxyPoolRouter.post('/:id/test', async (req, res) => {
   const url = proxyPoolEntryUrl(entryId(req));
-  const result = await probeProxyUrl(url, { targetUrl: 'https://www.gstatic.com/generate_204', timeoutMs: 12_000 });
+  const result = await probeProxyUrl(url, {
+    targetUrl: 'https://www.gstatic.com/generate_204',
+    timeoutMs: 12_000,
+    mode: 'forward',
+  });
   res.json({
     ok: result.ok,
     latencyMs: result.latencyMs,

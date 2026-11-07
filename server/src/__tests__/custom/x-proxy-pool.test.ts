@@ -6,6 +6,7 @@ import { createUser, createSession } from '../../services/auth.js';
 import { setOutboundProxyUrl } from '../../custom/x-gateway/config.js';
 import { createApiKeyAccount, accountRow, resolveXGatewayAccountProxy } from '../../custom/provider-accounts/store.js';
 import { listProxyPool } from '../../custom/x-gateway/proxy-pool.js';
+import { applyProxyMode } from '../../lib/proxy.js';
 
 describe('X Gateway Proxy Pool', () => {
   let server: Server;
@@ -197,5 +198,13 @@ describe('X Gateway Proxy Pool', () => {
     expect(failed.status).toBe(200);
     expect(failed.body.ok).toBe(false);
     expect(JSON.stringify(failed.body)).not.toContain('secretc');
+
+    // When global proxy mode is fetch-relay, pool entries must still probe in forward mode
+    applyProxyMode('fetch-relay');
+    const inRelayMode = await requestX(`/api/x-gateway/proxy-pool/${probeId}/test`, { method: 'POST', key: adminSession, body: {} });
+    expect(inRelayMode.status).toBe(200);
+    expect(inRelayMode.body.ok).toBe(true);
+    expect(inRelayMode.body.status).toBe(204);
+    applyProxyMode('forward');
   });
 });
