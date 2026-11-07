@@ -403,19 +403,27 @@ async function readSse(response: Response, limit: number, deadlineMs: number): P
   return text;
 }
 
-function collectIds(text: string, fileIds: string[], sedimentIds: string[]): void {
+function collectIds(text: string, fileIds: string[], sedimentIds: string[], directUrls?: string[]): void {
   const addUnique = (list: string[], value: string) => {
-    if (value && !list.includes(value)) list.push(value);
+    if (value && !list.includes(value) && value !== 'file_upload') list.push(value);
   };
   for (const match of text.matchAll(/file-service:\/\/([A-Za-z0-9_-]+)/g)) addUnique(fileIds, match[1]);
+  for (const match of text.matchAll(/\bfile-[A-Za-z0-9_-]{18,}\b/g)) addUnique(fileIds, match[0]);
   for (const match of text.matchAll(/\bfile_00000000[a-f0-9]{24}\b/g)) addUnique(fileIds, match[0]);
   for (const match of text.matchAll(/sediment:\/\/([A-Za-z0-9_-]+)/g)) addUnique(sedimentIds, match[1]);
+  if (directUrls) {
+    const unescaped = text.replace(/\\\//g, '/');
+    for (const match of unescaped.matchAll(/https:\/\/files\.oaiusercontent\.com\/[^\s"')>]+/g)) {
+      addUnique(directUrls, match[0]);
+    }
+  }
 }
 
 interface ConversationIds {
   conversationId: string;
   fileIds: string[];
   sedimentIds: string[];
+  directUrls?: string[];
 }
 
 /** prepare -> conversation SSE. Returns the conversation id plus any ids seen. */
@@ -525,8 +533,9 @@ async function runImageConversation(
   const conversationId = (sseText.match(/"conversation_id"\s*:\s*"([0-9a-f-]{36})"/) || [])[1] || '';
   const fileIds: string[] = [];
   const sedimentIds: string[] = [];
-  collectIds(sseText, fileIds, sedimentIds);
-  return { conversationId, fileIds, sedimentIds };
+  const directUrls: string[] = [];
+  collectIds(sseText, fileIds, sedimentIds, directUrls);
+  return { conversationId, fileIds, sedimentIds, directUrls };
 }
 
 /** Poll the conversation document until an image_gen record shows up. */
@@ -535,10 +544,11 @@ async function pollConversationImages(
   conversationId: string,
   initial: ConversationIds,
   signal?: AbortSignal,
-): Promise<{ fileIds: string[]; sedimentIds: string[] }> {
+): Promise<{ fileIds: string[]; sedimentIds: string[]; directUrls: string[] }> {
   const started = Date.now();
-  const fileIds = [...initial.fileIds];
+  const fileIds = [...initial.fileIds].filter(id => id !== 'file_upload');
   const sedimentIds = [...initial.sedimentIds];
+  const directUrls = [...(initial.directUrls ?? [])];
   const headers = { ...authHeaders(ctx), Accept: 'application/json' };
 
   await sleep(POLL_INITIAL_WAIT_MS);
@@ -565,16 +575,17 @@ async function pollConversationImages(
       throw new ChatGptWebImageError('ChatGPT conversation document is unexpectedly large', 502);
     }
 
-    collectIds(text, fileIds, sedimentIds);
-    if (fileIds.length > 0 || sedimentIds.length > 0) {
-      return { fileIds: fileIds.filter(id => id !== 'file_upload'), sedimentIds };
+    collectIds(text, fileIds, sedimentIds, directUrls);
+    const validFileIds = fileIds.filter(id => id !== 'file_upload');
+    if (validFileIds.length > 0 || sedimentIds.length > 0 || directUrls.length > 0) {
+      return { fileIds: validFileIds, sedimentIds, directUrls };
     }
     if (CONTENT_POLICY_RE.test(text) && /"is_error"\s*:\s*true/.test(text)) {
       throw new ChatGptWebImageError('ChatGPT refused the image request (content policy)', 400);
     }
     // A depleted account reports a tool-level rate limit instead of an image:
     // fail fast so the fallback loop can try the next account.
-    if (/ChatGPTAgentToolRateLimitException|Free plan limit for image generation/i.test(text)) {
+    if (/ChatGPTAgentToolRateLimitException|Free plan limit for image generation|image creation limit/i.test(text)) {
       throw new ChatGptWebImageError(
         'ChatGPT account has hit its image generation quota — add another account or wait for the reset',
         429,
@@ -587,7 +598,7 @@ async function pollConversationImages(
 
 /** Signed asset URLs come from ChatGPT itself, so let normal redirects (CDN) work. */
 async function downloadUrl(url: string, signal?: AbortSignal): Promise<{ b64: string; mime: string } | null> {
-  const res = await webFetch(url, {}, DOWNLOAD_TIMEOUT_MS, undefined, signal);
+  const res = await webFetch(url, {}, DOWNLOAD_TIMEOUT_MS, ('chatgpt-web' as Platform), signal);
   if (!res.ok) return null;
   const buffer = Buffer.from(await res.arrayBuffer());
   if (!buffer.length) return null;
@@ -601,41 +612,73 @@ async function downloadUrl(url: string, signal?: AbortSignal): Promise<{ b64: st
 async function downloadGeneratedImage(
   ctx: ImageContext,
   conversationId: string,
-  { fileIds, sedimentIds }: { fileIds: string[]; sedimentIds: string[] },
+  { fileIds, sedimentIds, directUrls }: { fileIds: string[]; sedimentIds: string[]; directUrls?: string[] },
   signal?: AbortSignal,
 ): Promise<{ b64: string; mime: string }> {
+  if (directUrls) {
+    for (const url of directUrls) {
+      const media = await downloadUrl(url, signal);
+      if (media) return media;
+    }
+  }
+
   const jsonHeaders = { ...authHeaders(ctx), Accept: 'application/json' };
 
   for (const fileId of fileIds) {
+    if (fileId === 'file_upload') continue;
     const res = await request(
       `${ctx.baseUrl}/backend-api/files/${fileId}/download`,
-      { headers: jsonHeaders },
+      { headers: jsonHeaders, redirect: 'manual' },
       60_000,
       ctx,
       signal,
     ).catch(() => null);
-    if (!res?.ok) continue;
-    const body = await res.json().catch(() => null) as { download_url?: unknown; url?: unknown } | null;
-    const url = typeof body?.download_url === 'string' ? body.download_url : (typeof body?.url === 'string' ? body.url : '');
-    if (!url) continue;
-    const media = await downloadUrl(url, signal);
-    if (media) return media;
+    if (!res) continue;
+
+    if ([301, 302, 303, 307, 308].includes(res.status)) {
+      const loc = res.headers.get('location');
+      if (loc) {
+        const media = await downloadUrl(loc, signal);
+        if (media) return media;
+      }
+    }
+
+    if (res.ok) {
+      const body = await res.json().catch(() => null) as { download_url?: unknown; url?: unknown } | null;
+      const url = typeof body?.download_url === 'string' ? body.download_url : (typeof body?.url === 'string' ? body.url : '');
+      if (url) {
+        const media = await downloadUrl(url, signal);
+        if (media) return media;
+      }
+    }
   }
 
   for (const sedimentId of sedimentIds) {
     const res = await request(
       `${ctx.baseUrl}/backend-api/conversation/${conversationId}/attachment/${sedimentId}/download`,
-      { headers: jsonHeaders },
+      { headers: jsonHeaders, redirect: 'manual' },
       60_000,
       ctx,
       signal,
     ).catch(() => null);
-    if (!res?.ok) continue;
-    const body = await res.json().catch(() => null) as { download_url?: unknown; url?: unknown } | null;
-    const url = typeof body?.download_url === 'string' ? body.download_url : (typeof body?.url === 'string' ? body.url : '');
-    if (!url) continue;
-    const media = await downloadUrl(url, signal);
-    if (media) return media;
+    if (!res) continue;
+
+    if ([301, 302, 303, 307, 308].includes(res.status)) {
+      const loc = res.headers.get('location');
+      if (loc) {
+        const media = await downloadUrl(loc, signal);
+        if (media) return media;
+      }
+    }
+
+    if (res.ok) {
+      const body = await res.json().catch(() => null) as { download_url?: unknown; url?: unknown } | null;
+      const url = typeof body?.download_url === 'string' ? body.download_url : (typeof body?.url === 'string' ? body.url : '');
+      if (url) {
+        const media = await downloadUrl(url, signal);
+        if (media) return media;
+      }
+    }
   }
 
   throw new ChatGptWebImageError('ChatGPT image generation produced no downloadable file', 502);
@@ -647,7 +690,7 @@ export async function generateChatGptWebImage(opts: ChatGptWebImageOptions): Pro
 
   const baseUrl = (opts.baseUrl?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, '');
   const userAgent = opts.userAgent?.trim() || DEFAULT_USER_AGENT;
-  const platform: Platform = opts.platform ?? 'custom';
+  const platform: Platform = (opts.platform && opts.platform !== 'custom') ? opts.platform : ('chatgpt-web' as Platform);
   const cookie = normalizeChatGptWebCookie(opts.credential);
 
   const accessToken = await fetchChatGptWebAccessToken(cookie, userAgent, baseUrl, platform, opts.signal);
@@ -657,11 +700,14 @@ export async function generateChatGptWebImage(opts: ChatGptWebImageOptions): Pro
   const ctx: ImageContext = { baseUrl, accessToken, cookie, userAgent, platform, sentinel };
 
   const initial = await runImageConversation(ctx, opts.prompt, opts.size, opts.signal);
-  if (!initial.conversationId && initial.fileIds.length === 0 && initial.sedimentIds.length === 0) {
+  const initialValidFiles = initial.fileIds.filter(id => id !== 'file_upload');
+  const hasInitialMedia = initialValidFiles.length > 0 || initial.sedimentIds.length > 0 || ((initial.directUrls?.length ?? 0) > 0);
+
+  if (!initial.conversationId && !hasInitialMedia) {
     throw new ChatGptWebImageError('ChatGPT image conversation produced no conversation id', 502);
   }
-  const ids = initial.fileIds.length > 0 || initial.sedimentIds.length > 0
-    ? initial
+  const ids = hasInitialMedia
+    ? { ...initial, fileIds: initialValidFiles, directUrls: initial.directUrls ?? [] }
     : await pollConversationImages(ctx, initial.conversationId, initial, opts.signal);
 
   return downloadGeneratedImage(ctx, initial.conversationId, ids, opts.signal);
