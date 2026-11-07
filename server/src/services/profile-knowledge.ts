@@ -7,6 +7,8 @@ import { KNOWLEDGE_LIMITS, type KnowledgeDoc, type KnowledgeHit, type KnowledgeS
 // that separates words with spaces or punctuation (Vietnamese included).
 
 const CHUNK_CHARS = 800;
+/** Passages scoring under this share of the best one are left out. */
+const MIN_RELATIVE_SCORE = 0.25;
 
 /** Split a document into passages of about CHUNK_CHARS, on paragraph and then sentence boundaries. */
 export function chunkText(content: string): string[] {
@@ -84,9 +86,12 @@ export function searchKnowledge(profileId: number, query: string, maxChars: numb
     }
     return { c, score };
   }).filter(x => x.score > 0).sort((a, b2) => b2.score - a.score);
+  // A passage that shares only a common word with the question is noise next to a strong match.
+  const best = scored[0]?.score ?? 0;
+  const relevant = scored.filter(x => x.score >= best * MIN_RELATIVE_SCORE);
   const hits: KnowledgeHit[] = [];
   let used = 0;
-  for (const { c, score } of scored) {
+  for (const { c, score } of relevant) {
     if (used + c.text.length > maxChars) { if (hits.length === 0) hits.push({ docId: c.docId, title: c.title, text: c.text.slice(0, maxChars), score }); break; }
     hits.push({ docId: c.docId, title: c.title, text: c.text, score: Math.round(score * 1000) / 1000 });
     used += c.text.length;

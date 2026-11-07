@@ -116,6 +116,12 @@ describe('client key knowledge base', () => {
     expect(hours).not.toContain('30.000đ');
   });
 
+  it('leaves out a passage that only shares a common word with the question', async () => {
+    await settings({ enabled: true });
+    const hits = (await kb('/search?q=' + encodeURIComponent('Đổi trả trong mấy ngày?'))).body.hits as Array<{ title: string }>;
+    expect(hits.map(h => h.title)).toEqual(['Đổi trả']); // "ngày" also appears in the shipping text
+  });
+
   it('adds nothing when no passage matches', async () => {
     await settings({ enabled: true });
     expect(systemText((await ask('xyzzy qwerty')).upstream)).not.toContain('Reference material');
