@@ -1,4 +1,5 @@
 import { getDb, getSetting, setSetting } from '../db/index.js';
+import { isTursoDatabase } from '../db/turso.js';
 import { getProvider, hasProvider, resolveProvider } from '../providers/index.js';
 import { decrypt } from '../lib/crypto.js';
 import { decryptProxyUrl } from '../lib/key-proxy.js';
@@ -779,6 +780,16 @@ export function getActiveRoutingWeights(): { weights: RoutingWeights | null; adj
 const WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const HALF_LIFE_DAYS = 2; // a 2-day-old request counts half as much as a fresh one
 const CACHE_TTL_MS = 60 * 1000;
+// On a remote database every refresh scans the last week and the month to date of `requests`, and a
+// remote database bills by rows read (Turso). Ten minutes there keeps routing quality (a week-long,
+// two-day-half-life average barely moves in ten minutes; recent failures are handled by the in-memory
+// penalties) at a tenth of the reads. ROUTER_STATS_TTL_MS overrides both defaults.
+const REMOTE_CACHE_TTL_MS = 10 * 60 * 1000;
+function statsTtlMs(db: Db): number {
+  const raw = Number(process.env.ROUTER_STATS_TTL_MS);
+  if (Number.isFinite(raw) && raw > 0) return raw;
+  return isTursoDatabase(db) ? REMOTE_CACHE_TTL_MS : CACHE_TTL_MS;
+}
 
 interface ModelStats {
   successes: number;   // decay-weighted pseudo-count
@@ -838,7 +849,7 @@ function customEndpointScopes(db: Db): Map<number, string> {
 }
 
 export function refreshStatsCache(db: Db, force = false): void {
-  if (!force && statsCache && Date.now() - statsCacheTime < CACHE_TTL_MS) return;
+  if (!force && statsCache && Date.now() - statsCacheTime < statsTtlMs(db)) return;
 
   // Re-read the community priors alongside the stats they season, so a forced
   // refresh (tests, admin actions) never routes on a stale prior snapshot.
