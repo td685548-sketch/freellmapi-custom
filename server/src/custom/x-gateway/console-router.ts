@@ -21,6 +21,7 @@ import { xProxyPoolRouter } from './proxy-pool-router.js';
 import { xGatewayMediaRouter } from './media-router.js';
 import { xCliToolsRouter } from './cli-tools-router.js';
 import { xTranslatorRouter } from './translator-router.js';
+import { xTunnelRouter } from './tunnel-router.js';
 
 /** Console API for the gateway switch, outbound proxy, dedicated API keys, and default savers.
  *
@@ -140,6 +141,7 @@ xGatewayConsoleRouter.use(xQuotaRouter);
 xGatewayConsoleRouter.use('/proxy-pool', xProxyPoolRouter);
 xGatewayConsoleRouter.use('/tools', xCliToolsRouter);
 xGatewayConsoleRouter.use('/translator', xTranslatorRouter);
+xGatewayConsoleRouter.use('/tunnel', xTunnelRouter);
 
 xGatewayConsoleRouter.use((_req, res) => {
   res.status(404).json({ error: { type: 'not_found', message: 'Not found' } });

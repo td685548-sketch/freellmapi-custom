@@ -111,13 +111,14 @@ describe('TranslatorInspector component', () => {
       );
     });
 
-    // Wait for debounced inspect query
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 350));
-    });
-
-    expect(container.textContent).toContain('Protocol Ingestion & Validation');
-    expect(container.textContent).toContain('System Message Extraction');
+    // Wait for debounced inspect query with vi.waitFor
+    await vi.waitFor(
+      () => {
+        expect(container.textContent).toContain('Protocol Ingestion & Validation');
+        expect(container.textContent).toContain('System Message Extraction');
+      },
+      { timeout: 2000 }
+    );
   });
 
   it('switches between tabs: JSON and Dispatch', async () => {
