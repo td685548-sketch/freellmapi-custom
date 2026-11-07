@@ -8,6 +8,10 @@
 .x-mgmt-form { display: grid; gap: 12px; padding: 16px; margin-bottom: 16px; }
 .x-mgmt-form label { display: grid; gap: 4px; font-size: 13px; }
 .x-mgmt-form input, .x-mgmt-form select, .x-mgmt-form textarea { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border, #8884); background: transparent; color: inherit; font: inherit; }
+/* Native option popups are painted by the browser with its own (white) list
+   background and ignore the select's transparent background, so `color: inherit`
+   leaves dark-theme text invisible on that white list. Pin both sides. */
+.x-console select option { background-color: var(--x-panel); color: var(--x-text); }
 .x-mgmt-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
 .x-mgmt-steps { display: grid; gap: 8px; }
 .x-mgmt-step { display: grid; grid-template-columns: 28px minmax(120px, 200px) 1fr auto; gap: 8px; align-items: center; }
