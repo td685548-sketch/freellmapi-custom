@@ -64,17 +64,22 @@ xProxyPoolRouter.delete('/:id', (req, res) => {
   res.json({ ok: true, id });
 });
 
+function redactProbeError(error: string | undefined): string {
+  if (!error) return 'Proxy unreachable or refused the connection.';
+  // Strip any embedded credentials (e.g. user:pass@host) so secrets never leak to the client
+  return error.replace(/([\w.%-]+):([^\s@/]+)@/g, '$1:***@');
+}
+
 // Probe the proxy with a tiny no-content endpoint; any HTTP answer proves the
-// tunnel works. The message stays generic — probe errors can embed the proxy
-// URL (with credentials) in err.message.
+// tunnel works. Credentials are stripped before returning any probe error message.
 xProxyPoolRouter.post('/:id/test', async (req, res) => {
   const url = proxyPoolEntryUrl(entryId(req));
-  const result = await probeProxyUrl(url, { targetUrl: 'https://www.gstatic.com/generate_204', timeoutMs: 8_000 });
+  const result = await probeProxyUrl(url, { targetUrl: 'https://www.gstatic.com/generate_204', timeoutMs: 12_000 });
   res.json({
     ok: result.ok,
     latencyMs: result.latencyMs,
     ...(result.status !== undefined ? { status: result.status } : {}),
-    ...(result.ok ? {} : { message: 'Proxy unreachable or refused the connection.' }),
+    ...(result.ok ? {} : { message: redactProbeError(result.error) }),
   });
 });
 
