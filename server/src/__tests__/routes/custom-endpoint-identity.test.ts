@@ -37,7 +37,7 @@ async function request(app: Express, method: string, path: string, body?: unknow
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const data = await res.json().catch(() => null);
-  server.close();
+  await new Promise<void>(resolve => server.close(() => resolve()));
   return { status: res.status, body: data };
 }
 
