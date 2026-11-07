@@ -78,6 +78,7 @@ describe('client key stored conversations', () => {
     const key = encrypt('gsk_conv');
     getDb().prepare(`INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled) VALUES ('groq','k',?,?,?,'healthy',1)`)
       .run(key.encrypted, key.iv, key.authTag);
+    getDb().prepare("UPDATE models SET rpm_limit = NULL, rpd_limit = NULL WHERE platform = 'groq'").run();
     server = createApp().listen(0, '127.0.0.1');
     await new Promise<void>(resolve => server.once('listening', resolve));
     base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;

@@ -2,14 +2,18 @@ import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest';
 import type { Server } from 'http';
 import { initDb, getDb } from '../../db/index.js';
 import { createApp } from '../../app.js';
-import { createUser } from '../../services/auth.js';
+import { createUser, createSession } from '../../services/auth.js';
 import { mintUserApiKey, revokeUserApiKey } from '../../services/user-keys.js';
-import { setEnabled } from '../../custom/x-gateway/config.js';
+import { mintXGatewayClientKey, revokeXGatewayClientKey } from '../../custom/x-gateway/client-keys.js';
+import { setEnabled, setOutboundProxyUrl } from '../../custom/x-gateway/config.js';
+import { createApiKeyAccount, accountRow, resolveXGatewayAccountProxy } from '../../custom/provider-accounts/store.js';
 import { encrypt } from '../../lib/crypto.js';
 
 describe('X Gateway Access Control (US1 / Phase 3)', () => {
   let server: Server;
   let base: string;
+  let adminUserId: number;
+  let adminSessionToken: string;
   let adminKey: string;
   let memberKey: string;
   let delegatedKey: string;
@@ -31,6 +35,8 @@ describe('X Gateway Access Control (US1 / Phase 3)', () => {
 
     // 1. Primary admin (first user)
     const admin = createUser('admin@example.com', 'AdminPass123!');
+    adminUserId = admin.userId;
+    adminSessionToken = createSession(admin.userId);
     const adminKeyObj = mintUserApiKey(admin.userId, 'Admin Key');
     adminKey = adminKeyObj.key;
 
@@ -219,6 +225,110 @@ describe('X Gateway Access Control (US1 / Phase 3)', () => {
       const res = await requestX('/x/v1/nonexistent-endpoint', { method: 'GET', key: adminKey });
       expect(res.status).toBe(404);
       expect(res.body).toEqual({ error: { message: 'Not found', type: 'not_found' } });
+    });
+
+    it('supports dedicated X Gateway API keys (sk-xgw-...) on /x/v1 while rejecting them on /v1', async () => {
+      // Mint via console endpoint
+      const createRes = await requestX('/api/x-gateway/keys', {
+        method: 'POST',
+        key: adminSessionToken,
+        body: { name: 'Cursor X Key' },
+      });
+      expect(createRes.status).toBe(201);
+      expect(createRes.body.key).toMatch(/^sk-xgw-/);
+      const xKey = createRes.body.key as string;
+      const xKeyId = createRes.body.id as number;
+
+      // List keys via console endpoint
+      const listRes = await requestX('/api/x-gateway/keys', {
+        method: 'GET',
+        key: adminSessionToken,
+      });
+      expect(listRes.status).toBe(200);
+      expect(listRes.body.keys.some((k: { id: number; name: string }) => k.id === xKeyId && k.name === 'Cursor X Key')).toBe(true);
+
+      // Works on /x/v1/chat/completions and attributes usage to user
+      const chatRes = await requestX('/x/v1/chat/completions', {
+        key: xKey,
+        body: validChatPayload,
+      });
+      expect(chatRes.status).toBe(200);
+      expect(chatRes.headers.get('x-gateway')).toBe('x');
+
+      // Rejected on main /v1/models endpoint
+      const mainRes = await requestX('/v1/models', {
+        method: 'GET',
+        key: xKey,
+      });
+      expect(mainRes.status).toBe(401);
+      expect(mainRes.body.error.message).toMatch(/scoped exclusively to \/x\/v1/);
+
+      // Revoking key immediately blocks subsequent /x/v1 calls
+      const delRes = await requestX(`/api/x-gateway/keys/${xKeyId}`, {
+        method: 'DELETE',
+        key: adminSessionToken,
+      });
+      expect(delRes.status).toBe(200);
+
+      const afterRevoke = await requestX('/x/v1/chat/completions', {
+        key: xKey,
+        body: validChatPayload,
+      });
+      expect(afterRevoke.status).toBe(401);
+
+      // Also verify direct service helpers
+      const directKey = mintXGatewayClientKey(adminUserId, 'Direct X Key');
+      expect(directKey.key).toMatch(/^sk-xgw-/);
+      expect(revokeXGatewayClientKey(adminUserId, directKey.id)).toBe(true);
+    });
+
+    it('supports gateway-wide and per-account outbound proxy configuration for X Gateway', async () => {
+      // Configure gateway-wide outbound proxy via console endpoint
+      const saveProxyRes = await requestX('/api/x-gateway/proxy', {
+        method: 'PUT',
+        key: adminSessionToken,
+        body: { proxyUrl: 'socks5://proxyuser:proxypass@198.51.100.10:1080' },
+      });
+      expect(saveProxyRes.status).toBe(200);
+      expect(saveProxyRes.body).toEqual({
+        proxyUrl: 'socks5://proxyuser:***@198.51.100.10:1080',
+        configured: true,
+      });
+
+      const proxyGetRes = await requestX('/api/x-gateway/proxy', {
+        method: 'GET',
+        key: adminSessionToken,
+      });
+      expect(proxyGetRes.status).toBe(200);
+      expect(proxyGetRes.body).toEqual({
+        proxyUrl: 'socks5://proxyuser:***@198.51.100.10:1080',
+        configured: true,
+      });
+
+      // Account without per-account proxy inherits X Gateway outbound proxy
+      const inheritedId = createApiKeyAccount({
+        provider: 'groq',
+        key: 'gsk_inherited_proxy',
+        label: 'Inherited Proxy Account',
+      });
+      expect(resolveXGatewayAccountProxy(accountRow(inheritedId))).toBe(
+        'socks5://proxyuser:proxypass@198.51.100.10:1080',
+      );
+
+      // Account with per-account proxy overrides X Gateway outbound proxy
+      const overrideId = createApiKeyAccount({
+        provider: 'groq',
+        key: 'gsk_override_proxy',
+        label: 'Override Proxy Account',
+        proxyUrl: 'http://acctuser:acctpass@203.0.113.5:8080',
+      });
+      expect(resolveXGatewayAccountProxy(accountRow(overrideId))).toBe(
+        'http://acctuser:acctpass@203.0.113.5:8080',
+      );
+
+      // Clear gateway-wide proxy so mock fetch in other tests is unaffected
+      setOutboundProxyUrl('');
+      expect(resolveXGatewayAccountProxy(accountRow(inheritedId))).toBeUndefined();
     });
   });
 });

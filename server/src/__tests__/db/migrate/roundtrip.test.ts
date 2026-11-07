@@ -71,6 +71,7 @@ const CUSTOM_END_USERS_FILENAME = '20261107_000002_custom_end_users.ts';
 const CUSTOM_PROFILE_KNOWLEDGE_FILENAME = '20261107_000003_custom_profile_knowledge.ts';
 const CUSTOM_PROFILE_CONVERSATIONS_FILENAME = '20261107_000004_custom_profile_conversations.ts';
 const CUSTOM_X_GATEWAY_KEYS_FILENAME = '20261107_120000_custom_x_gateway_keys.ts';
+const CUSTOM_X_GATEWAY_PROXY_AND_API_KEYS_FILENAME = '20261107_130000_custom_x_gateway_proxy_and_api_keys.ts';
 
 interface SchemaRow {
   type: string;
@@ -188,6 +189,7 @@ describe('migration round trip', () => {
         CUSTOM_PROFILE_KNOWLEDGE_FILENAME,
         CUSTOM_PROFILE_CONVERSATIONS_FILENAME,
         CUSTOM_X_GATEWAY_KEYS_FILENAME,
+        CUSTOM_X_GATEWAY_PROXY_AND_API_KEYS_FILENAME,
       ]);
     } finally {
       db.close();
