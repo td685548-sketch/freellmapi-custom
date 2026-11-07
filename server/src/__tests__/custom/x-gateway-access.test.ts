@@ -7,6 +7,8 @@ import { mintUserApiKey, revokeUserApiKey } from '../../services/user-keys.js';
 import { mintXGatewayClientKey, revokeXGatewayClientKey } from '../../custom/x-gateway/client-keys.js';
 import { setEnabled, setOutboundProxyUrl } from '../../custom/x-gateway/config.js';
 import { createApiKeyAccount, accountRow, resolveXGatewayAccountProxy } from '../../custom/provider-accounts/store.js';
+import { resolveXGatewayProvider } from '../../custom/provider-accounts/catalog.js';
+import { AnthropicWireProvider, WebCookieProvider, buildWebSessionHeaders, extractWebResponseText } from '../../custom/provider-accounts/web-cookie.js';
 import { encrypt } from '../../lib/crypto.js';
 
 describe('X Gateway Access Control (US1 / Phase 3)', () => {
@@ -329,6 +331,111 @@ describe('X Gateway Access Control (US1 / Phase 3)', () => {
       // Clear gateway-wide proxy so mock fetch in other tests is unaffected
       setOutboundProxyUrl('');
       expect(resolveXGatewayAccountProxy(accountRow(inheritedId))).toBeUndefined();
+    });
+
+    it('supports Anthropic Messages API (/x/v1/messages, /x/v1/messages/count_tokens, and anthropic-version /x/v1/models)', async () => {
+      // 1. Anthropic /x/v1/messages
+      const msgRes = await requestX('/x/v1/messages', {
+        key: adminKey,
+        body: {
+          model: 'claude-sonnet-4-5-20250929',
+          max_tokens: 512,
+          system: 'You are a helpful coding assistant.',
+          messages: [{ role: 'user', content: 'Write a hello world' }],
+        },
+      });
+      expect(msgRes.status).toBe(200);
+      expect(msgRes.headers.get('x-gateway')).toBe('x');
+      expect(msgRes.body.type).toBe('message');
+      expect(msgRes.body.role).toBe('assistant');
+      expect(msgRes.body.content[0]).toEqual({
+        type: 'text',
+        text: 'Hello from mock provider!',
+      });
+
+      // 2. Anthropic /x/v1/messages/count_tokens
+      const countRes = await requestX('/x/v1/messages/count_tokens', {
+        key: adminKey,
+        body: {
+          model: 'claude-sonnet-4-5-20250929',
+          messages: [{ role: 'user', content: 'Count these tokens please' }],
+        },
+      });
+      expect(countRes.status).toBe(200);
+      expect(typeof countRes.body.input_tokens).toBe('number');
+      expect(countRes.body.input_tokens).toBeGreaterThan(0);
+
+      // 3. Anthropic GET /x/v1/models with anthropic-version header
+      const modelsRes = await realFetch(`${base}/x/v1/models`, {
+        method: 'GET',
+        headers: {
+          'x-api-key': adminKey,
+          'anthropic-version': '2023-06-01',
+        },
+      });
+      expect(modelsRes.status).toBe(200);
+      const modelsBody = await modelsRes.json();
+      expect(modelsBody.has_more).toBe(false);
+      expect(modelsBody.data.some((m: { id: string; type: string }) => m.id === 'claude-sonnet-4-5-20250929' && m.type === 'model')).toBe(true);
+    });
+
+    it('supports OpenAI Responses API (/x/v1/responses) and Legacy Completions (/x/v1/completions)', async () => {
+      // 1. OpenAI Responses API for Codex CLI
+      const respRes = await requestX('/x/v1/responses', {
+        key: adminKey,
+        body: {
+          model: 'auto',
+          instructions: 'Reply concisely.',
+          input: 'Hello Codex!',
+        },
+      });
+      expect(respRes.status).toBe(200);
+      expect(respRes.headers.get('x-gateway')).toBe('x');
+      expect(respRes.body.object).toBe('response');
+      expect(respRes.body.status).toBe('completed');
+      expect(respRes.body.output_text).toBe('Hello from mock provider!');
+
+      // 2. Legacy Completions API for Continue.dev autocomplete
+      const cmplRes = await requestX('/x/v1/completions', {
+        key: adminKey,
+        body: {
+          model: 'auto',
+          prompt: 'function add(a, b) {',
+          suffix: '}',
+          max_tokens: 64,
+        },
+      });
+      expect(cmplRes.status).toBe(200);
+      expect(cmplRes.body.object).toBe('text_completion');
+      expect(cmplRes.body.choices[0].text).toBe('Hello from mock provider!');
+    });
+
+    it('resolves WebCookieProvider for webCookie providers and AnthropicWireProvider for Anthropic-wire providers', () => {
+      const grokWeb = resolveXGatewayProvider('grok-web');
+      expect(grokWeb).toBeInstanceOf(WebCookieProvider);
+
+      const chatgptWeb = resolveXGatewayProvider('chatgpt-web');
+      expect(chatgptWeb).toBeInstanceOf(WebCookieProvider);
+
+      const claudeProvider = resolveXGatewayProvider('claude');
+      expect(claudeProvider).toBeInstanceOf(AnthropicWireProvider);
+
+      const glmProvider = resolveXGatewayProvider('glm');
+      expect(glmProvider).toBeInstanceOf(AnthropicWireProvider);
+
+      // Verify cookie header normalization and web response extraction
+      const grokHeaders = buildWebSessionHeaders('grok-web', 'my_raw_sso_token');
+      expect(grokHeaders['Cookie']).toBe('sso=my_raw_sso_token');
+
+      const fullCookieHeaders = buildWebSessionHeaders('grok-web', 'sso=abc; sso-rw=def');
+      expect(fullCookieHeaders['Cookie']).toBe('sso=abc; sso-rw=def');
+
+      expect(
+        extractWebResponseText({ result: { response: { token: 'Grok token ' } } }),
+      ).toBe('Grok token ');
+      expect(
+        extractWebResponseText({ message: { content: { parts: ['ChatGPT part'] } } }),
+      ).toBe('ChatGPT part');
     });
   });
 });

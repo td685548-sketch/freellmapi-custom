@@ -5,6 +5,7 @@ import { resolveProvider } from '../../providers/index.js';
 import { OpenAICompatProvider } from '../../providers/openai-compat.js';
 import { CopilotProvider } from './copilot.js';
 import { COPILOT_BASE_URL } from './http.js';
+import { AnthropicWireProvider, WebCookieProvider } from './web-cookie.js';
 
 export interface XGatewayCatalogProvider {
   id: string;
@@ -7512,6 +7513,31 @@ export function resolveXGatewayProvider(providerId: string, baseUrl?: string | n
   }
 
   const catalogEntry = getXGatewayProvider(normalized);
+  const effectiveUrl = trimmedUrl ?? catalogEntry?.baseUrl?.trim();
+
+  if (catalogEntry?.category === 'webCookie' && effectiveUrl) {
+    return new WebCookieProvider({
+      providerId: catalogEntry.id,
+      name: catalogEntry.name,
+      baseUrl: effectiveUrl,
+      timeoutMs: 120_000,
+    });
+  }
+
+  if (
+    effectiveUrl &&
+    (normalized === 'claude' ||
+      normalized === 'glm' ||
+      effectiveUrl.includes('api.anthropic.com') ||
+      effectiveUrl.includes('/anthropic/v1'))
+  ) {
+    return new AnthropicWireProvider({
+      name: catalogEntry?.name ?? normalized,
+      baseUrl: effectiveUrl,
+      timeoutMs: 120_000,
+    });
+  }
+
   if (trimmedUrl && catalogEntry && trimmedUrl !== catalogEntry.baseUrl) {
     return new OpenAICompatProvider({
       platform: 'custom',
@@ -7527,7 +7553,6 @@ export function resolveXGatewayProvider(providerId: string, baseUrl?: string | n
     if (builtin) return builtin;
   }
 
-  const effectiveUrl = trimmedUrl ?? catalogEntry?.baseUrl?.trim();
   if (!effectiveUrl) return undefined;
 
   return new OpenAICompatProvider({

@@ -46,6 +46,7 @@ export default function Endpoint() {
   const [keyName, setKeyName] = useState('')
   const [newlyCreatedKey, setNewlyCreatedKey] = useState<string | null>(null)
   const [proxyInput, setProxyInput] = useState('')
+  const [activeCliTab, setActiveCliTab] = useState<'claude-code' | 'codex' | 'cursor-cline' | 'continue' | 'opencode'>('claude-code')
   const canEdit = session.hasPermission('edit_x_settings')
 
   const status = useQuery({
@@ -101,8 +102,51 @@ export default function Endpoint() {
   })
 
   const base = new URL(`${import.meta.env.BASE_URL}x/v1`, window.location.origin).href
+  const anthropicBase = base.replace(/\/v1$/, '')
   const displayKey = newlyCreatedKey ?? s.placeholderKey
   const example = `curl '${base}/chat/completions' \\\n  -H 'Authorization: Bearer ${displayKey}' \\\n  -H 'Content-Type: application/json' \\\n  -d '{"model":"auto","messages":[{"role":"user","content":"Hello"}]}'`
+
+  const cliSnippets: Record<typeof activeCliTab, { title: string; code: string }> = {
+    'claude-code': {
+      title: 'Claude Code (/x/v1/messages — Anthropic compatible)',
+      code: `export ANTHROPIC_BASE_URL="${anthropicBase}"\nexport ANTHROPIC_API_KEY="${displayKey}"\nclaude`,
+    },
+    codex: {
+      title: 'OpenAI Codex CLI (/x/v1/responses — Responses API)',
+      code: `export OPENAI_BASE_URL="${base}"\nexport OPENAI_API_KEY="${displayKey}"\ncodex --model auto`,
+    },
+    'cursor-cline': {
+      title: 'Cursor / Cline / Roo Code (OpenAI Compatible)',
+      code: `Base URL : ${base}\nAPI Key  : ${displayKey}\nModel ID : auto   (or combo:<name> / <provider>/<model>)`,
+    },
+    continue: {
+      title: 'Continue.dev (~/.continue/config.yaml)',
+      code: `models:\n  - name: X Gateway Auto\n    provider: openai\n    apiBase: ${base}\n    apiKey: ${displayKey}\n    model: auto\n    roles:\n      - chat\n      - edit\n      - apply\n  - name: X Gateway Autocomplete\n    provider: openai\n    apiBase: ${base}\n    apiKey: ${displayKey}\n    model: auto\n    roles:\n      - autocomplete`,
+    },
+    opencode: {
+      title: 'OpenCode (opencode.json)',
+      code: JSON.stringify(
+        {
+          $schema: 'https://opencode.ai/config.json',
+          provider: {
+            'x-gateway': {
+              npm: '@ai-sdk/openai-compatible',
+              name: 'X Gateway',
+              options: {
+                baseURL: base,
+                apiKey: displayKey,
+              },
+              models: {
+                auto: { name: 'X Gateway Auto' },
+              },
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    },
+  }
   const copy = async (text: string) => {
     try { await navigator.clipboard.writeText(text); setCopied(text); setError('') }
     catch { setError(s.copyError) }
@@ -237,6 +281,59 @@ export default function Endpoint() {
       )}
       {saveProxy.isError && <p className="x-error" role="alert">{saveProxy.error.message}</p>}
       {saveProxy.isSuccess && <p className="x-test-ok" role="status"><Check size={16} />{s.proxySaved}</p>}
+    </section>
+
+    <section className="x-panel x-endpoint-panel">
+      <div className="x-section-heading">
+        <h2>{s.cliSetupTitle}</h2>
+        <p className="x-muted">{s.cliSetupHelp}</p>
+      </div>
+      <div className="x-pills" role="tablist" aria-label={s.cliSetupTitle}>
+        {([
+          ['claude-code', 'Claude Code'],
+          ['codex', 'Codex CLI'],
+          ['cursor-cline', 'Cursor / Cline / Roo'],
+          ['continue', 'Continue.dev'],
+          ['opencode', 'OpenCode'],
+        ] as const).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={activeCliTab === id}
+            className={activeCliTab === id ? 'active' : ''}
+            onClick={() => setActiveCliTab(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="x-section-heading x-inline">
+        <strong>{cliSnippets[activeCliTab].title}</strong>
+        <button className="x-button x-small" onClick={() => void copy(cliSnippets[activeCliTab].code)}>
+          <Copy size={14} />
+          {copied === cliSnippets[activeCliTab].code ? s.copied : s.copy}
+        </button>
+      </div>
+      <pre className="x-code-block"><code>{cliSnippets[activeCliTab].code}</code></pre>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+        <small className="x-muted" style={{ marginRight: 4 }}>{s.supportedEndpointsTitle}:</small>
+        {[
+          'POST /x/v1/chat/completions',
+          'POST /x/v1/messages',
+          'POST /x/v1/responses',
+          'POST /x/v1/completions',
+          'POST /x/v1/embeddings',
+          'POST /x/v1/images/generations',
+          'POST /x/v1/audio/speech',
+          'POST /x/v1/audio/transcriptions',
+          'GET /x/v1/models',
+        ].map(ep => (
+          <code key={ep} style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: 999, background: 'var(--x-surface-subtle)', border: '1px solid var(--x-border)' }}>
+            {ep}
+          </code>
+        ))}
+      </div>
     </section>
 
     <section className="x-panel x-endpoint-panel"><div className="x-section-heading x-inline"><h2>{s.example}</h2><button className="x-button x-small" onClick={() => void copy(example)}><Copy size={14} />{copied === example ? s.copied : s.copy}</button></div><pre className="x-code-block"><code>{example}</code></pre></section>
