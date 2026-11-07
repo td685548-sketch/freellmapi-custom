@@ -21,6 +21,7 @@ import { endUsersRouter } from '../routes/end-users.js';
 import { profileKnowledgeRouter } from '../routes/profile-knowledge.js';
 import { profileConversationsRouter, storedConversationsRouter } from '../routes/profile-conversations.js';
 import { contentFilterRouter } from '../routes/content-filter.js';
+import { maybeRollUp } from '../services/usage-daily.js';
 import { adminUserQuotaRouter, profileQuotaRouter, selfQuotaRouter } from '../routes/usage-quota.js';
 import { withRoutingSettingsScope } from '../db/routing-settings-scope.js';
 import { providerTiersRouter } from '../routes/provider-tiers.js';
@@ -129,6 +130,9 @@ export function registerCustomRoutes(app: Express): void {
   });
   // Rate-limiting and usage tracking gate for member personal API keys (/v1, /v1beta and /x/v1 inference)
   app.use(['/v1', '/v1beta', '/x/v1'], userInferenceGate);
+  // Roll finished days of the request log into the long-term daily table, after an inference
+  // response has gone out (a time check per request; the work itself at most once a day).
+  app.use(['/v1', '/v1beta'], (_req, res, next) => { res.once('finish', () => maybeRollUp()); next(); });
   // A web app's own view of the conversations kept for its key; ahead of the profile gate so reading or
   // erasing them costs no allowance.
   app.use('/v1/stored-conversations', storedConversationsRouter);

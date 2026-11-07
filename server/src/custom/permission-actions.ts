@@ -59,6 +59,8 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
   if (parent === 'view_usage' && read) {
     if (path === '/api/usage/accounts') return 'view_usage_accounts';
     if (path === '/api/usage/profiles') return 'view_usage_profiles';
+    if (/^\/api\/usage\/(?:daily\/accounts|export\/accounts\.csv)$/.test(path)) return 'view_usage_accounts';
+    if (/^\/api\/usage\/(?:daily\/(?:profiles|end-users)|export\/(?:profiles|end-users)\.csv)$/.test(path)) return 'view_usage_profiles';
   }
   if (parent === 'manage_x_gateway') {
     if (path === '/api/x-gateway/enabled' || path === '/api/x-gateway/defaults') {

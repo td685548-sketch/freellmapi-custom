@@ -13,6 +13,7 @@ import { loadStoredSort, nextSort, persistSort, type SortState } from '@/lib/tab
 import type { UsageOverview, UsageRow } from '../../../shared/usage-overview'
 import { useAdministrativeAccess } from './use-administrative-access'
 import { UsageAlertsCard } from './UsageAlertsCard'
+import { UsageExportCard } from './UsageExportCard'
 import {
   DEFAULT_FILTERS, DEFAULT_SORT, RANKING_COLUMNS, applyFilters, changeOf, loadFilters, rankRows, saveFilters, successRate, tokensOf, totalsOf,
   type KindFilter, type RankingColumn, type RankingFilters,
@@ -247,6 +248,7 @@ export function UsageRankingPage() {
           </Table>
         </div>
       )}
+      <UsageExportCard canAccounts={canAccounts} canProfiles={canProfiles} />
       {can('view_settings') && <UsageAlertsCard canEdit={can('edit_settings')} />}
       <p className="text-xs text-muted-foreground">
         Last {days} days (UTC); arrows compare with the {days} days before. Allowance used is the fullest daily or monthly allowance right now. Only traffic sent with a personal key or a client key is attributed; the shared key and dashboard sessions are not counted.
