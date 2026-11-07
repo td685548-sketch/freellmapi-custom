@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
-import { ArrowLeft, BarChart3, ChevronRight, Film, KeyRound, Layers, Menu, Moon, Network, Scissors, ScrollText, Server, ShieldCheck, Sun, Terminal, X } from 'lucide-react'
+import { ArrowLeft, ArrowLeftRight, BarChart3, ChevronRight, Film, KeyRound, Layers, Menu, Moon, Network, Scissors, ScrollText, Server, ShieldCheck, Sun, Terminal, X } from 'lucide-react'
 import { useI18n } from '@/i18n'
 import { useTheme } from '@/theme-context'
 import { Toaster } from '@/components/toaster'
@@ -21,10 +21,12 @@ import ConsoleLog from './pages/ConsoleLog'
 import ProxyPool from './pages/ProxyPool'
 import MediaProviders from './pages/MediaProviders'
 import CLITools from './pages/CLITools'
+import TranslatorInspector from './pages/TranslatorInspector'
 import { useMgmtStrings } from './management-strings'
 import { usePoolStrings } from './proxy-pool-strings'
 import { useMediaStrings } from './media-strings'
 import { useToolsStrings } from './tools-strings'
+import { useTranslatorStrings } from './translator-strings'
 import './x-gateway.css'
 
 function XGatewayShell() {
@@ -33,6 +35,7 @@ function XGatewayShell() {
   const p = usePoolStrings()
   const med = useMediaStrings()
   const t = useToolsStrings()
+  const tr = useTranslatorStrings()
   const session = useUserSession()
   const { locale, setLocale } = useI18n()
   const { resolvedDark, setTheme } = useTheme()
@@ -45,6 +48,7 @@ function XGatewayShell() {
   const items = [
     { to: '/x/endpoint', label: s.endpoint, icon: KeyRound },
     { to: '/x/tools', label: t.cliToolsNav, icon: Terminal },
+    { to: '/x/translator', label: tr.translatorNav, icon: ArrowLeftRight },
     ...(canView ? [{ to: '/x/providers', label: s.providers, icon: Server }] : []),
     ...(canView ? [{ to: '/x/combos', label: m.combos, icon: Layers }] : []),
     ...(canView ? [{ to: '/x/media', label: med.mediaTitle, icon: Film }] : []),
@@ -71,6 +75,7 @@ function XGatewayShell() {
         <Route path="accounts/callback" element={<AccountCallback />} />
         <Route path="endpoint" element={<Endpoint />} />
         <Route path="tools" element={<CLITools />} />
+        <Route path="translator" element={<TranslatorInspector />} />
         <Route path="savers" element={<TokenSavers />} />
         <Route path="media" element={protectedPage(<MediaProviders />)} />
         <Route path="proxies" element={<ProxyPool />} />
