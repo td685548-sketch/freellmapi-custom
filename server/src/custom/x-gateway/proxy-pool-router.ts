@@ -67,7 +67,7 @@ xProxyPoolRouter.delete('/:id', (req, res) => {
 function redactProbeError(error: string | undefined): string {
   if (!error) return 'Proxy unreachable or refused the connection.';
   // Strip any embedded credentials (e.g. user:pass@host) so secrets never leak to the client
-  return error.replace(/([a-zA-Z0-9_\-\.\%]+):([^\s@\/]+)@/g, '$1:***@');
+  return error.replace(/([\w.%-]+):([^\s@/]+)@/g, '$1:***@');
 }
 
 // Probe the proxy with a tiny no-content endpoint; any HTTP answer proves the
