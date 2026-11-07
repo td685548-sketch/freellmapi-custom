@@ -11,6 +11,7 @@ import {
   recordXGatewayKeyUsage,
   resolveXGatewayAccountProxy,
 } from '../provider-accounts/store.js';
+import { generateChatGptWebImages } from '../provider-accounts/chatgpt-web-image.js';
 import {
   getMediaDefaults,
   setMediaDefaults,
@@ -224,6 +225,36 @@ xGatewayMediaRouter.post('/media/test/image', async (req: Request, res: Response
 
     const effectiveProxy = resolveXGatewayAccountProxy(account);
     try {
+      // ChatGPT Web has no OpenAI-style /images/generations endpoint; it runs
+      // the picture_v2 flow over /backend-api instead (9Router parity).
+      if (account.provider === 'chatgpt-web') {
+        const result = await withQuotaTracking(account, modelId, effectiveProxy, () =>
+          generateChatGptWebImages({
+            credential,
+            prompt: parsed.data.prompt,
+            n: parsed.data.n ?? 1,
+            size: parsed.data.size,
+            baseUrl,
+            platform: account.platform,
+          }),
+        );
+        const latencyMs = Date.now() - startMs;
+        recordXGatewayKeyUsage(account.id, 1);
+        logRequest(
+          account.provider, modelId, null, 'success', 1, 1,
+          latencyMs, null, latencyMs, requestedModel, null, 'x-gateway',
+        );
+        res.json({
+          ok: true,
+          data: result.data,
+          provider: account.provider,
+          accountLabel: account.label,
+          model: modelId,
+          latencyMs,
+        });
+        return;
+      }
+
       const upstreamRes = await withQuotaTracking(account, modelId, effectiveProxy, () =>
         proxyFetch(
           `${baseUrl}/images/generations`,
