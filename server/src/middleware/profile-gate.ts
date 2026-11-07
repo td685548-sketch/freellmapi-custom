@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { setRequestAllowedModels, setRequestEndUser, setRequestProfile } from '../lib/client-context.js';
 import { endUserOf, enforceEndUserQuota } from '../custom/end-user-gate.js';
 import { injectKnowledge } from '../custom/knowledge-inject.js';
+import { applyConversation } from '../custom/conversation-inject.js';
 import { capOutputTokens, checkModel, refuse } from '../custom/profile-restrictions.js';
 import { enforceUsageQuota } from '../custom/quota-gate.js';
 import { CLIENT_PROFILE_KEY_PREFIX } from '../lib/system-prompt.js';
@@ -40,8 +41,9 @@ export function profileInferenceGate(req: Request, res: Response, next: NextFunc
   if (profile.maxTokens !== null) capOutputTokens(req, profile.maxTokens);
 
   const tokens = () => context?.userTokens ?? 0;
-  // Once admitted: add the key's reference passages, then route.
+  // Once admitted: add the stored conversation and the key's reference passages, then route.
   const proceed = () => {
+    if (!applyConversation(req, res, profile.id, endUser, profile.conversations)) return;
     if (profile.knowledge.enabled) injectKnowledge(req, profile.id, profile.knowledge.maxChars);
     next();
   };
