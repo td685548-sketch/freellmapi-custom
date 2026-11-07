@@ -20,6 +20,7 @@ import { usageAlertSettingsRouter } from '../routes/usage-alert-settings.js';
 import { endUsersRouter } from '../routes/end-users.js';
 import { profileKnowledgeRouter } from '../routes/profile-knowledge.js';
 import { profileConversationsRouter, storedConversationsRouter } from '../routes/profile-conversations.js';
+import { contentFilterRouter } from '../routes/content-filter.js';
 import { adminUserQuotaRouter, profileQuotaRouter, selfQuotaRouter } from '../routes/usage-quota.js';
 import { withRoutingSettingsScope } from '../db/routing-settings-scope.js';
 import { providerTiersRouter } from '../routes/provider-tiers.js';
@@ -141,7 +142,7 @@ export function registerCustomRoutes(app: Express): void {
   for (const gate of PERMISSION_GATES) installGate(app, gate);
   app.use(['/api/keys', '/api/embeddings', '/api/media', '/api/decisions'], guardKeyAddition);
   // Usage and request cap per client profile; the manage_settings gate for this prefix is installed just above.
-  app.use('/api/client-profiles', profileAnalyticsRouter, profileQuotaRouter, profileRestrictionsRouter, profileTestRouter, profileKeyRotationRouter, profileRequestsRouter, endUsersRouter, profileKnowledgeRouter, profileConversationsRouter);
+  app.use('/api/client-profiles', profileAnalyticsRouter, profileQuotaRouter, profileRestrictionsRouter, profileTestRouter, profileKeyRotationRouter, profileRequestsRouter, endUsersRouter, profileKnowledgeRouter, profileConversationsRouter, contentFilterRouter);
   // Where usage alerts go; the /api/settings gate above covers it (view_settings / edit_settings).
   app.use('/api/settings/usage-alerts', usageAlertSettingsRouter);
   // Usage ranking of accounts and client keys; its view_usage gate is in PERMISSION_GATES.

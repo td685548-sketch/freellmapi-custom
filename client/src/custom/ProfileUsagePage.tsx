@@ -16,6 +16,7 @@ import { RecentRequestsCard } from './RecentRequestsCard'
 import { EndUsersCard } from './EndUsersCard'
 import { KnowledgeCard } from './KnowledgeCard'
 import { ConversationsCard } from './ConversationsCard'
+import { ContentFilterCard } from './ContentFilterCard'
 import { useAdministrativeAccess } from './use-administrative-access'
 
 const MAX_RPM = 1000
@@ -114,6 +115,7 @@ export function ProfileUsagePage() {
       />
       <KnowledgeCard profileId={profileId} canEdit={can('edit_client_profiles')} />
       <ConversationsCard profileId={profileId} canEdit={can('edit_client_profiles')} />
+      <ContentFilterCard profileId={profileId} canEdit={can('edit_client_profiles')} />
       <EndUsersCard profileId={profileId} canEdit={can('edit_client_profiles')} />
       <RecentRequestsCard endpoint={`/api/client-profiles/${profileId}/requests`} />
     </div>

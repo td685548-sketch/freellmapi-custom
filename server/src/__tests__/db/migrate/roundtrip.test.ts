@@ -70,6 +70,7 @@ const CUSTOM_PROVIDER_ACCOUNTS_FILENAME = '20261107_000001_custom_provider_accou
 const CUSTOM_END_USERS_FILENAME = '20261107_000002_custom_end_users.ts';
 const CUSTOM_PROFILE_KNOWLEDGE_FILENAME = '20261107_000003_custom_profile_knowledge.ts';
 const CUSTOM_PROFILE_CONVERSATIONS_FILENAME = '20261107_000004_custom_profile_conversations.ts';
+const CUSTOM_CONTENT_FILTER_FILENAME = '20261107_000005_custom_content_filter.ts';
 const CUSTOM_X_GATEWAY_KEYS_FILENAME = '20261107_120000_custom_x_gateway_keys.ts';
 
 interface SchemaRow {
@@ -187,6 +188,7 @@ describe('migration round trip', () => {
         CUSTOM_END_USERS_FILENAME,
         CUSTOM_PROFILE_KNOWLEDGE_FILENAME,
         CUSTOM_PROFILE_CONVERSATIONS_FILENAME,
+        CUSTOM_CONTENT_FILTER_FILENAME,
         CUSTOM_X_GATEWAY_KEYS_FILENAME,
       ]);
     } finally {
