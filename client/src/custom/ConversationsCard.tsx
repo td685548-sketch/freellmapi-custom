@@ -54,7 +54,7 @@ export function ConversationsCard({ profileId, canEdit }: { profileId: number; c
     queryFn: () => apiFetch(`${base}/conversations${filter ? `?endUser=${encodeURIComponent(filter)}` : ''}`),
   })
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['conversations', profileId] })
-  const messages = useQuery<{ messages: StoredMessage[] }>({
+  const messages = useQuery<{ messages: StoredMessage[]; conversation?: { summary?: string | null } }>({
     queryKey: ['conversation', profileId, open],
     queryFn: () => apiFetch(`${base}/conversations/${encodeURIComponent(open!)}`),
     enabled: canEdit && open !== null,
@@ -103,6 +103,14 @@ export function ConversationsCard({ profileId, canEdit }: { profileId: number; c
         {!valid && <span className="text-xs text-destructive">{FIELDS.map(f => `${f.min.toLocaleString()}–${f.max.toLocaleString()}`).join(' · ')}</span>}
       </form>
 
+      <label className="flex items-start gap-2 text-xs">
+        <Switch size="sm" checked={settings.summarize} disabled={!canEdit} onCheckedChange={(summarize) => save.mutate({ summarize })} aria-label="Summarize older turns" className="mt-0.5" />
+        <span>
+          <span className="font-medium">Summarize older turns</span>
+          <span className="block text-muted-foreground">Turns that no longer fit the limits are folded into a short summary sent ahead of the history, so the assistant still remembers them. Each summary is one extra request with this key and counts against its limits.</span>
+        </span>
+      </label>
+
       <details className="text-xs">
         <summary className="cursor-pointer text-muted-foreground">Example for your backend</summary>
         <pre className="mt-2 overflow-x-auto rounded-lg bg-muted/50 p-3 text-[11px] leading-relaxed">{EXAMPLE}</pre>
@@ -135,6 +143,11 @@ export function ConversationsCard({ profileId, canEdit }: { profileId: number; c
                     <ConfirmButton onConfirm={() => remove.mutate(`/${encodeURIComponent(c.id)}`)} size="icon-xs" armedSize="xs" aria-label={`Delete ${c.id}`} armedClassName="text-destructive"><Trash2 className="size-3.5" /></ConfirmButton>
                   )}
                 </div>
+                {open === c.id && messages.data?.conversation?.summary && (
+                  <p className="mt-2 rounded-lg border border-dashed p-2 whitespace-pre-wrap" aria-label={`Summary of ${c.id}`}>
+                    <strong>Summary of earlier turns:</strong> {messages.data.conversation.summary}
+                  </p>
+                )}
                 {open === c.id && (
                   <ol className="mt-2 space-y-1" aria-label={`Messages of ${c.id}`}>
                     {(messages.data?.messages ?? []).map((m, i) => (
