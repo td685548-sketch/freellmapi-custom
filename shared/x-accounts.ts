@@ -21,6 +21,7 @@ export interface AccountProvider {
   name: string;
   category?: ProviderCategory;
   baseUrl?: string | null;
+  hasMainDbKey?: boolean;
   authMethods: ProviderAccountAuthMethod[];
   accounts: ProviderAccount[];
 }

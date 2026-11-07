@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Copy, ExternalLink, KeyRound, LoaderCircle, ShieldCheck, X } from 'lucide-react'
+import { Copy, ExternalLink, LoaderCircle, ShieldCheck, X } from 'lucide-react'
 import { Dialog, DialogPopup, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import type { AccountProvider, ProviderAccount, ProviderAccountAuthStartResponse } from '../../../../shared/x-accounts'
 import { accountsApi, callbackAddress, refreshAccounts, trustedLoginUrl } from './api'
 import { useXStrings } from './strings'
+import { ProviderMark } from './pages/Providers'
 
 export function ConnectAccountDialog({ provider, account, onClose }: {
   provider: AccountProvider; account?: ProviderAccount; onClose: () => void
@@ -132,7 +133,7 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
   return <Dialog open onOpenChange={open => { if (!open) onClose() }}>
     <DialogPopup className="x-console x-dialog">
       <button className="x-icon-button x-dialog-close" aria-label={s.close} onClick={onClose}><X size={18} /></button>
-      <div className="x-dialog-icon"><KeyRound size={24} /></div>
+      <div className="x-dialog-icon"><ProviderMark id={provider.id} name={provider.name} /></div>
       <DialogTitle className="x-dialog-title">{account ? s.reconnect : s.addAccount} · {provider.name}</DialogTitle>
       <DialogDescription className="x-muted">{s.oauthHelp}</DialogDescription>
       {provider.id === 'github-copilot' && <p className="x-notice">{s.copilotNotice}</p>}

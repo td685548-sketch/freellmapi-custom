@@ -141,6 +141,53 @@ export function accountModels(
   return baseModels.filter(m => !scope || scope.has(m.id));
 }
 
+const MAIN_DB_PLATFORM_ALIASES: Record<string, string[]> = {
+  google: ['google', 'gemini'],
+  cloudflare: ['cloudflare-ai'],
+  zhipu: ['glm', 'glm-cn'],
+  kilo: ['kilo-gateway', 'kilocode'],
+  opencode: ['opencode', 'opencode-zen', 'opencode-go'],
+  airforce: ['api-airforce'],
+  brave: ['brave-search'],
+  serpsearch: ['serper', 'searchapi'],
+  qianfan: ['baidu'],
+  volcengine: ['volcengine-ark'],
+  modelscope: ['alims-intl'],
+};
+
+function getMainDbProviderIds(db: ReturnType<typeof getDb>): Set<string> {
+  const result = new Set<string>();
+  try {
+    const mainRows = db
+      .prepare('SELECT DISTINCT platform, base_url FROM api_keys')
+      .all() as Array<{ platform: string; base_url: string | null }>;
+    for (const row of mainRows) {
+      const platform = (row.platform ?? '').trim().toLowerCase();
+      if (!platform) continue;
+      const normalized = normalizeXGatewayProviderId(platform);
+      if (normalized) result.add(normalized);
+      const aliased = MAIN_DB_PLATFORM_ALIASES[platform];
+      if (aliased) {
+        for (const id of aliased) result.add(id);
+      }
+      if (row.base_url) {
+        const trimmedUrl = row.base_url.trim().replace(/\/+$/, '').toLowerCase();
+        if (trimmedUrl === COPILOT_BASE_URL.toLowerCase()) {
+          result.add('github-copilot');
+        }
+        for (const cat of X_GATEWAY_PROVIDERS) {
+          if (cat.baseUrl && cat.baseUrl.trim().replace(/\/+$/, '').toLowerCase() === trimmedUrl) {
+            result.add(cat.id);
+          }
+        }
+      }
+    }
+  } catch {
+    // Ignore if api_keys table is unavailable
+  }
+  return result;
+}
+
 export function listAccounts(): ProviderAccountsResponse['providers'] {
   const db = getDb();
   const month = new Date().toISOString().slice(0, 7);
@@ -151,12 +198,15 @@ export function listAccounts(): ProviderAccountsResponse['providers'] {
     ORDER BY k.id
   `).all(month) as Array<RawXGatewayKeyRow & { requests: number; tokens: number }>;
 
+  const mainDbProviderIds = getMainDbProviderIds(db);
+
   const providers: ProviderAccountsResponse['providers'] = X_GATEWAY_PROVIDERS.map(p => ({
     id: p.id,
     alias: p.alias,
     name: p.name,
     category: p.category,
     baseUrl: p.baseUrl || null,
+    ...(mainDbProviderIds.has(p.id) ? { hasMainDbKey: true } : {}),
     authMethods: [...p.authMethods],
     accounts: [],
   }));

@@ -168,6 +168,41 @@ describe('provider catalog', () => {
     const groqCard = [...container.querySelectorAll('a')].find(a => a.textContent?.includes('Groq'))!
     expect(groqCard.textContent).toContain('API key')
     expect(groqCard.textContent).not.toContain('Browser login')
+    const logoSources = [...container.querySelectorAll<HTMLImageElement>('.x-provider-mark-logo img')].map(img => img.getAttribute('src'))
+    expect(logoSources).toContain('/providers/openrouter.png')
+    expect(logoSources).toContain('/providers/copilot.png')
+    expect(logoSources).toContain('/providers/groq.png')
+
+    // Filter by Login (OAuth) vs API key
+    click(button('Login (OAuth)'))
+    await flush()
+    expect(container.textContent).toContain('OpenRouter')
+    expect(container.textContent).toContain('GitHub Copilot')
+    expect(container.textContent).not.toContain('Groq')
+
+    click(button('API key'))
+    await flush()
+    expect(container.textContent).toContain('Groq')
+    expect(container.textContent).not.toContain('GitHub Copilot')
+
+    click(button('All types'))
+    await flush()
+    expect(container.textContent).toContain('Groq')
+    expect(container.textContent).toContain('GitHub Copilot')
+  })
+
+  it('hides providers that already have API keys in the main DB by default and shows them when toggled', async () => {
+    data.providers[2].hasMainDbKey = true
+    mount(<Providers />)
+    await flush()
+    expect(container.textContent).toContain('OpenRouter')
+    expect(container.textContent).not.toContain('Groq')
+    expect(container.textContent).toContain('Hide main DB (1)')
+
+    click(button('Show all DBs'))
+    await flush()
+    expect(container.textContent).toContain('Groq')
+    expect(container.textContent).toContain('In main DB')
   })
 
   it('surfaces a load error with a working retry', async () => {
