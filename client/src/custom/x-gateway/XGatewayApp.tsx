@@ -46,6 +46,7 @@ function XGatewayShell() {
   const location = useLocation()
   const [menuOpen, setMenuOpen] = useState(false)
   if (session.isPending) return <div className="x-console"><AccountLoadState /></div>
+  if (session.isError) return <div className="x-console"><AccountLoadState error retry={() => void session.refetch()} /></div>
   if (!session.hasPermission('use_x_gateway')) return <NotFoundPage />
   const canView = session.hasPermission('view_keys')
   const protectedPage = (page: ReactNode) => canView ? page : <div className="x-empty" role="alert"><ShieldCheck size={32} /><p>{s.permission}</p></div>

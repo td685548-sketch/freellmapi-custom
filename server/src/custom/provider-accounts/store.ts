@@ -21,9 +21,17 @@ import {
 export type { CustomProviderNode };
 export const CUSTOM_NODES_SETTINGS_KEY = 'x_gateway_custom_nodes';
 
+let cachedCustomNodesDb: unknown = null;
+let cachedCustomNodes: CustomProviderNode[] | null = null;
+let cachedModelConfigsDb: unknown = null;
+let cachedModelConfigs: Record<string, ProviderModelConfig> | null = null;
+
 export function listCustomProviderNodes(): CustomProviderNode[] {
   try {
     const db = getDb();
+    if (cachedCustomNodes !== null && cachedCustomNodesDb === db) {
+      return cachedCustomNodes;
+    }
     let raw: string | undefined;
     try {
       const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(CUSTOM_NODES_SETTINGS_KEY) as { value: string } | undefined;
@@ -32,9 +40,16 @@ export function listCustomProviderNodes(): CustomProviderNode[] {
       const row = db.prepare('SELECT value FROM x_gateway_config WHERE key = ?').get(CUSTOM_NODES_SETTINGS_KEY) as { value: string } | undefined;
       raw = row?.value;
     }
-    if (!raw) return [];
+    if (!raw) {
+      cachedCustomNodesDb = db;
+      cachedCustomNodes = [];
+      return [];
+    }
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as CustomProviderNode[]) : [];
+    const list = Array.isArray(parsed) ? (parsed as CustomProviderNode[]) : [];
+    cachedCustomNodesDb = db;
+    cachedCustomNodes = list;
+    return list;
   } catch {
     return [];
   }
@@ -184,6 +199,8 @@ let cachedUsableKeys: Array<AccountRow & { requests: number; tokens: number }> |
 
 export function invalidateXGatewayKeyCache(): void {
   cachedUsableKeys = null;
+  cachedCustomNodes = null;
+  cachedModelConfigs = null;
 }
 
 export function accountRow(id: number): AccountRow {
@@ -213,12 +230,23 @@ const PROVIDER_MODELS_CONFIG_KEY = 'provider_model_configs';
 
 function loadAllProviderModelConfigs(): Record<string, ProviderModelConfig> {
   try {
-    const row = getDb()
+    const db = getDb();
+    if (cachedModelConfigs !== null && cachedModelConfigsDb === db) {
+      return cachedModelConfigs;
+    }
+    const row = db
       .prepare('SELECT value FROM x_gateway_config WHERE key = ?')
       .get(PROVIDER_MODELS_CONFIG_KEY) as { value: string } | undefined;
-    if (!row?.value) return {};
+    if (!row?.value) {
+      cachedModelConfigsDb = db;
+      cachedModelConfigs = {};
+      return {};
+    }
     const parsed = JSON.parse(row.value);
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, ProviderModelConfig>) : {};
+    const configs = parsed && typeof parsed === 'object' ? (parsed as Record<string, ProviderModelConfig>) : {};
+    cachedModelConfigsDb = db;
+    cachedModelConfigs = configs;
+    return configs;
   } catch {
     return {};
   }
@@ -226,12 +254,15 @@ function loadAllProviderModelConfigs(): Record<string, ProviderModelConfig> {
 
 function saveAllProviderModelConfigs(configs: Record<string, ProviderModelConfig>): void {
   const now = new Date().toISOString();
-  getDb()
+  const db = getDb();
+  db
     .prepare(
       `INSERT INTO x_gateway_config (key, value, updated_at) VALUES (?, ?, ?)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
     )
     .run(PROVIDER_MODELS_CONFIG_KEY, JSON.stringify(configs), now);
+  cachedModelConfigsDb = db;
+  cachedModelConfigs = configs;
 }
 
 export function getProviderModelConfig(providerId: string): ProviderModelConfig {
@@ -351,8 +382,10 @@ function getMainDbProviderIds(db: ReturnType<typeof getDb>): Set<string> {
     for (const row of mainRows) {
       const platform = (row.platform ?? '').trim().toLowerCase();
       if (!platform) continue;
-      const normalized = normalizeXGatewayProviderId(platform);
-      if (normalized) result.add(normalized);
+      if (platform !== 'custom') {
+        const normalized = normalizeXGatewayProviderId(platform);
+        if (normalized) result.add(normalized);
+      }
       const aliased = MAIN_DB_PLATFORM_ALIASES[platform];
       if (aliased) {
         for (const id of aliased) result.add(id);

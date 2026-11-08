@@ -133,44 +133,50 @@ export function getDefaultPricing(): ProviderPricingMap {
   return clonePricingMap(DEFAULT_MODEL_PRICING);
 }
 
-export function getPricingOverrides(): ProviderPricingMap {
-  const raw = getSetting(PRICING_OVERRIDES_SETTING_KEY);
-  if (!raw) return {};
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    const sanitized: ProviderPricingMap = {};
-    for (const [provider, models] of Object.entries(parsed as Record<string, unknown>)) {
-      if (!models || typeof models !== 'object' || Array.isArray(models)) continue;
-      for (const [model, rateObj] of Object.entries(models as Record<string, unknown>)) {
-        if (!rateObj || typeof rateObj !== 'object' || Array.isArray(rateObj)) continue;
-        const r = rateObj as Record<string, unknown>;
-        const input = typeof r.input === 'number' && Number.isFinite(r.input) && r.input >= 0 ? r.input : undefined;
-        const output = typeof r.output === 'number' && Number.isFinite(r.output) && r.output >= 0 ? r.output : undefined;
-        if (input === undefined && output === undefined) continue;
-        if (!sanitized[provider]) sanitized[provider] = {};
-        const entry: ModelPricingRate = {
-          input: input ?? DEFAULT_MODEL_PRICING[provider]?.[model]?.input ?? FALLBACK_PRICING_RATE.input,
-          output: output ?? DEFAULT_MODEL_PRICING[provider]?.[model]?.output ?? FALLBACK_PRICING_RATE.output,
-        };
-        if (typeof r.cached === 'number' && Number.isFinite(r.cached) && r.cached >= 0) entry.cached = r.cached;
-        if (typeof r.reasoning === 'number' && Number.isFinite(r.reasoning) && r.reasoning >= 0) entry.reasoning = r.reasoning;
-        if (typeof r.cache_creation === 'number' && Number.isFinite(r.cache_creation) && r.cache_creation >= 0) {
-          entry.cache_creation = r.cache_creation;
-        }
-        sanitized[provider][model] = entry;
-      }
-    }
-    return sanitized;
-  } catch {
-    return {};
-  }
-}
+let lastOverridesRaw: string | undefined;
+let cachedOverridesMap: ProviderPricingMap = {};
+let cachedMergedMap: ProviderPricingMap | null = null;
 
-export function getMergedPricing(): ProviderPricingMap {
+function ensurePricingCache(): void {
+  const raw = getSetting(PRICING_OVERRIDES_SETTING_KEY) ?? '';
+  if (raw === lastOverridesRaw && cachedMergedMap !== null) {
+    return;
+  }
+  lastOverridesRaw = raw;
+  const sanitized: ProviderPricingMap = {};
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        for (const [provider, models] of Object.entries(parsed as Record<string, unknown>)) {
+          if (!models || typeof models !== 'object' || Array.isArray(models)) continue;
+          for (const [model, rateObj] of Object.entries(models as Record<string, unknown>)) {
+            if (!rateObj || typeof rateObj !== 'object' || Array.isArray(rateObj)) continue;
+            const r = rateObj as Record<string, unknown>;
+            const input = typeof r.input === 'number' && Number.isFinite(r.input) && r.input >= 0 ? r.input : undefined;
+            const output = typeof r.output === 'number' && Number.isFinite(r.output) && r.output >= 0 ? r.output : undefined;
+            if (input === undefined && output === undefined) continue;
+            if (!sanitized[provider]) sanitized[provider] = {};
+            const entry: ModelPricingRate = {
+              input: input ?? DEFAULT_MODEL_PRICING[provider]?.[model]?.input ?? FALLBACK_PRICING_RATE.input,
+              output: output ?? DEFAULT_MODEL_PRICING[provider]?.[model]?.output ?? FALLBACK_PRICING_RATE.output,
+            };
+            if (typeof r.cached === 'number' && Number.isFinite(r.cached) && r.cached >= 0) entry.cached = r.cached;
+            if (typeof r.reasoning === 'number' && Number.isFinite(r.reasoning) && r.reasoning >= 0) entry.reasoning = r.reasoning;
+            if (typeof r.cache_creation === 'number' && Number.isFinite(r.cache_creation) && r.cache_creation >= 0) {
+              entry.cache_creation = r.cache_creation;
+            }
+            sanitized[provider][model] = entry;
+          }
+        }
+      }
+    } catch {
+      // Ignore malformed JSON
+    }
+  }
+  cachedOverridesMap = sanitized;
   const merged = clonePricingMap(DEFAULT_MODEL_PRICING);
-  const overrides = getPricingOverrides();
-  for (const [provider, models] of Object.entries(overrides)) {
+  for (const [provider, models] of Object.entries(sanitized)) {
     if (!merged[provider]) merged[provider] = {};
     for (const [model, rate] of Object.entries(models)) {
       const base = merged[provider][model] ?? {
@@ -183,7 +189,17 @@ export function getMergedPricing(): ProviderPricingMap {
       };
     }
   }
-  return merged;
+  cachedMergedMap = merged;
+}
+
+export function getPricingOverrides(): ProviderPricingMap {
+  ensurePricingCache();
+  return clonePricingMap(cachedOverridesMap);
+}
+
+export function getMergedPricing(): ProviderPricingMap {
+  ensurePricingCache();
+  return clonePricingMap(cachedMergedMap!);
 }
 
 export function validatePricingPatch(
@@ -283,7 +299,11 @@ export function resolveModelPricing(
   model: string | undefined | null,
   pricingMap?: ProviderPricingMap,
 ): ModelPricingRate {
-  const map = pricingMap ?? getMergedPricing();
+  let map = pricingMap;
+  if (!map) {
+    ensurePricingCache();
+    map = cachedMergedMap!;
+  }
   const normProvider = (provider ?? '').trim().toLowerCase();
   const rawModel = (model ?? '').trim();
 
