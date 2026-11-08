@@ -37,6 +37,32 @@ export interface ProviderModelsConfigResponse {
   modelAliases: Record<string, string>
 }
 
+export interface CustomProviderNode {
+  id: string
+  name: string
+  prefix: string
+  type: 'openai-compatible' | 'anthropic-compatible' | 'custom-embedding'
+  apiType?: 'chat' | 'responses'
+  baseUrl: string
+  models?: string[]
+}
+
+export interface ValidateNodeResponse {
+  ok: boolean
+  valid: boolean
+  latencyMs: number
+  models: string[]
+  message?: string
+  error?: string
+}
+
+export interface ModelPingResponse {
+  ok: boolean
+  latencyMs: number
+  model: string
+  message: string
+}
+
 export const accountsApi = {
   start: (provider: string, body: { label: string; callbackUrl: string; reconnectId?: number }) =>
     apiFetch<ProviderAccountAuthStartResponse>(`${base}/auth/${encodeURIComponent(provider)}/start`, { method: 'POST', body: JSON.stringify(body) }),
@@ -93,6 +119,27 @@ export const accountsApi = {
     apiFetch<{ ids: number[]; count: number }>(`${base}/bulk`, {
       method: 'POST',
       body: JSON.stringify(body),
+    }),
+  getCustomNodes: (signal?: AbortSignal) =>
+    apiFetch<{ ok: boolean; nodes: CustomProviderNode[] }>(`${base}/nodes`, { signal }),
+  saveCustomNode: (node: CustomProviderNode) =>
+    apiFetch<{ ok: boolean; node: CustomProviderNode }>(`${base}/nodes`, {
+      method: 'POST',
+      body: JSON.stringify(node),
+    }),
+  deleteCustomNode: (nodeId: string) =>
+    apiFetch<{ ok: boolean; nodeId: string }>(`${base}/nodes/${encodeURIComponent(nodeId)}`, {
+      method: 'DELETE',
+    }),
+  validateCustomNode: (body: { baseUrl: string; apiKey?: string; type?: string; modelId?: string }) =>
+    apiFetch<ValidateNodeResponse>(`${base}/nodes/validate`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  pingModel: (providerId: string, model: string) =>
+    apiFetch<ModelPingResponse>(`${base}/providers/${encodeURIComponent(providerId)}/models/ping`, {
+      method: 'POST',
+      body: JSON.stringify({ model }),
     }),
 }
 
