@@ -13,6 +13,7 @@ import { proxyRouter } from './routes/proxy.js';
 import { responsesRouter } from './routes/responses.js';
 import { anthropicRouter } from './routes/anthropic.js';
 import { fallbackRouter } from './routes/fallback.js';
+import { modelListCacheInvalidation } from './routes/model-list-page.js';
 import { profilesRouter } from './routes/profiles.js';
 import { embeddingsRouter } from './routes/embeddings.js';
 import { mediaRouter } from './routes/media.js';
@@ -248,6 +249,7 @@ export function createApp(config?: Config) {
 
   // Custom fork surface (admin/member gating, /api/invites, /api/user, invite
   // registration). Registered below the limiter so it shares the same throttle.
+  app.use('/api', modelListCacheInvalidation);
   registerCustomRoutes(app);
 
   // Dashboard auth (#35): /api/auth/{status,setup,login} bootstrap without a

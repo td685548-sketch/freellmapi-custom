@@ -38,6 +38,8 @@ export interface FallbackEntry {
   // go through memberProviderLabel / providerPinId / memberEndpointTitle, which
   // reveal them only once two endpoints actually collide (#651).
   endpointScope?: string | null
+  // A paged list may not contain the other endpoint's renamed display group.
+  endpointCollision?: boolean
   qualifiedModelId?: string | null
   hasOverrides?: boolean
   // Which fields a local override replaces, so the model page can mark the
@@ -181,9 +183,10 @@ export function memberProviderLabel<T extends {
  * when it is needed (#651).
  */
 function hasEndpointCollision<T extends {
-  platform: string; modelId: string; source?: 'catalog' | 'custom' | 'discovered'; endpointScope?: string | null
+  platform: string; modelId: string; source?: 'catalog' | 'custom' | 'discovered'; endpointScope?: string | null; endpointCollision?: boolean
 }>(row: T, siblings: readonly T[]): boolean {
   if (row.source !== 'custom' || !row.endpointScope) return false
+  if (row.endpointCollision === true) return true
   const endpoints = new Set(siblings
     .filter(s => s.platform === row.platform && s.modelId === row.modelId
       && s.source === 'custom' && !!s.endpointScope)

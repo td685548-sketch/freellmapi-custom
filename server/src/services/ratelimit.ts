@@ -570,6 +570,30 @@ export function modelWindowUsedFraction(
   limits: WindowLimits,
   now = Date.now(),
 ): number | null {
+  const usage = bestModelWindowUsage(model, limits, now);
+  return usage ? Math.min(1, keyWindowPressure(usage, limits)) : null;
+}
+
+/** Display-only usage reuses the scorer's memoised snapshot, without another history scan. */
+export function modelWindowUsage(
+  model: { platform: string; modelId: string; keyId?: number | null },
+  limits: WindowLimits,
+  now = Date.now(),
+) {
+  const usage = bestModelWindowUsage(model, limits, now);
+  const window = (used: number, limit: number | null) => usage && limit != null ? { used, limit } : null;
+  return {
+    rpm: window(usage?.rpm ?? 0, limits.rpm),
+    rpd: window(usage?.rpd ?? 0, limits.rpd),
+    tpm: window(usage?.tpm ?? 0, limits.tpm),
+  };
+}
+
+function bestModelWindowUsage(
+  model: { platform: string; modelId: string; keyId?: number | null },
+  limits: WindowLimits,
+  now: number,
+): KeyWindowUsage | null {
   if (limits.rpm == null && limits.rpd == null && limits.tpm == null && limits.tpd == null) return null;
   const snap = getWindowUsageSnapshot(now);
   if (!snap) return null;
@@ -583,7 +607,8 @@ export function modelWindowUsedFraction(
     ? snap.baseUrlByKeyId.get(model.keyId) ?? null
     : null;
 
-  let best: number | null = null;
+  let best: KeyWindowUsage | null = null;
+  let bestPressure = Infinity;
   for (const k of pool) {
     if (!scopeAllows(k.scope, model.modelId)) continue;
     if (model.platform === 'custom' && model.keyId != null) {
@@ -591,11 +616,11 @@ export function modelWindowUsedFraction(
     }
     const usage = snap.usage.get(usageCacheKey(model.platform, model.modelId, k.id)) ?? NO_WINDOW_USAGE;
     const pressure = keyWindowPressure(usage, limits);
-    if (best === null || pressure < best) best = pressure;
-    if (best === 0) break; // an untouched key is as good as it gets
+    if (pressure < bestPressure) { best = usage; bestPressure = pressure; }
+    if (bestPressure === 0) break; // an untouched key is as good as it gets
   }
   if (best === null) return null; // every key scoped away from this model
-  return Math.min(1, best);
+  return best;
 }
 
 // ── Provider-wide daily request caps (#162) ──
