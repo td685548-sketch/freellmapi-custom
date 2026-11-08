@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Copy, ExternalLink, Globe, KeyRound, Plus, Terminal, Trash2 } from 'lucide-react'
+import { Check, Copy, ExternalLink, Globe, KeyRound, Lock, Plus, ShieldCheck, Terminal, Trash2 } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { useUserSession } from '../../use-session'
 import { useSessionRevision } from '../../session-state'
@@ -26,6 +26,18 @@ type XGatewayClientKey = {
   revoked: boolean
   createdAt: string
   lastUsedAt: string | null
+  access?: {
+    restricted: boolean
+    allow: string[]
+  }
+}
+
+type ProxyTestResult = {
+  ok: boolean
+  latencyMs: number
+  status?: number
+  target?: string
+  error?: string
 }
 
 type MintedXGatewayKey = {
@@ -46,6 +58,9 @@ export default function Endpoint() {
   const [keyName, setKeyName] = useState('')
   const [newlyCreatedKey, setNewlyCreatedKey] = useState<string | null>(null)
   const [proxyInput, setProxyInput] = useState('')
+  const [editingAccessKeyId, setEditingAccessKeyId] = useState<number | null>(null)
+  const [accessRestricted, setAccessRestricted] = useState(false)
+  const [accessAllowInput, setAccessAllowInput] = useState('')
   const [activeCliTab, setActiveCliTab] = useState<'claude-code' | 'codex' | 'cursor-cline' | 'continue' | 'opencode'>('claude-code')
   const canEdit = session.hasPermission('edit_x_settings')
 
@@ -99,6 +114,28 @@ export default function Endpoint() {
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['x-gateway-client-keys'] })
     },
+  })
+
+  const updateKeyAccess = useMutation({
+    meta: { silenceToast: true },
+    mutationFn: ({ id, restricted, allow }: { id: number; restricted: boolean; allow: string[] }) =>
+      apiFetch<{ ok: boolean }>(`/api/x-gateway/keys/${id}/access`, {
+        method: 'PATCH',
+        body: JSON.stringify({ restricted, allow }),
+      }),
+    onSuccess: async () => {
+      setEditingAccessKeyId(null)
+      await client.invalidateQueries({ queryKey: ['x-gateway-client-keys'] })
+    },
+  })
+
+  const testProxy = useMutation({
+    meta: { silenceToast: true },
+    mutationFn: (proxyUrl: string) =>
+      apiFetch<ProxyTestResult>('/api/x-gateway/proxy/test', {
+        method: 'POST',
+        body: JSON.stringify({ proxyUrl }),
+      }),
   })
 
   const base = new URL(`${import.meta.env.BASE_URL}x/v1`, window.location.origin).href
@@ -220,27 +257,100 @@ export default function Endpoint() {
 
       {activeClientKeys.length > 0 ? (
         <div style={{ display: 'grid', gap: 8 }}>
-          {activeClientKeys.map(k => (
-            <div key={k.id} className="x-code-line" style={{ justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <strong>{k.name}</strong>
-                <code>{k.keyPrefix}</code>
+          {activeClientKeys.map(k => {
+            const isRestricted = Boolean(k.access?.restricted)
+            const allowList = k.access?.allow ?? []
+            const isEditing = editingAccessKeyId === k.id
+            return (
+              <div key={k.id} style={{ display: 'grid', gap: 8, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--x-border)', background: 'var(--x-surface-subtle)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <strong>{k.name}</strong>
+                    <code>{k.keyPrefix}</code>
+                    <span className={`x-badge ${isRestricted ? '' : 'x-green'}`} style={{ fontSize: '0.72rem' }}>
+                      {isRestricted ? <Lock size={12} /> : <ShieldCheck size={12} />}
+                      {isRestricted ? `${s.accessRestricted} (${allowList.length})` : s.accessAllModels}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <button
+                      type="button"
+                      className="x-button x-small"
+                      onClick={() => {
+                        if (isEditing) {
+                          setEditingAccessKeyId(null)
+                        } else {
+                          setEditingAccessKeyId(k.id)
+                          setAccessRestricted(isRestricted)
+                          setAccessAllowInput(allowList.join(', '))
+                        }
+                      }}
+                    >
+                      {s.configureKeyAccess}
+                    </button>
+                    <button
+                      type="button"
+                      className="x-icon-button x-danger"
+                      aria-label={`${s.revokeKey}: ${k.name}`}
+                      disabled={revokeKey.isPending}
+                      onClick={() => revokeKey.mutate(k.id)}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+                {isEditing && (
+                  <div style={{ display: 'grid', gap: 8, paddingTop: 8, borderTop: '1px solid var(--x-border)' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.82rem', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={accessRestricted}
+                        onChange={e => setAccessRestricted(e.target.checked)}
+                      />
+                      <span>{s.accessRestricted}</span>
+                    </label>
+                    {accessRestricted && (
+                      <div style={{ display: 'grid', gap: 4 }}>
+                        <small className="x-muted">{s.allowedModelsLabel}</small>
+                        <input
+                          type="text"
+                          value={accessAllowInput}
+                          placeholder={s.allowedModelsPlaceholder}
+                          onChange={e => setAccessAllowInput(e.target.value)}
+                          style={{ padding: '7px 10px', borderRadius: 6, border: '1px solid var(--x-border)', background: 'var(--x-surface)', color: 'var(--x-ink)', fontSize: '0.82rem' }}
+                        />
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        type="button"
+                        className="x-button x-primary x-small"
+                        disabled={updateKeyAccess.isPending}
+                        onClick={() => {
+                          const parsedAllow = accessAllowInput
+                            .split(',')
+                            .map(item => item.trim())
+                            .filter(Boolean)
+                          updateKeyAccess.mutate({ id: k.id, restricted: accessRestricted, allow: parsedAllow })
+                        }}
+                      >
+                        {updateKeyAccess.isPending ? s.saving : s.saveAccess}
+                      </button>
+                      <button type="button" className="x-button x-small" onClick={() => setEditingAccessKeyId(null)}>
+                        {s.cancel}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
-              <button
-                type="button"
-                className="x-icon-button x-danger"
-                aria-label={`${s.revokeKey}: ${k.name}`}
-                disabled={revokeKey.isPending}
-                onClick={() => revokeKey.mutate(k.id)}
-              >
-                <Trash2 size={16} />
-              </button>
-            </div>
-          ))}
+            )
+          })}
         </div>
       ) : (
         <p className="x-muted">{s.noXKeys}</p>
       )}
+      {updateKeyAccess.isError && <p className="x-error" role="alert">{updateKeyAccess.error.message}</p>}
+      {updateKeyAccess.isSuccess && <p className="x-test-ok" role="status"><Check size={16} />{s.accessSaved}</p>}
     </section>
 
     <section className="x-panel x-endpoint-panel">
@@ -267,6 +377,14 @@ export default function Endpoint() {
           <button type="submit" className="x-button x-primary" disabled={saveProxy.isPending || !proxyInput.trim()}>
             {saveProxy.isPending ? s.saving : s.saveProxy}
           </button>
+          <button
+            type="button"
+            className="x-button"
+            disabled={testProxy.isPending || (!proxyInput.trim() && !activeProxy)}
+            onClick={() => testProxy.mutate(proxyInput.trim())}
+          >
+            {testProxy.isPending ? s.testingProxy : s.testProxy}
+          </button>
           {activeProxy && (
             <button
               type="button"
@@ -281,6 +399,14 @@ export default function Endpoint() {
       )}
       {saveProxy.isError && <p className="x-error" role="alert">{saveProxy.error.message}</p>}
       {saveProxy.isSuccess && <p className="x-test-ok" role="status"><Check size={16} />{s.proxySaved}</p>}
+      {testProxy.isError && <p className="x-error" role="alert">{testProxy.error.message}</p>}
+      {testProxy.data && (
+        <p className={testProxy.data.ok ? 'x-test-ok' : 'x-error'} role="status">
+          {testProxy.data.ok
+            ? `${s.proxyTestOk} (${testProxy.data.latencyMs}ms)`
+            : `${s.proxyTestFailed}: ${testProxy.data.error || 'Unreachable'}`}
+        </p>
+      )}
     </section>
 
     <section className="x-panel x-endpoint-panel">

@@ -24,6 +24,19 @@ export async function refreshAccounts(client: QueryClient) {
   await client.invalidateQueries({ queryKey: ['x-accounts'] })
 }
 
+export interface BatchTestResponse {
+  results: Array<{ id: number; label: string; provider: string; ok: boolean; message?: string }>
+  summary: { total: number; passed: number; failed: number }
+}
+
+export interface ProviderModelsConfigResponse {
+  providerId: string
+  catalogModels: Array<{ id: string; name: string }>
+  disabledModels: string[]
+  customModels: Array<{ id: string; name: string }>
+  modelAliases: Record<string, string>
+}
+
 export const accountsApi = {
   start: (provider: string, body: { label: string; callbackUrl: string; reconnectId?: number }) =>
     apiFetch<ProviderAccountAuthStartResponse>(`${base}/auth/${encodeURIComponent(provider)}/start`, { method: 'POST', body: JSON.stringify(body) }),
@@ -35,6 +48,27 @@ export const accountsApi = {
     apiFetch<void>(`${base}/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   remove: (id: number) => apiFetch<void>(`${base}/${id}`, { method: 'DELETE' }),
   test: (id: number) => apiFetch<ProviderAccountTestResponse>(`${base}/${id}/test`, { method: 'POST', body: '{}' }),
+  testBatch: (body: { providerId?: string; accountIds?: number[] }) =>
+    apiFetch<BatchTestResponse>(`${base}/test-batch`, { method: 'POST', body: JSON.stringify(body) }),
+  toggleProvider: (providerId: string, enabled: boolean) =>
+    apiFetch<{ ok: boolean; providerId: string; enabled: boolean; updated: number }>(
+      `${base}/providers/${encodeURIComponent(providerId)}/toggle`,
+      { method: 'POST', body: JSON.stringify({ enabled }) },
+    ),
+  getProviderModels: (providerId: string, signal?: AbortSignal) =>
+    apiFetch<ProviderModelsConfigResponse>(`${base}/providers/${encodeURIComponent(providerId)}/models`, { signal }),
+  updateProviderModels: (
+    providerId: string,
+    body: {
+      disabledModels?: string[]
+      customModels?: Array<{ id: string; name?: string }>
+      modelAliases?: Record<string, string>
+    },
+  ) =>
+    apiFetch<ProviderModelsConfigResponse>(`${base}/providers/${encodeURIComponent(providerId)}/models`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
   addKey: (provider: string, key: string, label: string, baseUrl?: string, proxyUrl?: string, authMethod?: ProviderAccountAuthMethod, proxyPoolId?: number | null) =>
     apiFetch<{ id: number }>(base, {
       method: 'POST',
@@ -47,6 +81,18 @@ export const accountsApi = {
         ...(authMethod ? { authMethod } : {}),
         ...(proxyPoolId !== undefined ? { proxyPoolId } : {}),
       }),
+    }),
+  addBulkKeys: (body: {
+    provider: string
+    entries: Array<{ key: string; label?: string }>
+    baseUrl?: string
+    proxyUrl?: string
+    authMethod?: ProviderAccountAuthMethod
+    proxyPoolId?: number | null
+  }) =>
+    apiFetch<{ ids: number[]; count: number }>(`${base}/bulk`, {
+      method: 'POST',
+      body: JSON.stringify(body),
     }),
 }
 

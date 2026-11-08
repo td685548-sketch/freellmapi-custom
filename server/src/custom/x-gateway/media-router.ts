@@ -236,7 +236,6 @@ xGatewayMediaRouter.put('/media/config', (req: Request, res: Response) => {
   setMediaDefaults(next as any, userId);
   res.json({ ok: true, defaults: next });
 });
-});
 
 xGatewayMediaRouter.post('/media/test/image', async (req: Request, res: Response) => {
   const parsed = imageTestSchema.safeParse(req.body);

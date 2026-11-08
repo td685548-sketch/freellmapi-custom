@@ -1,6 +1,5 @@
 import { getDb } from '../../db/index.js';
 import { BUILTIN_SKILLS, type BuiltinSkillDefinition } from './skills-builtin.js';
-import { tunnelService } from './tunnel-service.js';
 
 export interface CustomSkill {
   id: string;
@@ -48,10 +47,6 @@ function estimateTokens(text: string): number {
 
 function resolveBaseUrl(options?: { baseUrl?: string; origin?: string }): string {
   if (options?.baseUrl) return options.baseUrl.replace(/\/+$/, '');
-  const tunnelStatus = tunnelService.getStatus();
-  if (tunnelStatus.state === 'active' && tunnelStatus.url) {
-    return tunnelStatus.url.replace(/\/+$/, '');
-  }
   if (options?.origin) {
     return options.origin.replace(/\/+$/, '');
   }
@@ -93,7 +88,6 @@ export class SkillsService {
 
   public listSkills(options?: { baseUrl?: string; origin?: string }): SkillsListResponse {
     const baseUrl = resolveBaseUrl(options);
-    const tunnelStatus = tunnelService.getStatus();
     const customList = this.loadCustomSkills();
 
     const builtins: SkillSummary[] = BUILTIN_SKILLS.map((b: BuiltinSkillDefinition) => {
@@ -141,8 +135,8 @@ export class SkillsService {
 
     return {
       skills: [...builtins, ...customs],
-      tunnelActive: tunnelStatus.state === 'active' && Boolean(tunnelStatus.url),
-      tunnelUrl: tunnelStatus.url,
+      tunnelActive: false,
+      tunnelUrl: null,
       resolvedBaseUrl: baseUrl,
     };
   }
