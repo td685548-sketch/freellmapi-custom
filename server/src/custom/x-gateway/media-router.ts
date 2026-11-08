@@ -21,6 +21,14 @@ import {
 import { accountBaseUrl } from './protocols.js';
 import { withQuotaTracking } from './quota/tracking.js';
 import { resolveCandidateRoutes } from './router.js';
+import {
+  getDefaultPricing,
+  getMergedPricing,
+  getPricingOverrides,
+  resetPricingOverrides,
+  updatePricingOverrides,
+  validatePricingPatch,
+} from './pricing.js';
 
 export const xGatewayMediaRouter = Router();
 
@@ -775,4 +783,49 @@ xGatewayMediaRouter.post('/media/test/web', async (req: Request, res: Response) 
   const message = lastError instanceof Error ? lastError.message : 'All X Gateway web search accounts failed.';
   res.status(502).json({ error: { message } });
 });
+
+// ---------------------------------------------------------------------------
+// Model Pricing Configuration Routes (/api/x-gateway/pricing)
+// ---------------------------------------------------------------------------
+
+xGatewayMediaRouter.get('/pricing', (_req: Request, res: Response) => {
+  res.json({
+    pricing: getMergedPricing(),
+    defaults: getDefaultPricing(),
+    overrides: getPricingOverrides(),
+  });
+});
+
+xGatewayMediaRouter.patch('/pricing', (req: Request, res: Response) => {
+  const validated = validatePricingPatch(req.body);
+  if (!validated.ok) {
+    res.status(400).json({ error: { message: validated.error } });
+    return;
+  }
+  const pricing = updatePricingOverrides(validated.patch);
+  res.json({
+    ok: true,
+    pricing,
+    defaults: getDefaultPricing(),
+    overrides: getPricingOverrides(),
+  });
+});
+
+xGatewayMediaRouter.delete('/pricing', (req: Request, res: Response) => {
+  const provider = typeof req.query.provider === 'string' && req.query.provider.trim()
+    ? req.query.provider.trim()
+    : undefined;
+  const model = typeof req.query.model === 'string' && req.query.model.trim()
+    ? req.query.model.trim()
+    : undefined;
+
+  const pricing = resetPricingOverrides(provider, model);
+  res.json({
+    ok: true,
+    pricing,
+    defaults: getDefaultPricing(),
+    overrides: getPricingOverrides(),
+  });
+});
+
 

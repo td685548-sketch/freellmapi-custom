@@ -1,10 +1,17 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Check, Copy, ScrollText, Search, Terminal, Trash2, X } from 'lucide-react'
+import { Check, Coins, Copy, ScrollText, Search, Terminal, Trash2, X } from 'lucide-react'
+import { apiFetch } from '@/lib/api'
 import { useSessionRevision } from '../../session-state'
 import { mgmtApi, type XLog } from '../management-api'
 import { useMgmtStrings } from '../management-strings'
 import { useXStrings } from '../strings'
+import {
+  calculateTokenCostDollars,
+  fmtDollars,
+  resolveClientModelPricing,
+  type ProviderPricingMap,
+} from './AccountUsage'
 
 const MAX_TERMINAL_LINES = 1000
 
@@ -46,6 +53,13 @@ export default function ConsoleLog() {
     refetchInterval: 30_000,
     retry: false,
   })
+  const pricingQuery = useQuery({
+    queryKey: ['x-gateway-pricing', revision],
+    queryFn: ({ signal }) => apiFetch<{ pricing: ProviderPricingMap }>('/api/x-gateway/pricing', { signal }),
+    staleTime: 60_000,
+    retry: false,
+  })
+  const pricingMap = pricingQuery.data?.pricing
   const buckets = hourly.data?.buckets ?? []
   const max = Math.max(1, ...buckets.map(b => b.requests))
 
@@ -416,6 +430,30 @@ export default function ConsoleLog() {
                       <span style={{ fontSize: '0.75rem', color: 'var(--text-muted, #94a3b8)', display: 'block' }}>Tổng Tokens</span>
                       <strong style={{ fontSize: '1rem', color: '#10b981' }}>{(selectedLog.inputTokens + selectedLog.outputTokens).toLocaleString()}</strong>
                     </div>
+                    {(() => {
+                      const modelName = selectedLog.requestedModel ?? selectedLog.modelId
+                      const rate = resolveClientModelPricing(selectedLog.platform, modelName, pricingMap)
+                      const reqCost = calculateTokenCostDollars(
+                        selectedLog.platform,
+                        modelName,
+                        selectedLog.inputTokens,
+                        selectedLog.outputTokens,
+                        pricingMap,
+                      )
+                      return (
+                        <div style={{ gridColumn: 'span 2', paddingTop: '0.5rem', borderTop: '1px solid var(--border-color, #334155)' }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted, #94a3b8)', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                            <Coins size={13} color="#f59e0b" /> Chi phí ước tính (Estimated Cost)
+                          </span>
+                          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: '0.2rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                            <strong style={{ fontSize: '1.05rem', color: '#f59e0b' }}>{fmtDollars(reqCost)}</strong>
+                            <small style={{ fontSize: '0.72rem', color: 'var(--text-muted, #94a3b8)' }}>
+                              Rate: In ${rate.input}/1M • Out ${rate.output}/1M
+                            </small>
+                          </div>
+                        </div>
+                      )
+                    })()}
                   </div>
 
                   {/* Error Details */}
