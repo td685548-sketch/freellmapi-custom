@@ -97,7 +97,7 @@ describe('chain manager', () => {
 describe('chains reach the rest of the dashboard (#1021)', () => {
   it('scopes the fallback table and its staged edits to the active chain', () => {
     expect(fallbackPage).toContain("queryKey: ['profiles', 'active']")
-    expect(fallbackPage).toContain("queryKey: ['fallback', 'chain', activeProfileId]")
+    expect(fallbackPage).toContain('profileId: activeProfileId, enabled: !activePending')
     // Staged edits remember which chain they were made against instead of
     // following whichever one happens to be active at save time.
     expect(fallbackPage).toMatch(/staged\.profileId === activeProfileId/)

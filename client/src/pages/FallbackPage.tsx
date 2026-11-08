@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   DndContext,
@@ -19,7 +19,7 @@ import { Boxes, ChevronDown, Search, X } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useI18n } from '@/i18n'
 import { apiFetch } from '@/lib/api'
-import { nextModelSort, sortModelGroups, type ModelSortCol } from '@/lib/model-table-sort'
+import { nextModelSort, type ModelSortCol } from '@/lib/model-table-sort'
 import type { SortState } from '@/lib/table-sort'
 import {
   buildGroups,
@@ -29,13 +29,10 @@ import {
   groupMaxContext,
   type FallbackEntry,
   type ModelGroupRow,
-  type RateLimitUsageData,
-  type RoutingData,
   type RoutingStrategy,
   type RoutingWeights,
   type KeySelectionStrategy,
   type Row,
-  type TokenUsageData,
 } from '@/lib/routing'
 import { Button } from '@/components/ui/button'
 import { CustomWeightsPopover } from '@/components/custom-weights-popover'
@@ -43,7 +40,10 @@ import { EmptyState } from '@/components/empty-state'
 import { GettingStarted } from '@/components/getting-started'
 import { GroupHeaderCells, ModelTableHead, SortableGroupRow } from '@/components/model-table'
 import { TableSkeleton } from '@/components/ui/skeleton'
-import { TokenUsageBar } from '@/components/token-usage-bar'
+import { useModelList } from '@/custom/model-list/use-model-list'
+import { ModelListPagination } from '@/custom/model-list/ModelListPagination'
+import { PagedTokenUsage } from '@/custom/model-list/PagedTokenUsage'
+import { useModelListStrings } from '@/custom/model-list/strings'
 import { PageHeader } from '@/components/page-header'
 import { FloatingBar } from '@/components/floating-bar'
 import { ModelsTabs } from '@/components/models-tabs'
@@ -76,11 +76,6 @@ const CTX_BUCKETS: { key: number; label?: string; tKey?: string }[] = [
   { key: 1_000_000, label: '1M+' },
 ]
 
-// Rows rendered up front; a sentinel below the table streams in the rest as
-// you scroll. Keeps first paint cheap when the catalog grows into the
-// hundreds without a virtualization dependency (which would fight dnd-kit).
-const RENDER_CHUNK = 50
-
 // The secondary routing knobs (key selection, exploration, peak hours) live
 // behind a "More options" disclosure so the card opens on the strategy pills
 // alone. Collapse state is remembered per browser, the same way the chain
@@ -100,6 +95,7 @@ function readOptionsCollapsed(): boolean {
 
 export default function FallbackPage() {
   const { t } = useI18n()
+  const listStrings = useModelListStrings()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   // Staged edits carry the chain they were made against, so switching chains
@@ -130,46 +126,29 @@ export default function FallbackPage() {
   })
   const activeProfileId = active?.activeProfileId ?? null
 
-  const { data: entries = [], isLoading: entriesLoading } = useQuery<FallbackEntry[]>({
-    queryKey: ['fallback', 'chain', activeProfileId],
-    // The chain id rides in the request itself (#1047): keyed-but-unpinned, a
-    // refetch racing an activation fetched "whichever chain is active by now"
-    // into the OLD chain's cache entry, and switching A→B→A then rendered (and
-    // could save) B's rows under A's name until a hard refresh.
-    queryFn: () => apiFetch(activeProfileId != null ? `/api/fallback?profile=${activeProfileId}` : '/api/fallback'),
-    enabled: !activePending,
+  const pagination = useModelList({
+    profileId: activeProfileId, enabled: !activePending,
+    search, vision: filterVision, tools: filterTools, context: minContext, sort,
   })
-  const isLoading = activePending || entriesLoading
+  const { entries, routing, rateLimitUsage } = pagination
+  const isLoading = activePending || pagination.isLoading
 
   // Staged edits are DISCARDED when the active chain changes, not just hidden
   // (#1047): merely masking them meant switching A→B→A resurrected A's stale
   // unsaved rows over freshly fetched data, with only a refresh clearing them.
-  useEffect(() => {
-    setStaged(prev => (prev && prev.profileId !== activeProfileId ? null : prev))
-  }, [activeProfileId])
+  if (staged && staged.profileId !== activeProfileId) setStaged(null)
 
   const localEntries = staged && staged.profileId === activeProfileId ? staged.entries : null
-  const setLocalEntries = (entries: FallbackEntry[] | null) =>
-    setStaged(entries === null ? null : { profileId: activeProfileId, entries })
-
-  const { data: tokenUsage } = useQuery<TokenUsageData>({
-    queryKey: ['fallback', 'token-usage'],
-    queryFn: () => apiFetch('/api/fallback/token-usage'),
-  })
-
-  const { data: routing } = useQuery<RoutingData>({
-    queryKey: ['fallback', 'routing'],
-    queryFn: () => apiFetch('/api/fallback/routing'),
-    refetchInterval: 15_000,
-  })
-
-  // Time-window rate-limit usage (#876). One observer and one poll timer for the
-  // whole table — the row component reads it from a map instead of subscribing
-  // per row, which on a large catalog was hundreds of observers and timers.
-  const { data: rateLimitUsage } = useQuery<RateLimitUsageData>({
-    queryKey: ['fallback', 'rate-limit-usage'],
-    queryFn: () => apiFetch('/api/fallback/rate-limit-usage'),
-    refetchInterval: 15_000,
+  const setLocalEntries = (updates: FallbackEntry[] | null) => setStaged(previous => {
+    if (updates === null) return null
+    const merged = new Map((previous?.profileId === activeProfileId ? previous.entries : []).map(e => [e.modelDbId, e]))
+    const baseline = new Map(entries.map(e => [e.modelDbId, e]))
+    for (const entry of updates) {
+      const saved = baseline.get(entry.modelDbId)
+      if (saved && saved.enabled === entry.enabled && saved.priority === entry.priority) merged.delete(entry.modelDbId)
+      else merged.set(entry.modelDbId, entry)
+    }
+    return merged.size ? { profileId: activeProfileId, entries: [...merged.values()] } : null
   })
   const rateUsageByModel = useMemo(
     () => new Map((rateLimitUsage?.rows ?? []).map(r => [r.modelDbId, r])),
@@ -177,11 +156,12 @@ export default function FallbackPage() {
   )
 
   const saveMutation = useMutation({
-    mutationFn: (data: { modelDbId: number; priority: number; enabled: boolean }[]) =>
-      apiFetch('/api/fallback', { method: 'PUT', body: JSON.stringify(data) }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['fallback'] })
-      setLocalEntries(null)
+    mutationFn: (data: { profileId: number | null; entries: { modelDbId: number; priority: number; enabled: boolean }[] }) =>
+      apiFetch('/api/fallback/page', { method: 'PUT', body: JSON.stringify(data) }),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['fallback'], refetchType: 'none' })
+      queryClient.resetQueries({ queryKey: ['fallback', 'routing', 'page'] })
+      setStaged(previous => previous?.profileId === variables.profileId ? null : previous)
     },
   })
 
@@ -193,7 +173,10 @@ export default function FallbackPage() {
       decisionModel?: string; decisionMinProbability?: number
     }) =>
       apiFetch('/api/fallback/routing', { method: 'PUT', body: JSON.stringify(payload) }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['fallback', 'routing'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['fallback', 'routing'], refetchType: 'none' })
+      queryClient.resetQueries({ queryKey: ['fallback', 'routing', 'page'] })
+    },
   })
 
   const strategy: RoutingStrategy = routing?.strategy ?? 'balanced'
@@ -208,12 +191,12 @@ export default function FallbackPage() {
     () => new Map((routing?.scores ?? []).map(s => [s.modelDbId, s])),
     [routing?.scores],
   )
-  const allEntries = useMemo(() => localEntries ?? entries, [localEntries, entries])
+  const allEntries = useMemo(() => {
+    const edits = new Map((localEntries ?? []).map(e => [e.modelDbId, e]))
+    return entries.map(e => edits.get(e.modelDbId) ?? e)
+  }, [localEntries, entries])
   const configured = useMemo(() => allEntries.filter(e => e.keyCount > 0), [allEntries])
-  const unconfiguredPlatforms = useMemo(
-    () => [...new Set(allEntries.filter(e => e.keyCount === 0).map(e => e.platform))],
-    [allEntries],
-  )
+  const unconfiguredPlatforms = pagination.unconfiguredPlatforms
 
   // Entry fields win on overlap: the routing snapshot also carries `enabled`
   // (and identity fields), which would otherwise clobber unsaved local toggles.
@@ -228,7 +211,10 @@ export default function FallbackPage() {
   )
 
   function handleSave() {
-    saveMutation.mutate(allEntries.map(e => ({ modelDbId: e.modelDbId, priority: e.priority, enabled: e.enabled })))
+    saveMutation.mutate({
+      profileId: activeProfileId,
+      entries: (localEntries ?? allEntries).map(e => ({ modelDbId: e.modelDbId, priority: e.priority, enabled: e.enabled })),
+    })
   }
 
   function toggleOptions() {
@@ -249,9 +235,13 @@ export default function FallbackPage() {
   // groups; rank stays the model's position in the full chain so the numbers
   // don't renumber as you filter. Drag-to-reorder is only offered over the full,
   // unfiltered manual chain (reordering a filtered subset would be ambiguous).
-  const rankByKey = useMemo(() => new Map(orderedGroups.map((g, i) => [g.key, i + 1])), [orderedGroups])
   const query = search.trim().toLowerCase()
   const filtersActive = query !== '' || filterVision || filterTools || minContext > 0
+  const canReorder = isManual && !filtersActive && !sort && !pagination.hasNextPage && !pagination.isFetching
+  const hasManualOrder = isManual && !!localEntries && !filtersActive && !sort && !pagination.hasNextPage
+  const rankByKey = useMemo(() => new Map(orderedGroups.map((g, i) =>
+    [g.key, hasManualOrder ? i + 1 : pagination.ranks.get(g.key) ?? i + 1])),
+  [orderedGroups, hasManualOrder, pagination.ranks])
   const visibleGroups = useMemo(() => orderedGroups.filter(g => {
     if (filterVision && !g.members.some(m => m.supportsVision)) return false
     if (filterTools && !g.members.some(m => m.supportsTools)) return false
@@ -260,33 +250,11 @@ export default function FallbackPage() {
     return true
   }), [orderedGroups, filterVision, filterTools, minContext, query])
   const sortedGroups = useMemo(() => {
-    if (!sort) return visibleGroups
-    return sortModelGroups(visibleGroups, sort, rankByKey)
-  }, [visibleGroups, sort, rankByKey])
-  const draggable = isManual && !filtersActive && !sort
-
-  // Progressive rendering: grow the row budget whenever the sentinel below the
-  // table scrolls near the viewport (drag autoscroll extends it too).
-  const [renderLimit, setRenderLimit] = useState(RENDER_CHUNK)
-  useEffect(() => {
-    setRenderLimit(RENDER_CHUNK)
-  }, [search, filterVision, filterTools, minContext, sort])
-  const renderedGroups = sortedGroups.slice(0, renderLimit)
-  const hasMoreRows = sortedGroups.length > renderLimit
-  const sentinelRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!hasMoreRows) return
-    const el = sentinelRef.current
-    if (!el) return
-    const io = new IntersectionObserver(
-      hits => {
-        if (hits.some(h => h.isIntersecting)) setRenderLimit(l => l + RENDER_CHUNK)
-      },
-      { rootMargin: '600px' },
-    )
-    io.observe(el)
-    return () => io.disconnect()
-  }, [hasMoreRows, renderLimit])
+    if (hasManualOrder) return visibleGroups
+    return visibleGroups.slice().sort((a, b) => (pagination.groupOrder.get(a.key) ?? 0) - (pagination.groupOrder.get(b.key) ?? 0))
+  }, [visibleGroups, hasManualOrder, pagination.groupOrder])
+  const draggable = canReorder
+  const renderedGroups = sortedGroups
 
   function clearFilters() {
     setSearch('')
@@ -320,8 +288,9 @@ export default function FallbackPage() {
   function persistGroupOrder(groups: ModelGroupRow[]) {
     const order: number[] = []
     for (const g of groups) for (const m of g.members) order.push(m.modelDbId)
-    const unconfigured = allEntries.filter(e => e.keyCount === 0).map(e => e.modelDbId)
-    const prio = new Map([...order, ...unconfigured].map((id, i) => [id, i + 1]))
+    // Reuse only loaded rows' existing slots; hidden/keyless priorities stay intact.
+    const slots = allEntries.map(e => e.priority).sort((a, b) => a - b)
+    const prio = new Map(order.map((id, i) => [id, slots[i]]))
     setLocalEntries(allEntries.map(e => ({ ...e, priority: prio.get(e.modelDbId) ?? e.priority })))
   }
 
@@ -363,7 +332,8 @@ export default function FallbackPage() {
         <GettingStarted />
 
         {/* Monthly token budget — moved to the top */}
-        {tokenUsage && tokenUsage.totalBudget > 0 && <TokenUsageBar data={tokenUsage} />}
+        {pagination.tokenSummary && pagination.tokenSummary.totalBudget > 0 &&
+          <PagedTokenUsage key={activeProfileId ?? 'global'} summary={pagination.tokenSummary} profileId={activeProfileId} />}
 
         {/* Strategy selector */}
         <section className="rounded-3xl border bg-card p-5">
@@ -555,7 +525,9 @@ export default function FallbackPage() {
         {/* Unified routing / fallback table */}
         {isLoading ? (
           <TableSkeleton rows={8} />
-        ) : orderedGroups.length === 0 ? (
+        ) : pagination.isError && entries.length === 0 ? (
+          <EmptyState title={listStrings.failed} action={<Button variant="outline" onClick={() => void pagination.reload()}>{listStrings.retry}</Button>} />
+        ) : pagination.totalGroups === 0 ? (
           <EmptyState
             icon={Boxes}
             title={t('models.noModelsTitle')}
@@ -576,6 +548,7 @@ export default function FallbackPage() {
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                   placeholder={t('models.searchPlaceholder')}
+                  maxLength={200}
                   aria-label={t('models.searchPlaceholder')}
                   className="w-full rounded-xl border bg-card py-1.5 pl-9 pr-8 text-sm outline-none transition-colors focus:border-foreground/30"
                 />
@@ -656,10 +629,12 @@ export default function FallbackPage() {
 
             {filtersActive && (
               <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>{t('models.showingCount', { shown: visibleGroups.length, total: orderedGroups.length })}</span>
+                <span>{t('models.showingCount', { shown: visibleGroups.length, total: pagination.matchedGroups })}</span>
                 <button onClick={clearFilters} className="underline hover:text-foreground">{t('models.clearFilters')}</button>
               </div>
             )}
+
+            {isManual && pagination.hasNextPage && <p className="text-xs text-muted-foreground">{listStrings.manual}</p>}
 
             {/* DndContext must wrap OUTSIDE the table: it renders hidden a11y
                 live-region <div>s, which are invalid as direct <table> children. */}
@@ -704,9 +679,14 @@ export default function FallbackPage() {
               </div>
             )}
 
-            {/* Invisible sentinel: when it nears the viewport the next row chunk
-                renders. Present only while rows remain, so IO never fires idle. */}
-            {hasMoreRows && <div ref={sentinelRef} className="h-px" aria-hidden="true" />}
+            <ModelListPagination
+              loaded={renderedGroups.length} total={pagination.matchedGroups}
+              hasMore={pagination.hasNextPage} busy={pagination.isFetching}
+              error={pagination.isError} expired={pagination.expired}
+              onMore={pagination.loadMore}
+              onRetry={() => void (pagination.isFetchNextPageError ? pagination.fetchNextPage() : pagination.refetch())}
+              onReload={() => void pagination.reload()}
+            />
 
             {/* Floating action bar — fixed to the viewport so it's always visible,
                 sliding up when there are unsaved changes and back down on save/discard. */}

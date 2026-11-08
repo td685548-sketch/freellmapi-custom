@@ -758,3 +758,4 @@ export interface ModelTestResult {
   latencyMs: number;
   error?: string;
 }
+export type { ModelListPageInfo } from './model-list-page.js';

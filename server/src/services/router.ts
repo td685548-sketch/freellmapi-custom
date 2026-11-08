@@ -2472,9 +2472,10 @@ export interface RoutingScore {
   rateLimit: number;
   score: number;
   totalRequests: number; // decay-weighted observations
+  monthlyUsedTokens?: number;
 }
 
-export function getRoutingScores(): { strategy: RoutingStrategy; keySelectionStrategy: KeySelectionStrategy; weights: RoutingWeights | null; customWeights: RoutingWeights; exploreEnabled: boolean; peakAdjusted: boolean; peakHours: PeakHoursConfig; scores: RoutingScore[] } {
+export function getRoutingScores(catalog?: ChainRow[], includeMonthlyUsage = false): { strategy: RoutingStrategy; keySelectionStrategy: KeySelectionStrategy; weights: RoutingWeights | null; customWeights: RoutingWeights; exploreEnabled: boolean; peakAdjusted: boolean; peakHours: PeakHoursConfig; scores: RoutingScore[] } {
   const db = getDb();
   const strategy = getRoutingStrategy();
   refreshStatsCache(db);
@@ -2486,8 +2487,8 @@ export function getRoutingScores(): { strategy: RoutingStrategy; keySelectionStr
   // scratch" even though the underlying per-model stats are global. Rows the
   // chain names keep its enabled flag; the rest score as disabled. Display
   // only: routeRequest still walks getActiveChain.
-  const profileId = getActiveProfileId(db);
-  const chain = db.prepare(`
+  const profileId = catalog ? null : getActiveProfileId(db);
+  const chain = catalog ?? db.prepare(`
     SELECT m.id AS model_db_id, COALESCE(c.priority, 0) AS priority, COALESCE(c.enabled, 0) AS enabled,
            m.platform, m.model_id, m.display_name, m.intelligence_rank,
            m.size_label, m.monthly_token_budget,
@@ -2527,6 +2528,7 @@ export function getRoutingScores(): { strategy: RoutingStrategy; keySelectionStr
       rateLimit: scored.rateLimit,
       score: scored.score,
       totalRequests: Math.round((stats?.successes ?? 0) + (stats?.failures ?? 0)),
+      ...(includeMonthlyUsage ? { monthlyUsedTokens: stats?.monthlyUsedTokens ?? 0 } : {}),
     };
   }).sort((a, b) => b.score - a.score);
 

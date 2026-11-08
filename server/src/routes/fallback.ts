@@ -20,8 +20,10 @@ import { overriddenFieldNames } from '../services/model-state.js';
 import { parseModelScope, scopeAllows } from '../lib/model-scope.js';
 import { getQuotaOutlook } from '../services/quota-outlook.js';
 import { getDecisionRoutingStatus, setDecisionRoutingSettings } from '../services/routing-decision.js';
+import { modelListPageRouter } from './model-list-page.js';
 
 export const fallbackRouter = Router();
+fallbackRouter.use('/page', modelListPageRouter);
 
 // Dashboard-session authenticated by app.ts. Polling only reads saved quota
 // observations and request history, never provider endpoints or key material.
