@@ -2,6 +2,7 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import { z } from 'zod';
 import type { SessionUser } from '../../services/auth.js';
 import { isValidKeyProxyUrl, KEY_PROXY_URL_ERROR, KEY_PROXY_URL_MAX, maskProxyUrl } from '../../lib/key-proxy.js';
+import { probeProxyUrl } from '../../lib/proxy.js';
 import {
   getConfigSnapshot,
   setDefaultSavers,
@@ -27,7 +28,6 @@ import { xProxyPoolRouter } from './proxy-pool-router.js';
 import { xGatewayMediaRouter } from './media-router.js';
 import { xCliToolsRouter } from './cli-tools-router.js';
 import { xTranslatorRouter } from './translator-router.js';
-import { xTunnelRouter } from './tunnel-router.js';
 import { xSkillsRouter } from './skills-router.js';
 
 /** Console API for the gateway switch, outbound proxy, dedicated API keys, and default savers.
@@ -120,6 +120,20 @@ xGatewayConsoleRouter.put('/proxy', (req, res) => {
   });
 });
 
+xGatewayConsoleRouter.post('/proxy/test', async (req, res, next) => {
+  try {
+    const rawInput = typeof req.body?.proxyUrl === 'string' ? req.body.proxyUrl.trim() : '';
+    const candidate = rawInput || getConfigSnapshot().outboundProxyUrl;
+    if (candidate && !isValidKeyProxyUrl(candidate)) {
+      throw new ConsoleError(400, KEY_PROXY_URL_ERROR);
+    }
+    const result = await probeProxyUrl(candidate || undefined);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
 xGatewayConsoleRouter.get('/keys', (req, res) => {
   const uid = requireUserId(req);
   res.json({ keys: listXGatewayClientKeys(uid) });
@@ -190,7 +204,6 @@ xGatewayConsoleRouter.use(xQuotaRouter);
 xGatewayConsoleRouter.use('/proxy-pool', xProxyPoolRouter);
 xGatewayConsoleRouter.use('/tools', xCliToolsRouter);
 xGatewayConsoleRouter.use('/translator', xTranslatorRouter);
-xGatewayConsoleRouter.use('/tunnel', xTunnelRouter);
 xGatewayConsoleRouter.use('/skills', xSkillsRouter);
 
 xGatewayConsoleRouter.use((_req, res) => {

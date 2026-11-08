@@ -8,14 +8,19 @@ import { decrypt } from '../../lib/crypto.js';
 import { KEY_PROXY_URL_MAX } from '../../lib/key-proxy.js';
 import { withKeyProxy } from '../../lib/proxy.js';
 import { AccountError } from './http.js';
-import { resolveXGatewayProvider } from './catalog.js';
+import { getXGatewayProvider, normalizeXGatewayProviderId, resolveXGatewayProvider } from './catalog.js';
 import {
   accountModels,
   accountRow,
   createApiKeyAccount,
   deleteAccount,
+  getProviderModelConfig,
+  listAccountRowsForBatchTest,
   listAccounts,
   resolveXGatewayAccountProxy,
+  setAccountStatus,
+  setProviderModelConfig,
+  toggleProviderAccounts,
   updateAccount,
   type OAuthProvider,
 } from './store.js';
@@ -53,6 +58,32 @@ const updateSchema = z.object({
   monthlyTokenCap: z.number().int().min(0).safe().optional(),
 }).strict().refine(b => Object.keys(b).length > 0);
 const testSchema = z.object({ model: z.string().trim().min(1).max(200).optional(), message: z.string().trim().min(1).max(4000).optional() }).strict();
+const batchTestSchema = z.object({
+  providerId: z.string().trim().min(1).max(100).optional(),
+  accountIds: z.array(z.number().int().positive().safe()).max(200).optional(),
+}).strict();
+const bulkCreateSchema = z.object({
+  provider: z.string().trim().min(1).max(100),
+  entries: z.array(z.object({
+    key: z.string().trim().min(1).max(65536),
+    label: labelSchema.optional(),
+  })).min(1).max(100),
+  baseUrl: z.string().trim().max(2048).optional(),
+  proxyUrl: z.string().trim().max(KEY_PROXY_URL_MAX).optional(),
+  proxyPoolId: z.number().int().positive().safe().nullable().optional(),
+  authMethod: z.enum(['api_key', 'oauth_pkce', 'device_code', 'cookie']).optional(),
+}).strict();
+const providerToggleSchema = z.object({
+  enabled: z.boolean(),
+}).strict();
+const providerModelsSchema = z.object({
+  disabledModels: z.array(z.string().trim().min(1).max(200)).max(500).optional(),
+  customModels: z.array(z.object({
+    id: z.string().trim().min(1).max(200),
+    name: z.string().trim().max(200).optional(),
+  })).max(200).optional(),
+  modelAliases: z.record(z.string().trim().min(1).max(200), z.string().trim().min(1).max(200)).optional(),
+}).strict();
 const emptySchema = z.object({}).strict();
 
 function parse<T>(schema: z.ZodType<T>, input: unknown): T {
@@ -113,6 +144,122 @@ providerAccountsRouter.post('/', requirePermission('add_keys'), (req: SessionReq
     userId: req.user?.userId ?? null,
   });
   res.status(201).json({ id: accountId });
+});
+
+providerAccountsRouter.post('/bulk', requirePermission('add_keys'), (req: SessionRequest, res) => {
+  const body = parse(bulkCreateSchema, req.body);
+  if ((body.provider === 'custom' || body.baseUrl) && !hasPermission(req.user, 'manage_key_models')) {
+    throw new AccountError(403, 'Permission denied.');
+  }
+  const ids: number[] = [];
+  for (let i = 0; i < body.entries.length; i++) {
+    const entry = body.entries[i]!;
+    const createdId = createApiKeyAccount({
+      provider: body.provider,
+      key: entry.key,
+      label: entry.label || `${body.provider} #${i + 1}`,
+      baseUrl: body.baseUrl,
+      proxyUrl: body.proxyUrl,
+      proxyPoolId: body.proxyPoolId,
+      authMethod: body.authMethod,
+      userId: req.user?.userId ?? null,
+    });
+    ids.push(createdId);
+  }
+  res.status(201).json({ ids, count: ids.length });
+});
+
+providerAccountsRouter.post('/test-batch', requirePermission('test_keys'), async (req, res) => {
+  const body = parse(batchTestSchema, req.body ?? {});
+  const rows = listAccountRowsForBatchTest({ providerId: body.providerId, accountIds: body.accountIds });
+  const results: Array<{ id: number; label: string; provider: string; ok: boolean; message?: string }> = [];
+
+  for (const row of rows) {
+    const provider = resolveXGatewayProvider(row.provider, row.base_url);
+    if (!provider || !provider.supportsKeyValidation) {
+      results.push({
+        id: row.id,
+        label: row.label,
+        provider: row.provider,
+        ok: false,
+        message: 'Provider does not support credential health checks.',
+      });
+      continue;
+    }
+    try {
+      const credential = decrypt(row.encrypted_key, row.iv, row.auth_tag);
+      const ok = await withKeyProxy(resolveXGatewayAccountProxy(row), async () => {
+        return (await provider.validateKey(credential, { platform: row.platform, keyId: row.id })) === true;
+      });
+      setAccountStatus(row.id, ok ? 'healthy' : 'error');
+      results.push({
+        id: row.id,
+        label: row.label,
+        provider: row.provider,
+        ok,
+        ...(ok ? {} : { message: 'Account health check failed.' }),
+      });
+    } catch {
+      setAccountStatus(row.id, 'error');
+      results.push({
+        id: row.id,
+        label: row.label,
+        provider: row.provider,
+        ok: false,
+        message: 'Account health check failed.',
+      });
+    }
+  }
+
+  const passed = results.filter(r => r.ok).length;
+  res.json({
+    results,
+    summary: {
+      total: results.length,
+      passed,
+      failed: results.length - passed,
+    },
+  });
+});
+
+providerAccountsRouter.post('/providers/:providerId/toggle', requirePermission('edit_keys'), (req, res) => {
+  const providerId = String(req.params.providerId ?? '').trim();
+  const body = parse(providerToggleSchema, req.body);
+  const updated = toggleProviderAccounts(providerId, body.enabled);
+  res.json({ ok: true, providerId, enabled: body.enabled, updated });
+});
+
+providerAccountsRouter.get('/providers/:providerId/models', requirePermission('view_keys'), (req, res) => {
+  const rawId = String(req.params.providerId ?? '').trim();
+  const normalized = normalizeXGatewayProviderId(rawId);
+  if (!normalized) throw new AccountError(404, 'Unknown provider.');
+  const catalogModels = getXGatewayProvider(normalized)?.models ?? [];
+  const config = getProviderModelConfig(normalized);
+  res.json({
+    providerId: normalized,
+    catalogModels,
+    disabledModels: config.disabledModels,
+    customModels: config.customModels,
+    modelAliases: config.modelAliases,
+  });
+});
+
+providerAccountsRouter.put('/providers/:providerId/models', requirePermission('edit_keys'), (req, res) => {
+  const rawId = String(req.params.providerId ?? '').trim();
+  const normalized = normalizeXGatewayProviderId(rawId);
+  if (!normalized) throw new AccountError(404, 'Unknown provider.');
+  const body = parse(providerModelsSchema, req.body ?? {});
+  const updated = setProviderModelConfig(normalized, {
+    disabledModels: body.disabledModels,
+    customModels: body.customModels?.map(m => ({ id: m.id, name: m.name || m.id })),
+    modelAliases: body.modelAliases,
+  });
+  res.json({
+    providerId: normalized,
+    disabledModels: updated.disabledModels,
+    customModels: updated.customModels,
+    modelAliases: updated.modelAliases,
+  });
 });
 
 providerAccountsRouter.post('/auth/:provider/start', async (req: SessionRequest, res) => {
@@ -179,8 +326,10 @@ providerAccountsRouter.post('/:id/test', requirePermission('test_keys'), async (
       }, { platform: row.platform, keyId: row.id, modelId: model });
       return Array.isArray(result.choices) && result.choices.length > 0;
     });
+    setAccountStatus(row.id, ok ? 'healthy' : 'error');
     res.json({ ok, ...(ok ? {} : { message: 'Account health check failed.' }) });
   } catch {
+    setAccountStatus(row.id, 'error');
     res.json({ ok: false, message: 'Account health check failed.' });
   }
 });

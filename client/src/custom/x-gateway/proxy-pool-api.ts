@@ -19,6 +19,44 @@ export interface XProxyPoolTestResult {
   message?: string
 }
 
+export interface XProxyPoolConfig {
+  noProxy: string[]
+  strictProxy: boolean
+}
+
+export interface XProxyPoolTestAllResult {
+  ok: boolean
+  total: number
+  healthy: number
+  unhealthy: number
+  latencyMs: number
+  results: Array<XProxyPoolTestResult & { id: number; name: string }>
+}
+
+export interface XProxyPoolBatchImportResult {
+  ok: boolean
+  imported: XProxyPoolEntry[]
+  failed: Array<{ line: string; error: string }>
+  total: number
+  importedCount: number
+  failedCount: number
+}
+
+export interface XProxyPoolDeployParams {
+  provider: 'cloudflare' | 'vercel'
+  apiToken: string
+  accountId?: string
+  workerName: string
+}
+
+export interface XProxyPoolDeployResult {
+  ok: boolean
+  provider: 'cloudflare' | 'vercel'
+  workerName: string
+  url: string
+  entry: XProxyPoolEntry
+}
+
 export const proxyPoolApi = {
   list: (signal?: AbortSignal) => apiFetch<{ entries: XProxyPoolEntry[] }>(base, { signal }),
   create: (body: { name: string; proxyUrl: string }) =>
@@ -27,4 +65,19 @@ export const proxyPoolApi = {
     apiFetch<{ entry: XProxyPoolEntry }>(`${base}/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   remove: (id: number) => apiFetch<{ ok: true }>(`${base}/${id}`, { method: 'DELETE' }),
   test: (id: number) => apiFetch<XProxyPoolTestResult>(`${base}/${id}/test`, { method: 'POST', body: '{}' }),
+  testAll: () => apiFetch<XProxyPoolTestAllResult>(`${base}/test-all`, { method: 'POST', body: '{}' }),
+  batchImport: (body: { proxies: string }) =>
+    apiFetch<XProxyPoolBatchImportResult>(`${base}/batch-import`, { method: 'POST', body: JSON.stringify(body) }),
+  bulkAction: (body: { action: 'enable' | 'disable' | 'delete'; ids: number[] }) =>
+    apiFetch<{ ok: true; action: string; affected: number; ids: number[] }>(`${base}/bulk-action`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  getConfig: (signal?: AbortSignal) => apiFetch<{ config: XProxyPoolConfig }>(`${base}/config`, { signal }),
+  saveConfig: (body: { noProxy?: string[] | string; strictProxy?: boolean }) =>
+    apiFetch<{ config: XProxyPoolConfig }>(`${base}/config`, { method: 'POST', body: JSON.stringify(body) }),
+  deployWorker: (body: XProxyPoolDeployParams) =>
+    apiFetch<XProxyPoolDeployResult>(`${base}/deploy-worker`, { method: 'POST', body: JSON.stringify(body) }),
+  getRelayTemplate: (signal?: AbortSignal) =>
+    apiFetch<{ cloudflare: string; vercel: string }>(`${base}/relay-template`, { signal }),
 }

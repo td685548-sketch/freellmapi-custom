@@ -9,7 +9,7 @@ import { apiFetch } from '@/lib/api'
 import type { ProviderAccountsResponse, ProviderAccount, ProviderAccountPollResponse } from '../../../../shared/x-accounts'
 import Providers from './pages/Providers'
 import ProviderAccounts from './pages/ProviderAccounts'
-import { ConnectAccountDialog, extractCookieCredential } from './ConnectAccountDialog'
+import { ConnectAccountDialog, extractCookieCredential, parseBulkCredentialLines } from './ConnectAccountDialog'
 import { AccountCallback } from './AccountCallback'
 import { trustedLoginUrl } from './api'
 
@@ -87,6 +87,37 @@ beforeEach(() => {
     if (path.endsWith('/poll')) return pollResults.shift() ?? { status: 'pending', interval: 1 }
     if (path.endsWith('/complete')) return { status: 'connected', accountId: 99 }
     if (path.endsWith('/test')) return { ok: true }
+    if (path === '/api/x-accounts/test-batch' && init?.method === 'POST') {
+      return {
+        results: [{ id: 1, label: 'Work', provider: 'openrouter', ok: true }],
+        summary: { total: 2, passed: 2, failed: 0 },
+      }
+    }
+    if (path.endsWith('/toggle') && init?.method === 'POST') {
+      return { ok: true, providerId: 'openrouter', enabled: true, updated: 2 }
+    }
+    if (path.endsWith('/models') && (!init?.method || init.method === 'GET')) {
+      return {
+        providerId: 'openrouter',
+        catalogModels: [{ id: 'fixture-chat', name: 'Fixture Chat' }],
+        disabledModels: [],
+        customModels: [],
+        modelAliases: {},
+      }
+    }
+    if (path.endsWith('/models') && init?.method === 'PUT') {
+      const bodyObj = JSON.parse(String(init.body ?? '{}'))
+      return {
+        providerId: 'openrouter',
+        catalogModels: [{ id: 'fixture-chat', name: 'Fixture Chat' }],
+        disabledModels: bodyObj.disabledModels ?? [],
+        customModels: bodyObj.customModels ?? [],
+        modelAliases: bodyObj.modelAliases ?? {},
+      }
+    }
+    if (path === '/api/x-accounts/bulk' && init?.method === 'POST') {
+      return { ids: [101, 102], count: 2 }
+    }
     if (path === '/api/x-gateway/proxy-pool') return { entries: [] }
     return undefined
   })
@@ -267,6 +298,32 @@ describe('provider accounts', () => {
     await flush()
     expect(vi.mocked(apiFetch).mock.calls.some(([p, i]) => p === '/api/x-accounts/1' && i?.method === 'DELETE')).toBe(true)
   })
+
+  it('supports batch testing all accounts, toggling all provider accounts, and managing provider models', async () => {
+    mount(providerRoute(), '/x/providers/openrouter')
+    await flush()
+
+    // Batch test provider accounts
+    click(button('Batch test (2)'))
+    await flush()
+    expect(vi.mocked(apiFetch).mock.calls.some(([p, i]) => p === '/api/x-accounts/test-batch' && i?.method === 'POST')).toBe(true)
+    expect(body().textContent).toContain('Batch check: 2/2 healthy')
+
+    // Switch to Models tab and manage models
+    click(body().querySelector('#x-models-tab')!)
+    await flush()
+    const modelSwitch = body().querySelector('#x-models-panel [role="switch"]')!
+    click(modelSwitch)
+    await flush()
+    expect(
+      vi.mocked(apiFetch).mock.calls.some(
+        ([p, i]) =>
+          p === '/api/x-accounts/providers/openrouter/models' &&
+          i?.method === 'PUT' &&
+          JSON.parse(String(i.body)).disabledModels.includes('fixture-chat'),
+      ),
+    ).toBe(true)
+  })
 })
 
 describe('connect dialog', () => {
@@ -424,5 +481,13 @@ describe('extractCookieCredential', () => {
   it('handles invalid or non-cookie JSON gracefully by returning trimmed raw text', () => {
     expect(extractCookieCredential('{ "invalid": 123 }')).toBe('{ "invalid": 123 }')
     expect(extractCookieCredential('invalid json {')).toBe('invalid json {')
+  })
+
+  it('parses multi-line bulk credentials with custom labels or auto-numbered labels', () => {
+    const parsed = parseBulkCredentialLines('Team A | gsk_key1\ngsk_key2\n# comment\n', 'Groq')
+    expect(parsed).toEqual([
+      { label: 'Team A', key: 'gsk_key1' },
+      { label: 'Groq #2', key: 'gsk_key2' },
+    ])
   })
 })

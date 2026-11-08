@@ -251,6 +251,35 @@ export function extractCookieCredential(raw: string): string {
   return trimmed
 }
 
+export function parseBulkCredentialLines(
+  raw: string,
+  baseLabel: string,
+  options?: { isCookie?: boolean; isOauthCli?: boolean },
+): Array<{ key: string; label: string }> {
+  const lines = raw
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(l => Boolean(l) && !l.startsWith('#'))
+  return lines
+    .map((line, index) => {
+      let entryLabel = ''
+      let rawKey = line
+      const pipeIdx = line.indexOf('|')
+      if (pipeIdx > 0) {
+        entryLabel = line.slice(0, pipeIdx).trim()
+        rawKey = line.slice(pipeIdx + 1).trim()
+      }
+      const normalizedKey = options?.isOauthCli
+        ? extractOAuthCredential(rawKey)
+        : options?.isCookie
+          ? extractCookieCredential(rawKey)
+          : rawKey.trim()
+      const finalLabel = entryLabel || (lines.length === 1 ? baseLabel.trim() : `${baseLabel.trim()} #${index + 1}`)
+      return { key: normalizedKey, label: finalLabel }
+    })
+    .filter(item => Boolean(item.key))
+}
+
 export function ConnectAccountDialog({ provider, account, onClose }: {
   provider: AccountProvider; account?: ProviderAccount; onClose: () => void
 }) {
@@ -262,6 +291,7 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
   const poolEntries = poolQuery.data?.entries ?? []
   const loginMethod = provider.authMethods.find(method => method === 'oauth_pkce' || method === 'device_code')
   const [method, setMethod] = useState(loginMethod ?? provider.authMethods[0] ?? 'api_key')
+  const [bulkMode, setBulkMode] = useState(false)
   const [label, setLabel] = useState(account?.label ?? '')
   const [key, setKey] = useState('')
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl ?? '')
@@ -344,20 +374,40 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
     setBusy(true)
     try {
       if (isDirectCredential) {
-        const finalKey = oauthCliGuide
-          ? extractOAuthCredential(key)
-          : isCookieMethod
-            ? extractCookieCredential(key)
-            : key.trim()
-        await accountsApi.addKey(
-          provider.id,
-          finalKey,
-          label.trim(),
-          provider.id === 'custom' ? baseUrl.trim() : undefined,
-          proxyUrl.trim() || undefined,
-          isCookieMethod ? 'cookie' : undefined,
-          poolChoice === '' ? undefined : poolChoice === 'none' ? null : Number(poolChoice),
-        )
+        const resolvedPoolId = poolChoice === '' ? undefined : poolChoice === 'none' ? null : Number(poolChoice)
+        if (bulkMode) {
+          const entries = parseBulkCredentialLines(key, label.trim() || provider.name, {
+            isCookie: isCookieMethod,
+            isOauthCli: Boolean(oauthCliGuide),
+          })
+          if (entries.length === 0) {
+            setError(s.required)
+            return
+          }
+          await accountsApi.addBulkKeys({
+            provider: provider.id,
+            entries,
+            ...(provider.id === 'custom' ? { baseUrl: baseUrl.trim() } : {}),
+            ...(proxyUrl.trim() ? { proxyUrl: proxyUrl.trim() } : {}),
+            ...(isCookieMethod ? { authMethod: 'cookie' } : {}),
+            ...(resolvedPoolId !== undefined ? { proxyPoolId: resolvedPoolId } : {}),
+          })
+        } else {
+          const finalKey = oauthCliGuide
+            ? extractOAuthCredential(key)
+            : isCookieMethod
+              ? extractCookieCredential(key)
+              : key.trim()
+          await accountsApi.addKey(
+            provider.id,
+            finalKey,
+            label.trim(),
+            provider.id === 'custom' ? baseUrl.trim() : undefined,
+            proxyUrl.trim() || undefined,
+            isCookieMethod ? 'cookie' : undefined,
+            resolvedPoolId,
+          )
+        }
         setKey('')
         if (active.current) connected()
       } else {
@@ -382,10 +432,22 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
     setError('')
     let code: string
     try {
-      const url = new URL(manual)
-      const expected = new URL(callbackAddress())
-      if (url.origin !== expected.origin || url.pathname !== expected.pathname || url.searchParams.get('attemptId') !== attempt.attemptId || !url.searchParams.get('code')) throw new Error()
-      code = url.searchParams.get('code')!
+      const trimmed = manual.trim()
+      if (/^https?:\/\//i.test(trimmed)) {
+        const url = new URL(trimmed)
+        const expected = new URL(callbackAddress())
+        const urlAttempt = url.searchParams.get('attemptId')
+        const isLocalRedirect = url.hostname === 'localhost' || url.hostname === '127.0.0.1'
+        const matchesCallbackRoute =
+          (url.origin === expected.origin && url.pathname === expected.pathname) || isLocalRedirect
+        if (!matchesCallbackRoute) throw new Error()
+        if (urlAttempt !== null && urlAttempt !== attempt.attemptId) throw new Error()
+        if (!isLocalRedirect && urlAttempt !== attempt.attemptId) throw new Error()
+        if (!url.searchParams.get('code')) throw new Error()
+        code = url.searchParams.get('code')!
+      } else {
+        throw new Error()
+      }
     } catch { setError(s.invalidCallback); return }
     setBusy(true)
     try {
@@ -431,19 +493,45 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
             {value === 'api_key' ? s.apiKey : value === 'cookie' ? s.cookie : value === 'device_code' ? s.device : s.oauth}
           </label>)}
         </fieldset>}
+        {isDirectCredential && !account && (
+          <div className="x-segment" style={{ justifySelf: 'start' }}>
+            <button
+              type="button"
+              className={!bulkMode ? 'selected' : ''}
+              aria-pressed={!bulkMode}
+              onClick={() => setBulkMode(false)}
+            >
+              Single Key
+            </button>
+            <button
+              type="button"
+              className={bulkMode ? 'selected' : ''}
+              aria-pressed={bulkMode}
+              onClick={() => setBulkMode(true)}
+            >
+              Bulk Import
+            </button>
+          </div>
+        )}
         <label>{s.name}<input id="x-account-label" name="label" autoFocus maxLength={100} value={label} placeholder={s.namePlaceholder} onChange={event => setLabel(event.target.value)} disabled={busy} required /></label>
         {provider.id === 'custom' && <label>{s.baseUrl}<input id="x-account-base-url" name="baseUrl" type="url" value={baseUrl} placeholder="https://api.example.com/v1" onChange={event => setBaseUrl(event.target.value)} disabled={busy} required /></label>}
         {isDirectCredential && (
-          isCookieMethod || oauthCliGuide ? (
+          bulkMode || isCookieMethod || oauthCliGuide ? (
             <label>
-              {isCookieMethod ? s.cookieCredential : s.oauthCliCredential}
+              {bulkMode ? `${s.credential} (1 per line, or Label | Key)` : isCookieMethod ? s.cookieCredential : s.oauthCliCredential}
               <textarea
                 id="x-account-credential"
                 name="credential"
-                rows={3}
+                rows={bulkMode ? 5 : 3}
                 value={key}
                 onChange={event => setKey(event.target.value)}
-                placeholder={isCookieMethod ? (cookieGuide?.placeholder ?? s.cookieCredentialPlaceholder) : (oauthCliGuide?.placeholder ?? s.oauthCliPlaceholder)}
+                placeholder={
+                  bulkMode
+                    ? 'Account 1 | sk-...\nAccount 2 | sk-...'
+                    : isCookieMethod
+                      ? (cookieGuide?.placeholder ?? s.cookieCredentialPlaceholder)
+                      : (oauthCliGuide?.placeholder ?? s.oauthCliPlaceholder)
+                }
                 disabled={busy}
                 required
                 style={{ fontFamily: 'var(--x-mono)', fontSize: '0.84rem', resize: 'vertical' }}

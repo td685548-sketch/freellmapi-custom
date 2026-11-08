@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
   Check,
+  ChevronDown,
   Copy,
   MessageSquare,
   Paperclip,
@@ -78,17 +79,42 @@ export default function Playground() {
   const [streamError, setStreamError] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [copiedTurnId, setCopiedTurnId] = useState<string | null>(null);
+  const [isNearBottom, setIsNearBottom] = useState(true);
+  const isNearBottomRef = useRef(true);
 
-  // Auto-scroll to bottom of chat
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  // Auto-scroll inside chat container
+  const scrollToBottom = useCallback((force = false) => {
+    const el = messagesContainerRef.current;
+    if (!el) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      return;
+    }
+    if (force || isNearBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, []);
+
+  const handleScroll = useCallback(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const threshold = 60;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
+    isNearBottomRef.current = nearBottom;
+    setIsNearBottom(nearBottom);
   }, []);
 
   useEffect(() => {
-    scrollToBottom();
+    scrollToBottom(false);
   }, [activeChat.messages, isStreaming, scrollToBottom]);
+
+  useEffect(() => {
+    setIsNearBottom(true);
+    isNearBottomRef.current = true;
+    scrollToBottom(true);
+  }, [activeChat.id, scrollToBottom]);
 
   // Persist chats to localStorage whenever they change
   useEffect(() => {
@@ -114,6 +140,9 @@ export default function Playground() {
     setActiveChatId(id);
     setInputError(null);
     setStreamError(null);
+    setIsNearBottom(true);
+    isNearBottomRef.current = true;
+    setTimeout(() => scrollToBottom(true), 0);
     setAttachments([]);
   };
 
@@ -126,6 +155,9 @@ export default function Playground() {
     setAttachments([]);
     setInputError(null);
     setStreamError(null);
+    setIsNearBottom(true);
+    isNearBottomRef.current = true;
+    setTimeout(() => scrollToBottom(true), 0);
   };
 
   const handleDeleteChat = (id: string, e: React.MouseEvent) => {
@@ -210,6 +242,9 @@ export default function Playground() {
 
     setInputError(null);
     setStreamError(null);
+    setIsNearBottom(true);
+    isNearBottomRef.current = true;
+    setTimeout(() => scrollToBottom(true), 0);
 
     const userTurn: ChatTurn = {
       id: crypto.randomUUID(),
@@ -375,21 +410,21 @@ export default function Playground() {
   };
 
   return (
-    <div className="x-page space-y-4 max-w-6xl mx-auto pb-8">
+    <div className="x-page x-playground-page">
       {/* Page Heading */}
-      <div className="x-page-heading">
+      <div className="x-page-heading x-playground-heading">
         <div>
           <h1>{s.title}</h1>
           <p>{s.help}</p>
         </div>
         <span className="x-heading-icon">
-          <MessageSquare size={28} />
+          <MessageSquare size={24} />
         </span>
       </div>
 
       {/* Gateway Disabled Banner */}
       {catalog && !catalog.enabled && (
-        <div className="x-chat-notice flex items-center justify-between" role="alert">
+        <div className="x-chat-notice flex items-center justify-between flex-shrink-0" role="alert">
           <div className="flex items-center gap-2">
             <AlertCircle size={16} />
             <span>{s.disabled}</span>
@@ -449,7 +484,7 @@ export default function Playground() {
         {/* Right Column: Chat Workspace */}
         <main className="x-panel x-chat-workspace flex flex-col">
           {/* Top Toolbar: Model Selector & Actions */}
-          <div className="x-chat-toolbar flex items-end gap-3 pb-3 border-b border-border">
+          <div className="x-chat-toolbar flex items-end gap-3 pb-3 border-b border-border flex-shrink-0">
             <label className="flex-1">
               <span className="font-medium text-xs text-foreground mb-1 block">{s.model}</span>
               <select
@@ -485,7 +520,7 @@ export default function Playground() {
           </div>
 
           {/* Collapsible Chat Settings */}
-          <details className="x-chat-settings mt-2 mb-2 text-xs">
+          <details className="x-chat-settings mt-2 mb-2 text-xs flex-shrink-0">
             <summary className="cursor-pointer font-medium text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 py-1">
               <Sliders size={13} />
               <span>{s.settings}</span>
@@ -532,7 +567,11 @@ export default function Playground() {
           </details>
 
           {/* Messages Scroll Area */}
-          <div className="x-chat-messages flex-1 overflow-y-auto space-y-4 my-2 pr-1">
+          <div
+            ref={messagesContainerRef}
+            onScroll={handleScroll}
+            className="x-chat-messages flex-1 overflow-y-auto space-y-4 my-2 pr-1"
+          >
             {activeChat.messages.length === 0 ? (
               <div className="x-chat-welcome">
                 <MessageSquare size={36} />
@@ -596,13 +635,30 @@ export default function Playground() {
 
           {/* Error Banner */}
           {(streamError || inputError) && (
-            <div className="x-error my-2 p-2.5 rounded-lg text-xs" role="alert">
+            <div className="x-error my-2 p-2.5 rounded-lg text-xs flex-shrink-0" role="alert">
               {streamError || inputError}
             </div>
           )}
 
+          {/* Floating Scroll to bottom button (Gemini style) */}
+          {!isNearBottom && activeChat.messages.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setIsNearBottom(true);
+                isNearBottomRef.current = true;
+                scrollToBottom(true);
+              }}
+              className="x-scroll-bottom-btn"
+              title="Cuộn xuống tin nhắn mới nhất"
+              aria-label="Scroll to bottom"
+            >
+              <ChevronDown size={16} />
+            </button>
+          )}
+
           {/* Composer & Input Area */}
-          <div className="x-chat-composer mt-2 border border-border rounded-xl overflow-hidden bg-background">
+          <div className="x-chat-composer mt-auto flex-shrink-0 border border-border rounded-xl overflow-hidden bg-background">
             {/* Attachment Previews */}
             {attachments.length > 0 && (
               <div className="x-chat-attachments flex gap-2 p-2 border-b border-border flex-wrap bg-muted/20">
@@ -627,7 +683,7 @@ export default function Playground() {
             )}
 
             <textarea
-              rows={3}
+              rows={2}
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={(e) => {

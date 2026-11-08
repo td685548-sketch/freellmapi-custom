@@ -2,7 +2,15 @@ import { getDb } from '../../db/index.js';
 import { decrypt, encrypt } from '../../lib/crypto.js';
 import { maskProxyUrl } from '../../lib/key-proxy.js';
 import type { SaverLevel } from '../output-savers/prompts.js';
-import type { ComboEntry } from './combos.js';
+import {
+  DEFAULT_COMBO_STRATEGY,
+  isComboStrategy,
+  MAX_COMBO_DESCRIPTION,
+  normalizeComboStrategy,
+  resetComboRotation,
+  type ComboEntry,
+  type ComboStrategy,
+} from './combos.js';
 
 export interface XGatewaySaverDefaults {
   caveman: boolean;
@@ -14,9 +22,17 @@ export interface XGatewayCombo {
   id: number;
   name: string;
   entries: ComboEntry[];
+  /** Routing strategy; older rows default to `fallback`. */
+  strategy?: ComboStrategy;
+  description?: string;
   createdBy?: number | null;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface ComboMeta {
+  strategy?: ComboStrategy;
+  description?: string;
 }
 
 export interface XGatewayMediaDefaults {
@@ -98,6 +114,37 @@ function parseSavers(raw: string | undefined): XGatewaySaverDefaults {
   }
 }
 
+/**
+ * `entries_json` started life as a bare `ComboEntry[]`. Strategy and description
+ * are stored alongside the entries in a small envelope instead of new columns, so
+ * existing rows (bare arrays) and older readers keep working unchanged.
+ */
+function parseComboPayload(raw: string): { entries: ComboEntry[]; strategy?: ComboStrategy; description?: string } {
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return { entries: parsed as ComboEntry[] };
+    if (parsed && typeof parsed === 'object' && Array.isArray(parsed.entries)) {
+      const record = parsed as Record<string, unknown>;
+      return {
+        entries: record.entries as ComboEntry[],
+        strategy: isComboStrategy(record.strategy) ? record.strategy : undefined,
+        description: typeof record.description === 'string' && record.description ? record.description : undefined,
+      };
+    }
+  } catch {
+    // fall through to the empty combo
+  }
+  return { entries: [] };
+}
+
+function serializeComboPayload(entries: ComboEntry[], meta?: ComboMeta): string {
+  const strategy = normalizeComboStrategy(meta?.strategy);
+  const description = (meta?.description ?? '').trim().slice(0, MAX_COMBO_DESCRIPTION);
+  // Keep the legacy bare-array shape when there is nothing extra to persist.
+  if (strategy === DEFAULT_COMBO_STRATEGY && !description) return JSON.stringify(entries);
+  return JSON.stringify({ entries, strategy, description });
+}
+
 function loadCombosFromDb(db: ReturnType<typeof getDb>): XGatewayCombo[] {
   try {
     const rows = db.prepare('SELECT id, name, entries_json, created_by, created_at, updated_at FROM x_gateway_combos ORDER BY name ASC').all() as Array<{
@@ -109,17 +156,13 @@ function loadCombosFromDb(db: ReturnType<typeof getDb>): XGatewayCombo[] {
       updated_at: string;
     }>;
     return rows.map(r => {
-      let entries: ComboEntry[] = [];
-      try {
-        const parsed = JSON.parse(r.entries_json);
-        if (Array.isArray(parsed)) entries = parsed;
-      } catch {
-        entries = [];
-      }
+      const payload = parseComboPayload(r.entries_json);
       return {
         id: r.id,
         name: r.name,
-        entries,
+        entries: payload.entries,
+        strategy: payload.strategy ?? DEFAULT_COMBO_STRATEGY,
+        description: payload.description,
         createdBy: r.created_by,
         createdAt: r.created_at,
         updatedAt: r.updated_at,
@@ -235,33 +278,39 @@ export function getComboById(id: number): XGatewayCombo | undefined {
   return getConfigSnapshot().combos.find(c => c.id === id);
 }
 
-export function createCombo(name: string, entries: ComboEntry[], createdBy?: number): XGatewayCombo {
+export function createCombo(name: string, entries: ComboEntry[], createdBy?: number, meta?: ComboMeta): XGatewayCombo {
   const db = getDb();
   const lower = name.toLowerCase();
   const now = new Date().toISOString();
   const result = db.prepare(
     'INSERT INTO x_gateway_combos (name, entries_json, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
-  ).run(lower, JSON.stringify(entries), createdBy ?? null, now, now);
+  ).run(lower, serializeComboPayload(entries, meta), createdBy ?? null, now, now);
   invalidateConfigCache();
+  resetComboRotation();
+  const strategy = normalizeComboStrategy(meta?.strategy);
+  const description = (meta?.description ?? '').trim().slice(0, MAX_COMBO_DESCRIPTION);
   return {
     id: Number(result.lastInsertRowid),
     name: lower,
     entries,
+    strategy,
+    ...(description ? { description } : {}),
     createdBy: createdBy ?? null,
     createdAt: now,
     updatedAt: now,
   };
 }
 
-export function updateCombo(id: number, name: string, entries: ComboEntry[]): XGatewayCombo | null {
+export function updateCombo(id: number, name: string, entries: ComboEntry[], meta?: ComboMeta): XGatewayCombo | null {
   const db = getDb();
   const lower = name.toLowerCase();
   const now = new Date().toISOString();
   const result = db.prepare(
     'UPDATE x_gateway_combos SET name = ?, entries_json = ?, updated_at = ? WHERE id = ?'
-  ).run(lower, JSON.stringify(entries), now, id);
+  ).run(lower, serializeComboPayload(entries, meta), now, id);
   if (result.changes === 0) return null;
   invalidateConfigCache();
+  resetComboRotation();
   return getComboById(id) ?? null;
 }
 
@@ -270,6 +319,7 @@ export function deleteCombo(id: number): boolean {
   const result = db.prepare('DELETE FROM x_gateway_combos WHERE id = ?').run(id);
   if (result.changes > 0) {
     invalidateConfigCache();
+    resetComboRotation();
     return true;
   }
   return false;

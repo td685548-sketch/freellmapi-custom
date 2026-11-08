@@ -129,6 +129,86 @@ export function reconnectAccount(id: number, provider: OAuthProvider): AccountRo
   return row;
 }
 
+export interface ProviderModelConfig {
+  disabledModels: string[];
+  customModels: Array<{ id: string; name: string }>;
+  modelAliases: Record<string, string>;
+}
+
+const PROVIDER_MODELS_CONFIG_KEY = 'provider_model_configs';
+
+function loadAllProviderModelConfigs(): Record<string, ProviderModelConfig> {
+  try {
+    const row = getDb()
+      .prepare('SELECT value FROM x_gateway_config WHERE key = ?')
+      .get(PROVIDER_MODELS_CONFIG_KEY) as { value: string } | undefined;
+    if (!row?.value) return {};
+    const parsed = JSON.parse(row.value);
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, ProviderModelConfig>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveAllProviderModelConfigs(configs: Record<string, ProviderModelConfig>): void {
+  const now = new Date().toISOString();
+  getDb()
+    .prepare(
+      `INSERT INTO x_gateway_config (key, value, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    )
+    .run(PROVIDER_MODELS_CONFIG_KEY, JSON.stringify(configs), now);
+}
+
+export function getProviderModelConfig(providerId: string): ProviderModelConfig {
+  const normalized = normalizeXGatewayProviderId(providerId) ?? providerId;
+  const all = loadAllProviderModelConfigs();
+  const entry = all[normalized];
+  return {
+    disabledModels: Array.isArray(entry?.disabledModels) ? entry.disabledModels : [],
+    customModels: Array.isArray(entry?.customModels) ? entry.customModels : [],
+    modelAliases: entry?.modelAliases && typeof entry.modelAliases === 'object' ? entry.modelAliases : {},
+  };
+}
+
+export function setProviderModelConfig(
+  providerId: string,
+  patch: Partial<ProviderModelConfig>,
+): ProviderModelConfig {
+  const normalized = normalizeXGatewayProviderId(providerId) ?? providerId;
+  const all = loadAllProviderModelConfigs();
+  const current = getProviderModelConfig(normalized);
+  const next: ProviderModelConfig = {
+    disabledModels:
+      patch.disabledModels !== undefined
+        ? Array.from(new Set(patch.disabledModels.map(m => m.trim()).filter(Boolean)))
+        : current.disabledModels,
+    customModels:
+      patch.customModels !== undefined
+        ? patch.customModels
+            .map(m => ({ id: m.id.trim(), name: (m.name || m.id).trim() }))
+            .filter(m => Boolean(m.id))
+        : current.customModels,
+    modelAliases:
+      patch.modelAliases !== undefined
+        ? Object.fromEntries(
+            Object.entries(patch.modelAliases)
+              .map(([k, v]) => [k.trim(), v.trim()] as const)
+              .filter(([k, v]) => Boolean(k && v)),
+          )
+        : current.modelAliases,
+  };
+  all[normalized] = next;
+  saveAllProviderModelConfigs(all);
+  invalidateXGatewayKeyCache();
+  return next;
+}
+
+export function resolveProviderModelAlias(providerId: string, modelId: string): string {
+  const cfg = getProviderModelConfig(providerId);
+  return cfg.modelAliases[modelId] || modelId;
+}
+
 export function accountModels(
   row: Pick<AccountRow, 'id' | 'provider' | 'platform' | 'base_url' | 'model_scope_json' | 'models_json'>,
 ): ProviderAccount['models'] {
@@ -149,6 +229,17 @@ export function accountModels(
     }
   }
 
+  const providerCfg = getProviderModelConfig(providerId);
+  if (providerCfg.customModels.length > 0) {
+    const known = new Set(baseModels.map(m => m.id));
+    for (const cm of providerCfg.customModels) {
+      if (!known.has(cm.id)) {
+        baseModels.push({ id: cm.id, name: cm.name || cm.id });
+        known.add(cm.id);
+      }
+    }
+  }
+
   const scope = parseModelScope(row.model_scope_json);
   if (scope) {
     const knownIds = new Set(baseModels.map(m => m.id));
@@ -159,7 +250,8 @@ export function accountModels(
     }
   }
 
-  return baseModels.filter(m => !scope || scope.has(m.id));
+  const disabledSet = new Set(providerCfg.disabledModels);
+  return baseModels.filter(m => (!scope || scope.has(m.id)) && !disabledSet.has(m.id));
 }
 
 const MAIN_DB_PLATFORM_ALIASES: Record<string, string[]> = {
@@ -545,4 +637,39 @@ export function deleteAccount(id: number): void {
   getDb().prepare('DELETE FROM x_gateway_keys WHERE id = ?').run(id);
   invalidateXGatewayKeyCache();
   clearCooldownsForKey(id);
+}
+
+export function setAccountStatus(id: number, status: 'healthy' | 'error' | 'unknown'): void {
+  getDb()
+    .prepare('UPDATE x_gateway_keys SET status = ?, last_checked_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .run(status, id);
+  invalidateXGatewayKeyCache();
+}
+
+export function toggleProviderAccounts(providerId: string, enabled: boolean): number {
+  const normalized = normalizeXGatewayProviderId(providerId);
+  if (!normalized) throw new AccountError(400, 'Unknown provider.');
+  const result = getDb()
+    .prepare('UPDATE x_gateway_keys SET enabled = ? WHERE provider = ?')
+    .run(enabled ? 1 : 0, normalized);
+  invalidateXGatewayKeyCache();
+  return Number(result.changes ?? 0);
+}
+
+export function listAccountRowsForBatchTest(filter: {
+  providerId?: string;
+  accountIds?: number[];
+}): AccountRow[] {
+  const db = getDb();
+  const rows = db.prepare('SELECT * FROM x_gateway_keys ORDER BY id').all() as RawXGatewayKeyRow[];
+  const hydrated = rows.map(hydrateAccountRow);
+  const normalizedProvider = filter.providerId
+    ? (normalizeXGatewayProviderId(filter.providerId) ?? filter.providerId)
+    : undefined;
+  const idSet = filter.accountIds && filter.accountIds.length > 0 ? new Set(filter.accountIds) : null;
+  return hydrated.filter(row => {
+    if (normalizedProvider && row.provider !== normalizedProvider) return false;
+    if (idSet && !idSet.has(row.id)) return false;
+    return true;
+  });
 }

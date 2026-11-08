@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowUpRight, Check, GitBranch, KeyRound, LoaderCircle, Search, Server, Waypoints } from 'lucide-react'
-import { useAccounts } from '../api'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { ArrowUpRight, Check, GitBranch, KeyRound, LoaderCircle, Search, Server, ShieldCheck, Waypoints } from 'lucide-react'
+import { accountsApi, refreshAccounts, useAccounts, type BatchTestResponse } from '../api'
 import { useXStrings } from '../strings'
 import type { AccountProvider } from '../../../../../shared/x-accounts'
 
@@ -90,13 +91,24 @@ function matchesTypeFilter(provider: AccountProvider, typeFilter: ProviderTypeFi
 export default function Providers() {
   const s = useXStrings()
   const query = useAccounts()
+  const client = useQueryClient()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<ProviderStatusFilter>('all')
   const [typeFilter, setTypeFilter] = useState<ProviderTypeFilter>('all')
   const [hideMainDb, setHideMainDb] = useState(true)
+  const [batchSummary, setBatchSummary] = useState<BatchTestResponse['summary'] | null>(null)
+  const batchTest = useMutation({
+    meta: { silenceToast: true },
+    mutationFn: () => accountsApi.testBatch({}),
+    onSuccess: async (res) => {
+      setBatchSummary(res.summary)
+      await refreshAccounts(client)
+    },
+  })
   if (query.isPending) return <AccountLoadState />
   if (query.isError) return <AccountLoadState error retry={() => void query.refetch()} />
   const providers = query.data.providers
+  const permissions = query.data.permissions
   const accounts = providers.flatMap(provider => provider.accounts)
   const mainDbCount = providers.filter(provider => provider.hasMainDbKey).length
   const filtered = providers.filter(provider => {
@@ -118,7 +130,29 @@ export default function Providers() {
   const webCookie = hasCategories ? filtered.filter(provider => provider.category === 'webCookie') : []
 
   return <>
-    <div className="x-page-heading"><div><div className="x-eyebrow">FreeLLMAPI / X Gateway</div><h1>{s.providers}</h1><p>{s.providerHelp}</p></div><span className="x-heading-icon"><Server size={28} /></span></div>
+    <div className="x-page-heading">
+      <div><div className="x-eyebrow">FreeLLMAPI / X Gateway</div><h1>{s.providers}</h1><p>{s.providerHelp}</p></div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {permissions?.test && accounts.length > 0 && (
+          <button
+            type="button"
+            className="x-button"
+            disabled={batchTest.isPending}
+            onClick={() => batchTest.mutate()}
+          >
+            <ShieldCheck size={16} />
+            {batchTest.isPending ? s.testing : `Batch test (${accounts.length})`}
+          </button>
+        )}
+        <span className="x-heading-icon"><Server size={28} /></span>
+      </div>
+    </div>
+    {batchSummary && (
+      <p className="x-test-ok" role="status">
+        <Check size={16} />
+        Batch check completed: {batchSummary.passed}/{batchSummary.total} healthy
+      </p>
+    )}
     <div className="x-stats"><div><span>{s.connectedProviders}</span><strong>{providers.filter(provider => provider.accounts.length).length}<small> / {providers.length}</small></strong></div><div><span>{s.totalAccounts}</span><strong>{accounts.length}</strong></div><div><span>{s.enabledAccounts}</span><strong className="x-positive">{accounts.filter(account => account.enabled).length}</strong></div></div>
     <div className="x-toolbar">
       <label className="x-search"><Search size={18} /><input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder={s.search} aria-label={s.search} /></label>
