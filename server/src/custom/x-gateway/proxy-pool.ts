@@ -1,4 +1,4 @@
-import { getDb } from '../../db/index.js';
+import { getDb, getSetting, setSetting } from '../../db/index.js';
 import { decryptProxyUrl, encryptProxyUrl, isValidKeyProxyUrl, KEY_PROXY_URL_ERROR, maskProxyUrl } from '../../lib/key-proxy.js';
 
 /**
@@ -185,4 +185,436 @@ export function deleteProxyPoolEntry(id: number): boolean {
   // FK ON DELETE SET NULL unbinds accounts; they fall back to the gateway proxy.
   const result = getDb().prepare('DELETE FROM x_gateway_proxy_pool WHERE id = ?').run(id);
   return result.changes > 0;
+}
+
+/**
+ * Parse a raw proxy line in various formats:
+ * - Scheme URLs: http://user:pass@host:port, https://..., socks5://..., socks4://...
+ * - host:port:user:pass (converted to http://user:pass@host:port)
+ * - host:port (converted to http://host:port)
+ * - user:pass@host:port (converted to http://user:pass@host:port)
+ * Optional explicit name prefix supported via "name=url" or "name|url"
+ */
+export function parseProxyLine(rawLine: string): { url: string; suggestedName: string } {
+  let line = rawLine.trim();
+  if (!line) {
+    throw new ProxyPoolError(400, 'Empty proxy line.');
+  }
+
+  let explicitName: string | undefined;
+  const nameSeparator = line.includes('|') ? '|' : (line.includes(' #') ? ' #' : undefined);
+  if (nameSeparator) {
+    const parts = line.split(nameSeparator);
+    if (parts.length >= 2) {
+      if (nameSeparator === '|') {
+        explicitName = parts[0].trim();
+        line = parts.slice(1).join('|').trim();
+      } else {
+        line = parts[0].trim();
+        explicitName = parts.slice(1).join(' #').trim();
+      }
+    }
+  }
+
+  // If already starts with a recognized URL scheme
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(line)) {
+    let parsed: URL;
+    try {
+      parsed = new URL(line);
+    } catch {
+      throw new ProxyPoolError(400, `Invalid URL format: ${line}`);
+    }
+    const host = parsed.hostname;
+    const port = parsed.port || (parsed.protocol === 'https:' ? '443' : parsed.protocol.startsWith('socks') ? '1080' : '80');
+    return {
+      url: line,
+      suggestedName: explicitName || `proxy-${host}-${port}`,
+    };
+  }
+
+  // Format: host:port:user:pass
+  const colons = line.split(':');
+  if (colons.length === 4) {
+    const [host, port, user, pass] = colons;
+    if (!host || !port || isNaN(Number(port))) {
+      throw new ProxyPoolError(400, `Invalid host:port:user:pass format: ${line}`);
+    }
+    const safeUser = encodeURIComponent(decodeURIComponent(user));
+    const safePass = encodeURIComponent(decodeURIComponent(pass));
+    return {
+      url: `http://${safeUser}:${safePass}@${host}:${port}`,
+      suggestedName: explicitName || `proxy-${host}-${port}`,
+    };
+  }
+
+  // Format: host:port
+  if (colons.length === 2 && !isNaN(Number(colons[1]))) {
+    const [host, port] = colons;
+    return {
+      url: `http://${host}:${port}`,
+      suggestedName: explicitName || `proxy-${host}-${port}`,
+    };
+  }
+
+  // Format: user:pass@host:port
+  if (line.includes('@')) {
+    const atIdx = line.indexOf('@');
+    const auth = line.slice(0, atIdx);
+    const hostPort = line.slice(atIdx + 1);
+    const hostPortParts = hostPort.split(':');
+    const host = hostPortParts[0];
+    const port = hostPortParts[1] || '80';
+    return {
+      url: `http://${auth}@${host}:${port}`,
+      suggestedName: explicitName || `proxy-${host}-${port}`,
+    };
+  }
+
+  throw new ProxyPoolError(400, `Unsupported proxy format: ${line}`);
+}
+
+export function batchImportProxies(
+  lines: string[],
+  createdBy?: number,
+): { imported: ProxyPoolEntry[]; failed: Array<{ line: string; error: string }> } {
+  const imported: ProxyPoolEntry[] = [];
+  const failed: Array<{ line: string; error: string }> = [];
+
+  const existingRows = getDb().prepare('SELECT name FROM x_gateway_proxy_pool').all() as Array<{ name: string }>;
+  const usedNames = new Set(existingRows.map(r => r.name.toLowerCase()));
+
+  for (let idx = 0; idx < lines.length; idx++) {
+    const rawLine = lines[idx].trim();
+    if (!rawLine || rawLine.startsWith('#') || rawLine.startsWith('//')) {
+      continue;
+    }
+
+    try {
+      const parsed = parseProxyLine(rawLine);
+      const cleanUrl = validateUrl(parsed.url);
+
+      const count = getDb().prepare('SELECT COUNT(*) AS n FROM x_gateway_proxy_pool').get() as { n: number };
+      if (Number(count.n) >= MAX_POOL_ENTRIES) {
+        failed.push({ line: rawLine, error: `Maximum limit of ${MAX_POOL_ENTRIES} proxy pool entries reached.` });
+        continue;
+      }
+
+      // Generate unique name
+      const baseName = (parsed.suggestedName || `proxy-${idx + 1}`).trim().slice(0, POOL_NAME_MAX);
+      let candidate = baseName;
+      let counter = 1;
+      while (usedNames.has(candidate.toLowerCase())) {
+        counter++;
+        const suffix = `-${counter}`;
+        candidate = `${baseName.slice(0, POOL_NAME_MAX - suffix.length)}${suffix}`;
+      }
+      usedNames.add(candidate.toLowerCase());
+
+      const enc = encryptProxyUrl(cleanUrl);
+      const now = new Date().toISOString();
+      const result = getDb().prepare(`
+        INSERT INTO x_gateway_proxy_pool (name, proxy_encrypted, proxy_iv, proxy_auth_tag, enabled, created_by, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+      `).run(candidate, enc.encrypted, enc.iv, enc.authTag, createdBy ?? null, now, now);
+
+      imported.push(entryWithCount(Number(result.lastInsertRowid)));
+    } catch (err: any) {
+      failed.push({ line: rawLine, error: err?.message ?? String(err) });
+    }
+  }
+
+  return { imported, failed };
+}
+
+export function bulkActionProxies(
+  action: 'enable' | 'disable' | 'delete',
+  ids: number[],
+): { affected: number; ids: number[] } {
+  if (!ids.length) return { affected: 0, ids: [] };
+  const placeholders = ids.map(() => '?').join(',');
+  const now = new Date().toISOString();
+  let affected = 0;
+
+  if (action === 'enable') {
+    const res = getDb().prepare(`
+      UPDATE x_gateway_proxy_pool
+      SET enabled = 1, updated_at = ?
+      WHERE id IN (${placeholders})
+    `).run(now, ...ids);
+    affected = res.changes;
+  } else if (action === 'disable') {
+    const res = getDb().prepare(`
+      UPDATE x_gateway_proxy_pool
+      SET enabled = 0, updated_at = ?
+      WHERE id IN (${placeholders})
+    `).run(now, ...ids);
+    affected = res.changes;
+  } else if (action === 'delete') {
+    const res = getDb().prepare(`
+      DELETE FROM x_gateway_proxy_pool
+      WHERE id IN (${placeholders})
+    `).run(...ids);
+    affected = res.changes;
+  }
+
+  return { affected, ids };
+}
+
+export interface ProxyPoolConfig {
+  noProxy: string[];
+  strictProxy: boolean;
+}
+
+export function getProxyPoolConfig(): ProxyPoolConfig {
+  const rawNoProxy = getSetting('x_gateway_proxy_pool_no_proxy') ?? '';
+  const rawStrict = getSetting('x_gateway_proxy_pool_strict_proxy') ?? '0';
+  const noProxy = rawNoProxy
+    .split(/[,\n]/)
+    .map(s => s.trim())
+    .filter(Boolean);
+  const strictProxy = rawStrict === '1' || rawStrict === 'true';
+  return { noProxy, strictProxy };
+}
+
+export function updateProxyPoolConfig(patch: { noProxy?: string[] | string; strictProxy?: boolean }): ProxyPoolConfig {
+  if (patch.noProxy !== undefined) {
+    const list = Array.isArray(patch.noProxy)
+      ? patch.noProxy.map(s => s.trim()).filter(Boolean)
+      : patch.noProxy.split(/[,\n]/).map(s => s.trim()).filter(Boolean);
+    setSetting('x_gateway_proxy_pool_no_proxy', list.join(','));
+  }
+  if (patch.strictProxy !== undefined) {
+    setSetting('x_gateway_proxy_pool_strict_proxy', patch.strictProxy ? '1' : '0');
+  }
+  return getProxyPoolConfig();
+}
+
+export function shouldBypassProxyPool(targetOrProvider: string): boolean {
+  if (!targetOrProvider) return false;
+  const { noProxy } = getProxyPoolConfig();
+  if (!noProxy.length) return false;
+  const lower = targetOrProvider.toLowerCase().trim();
+  return noProxy.some(rule => {
+    const r = rule.toLowerCase().trim();
+    if (!r) return false;
+    return lower === r || lower.includes(r) || lower.endsWith(`.${r}`);
+  });
+}
+
+export function isStrictProxyEnabled(): boolean {
+  return getProxyPoolConfig().strictProxy;
+}
+
+export const CLOUDFLARE_WORKER_RELAY_CODE = `addEventListener('fetch', event => {
+  event.respondWith(handleRequest(event.request));
+});
+
+async function handleRequest(request) {
+  const target = request.headers.get('fetch-relay-target');
+  if (!target) {
+    return new Response(JSON.stringify({ status: 'ok', service: 'freellmapi-worker-relay' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  }
+
+  try {
+    const reqHeaders = new Headers(request.headers);
+    reqHeaders.delete('fetch-relay-target');
+    reqHeaders.delete('fetch-relay-authorization');
+    reqHeaders.delete('host');
+
+    const response = await fetch(target, {
+      method: request.method,
+      headers: reqHeaders,
+      body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,
+      redirect: 'manual'
+    });
+
+    return response;
+  } catch (err) {
+    return new Response(JSON.stringify({ error: String(err && err.message ? err.message : err) }), {
+      status: 502,
+      headers: { 'content-type': 'application/json' }
+    });
+  }
+}`;
+
+export const VERCEL_RELAY_CODE = `export const config = { runtime: 'edge' };
+
+export default async function handler(request) {
+  const target = request.headers.get('fetch-relay-target');
+  if (!target) {
+    return new Response(JSON.stringify({ status: 'ok', service: 'freellmapi-vercel-relay' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  }
+
+  try {
+    const reqHeaders = new Headers(request.headers);
+    reqHeaders.delete('fetch-relay-target');
+    reqHeaders.delete('fetch-relay-authorization');
+    reqHeaders.delete('host');
+
+    return await fetch(target, {
+      method: request.method,
+      headers: reqHeaders,
+      body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,
+      redirect: 'manual'
+    });
+  } catch (err) {
+    return new Response(JSON.stringify({ error: String(err && err.message ? err.message : err) }), {
+      status: 502,
+      headers: { 'content-type': 'application/json' }
+    });
+  }
+}`;
+
+export interface DeployWorkerParams {
+  provider: 'cloudflare' | 'vercel';
+  apiToken: string;
+  accountId?: string;
+  workerName: string;
+  createdBy?: number;
+}
+
+export interface DeployWorkerResult {
+  ok: true;
+  provider: 'cloudflare' | 'vercel';
+  workerName: string;
+  url: string;
+  entry: ProxyPoolEntry;
+}
+
+export async function deployServerlessRelay(params: DeployWorkerParams): Promise<DeployWorkerResult> {
+  const token = params.apiToken?.trim();
+  if (!token) throw new ProxyPoolError(400, 'API token is required.');
+
+  const rawName = params.workerName?.trim() || '';
+  const cleanName = rawName.toLowerCase().replace(/[^a-z0-9-_]/g, '-').replace(/-+/g, '-').slice(0, 60);
+  if (!cleanName) throw new ProxyPoolError(400, 'Invalid workerName.');
+
+  if (params.provider === 'cloudflare') {
+    let accountId = params.accountId?.trim();
+    if (!accountId) {
+      const accRes = await fetch('https://api.cloudflare.com/client/v4/accounts', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!accRes.ok) {
+        const errText = await accRes.text().catch(() => '');
+        throw new ProxyPoolError(400, `Cloudflare API authentication failed (${accRes.status}): ${errText || accRes.statusText}`);
+      }
+      const accData = await accRes.json() as any;
+      if (!accData.result?.length) {
+        throw new ProxyPoolError(400, 'No Cloudflare accounts found for this API token.');
+      }
+      accountId = String(accData.result[0].id);
+    }
+
+    // Retrieve or check workers.dev subdomain
+    let subdomain = '';
+    const subRes = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/subdomain`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (subRes.ok) {
+      const subData = await subRes.json() as any;
+      subdomain = subData.result?.subdomain || '';
+    }
+    if (!subdomain) {
+      subdomain = 'workers';
+    }
+
+    // Upload worker script
+    const uploadRes = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${cleanName}`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/javascript',
+      },
+      body: CLOUDFLARE_WORKER_RELAY_CODE,
+    });
+    if (!uploadRes.ok) {
+      const errData = await uploadRes.json().catch(() => null) as any;
+      const msg = errData?.errors?.[0]?.message || uploadRes.statusText;
+      throw new ProxyPoolError(400, `Cloudflare Worker upload failed: ${msg}`);
+    }
+
+    // Enable workers.dev subdomain route
+    await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${cleanName}/subdomain`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ enabled: true }),
+    }).catch(() => {/* non-fatal */});
+
+    const relayUrl = `https://${cleanName}.${subdomain}.workers.dev`;
+
+    // Pick unique pool entry name
+    const baseEntryName = `cf-${cleanName}`.slice(0, POOL_NAME_MAX);
+    let finalEntryName = baseEntryName;
+    let counter = 1;
+    while (getDb().prepare('SELECT 1 FROM x_gateway_proxy_pool WHERE name = ?').get(finalEntryName)) {
+      counter++;
+      const suffix = `-${counter}`;
+      finalEntryName = `${baseEntryName.slice(0, POOL_NAME_MAX - suffix.length)}${suffix}`;
+    }
+
+    const entry = createProxyPoolEntry(finalEntryName, relayUrl, params.createdBy);
+    return { ok: true, provider: 'cloudflare', workerName: cleanName, url: relayUrl, entry };
+  }
+
+  if (params.provider === 'vercel') {
+    const deployRes = await fetch('https://api.vercel.com/v13/deployments', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: cleanName,
+        files: [
+          {
+            file: 'api/relay.js',
+            data: VERCEL_RELAY_CODE,
+          },
+          {
+            file: 'vercel.json',
+            data: JSON.stringify({
+              routes: [{ src: '/(.*)', dest: '/api/relay.js' }],
+            }),
+          },
+        ],
+        projectSettings: {
+          framework: null,
+        },
+      }),
+    });
+
+    if (!deployRes.ok) {
+      const errData = await deployRes.json().catch(() => null) as any;
+      const msg = errData?.error?.message || deployRes.statusText;
+      throw new ProxyPoolError(400, `Vercel deployment failed: ${msg}`);
+    }
+
+    const deployData = await deployRes.json() as any;
+    const hostUrl = deployData.url || deployData.alias?.[0] || `${cleanName}.vercel.app`;
+    const relayUrl = hostUrl.startsWith('http') ? hostUrl : `https://${hostUrl}`;
+
+    const baseEntryName = `vercel-${cleanName}`.slice(0, POOL_NAME_MAX);
+    let finalEntryName = baseEntryName;
+    let counter = 1;
+    while (getDb().prepare('SELECT 1 FROM x_gateway_proxy_pool WHERE name = ?').get(finalEntryName)) {
+      counter++;
+      const suffix = `-${counter}`;
+      finalEntryName = `${baseEntryName.slice(0, POOL_NAME_MAX - suffix.length)}${suffix}`;
+    }
+
+    const entry = createProxyPoolEntry(finalEntryName, relayUrl, params.createdBy);
+    return { ok: true, provider: 'vercel', workerName: cleanName, url: relayUrl, entry };
+  }
+
+  throw new ProxyPoolError(400, 'Unsupported provider. Must be cloudflare or vercel.');
 }
