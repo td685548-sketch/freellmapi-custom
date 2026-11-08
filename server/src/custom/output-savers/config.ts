@@ -1,6 +1,12 @@
 import { z } from 'zod';
 import { getSetting, setSetting } from '../../db/index.js';
-import { SAVER_LEVELS, SAVER_NAMES, type SaverLevel, type SaverName } from './prompts.js';
+import {
+  SAVER_LEVELS,
+  SAVER_NAMES,
+  registerCustomPromptGetter,
+  type SaverLevel,
+  type SaverName,
+} from './prompts.js';
 
 export const SAVERS_SETTING = 'output_savers';
 
@@ -17,16 +23,18 @@ const storedSchema = z.object({
   // existed must leave that saver to the environment instead of pinning it off.
   caveman: levelSchema.optional(),
   ponytail: levelSchema.optional(),
+  customPrompt: z.string().optional(),
 });
 
 export const outputSaversUpdateSchema = z.object({
   caveman: levelSchema.optional(),
   ponytail: levelSchema.optional(),
+  customPrompt: z.string().optional(),
 }).strict();
 
 export type OutputSaversUpdate = z.infer<typeof outputSaversUpdateSchema>;
 
-const levelRank: Record<SaverLevel, number> = { off: 0, lite: 1, full: 2, ultra: 3 };
+const levelRank: Record<SaverLevel, number> = { off: 0, lite: 1, full: 2, ultra: 3, wenyan: 4 };
 
 export function isSaverLevel(value: unknown): value is SaverLevel {
   return typeof value === 'string' && (SAVER_LEVELS as readonly string[]).includes(value);
@@ -37,7 +45,7 @@ function envLevel(name: SaverName): SaverLevel {
   return isSaverLevel(raw) ? raw : 'off';
 }
 
-function storedLevels(): Partial<OutputSaverLevels> {
+function storedConfig(): Partial<OutputSaverLevels> & { customPrompt?: string } {
   let raw: string | undefined;
   try {
     raw = getSetting(SAVERS_SETTING);
@@ -57,6 +65,7 @@ function storedLevels(): Partial<OutputSaverLevels> {
 export interface OutputSaverSettings {
   levels: OutputSaverLevels;
   sources: Record<SaverName, SaverSource>;
+  customPrompt?: string;
 }
 
 // Every chat request asks what the savers should do, including the overwhelmingly
@@ -79,7 +88,7 @@ export function invalidateOutputSaverSnapshot(): void {
 function loadSnapshot(): Snapshot {
   const now = Date.now();
   if (snapshot && now - snapshot.loadedAtMs < SNAPSHOT_TTL_MS) return snapshot;
-  const stored = storedLevels();
+  const stored = storedConfig();
   const levels = { ...OFF_LEVELS };
   const sources: Record<SaverName, SaverSource> = { caveman: 'default', ponytail: 'default' };
   for (const name of SAVER_NAMES) {
@@ -95,7 +104,8 @@ function loadSnapshot(): Snapshot {
       sources[name] = 'env';
     }
   }
-  snapshot = { levels, sources, loadedAtMs: now };
+  const customPrompt = typeof stored.customPrompt === 'string' ? stored.customPrompt : undefined;
+  snapshot = { levels, sources, customPrompt, loadedAtMs: now };
   return snapshot;
 }
 
@@ -107,12 +117,22 @@ export function getOutputSaverLevels(): OutputSaverLevels {
   return loadSnapshot().levels;
 }
 
-export function setOutputSaverLevels(update: OutputSaversUpdate): OutputSaverLevels {
+export function getOutputSaverCustomPrompt(): string | undefined {
+  return loadSnapshot().customPrompt;
+}
+
+// Register getter so prompts.ts can lazily resolve customPrompt without circular dependency
+registerCustomPromptGetter(getOutputSaverCustomPrompt);
+
+export function setOutputSaverLevels(
+  update: OutputSaversUpdate,
+): OutputSaverLevels & { customPrompt?: string } {
   const parsed = outputSaversUpdateSchema.parse(update);
-  const current = loadSnapshot().levels;
-  const next: OutputSaverLevels = {
-    caveman: parsed.caveman ?? current.caveman,
-    ponytail: parsed.ponytail ?? current.ponytail,
+  const current = loadSnapshot();
+  const next: OutputSaverLevels & { customPrompt?: string } = {
+    caveman: parsed.caveman ?? current.levels.caveman,
+    ponytail: parsed.ponytail ?? current.levels.ponytail,
+    customPrompt: parsed.customPrompt !== undefined ? parsed.customPrompt : current.customPrompt,
   };
   setSetting(SAVERS_SETTING, JSON.stringify(next));
   invalidateOutputSaverSnapshot();

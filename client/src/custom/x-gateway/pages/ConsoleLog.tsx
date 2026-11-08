@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ScrollText, Terminal, Trash2 } from 'lucide-react'
+import { Check, Copy, ScrollText, Search, Terminal, Trash2, X } from 'lucide-react'
 import { useSessionRevision } from '../../session-state'
-import { mgmtApi } from '../management-api'
+import { mgmtApi, type XLog } from '../management-api'
 import { useMgmtStrings } from '../management-strings'
 import { useXStrings } from '../strings'
 
@@ -31,6 +31,9 @@ export default function ConsoleLog() {
 
   // Request logs state
   const [status, setStatus] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [selectedLog, setSelectedLog] = useState<XLog | null>(null)
+  const [copiedLogJson, setCopiedLogJson] = useState(false)
   const logs = useQuery({
     queryKey: ['x-logs', revision, status],
     queryFn: ({ signal }) => mgmtApi.logs(status, signal),
@@ -183,19 +186,59 @@ export default function ConsoleLog() {
             )}
           </section>
 
-          <div className="x-mgmt-actions">
-            {([['', s.all], ['success', s.success], ['error', s.failed]] as const).map(([value, label]) => (
+          <div className="x-mgmt-actions" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
+            <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', alignItems: 'center' }}>
               <button
-                key={value}
-                className={`x-button ${status === value ? 'x-primary' : ''}`}
-                onClick={() => setStatus(value)}
+                className={`x-button ${status === '' ? 'x-primary' : ''}`}
+                onClick={() => setStatus('')}
               >
-                {label}
+                {s.all}
               </button>
-            ))}
-            <button className="x-button" onClick={() => { void logs.refetch(); void hourly.refetch() }}>
-              {s.refresh}
-            </button>
+              <button
+                className={`x-button ${status === 'success' ? 'x-primary' : ''}`}
+                onClick={() => setStatus('success')}
+              >
+                2xx OK
+              </button>
+              <button
+                className={`x-button ${status === 'error' ? 'x-primary' : ''}`}
+                onClick={() => setStatus('error')}
+              >
+                4xx/5xx Error
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                <Search size={14} style={{ position: 'absolute', left: '0.6rem', color: 'var(--text-muted)' }} />
+                <input
+                  type="text"
+                  placeholder="Lọc Model / Provider..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{
+                    padding: '0.375rem 0.6rem 0.375rem 2rem',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border)',
+                    backgroundColor: 'var(--bg-subtle, rgba(0,0,0,0.03))',
+                    fontSize: '0.8125rem',
+                    width: '210px',
+                  }}
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    style={{ position: 'absolute', right: '0.5rem', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+              <button className="x-button" onClick={() => { void logs.refetch(); void hourly.refetch() }}>
+                {s.refresh}
+              </button>
+            </div>
           </div>
 
           {logs.isPending && <p role="status">{s.loading}</p>}
@@ -206,33 +249,225 @@ export default function ConsoleLog() {
             </div>
           )}
 
-          {logs.data && (
-            <div className="x-panel x-table-wrap">
-              <table className="x-table">
-                <thead>
-                  <tr>
-                    <th>{s.time}</th>
-                    <th>{s.provider}</th>
-                    <th>{s.model}</th>
-                    <th>{s.status}</th>
-                    <th>{s.tokens}</th>
-                    <th>{s.latency}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {logs.data.logs.map(l => (
-                    <tr key={l.id}>
-                      <td>{new Date(l.createdAt).toLocaleString()}</td>
-                      <td>{l.platform}</td>
-                      <td><code>{l.requestedModel ?? l.modelId}</code></td>
-                      <td title={l.error ?? undefined}>{l.status === 'success' ? s.success : s.failed}</td>
-                      <td>{(l.inputTokens + l.outputTokens).toLocaleString()}</td>
-                      <td>{l.latencyMs ?? '–'} ms</td>
+          {logs.data && (() => {
+            const query = searchQuery.trim().toLowerCase();
+            const filtered = (logs.data.logs || []).filter(l => {
+              if (!query) return true;
+              return (
+                l.platform?.toLowerCase().includes(query) ||
+                l.modelId?.toLowerCase().includes(query) ||
+                l.requestedModel?.toLowerCase().includes(query) ||
+                (l.error && l.error.toLowerCase().includes(query))
+              );
+            });
+
+            return (
+              <div className="x-panel x-table-wrap">
+                <table className="x-table">
+                  <thead>
+                    <tr>
+                      <th>{s.time}</th>
+                      <th>{s.provider}</th>
+                      <th>{s.model}</th>
+                      <th>{s.status}</th>
+                      <th>{s.tokens}</th>
+                      <th>{s.latency}</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-              {!logs.data.logs.length && <div className="x-empty"><p>{s.noLogs}</p></div>}
+                  </thead>
+                  <tbody>
+                    {filtered.map(l => (
+                      <tr
+                        key={l.id}
+                        onClick={() => setSelectedLog(l)}
+                        style={{ cursor: 'pointer' }}
+                        title="Bấm để xem chi tiết metadata"
+                      >
+                        <td>{new Date(l.createdAt).toLocaleString()}</td>
+                        <td><strong>{l.platform}</strong></td>
+                        <td><code>{l.requestedModel ?? l.modelId}</code></td>
+                        <td>
+                          <span style={{
+                            padding: '0.2rem 0.5rem',
+                            borderRadius: '999px',
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            background: l.status === 'success' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                            color: l.status === 'success' ? '#10b981' : '#f87171',
+                          }}>
+                            {l.status === 'success' ? s.success : s.failed}
+                          </span>
+                        </td>
+                        <td>{(l.inputTokens + l.outputTokens).toLocaleString()}</td>
+                        <td>{l.latencyMs ?? '–'} ms</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {!filtered.length && <div className="x-empty"><p>{s.noLogs}</p></div>}
+              </div>
+            );
+          })()}
+
+          {/* Request Log Detail Drawer / Modal */}
+          {selectedLog && (
+            <div
+              style={{
+                position: 'fixed',
+                inset: 0,
+                backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                zIndex: 1000,
+                display: 'flex',
+                justifyContent: 'flex-end',
+                backdropFilter: 'blur(2px)',
+              }}
+              onClick={() => setSelectedLog(null)}
+            >
+              <div
+                style={{
+                  width: '100%',
+                  maxWidth: '520px',
+                  height: '100%',
+                  backgroundColor: 'var(--card-bg, #1e293b)',
+                  color: 'var(--foreground, #f8fafc)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  boxShadow: '-4px 0 24px rgba(0,0,0,0.3)',
+                  borderLeft: '1px solid var(--border-color, #334155)',
+                  boxSizing: 'border-box',
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Drawer Header */}
+                <div style={{
+                  padding: '1.25rem',
+                  borderBottom: '1px solid var(--border-color, #334155)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 600 }}>Chi tiết Request #{selectedLog.id}</h3>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted, #94a3b8)' }}>
+                      {new Date(selectedLog.createdAt).toLocaleString()}
+                    </span>
+                  </div>
+                  <button
+                    className="x-button"
+                    onClick={() => setSelectedLog(null)}
+                    style={{ padding: '0.35rem', borderRadius: '50%' }}
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                {/* Drawer Body */}
+                <div style={{ padding: '1.25rem', flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  {/* Status & Latency Badges */}
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <span style={{
+                      padding: '0.25rem 0.65rem',
+                      borderRadius: '999px',
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      background: selectedLog.status === 'success' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                      color: selectedLog.status === 'success' ? '#10b981' : '#f87171',
+                      border: `1px solid ${selectedLog.status === 'success' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                    }}>
+                      {selectedLog.status === 'success' ? '200 OK (Success)' : 'Error / Failed'}
+                    </span>
+                    <span style={{
+                      padding: '0.25rem 0.65rem',
+                      borderRadius: '999px',
+                      fontSize: '0.75rem',
+                      fontWeight: 500,
+                      background: 'var(--bg-subtle, rgba(255,255,255,0.06))',
+                    }}>
+                      Độ trễ: {selectedLog.latencyMs ?? '–'} ms
+                    </span>
+                  </div>
+
+                  {/* Metadata Grid */}
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr',
+                    gap: '0.75rem',
+                    background: 'var(--bg-subtle, rgba(0,0,0,0.15))',
+                    padding: '1rem',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-color, #334155)',
+                  }}>
+                    <div>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted, #94a3b8)', display: 'block' }}>Nhà cung cấp (Provider)</span>
+                      <strong style={{ fontSize: '0.9rem' }}>{selectedLog.platform}</strong>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted, #94a3b8)', display: 'block' }}>Model</span>
+                      <code style={{ fontSize: '0.85rem' }}>{selectedLog.requestedModel ?? selectedLog.modelId}</code>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted, #94a3b8)', display: 'block' }}>Input Tokens</span>
+                      <strong style={{ fontSize: '0.9rem' }}>{selectedLog.inputTokens.toLocaleString()}</strong>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted, #94a3b8)', display: 'block' }}>Output Tokens</span>
+                      <strong style={{ fontSize: '0.9rem' }}>{selectedLog.outputTokens.toLocaleString()}</strong>
+                    </div>
+                    <div style={{ gridColumn: 'span 2' }}>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted, #94a3b8)', display: 'block' }}>Tổng Tokens</span>
+                      <strong style={{ fontSize: '1rem', color: '#10b981' }}>{(selectedLog.inputTokens + selectedLog.outputTokens).toLocaleString()}</strong>
+                    </div>
+                  </div>
+
+                  {/* Error Details */}
+                  {selectedLog.error && (
+                    <div style={{
+                      background: 'rgba(239, 68, 68, 0.1)',
+                      border: '1px solid rgba(239, 68, 68, 0.3)',
+                      borderRadius: '8px',
+                      padding: '0.85rem',
+                      color: '#f87171',
+                      fontSize: '0.825rem',
+                    }}>
+                      <strong style={{ display: 'block', marginBottom: '0.25rem' }}>Thông báo lỗi (Error Details):</strong>
+                      <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontFamily: 'monospace' }}>
+                        {selectedLog.error}
+                      </pre>
+                    </div>
+                  )}
+
+                  {/* Raw JSON */}
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                      <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>Raw JSON Metadata</span>
+                      <button
+                        className="x-button x-small"
+                        onClick={() => {
+                          navigator.clipboard.writeText(JSON.stringify(selectedLog, null, 2))
+                          setCopiedLogJson(true)
+                          setTimeout(() => setCopiedLogJson(false), 2000)
+                        }}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem' }}
+                      >
+                        {copiedLogJson ? <Check size={13} /> : <Copy size={13} />}
+                        {copiedLogJson ? 'Đã sao chép!' : 'Copy JSON'}
+                      </button>
+                    </div>
+                    <pre style={{
+                      background: '#090d16',
+                      color: '#38bdf8',
+                      padding: '0.85rem',
+                      borderRadius: '8px',
+                      fontSize: '0.775rem',
+                      lineHeight: '1.4',
+                      overflowX: 'auto',
+                      maxHeight: '260px',
+                      margin: 0,
+                    }}>
+                      {JSON.stringify(selectedLog, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </>

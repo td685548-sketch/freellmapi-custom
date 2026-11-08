@@ -7,6 +7,7 @@ import {
   Copy,
   Download,
   Film,
+  Globe,
   Image as ImageIcon,
   Mic,
   Palette,
@@ -27,6 +28,7 @@ import {
   type TtsTestResult,
   type SttTestResult,
   type EmbeddingTestResult,
+  type WebTestResult,
 } from '../media-api';
 import { useMediaStrings } from '../media-strings';
 
@@ -72,6 +74,13 @@ export default function MediaProviders() {
   const [embModel, setEmbModel] = useState('auto');
   const [embDim, setEmbDim] = useState<string>('');
   const [embResult, setEmbResult] = useState<EmbeddingTestResult | null>(null);
+
+  // 5. Web Search & Fetch
+  const [webQuery, setWebQuery] = useState('What are the latest breakthroughs in AI agents and reasoning models?');
+  const [webModel, setWebModel] = useState('auto');
+  const [webFetchUrl, setWebFetchUrl] = useState('');
+  const [webResult, setWebResult] = useState<WebTestResult | null>(null);
+  const [copiedWebResult, setCopiedWebResult] = useState(false);
 
   // Queries
   const configQuery = useQuery({
@@ -128,6 +137,11 @@ export default function MediaProviders() {
     onSuccess: (res) => setEmbResult(res),
   });
 
+  const webMutation = useMutation({
+    mutationFn: () => mediaApi.testWeb({ query: webQuery, model: webModel, fetchUrl: webFetchUrl.trim() || undefined }),
+    onSuccess: (res) => setWebResult(res),
+  });
+
   const config = configQuery.data;
   const currentDefaults = configDraft || config?.defaults || {};
   const currentKindSpec = config?.kinds?.[activeKind];
@@ -151,6 +165,9 @@ export default function MediaProviders() {
   const embInputId = useId();
   const embModelId = useId();
   const embDimId = useId();
+  const webQueryId = useId();
+  const webModelId = useId();
+  const webFetchUrlId = useId();
   const defImgModelId = useId();
   const defTtsModelId = useId();
   const defTtsVoiceId = useId();
@@ -159,6 +176,7 @@ export default function MediaProviders() {
   const defSttLangId = useId();
   const defEmbModelId = useId();
   const defEmbDimId = useId();
+  const defWebModelId = useId();
 
   // Snippet generator
   const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
@@ -291,17 +309,18 @@ console.log(transcript.text);`;
     }
 
     // Embedding
-    if (snippetTab === 'curl') {
-      return `curl -X POST "${url}" \\
+    if (activeKind === 'embedding') {
+      if (snippetTab === 'curl') {
+        return `curl -X POST "${url}" \\
   -H "Authorization: Bearer ${activeApiKey}" \\
   -H "Content-Type: application/json" \\
   -d '{
     "model": "${embModel === 'auto' ? (currentDefaults.embedding?.defaultModel || 'auto') : embModel}",
     "input": "Semantic search retrieval test"${embDim ? `, "dimensions": ${embDim}` : ''}
   }'`;
-    }
-    if (snippetTab === 'python') {
-      return `from openai import OpenAI
+      }
+      if (snippetTab === 'python') {
+        return `from openai import OpenAI
 
 client = OpenAI(
     api_key="${activeApiKey}",
@@ -313,8 +332,8 @@ response = client.embeddings.create(
     input="Semantic search retrieval test"${embDim ? `, dimensions=${embDim}` : ''}
 )
 print("Vector length:", len(response.data[0].embedding))`;
-    }
-    return `import OpenAI from "openai";
+      }
+      return `import OpenAI from "openai";
 
 const client = new OpenAI({
   apiKey: "${activeApiKey}",
@@ -326,6 +345,51 @@ const response = await client.embeddings.create({
   input: "Semantic search retrieval test"${embDim ? `, dimensions: ${embDim}` : ''},
 });
 console.log("Vector length:", response.data[0].embedding.length);`;
+    }
+
+    // Web Search & Fetch
+    const webModelToUse = webModel === 'auto' ? (currentDefaults.web?.defaultModel || 'sonar-pro') : webModel;
+    if (snippetTab === 'curl') {
+      return `curl -X POST "${url}" \\
+  -H "Authorization: Bearer ${activeApiKey}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "${webModelToUse}",
+    "messages": [
+      {"role": "user", "content": ${JSON.stringify(webQuery)}}
+    ]
+  }'`;
+    }
+    if (snippetTab === 'python') {
+      return `from openai import OpenAI
+
+client = OpenAI(
+    api_key="${activeApiKey}",
+    base_url="${origin}/x/v1"
+)
+
+response = client.chat.completions.create(
+    model="${webModelToUse}",
+    messages=[
+        {"role": "user", "content": ${JSON.stringify(webQuery)}}
+    ]
+)
+print(response.choices[0].message.content)`;
+    }
+    return `import OpenAI from "openai";
+
+const client = new OpenAI({
+  apiKey: "${activeApiKey}",
+  baseURL: "${origin}/x/v1",
+});
+
+const response = await client.chat.completions.create({
+  model: "${webModelToUse}",
+  messages: [
+    { role: "user", content: ${JSON.stringify(webQuery)} }
+  ],
+});
+console.log(response.choices[0].message.content);`;
   };
 
   const handleCopy = (text: string) => {
@@ -383,6 +447,15 @@ console.log("Vector length:", response.data[0].embedding.length);`;
         >
           <Binary size={18} />
           <span>{s.tabEmbedding}</span>
+        </button>
+        <button
+          role="tab"
+          aria-selected={activeKind === 'web'}
+          className={`x-media-tab ${activeKind === 'web' ? 'active' : ''}`}
+          onClick={() => setActiveKind('web')}
+        >
+          <Globe size={18} />
+          <span>{s.tabWeb}</span>
         </button>
       </div>
 
@@ -580,6 +653,31 @@ console.log("Vector length:", response.data[0].embedding.length);`;
                 />
               </div>
             </>
+          )}
+
+          {activeKind === 'web' && (
+            <div className="x-media-field">
+              <label htmlFor={defWebModelId}>{s.defaultModel}</label>
+              <input
+                id={defWebModelId}
+                value={currentDefaults.web?.defaultModel ?? 'auto'}
+                placeholder={s.customModelPlaceholder}
+                disabled={!canEdit}
+                onChange={(e) => updateDraft({ web: { ...currentDefaults.web, defaultModel: e.target.value } })}
+              />
+              <div className="x-media-suggestions">
+                {currentKindSpec?.suggestedModels?.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    className="x-badge-button"
+                    onClick={() => updateDraft({ web: { ...currentDefaults.web, defaultModel: m } })}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       </section>
@@ -988,6 +1086,110 @@ console.log("Vector length:", response.data[0].embedding.length);`;
                 <div className="x-preview-placeholder">
                   <Binary size={40} />
                   <p>{s.embeddingPlaceholder}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* --- Web Search & Fetch Playground --- */}
+        {activeKind === 'web' && (
+          <div className="x-playground-grid">
+            <div className="x-playground-controls">
+              <div className="x-media-field">
+                <label htmlFor={webQueryId}>{s.webQuery}</label>
+                <textarea
+                  id={webQueryId}
+                  rows={3}
+                  value={webQuery}
+                  placeholder={s.webQueryPlaceholder}
+                  onChange={(e) => setWebQuery(e.target.value)}
+                />
+              </div>
+
+              <div className="x-media-row">
+                <div className="x-media-field">
+                  <label htmlFor={webModelId}>{s.model}</label>
+                  <input
+                    id={webModelId}
+                    value={webModel}
+                    placeholder="auto, sonar-pro, or provider/model"
+                    onChange={(e) => setWebModel(e.target.value)}
+                  />
+                </div>
+                <div className="x-media-field">
+                  <label htmlFor={webFetchUrlId}>{s.fetchUrl}</label>
+                  <input
+                    id={webFetchUrlId}
+                    value={webFetchUrl}
+                    placeholder={s.fetchUrlPlaceholder}
+                    onChange={(e) => setWebFetchUrl(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <button
+                className="x-button x-primary"
+                disabled={webMutation.isPending || !webQuery.trim()}
+                onClick={() => webMutation.mutate()}
+              >
+                <Globe size={16} />
+                {webMutation.isPending ? s.searchingWeb : s.searchWeb}
+              </button>
+
+              {webMutation.isError && (
+                <div role="alert" className="x-error">
+                  {webMutation.error.message}
+                </div>
+              )}
+            </div>
+
+            <div className="x-playground-preview">
+              {webResult && (
+                <div className="x-emb-result-box" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <div className="x-result-meta">
+                    <span>{s.routedVia}: <strong>{webResult.provider}/{webResult.model}</strong></span>
+                    <span>{s.latency}: <strong>{webResult.latencyMs} ms</strong></span>
+                  </div>
+                  <div style={{
+                    background: 'var(--bg-subtle, rgba(0,0,0,0.04))',
+                    padding: '0.75rem',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem',
+                    lineHeight: '1.5',
+                    maxHeight: '260px',
+                    overflowY: 'auto',
+                    whiteSpace: 'pre-wrap',
+                  }}>
+                    {webResult.content || JSON.stringify(webResult.results, null, 2)}
+                  </div>
+                  {webResult.results && webResult.results.length > 0 && webResult.results[0].url && (
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                      <span>{s.sources}: </span>
+                      <a href={webResult.results[0].url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--link, #3b82f6)' }}>
+                        {webResult.results[0].url}
+                      </a>
+                    </div>
+                  )}
+                  <div>
+                    <button
+                      className="x-button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(webResult.content || JSON.stringify(webResult.results, null, 2));
+                        setCopiedWebResult(true);
+                        setTimeout(() => setCopiedWebResult(false), 2000);
+                      }}
+                    >
+                      {copiedWebResult ? <Check size={14} /> : <Copy size={14} />}
+                      {copiedWebResult ? s.copied : s.copyWebResult}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {!webResult && !webMutation.isPending && (
+                <div className="x-preview-placeholder">
+                  <Globe size={40} />
+                  <p>{s.webQueryPlaceholder}</p>
                 </div>
               )}
             </div>

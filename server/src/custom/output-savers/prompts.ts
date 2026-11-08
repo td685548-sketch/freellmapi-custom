@@ -5,7 +5,7 @@
 // which itself adapts the `caveman` (JuliusBrussee) and `ponytail`
 // (DietrichGebert) skills.
 
-export const SAVER_LEVELS = ['off', 'lite', 'full', 'ultra'] as const;
+export const SAVER_LEVELS = ['off', 'lite', 'full', 'ultra', 'wenyan'] as const;
 
 export type SaverLevel = (typeof SAVER_LEVELS)[number];
 
@@ -70,6 +70,20 @@ export const CAVEMAN_PROMPTS: Record<Exclude<SaverLevel, 'off'>, string> = {
     CAVEMAN_NO_SELF_REFERENCE,
     CAVEMAN_NO_DECORATION,
   ].join(' '),
+
+  wenyan: [
+    'Respond in ultra-dense classical syntax (wenyan / ancient compact). Strip all decorative prose, pleasantries, auxiliary verbs, and pronouns.',
+    'Use minimal characters, direct predicate-object or telegraphic statements. Keep technical symbols, code, commands, paths, and URLs 100% exact.',
+    'Pattern: [thing] [action] [reason]. [next step].',
+    CAVEMAN_EXAMPLES,
+    CAVEMAN_BOUNDARIES,
+    CAVEMAN_AUTO_CLARITY,
+    CAVEMAN_PERSISTENCE,
+    CAVEMAN_NO_INVENTED_ABBREV,
+    CAVEMAN_PRESERVE_LANGUAGE,
+    CAVEMAN_NO_SELF_REFERENCE,
+    CAVEMAN_NO_DECORATION,
+  ].join(' '),
 };
 
 const PONYTAIL_PERSONA = 'You are a lazy senior developer. Lazy means efficient, not careless. The best code is the code never written.';
@@ -114,6 +128,16 @@ export const PONYTAIL_PROMPTS: Record<Exclude<SaverLevel, 'off'>, string> = {
     PONYTAIL_NOT_LAZY,
     PONYTAIL_PERSISTENCE,
   ].join(' '),
+
+  wenyan: [
+    PONYTAIL_PERSONA,
+    'Wenyan: Radical minimalism. Absolute fewest tokens. Return working diff or one-line solution directly, zero explanation unless broken.',
+    PONYTAIL_LADDER,
+    PONYTAIL_RULES,
+    PONYTAIL_OUTPUT,
+    PONYTAIL_NOT_LAZY,
+    PONYTAIL_PERSISTENCE,
+  ].join(' '),
 };
 
 const PROMPTS_BY_NAME: Record<SaverName, Record<Exclude<SaverLevel, 'off'>, string>> = {
@@ -125,16 +149,29 @@ const PROMPTS_BY_NAME: Record<SaverName, Record<Exclude<SaverLevel, 'off'>, stri
  *  injection, so the idempotency test stays exact rather than substring-soft. */
 export const SAVER_SEGMENT_SEPARATOR = '\n\n';
 
+let customPromptGetter: (() => string | undefined) | null = null;
+
+export function registerCustomPromptGetter(getter: () => string | undefined): void {
+  customPromptGetter = getter;
+}
+
 export function saverPromptText(name: SaverName, level: SaverLevel): string {
   if (level === 'off') return '';
   return PROMPTS_BY_NAME[name][level];
 }
 
-/** Injection order is fixed (caveman then ponytail) so the system prefix is
+/** Injection order is fixed (caveman then ponytail then customPrompt) so the system prefix is
  *  byte-identical across requests and stays cache-friendly. */
-export function buildSaverBlock(levels: Record<SaverName, SaverLevel>): string {
-  return SAVER_NAMES
+export function buildSaverBlock(
+  levels: Record<SaverName, SaverLevel>,
+  customPrompt?: string,
+): string {
+  const parts = SAVER_NAMES
     .map(name => saverPromptText(name, levels[name]))
-    .filter(text => text.length > 0)
-    .join(SAVER_SEGMENT_SEPARATOR);
+    .filter(text => text.length > 0);
+  const custom = customPrompt !== undefined ? customPrompt : customPromptGetter?.();
+  if (custom && custom.trim().length > 0) {
+    parts.push(custom.trim());
+  }
+  return parts.join(SAVER_SEGMENT_SEPARATOR);
 }
