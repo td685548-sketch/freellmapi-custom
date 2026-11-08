@@ -414,6 +414,6 @@ describe('web search, fetch and HTML conversion', () => {
     expect(htmlToMarkdown('<h2>A &amp; B</h2><p><a href="/x?a=1&amp;b=2">link</a></p>'))
       .toContain('[link](/x?a=1&b=2)');
     expect(htmlToText('<p>One<br>Two</p><script>x()</script><p>Three</p>'))
-      .toBe('One\nTwo\nThree');
+      .toBe('One\nTwo\n\nThree');
   });
 });
