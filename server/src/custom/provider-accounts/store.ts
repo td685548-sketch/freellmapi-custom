@@ -14,7 +14,81 @@ import {
   getXGatewayProvider,
   normalizeXGatewayProviderId,
   platformForXGatewayProvider,
+  registerCustomNodesGetter,
+  type CustomProviderNode,
 } from './catalog.js';
+
+export type { CustomProviderNode };
+export const CUSTOM_NODES_SETTINGS_KEY = 'x_gateway_custom_nodes';
+
+export function listCustomProviderNodes(): CustomProviderNode[] {
+  try {
+    const db = getDb();
+    let raw: string | undefined;
+    try {
+      const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(CUSTOM_NODES_SETTINGS_KEY) as { value: string } | undefined;
+      raw = row?.value;
+    } catch {
+      const row = db.prepare('SELECT value FROM x_gateway_config WHERE key = ?').get(CUSTOM_NODES_SETTINGS_KEY) as { value: string } | undefined;
+      raw = row?.value;
+    }
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as CustomProviderNode[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveCustomProviderNode(node: CustomProviderNode): CustomProviderNode {
+  const db = getDb();
+  const current = listCustomProviderNodes();
+  const existingIdx = current.findIndex(n => n.id === node.id);
+  let updated: CustomProviderNode[];
+  if (existingIdx >= 0) {
+    updated = [...current];
+    updated[existingIdx] = node;
+  } else {
+    updated = [...current, node];
+  }
+  const serialized = JSON.stringify(updated);
+  try {
+    db.prepare(`
+      INSERT INTO settings (key, value) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(CUSTOM_NODES_SETTINGS_KEY, serialized);
+  } catch {
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO x_gateway_config (key, value, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+    `).run(CUSTOM_NODES_SETTINGS_KEY, serialized, now);
+  }
+  invalidateXGatewayKeyCache();
+  return node;
+}
+
+export function deleteCustomProviderNode(nodeId: string): void {
+  const db = getDb();
+  const current = listCustomProviderNodes();
+  const filtered = current.filter(n => n.id !== nodeId);
+  const serialized = JSON.stringify(filtered);
+  try {
+    db.prepare(`
+      INSERT INTO settings (key, value) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(CUSTOM_NODES_SETTINGS_KEY, serialized);
+  } catch {
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO x_gateway_config (key, value, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+    `).run(CUSTOM_NODES_SETTINGS_KEY, serialized, now);
+  }
+  invalidateXGatewayKeyCache();
+}
+
+registerCustomNodesGetter(listCustomProviderNodes);
 
 export type OAuthProvider = 'openrouter' | 'github-copilot';
 
@@ -326,9 +400,26 @@ export function listAccounts(): ProviderAccountsResponse['providers'] {
     accounts: [],
   }));
 
+  const customNodes = listCustomProviderNodes();
+  for (const node of customNodes) {
+    if (!providers.some(p => p.id === node.id)) {
+      providers.push({
+        id: node.id,
+        alias: node.prefix,
+        name: node.name,
+        category: 'apikey',
+        baseUrl: node.baseUrl || null,
+        authMethods: ['api_key'],
+        accounts: [],
+        isCustomNode: true,
+        customNodeType: node.type,
+      } as any);
+    }
+  }
+
   for (const raw of rows) {
     const row = hydrateAccountRow(raw);
-    const provider = providers.find(p => p.id === row.provider);
+    const provider = providers.find(p => p.id === row.provider || p.alias === row.provider);
     if (!provider) continue;
     const maskedProxy = maskProxyUrl(decryptProxyUrl(row));
     provider.accounts.push({
@@ -508,6 +599,9 @@ export function createApiKeyAccount(input: {
     throw new AccountError(400, 'API key or credential is required.');
   }
   let baseUrl: string | null = input.baseUrl?.trim() || null;
+  if (!baseUrl && catalogEntry.baseUrl) {
+    baseUrl = catalogEntry.baseUrl;
+  }
   if (normalizedProvider === 'custom') {
     if (!baseUrl) {
       throw new AccountError(400, 'Base URL is required for custom endpoints.');
@@ -647,11 +741,10 @@ export function setAccountStatus(id: number, status: 'healthy' | 'error' | 'unkn
 }
 
 export function toggleProviderAccounts(providerId: string, enabled: boolean): number {
-  const normalized = normalizeXGatewayProviderId(providerId);
-  if (!normalized) throw new AccountError(400, 'Unknown provider.');
+  const normalized = normalizeXGatewayProviderId(providerId) ?? providerId.trim().toLowerCase();
   const result = getDb()
-    .prepare('UPDATE x_gateway_keys SET enabled = ? WHERE provider = ?')
-    .run(enabled ? 1 : 0, normalized);
+    .prepare('UPDATE x_gateway_keys SET enabled = ? WHERE provider = ? OR provider = ?')
+    .run(enabled ? 1 : 0, normalized, providerId.trim());
   invalidateXGatewayKeyCache();
   return Number(result.changes ?? 0);
 }

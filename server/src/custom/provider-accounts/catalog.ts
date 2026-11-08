@@ -7477,9 +7477,58 @@ if (BY_ID.has('kilo-gateway')) BY_ALIAS.set('kilo', BY_ID.get('kilo-gateway')!);
 if (BY_ID.has('volcengine-ark')) BY_ALIAS.set('volcengine', BY_ID.get('volcengine-ark')!);
 if (BY_ID.has('baidu')) BY_ALIAS.set('qianfan', BY_ID.get('baidu')!);
 
+export interface CustomProviderNode {
+  id: string;
+  name: string;
+  prefix: string;
+  type: 'openai-compatible' | 'anthropic-compatible' | 'custom-embedding';
+  apiType?: 'chat' | 'responses';
+  baseUrl: string;
+  models?: string[];
+}
+
+let customNodesGetter: (() => CustomProviderNode[]) | null = null;
+export function registerCustomNodesGetter(fn: () => CustomProviderNode[]): void {
+  customNodesGetter = fn;
+}
+
+export function listXGatewayProviders(): readonly XGatewayCatalogProvider[] {
+  const customNodes = customNodesGetter ? customNodesGetter() : [];
+  if (!customNodes || customNodes.length === 0) {
+    return X_GATEWAY_PROVIDERS;
+  }
+  const customCatalogProviders: XGatewayCatalogProvider[] = customNodes.map(node => ({
+    id: node.id,
+    alias: node.prefix,
+    name: node.name,
+    category: 'apikey' as ProviderCategory,
+    authMethods: ['api_key'],
+    baseUrl: node.baseUrl,
+    models: (node.models || []).map(m => ({ id: m, name: m })),
+  }));
+  return [...X_GATEWAY_PROVIDERS, ...customCatalogProviders];
+}
+
 export function getXGatewayProvider(idOrAlias: string): XGatewayCatalogProvider | undefined {
   const key = idOrAlias.trim().toLowerCase();
-  return BY_ID.get(key) ?? BY_ALIAS.get(key);
+  const builtin = BY_ID.get(key) ?? BY_ALIAS.get(key);
+  if (builtin) return builtin;
+  if (customNodesGetter) {
+    const nodes = customNodesGetter();
+    const node = nodes.find(n => n.id.toLowerCase() === key || n.prefix.toLowerCase() === key);
+    if (node) {
+      return {
+        id: node.id,
+        alias: node.prefix,
+        name: node.name,
+        category: 'apikey' as ProviderCategory,
+        authMethods: ['api_key'],
+        baseUrl: node.baseUrl,
+        models: (node.models || []).map(m => ({ id: m, name: m })),
+      };
+    }
+  }
+  return undefined;
 }
 
 export function normalizeXGatewayProviderId(idOrAlias: string): string | null {
@@ -7514,6 +7563,26 @@ export function resolveXGatewayProvider(providerId: string, baseUrl?: string | n
 
   const catalogEntry = getXGatewayProvider(normalized);
   const effectiveUrl = trimmedUrl ?? catalogEntry?.baseUrl?.trim();
+
+  if (customNodesGetter) {
+    const nodes = customNodesGetter();
+    const customNode = nodes.find(n => n.id.toLowerCase() === normalized.toLowerCase() || n.prefix.toLowerCase() === normalized.toLowerCase());
+    if (customNode && effectiveUrl) {
+      if (customNode.type === 'anthropic-compatible') {
+        return new AnthropicWireProvider({
+          name: customNode.name,
+          baseUrl: effectiveUrl,
+          timeoutMs: 120_000,
+        });
+      }
+      return new OpenAICompatProvider({
+        platform: 'custom',
+        name: customNode.name,
+        baseUrl: effectiveUrl,
+        timeoutMs: 120_000,
+      });
+    }
+  }
 
   if (catalogEntry?.category === 'webCookie' && effectiveUrl) {
     return new WebCookieProvider({

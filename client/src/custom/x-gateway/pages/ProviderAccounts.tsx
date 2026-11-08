@@ -2,11 +2,14 @@ import { useState, useEffect, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  Activity,
+  AlertTriangle,
   ArrowLeft,
   CircleCheck,
   Clock,
   Ellipsis,
   KeyRound,
+  LoaderCircle,
   Pencil,
   Plus,
   RefreshCw,
@@ -130,6 +133,30 @@ export default function ProviderAccounts() {
   const [customModelName, setCustomModelName] = useState('')
   const [aliasFrom, setAliasFrom] = useState('')
   const [aliasTo, setAliasTo] = useState('')
+  const [modelPingStates, setModelPingStates] = useState<
+    Record<string, { loading?: boolean; latencyMs?: number; ok?: boolean; message?: string }>
+  >({})
+
+  const handlePingModel = async (modelId: string) => {
+    if (!providerId) return
+    setModelPingStates(prev => ({
+      ...prev,
+      [modelId]: { loading: true },
+    }))
+    try {
+      const res = await accountsApi.pingModel(providerId, modelId)
+      setModelPingStates(prev => ({
+        ...prev,
+        [modelId]: { loading: false, latencyMs: res.latencyMs, ok: res.ok, message: res.message },
+      }))
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Ping failed'
+      setModelPingStates(prev => ({
+        ...prev,
+        [modelId]: { loading: false, ok: false, message },
+      }))
+    }
+  }
 
   const modelConfigQuery = useQuery({
     queryKey: ['x-provider-models', providerId, revision],
@@ -433,7 +460,62 @@ export default function ProviderAccounts() {
     </section> : (
       <section id="x-models-panel" role="tabpanel" aria-labelledby="x-models-tab" className="x-panel x-model-list">
         {!permissions.edit ? (
-          models.length ? models.map(model => <div key={model.id}><strong>{model.name}</strong><code>{model.id}</code></div>) : <p className="x-muted">{s.noModels}</p>
+          models.length ? (
+            <div style={{ display: 'grid', gap: 8 }}>
+              {models.map(model => (
+                <div key={model.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <strong>{model.name}</strong><code>{model.id}</code>
+                  </div>
+                  {permissions.test && (
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      {modelPingStates[model.id]?.loading ? (
+                        <span className="x-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <LoaderCircle size={12} className="x-spin" /> Ping...
+                        </span>
+                      ) : modelPingStates[model.id]?.ok !== undefined ? (
+                        modelPingStates[model.id]?.ok ? (
+                          <span
+                            className="x-badge"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              color: '#10b981',
+                              background: 'rgba(16, 185, 129, 0.1)',
+                              borderColor: 'rgba(16, 185, 129, 0.3)',
+                            }}
+                            title={modelPingStates[model.id]?.message || 'Ping successful'}
+                          >
+                            <Activity size={12} /> {modelPingStates[model.id]?.latencyMs}ms
+                          </span>
+                        ) : (
+                          <span
+                            className="x-badge x-danger"
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                            title={modelPingStates[model.id]?.message}
+                          >
+                            <AlertTriangle size={12} /> {modelPingStates[model.id]?.message || 'Error'}
+                          </span>
+                        )
+                      ) : null}
+                      <button
+                        type="button"
+                        className="x-button x-small"
+                        style={{ padding: '3px 8px', fontSize: '0.75rem', height: '26px' }}
+                        disabled={modelPingStates[model.id]?.loading}
+                        onClick={() => handlePingModel(model.id)}
+                        aria-label={`Ping model ${model.id}`}
+                        title={`Ping ${model.id}`}
+                      >
+                        <Activity size={12} /> Ping
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : <p className="x-muted">{s.noModels}</p>
         ) : (
           <div style={{ display: 'grid', gap: 16 }}>
             <form
@@ -537,6 +619,51 @@ export default function ProviderAccounts() {
                         {model.isCustom && <span className="x-badge">Custom</span>}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {permissions.test && (
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                            {modelPingStates[model.id]?.loading ? (
+                              <span className="x-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                <LoaderCircle size={12} className="x-spin" /> Ping...
+                              </span>
+                            ) : modelPingStates[model.id]?.ok !== undefined ? (
+                              modelPingStates[model.id]?.ok ? (
+                                <span
+                                  className="x-badge"
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    color: '#10b981',
+                                    background: 'rgba(16, 185, 129, 0.1)',
+                                    borderColor: 'rgba(16, 185, 129, 0.3)',
+                                  }}
+                                  title={modelPingStates[model.id]?.message || 'Ping successful'}
+                                >
+                                  <Activity size={12} /> {modelPingStates[model.id]?.latencyMs}ms
+                                </span>
+                              ) : (
+                                <span
+                                  className="x-badge x-danger"
+                                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                                  title={modelPingStates[model.id]?.message}
+                                >
+                                  <AlertTriangle size={12} /> {modelPingStates[model.id]?.message || 'Error'}
+                                </span>
+                              )
+                            ) : null}
+                            <button
+                              type="button"
+                              className="x-button x-small"
+                              style={{ padding: '3px 8px', fontSize: '0.75rem', height: '26px' }}
+                              disabled={modelPingStates[model.id]?.loading}
+                              onClick={() => handlePingModel(model.id)}
+                              aria-label={`Ping model ${model.id}`}
+                              title={`Ping ${model.id}`}
+                            >
+                              <Activity size={12} /> Ping
+                            </button>
+                          </div>
+                        )}
                         <button
                           type="button"
                           role="switch"

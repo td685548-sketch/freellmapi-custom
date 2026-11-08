@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AreaChart,
   Area,
@@ -16,17 +16,123 @@ import {
   Coins,
   Cpu,
   Layers,
+  Plus,
+  RotateCcw,
+  Save,
   Search,
   Server,
+  Sliders,
   X,
 } from 'lucide-react'
+import { apiFetch } from '@/lib/api'
 import { useAccounts } from '../api'
 import { useXStrings } from '../strings'
 import { useSessionRevision } from '../../session-state'
+import { useUserSession } from '../../use-session'
 import { mgmtApi } from '../management-api'
 import { AccountLoadState } from './Providers'
 
 type TimeRange = '24h' | '7d' | '30d' | 'all'
+
+export interface ModelPricingRate {
+  input: number
+  output: number
+  cached?: number
+  reasoning?: number
+  cache_creation?: number
+}
+
+export type ProviderPricingMap = Record<string, Record<string, ModelPricingRate>>
+
+interface PricingResponse {
+  pricing: ProviderPricingMap
+  defaults: ProviderPricingMap
+  overrides: ProviderPricingMap
+}
+
+const FALLBACK_RATE: ModelPricingRate = {
+  input: 1.0,
+  output: 3.0,
+  cached: 0.5,
+  reasoning: 3.0,
+}
+
+export function resolveClientModelPricing(
+  provider: string | undefined,
+  model: string | undefined,
+  pricingMap: ProviderPricingMap | undefined,
+): ModelPricingRate {
+  const normProvider = (provider ?? '').trim().toLowerCase()
+  const rawModel = (model ?? '').trim()
+
+  if (rawModel.toLowerCase().includes(':free') || rawModel.toLowerCase().startsWith('cline-free/')) {
+    return { input: 0, output: 0, cached: 0, reasoning: 0 }
+  }
+
+  if (pricingMap) {
+    if (normProvider && rawModel && pricingMap[normProvider]?.[rawModel]) {
+      return pricingMap[normProvider][rawModel]
+    }
+    const slashIdx = rawModel.indexOf('/')
+    const stripped = slashIdx >= 0 ? rawModel.slice(slashIdx + 1) : rawModel
+    const prefix = slashIdx > 0 ? rawModel.slice(0, slashIdx).toLowerCase() : ''
+
+    if (normProvider && stripped && pricingMap[normProvider]?.[stripped]) {
+      return pricingMap[normProvider][stripped]
+    }
+    if (prefix && stripped && pricingMap[prefix]?.[stripped]) {
+      return pricingMap[prefix][stripped]
+    }
+    for (const models of Object.values(pricingMap)) {
+      if (rawModel && models[rawModel]) return models[rawModel]
+      if (stripped && models[stripped]) return models[stripped]
+    }
+    if (normProvider && pricingMap[normProvider]) {
+      const entries = Object.values(pricingMap[normProvider])
+      if (entries.length > 0) {
+        const avgIn = entries.reduce((s, e) => s + e.input, 0) / entries.length
+        const avgOut = entries.reduce((s, e) => s + e.output, 0) / entries.length
+        return { input: avgIn, output: avgOut }
+      }
+    }
+  }
+
+  return FALLBACK_RATE
+}
+
+export function calculateTokenCostDollars(
+  provider: string | undefined,
+  model: string | undefined,
+  inputTokens: number,
+  outputTokens: number,
+  pricingMap: ProviderPricingMap | undefined,
+): number {
+  const rate = resolveClientModelPricing(provider, model, pricingMap)
+  const inTok = Math.max(0, Number(inputTokens) || 0)
+  const outTok = Math.max(0, Number(outputTokens) || 0)
+  return (inTok * rate.input + outTok * rate.output) / 1_000_000
+}
+
+export function calculateBlendedTokensCostDollars(
+  provider: string | undefined,
+  model: string | undefined,
+  totalTokens: number,
+  pricingMap: ProviderPricingMap | undefined,
+): number {
+  const tok = Math.max(0, Number(totalTokens) || 0)
+  if (tok === 0) return 0
+  // Standard 70% input / 30% output blend when only total token count is stored
+  const inputTokens = tok * 0.7
+  const outputTokens = tok * 0.3
+  return calculateTokenCostDollars(provider, model, inputTokens, outputTokens, pricingMap)
+}
+
+export const fmtDollars = (dollars: number) => {
+  if (!dollars || dollars <= 0) return '$0.00'
+  if (dollars < 0.0001) return `$${dollars.toFixed(6)}`
+  if (dollars < 0.01) return `$${dollars.toFixed(4)}`
+  return `$${dollars.toFixed(2)}`
+}
 
 const fmtTokens = (n: number) => {
   if (!n) return '0'
@@ -35,17 +141,13 @@ const fmtTokens = (n: number) => {
   return n.toLocaleString()
 }
 
-const fmtCost = (tokens: number) => {
-  // Blended average cost estimation: ~$0.002 per 1,000 tokens
-  const dollars = (tokens / 1_000) * 0.002
-  if (!dollars || dollars <= 0) return '$0.00'
-  if (dollars < 0.01) return `$${dollars.toFixed(4)}`
-  return `$${dollars.toFixed(2)}`
-}
-
 export default function AccountUsage() {
   const s = useXStrings()
   const revision = useSessionRevision()
+  const session = useUserSession()
+  const queryClient = useQueryClient()
+  const canEditPricing =
+    session.hasPermission('edit_x_settings') || session.hasPermission('manage_x_gateway')
   const query = useAccounts()
 
   // Filters State
@@ -53,7 +155,17 @@ export default function AccountUsage() {
   const [providerSearch, setProviderSearch] = useState('')
   const [chartMetric, setChartMetric] = useState<'requests' | 'tokens'>('tokens')
 
-  // Hourly and Logs Queries
+  // Pricing Modal / Drawer State
+  const [showPricingModal, setShowPricingModal] = useState(false)
+  const [pricingFilter, setPricingFilter] = useState('')
+  const [pricingDraft, setPricingDraft] = useState<ProviderPricingMap | null>(null)
+  const [newProvider, setNewProvider] = useState('')
+  const [newModel, setNewModel] = useState('')
+  const [newInputRate, setNewInputRate] = useState('1.0')
+  const [newOutputRate, setNewOutputRate] = useState('3.0')
+  const [newCachedRate, setNewCachedRate] = useState('0.5')
+
+  // Hourly, Logs & Pricing Queries
   const hourlyQuery = useQuery({
     queryKey: ['x-hourly-usage', revision],
     queryFn: ({ signal }) => mgmtApi.hourly(signal),
@@ -67,6 +179,82 @@ export default function AccountUsage() {
     refetchInterval: 15_000,
     retry: false,
   })
+
+  const pricingQuery = useQuery({
+    queryKey: ['x-gateway-pricing', revision],
+    queryFn: ({ signal }) => apiFetch<PricingResponse>('/api/x-gateway/pricing', { signal }),
+    staleTime: 60_000,
+    retry: false,
+  })
+
+  const pricingMap = pricingDraft ?? pricingQuery.data?.pricing
+
+  const savePricingMutation = useMutation({
+    meta: { silenceToast: true },
+    mutationFn: (patch: ProviderPricingMap) =>
+      apiFetch<PricingResponse>('/api/x-gateway/pricing', {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      }),
+    onSuccess: async () => {
+      setPricingDraft(null)
+      await queryClient.invalidateQueries({ queryKey: ['x-gateway-pricing'] })
+    },
+  })
+
+  const resetPricingMutation = useMutation({
+    meta: { silenceToast: true },
+    mutationFn: (params?: { provider?: string; model?: string }) => {
+      const qs = new URLSearchParams()
+      if (params?.provider) qs.set('provider', params.provider)
+      if (params?.model) qs.set('model', params.model)
+      const suffix = qs.toString() ? `?${qs.toString()}` : ''
+      return apiFetch<PricingResponse>(`/api/x-gateway/pricing${suffix}`, {
+        method: 'DELETE',
+      })
+    },
+    onSuccess: async () => {
+      setPricingDraft(null)
+      await queryClient.invalidateQueries({ queryKey: ['x-gateway-pricing'] })
+    },
+  })
+
+  const handleRateChange = (
+    provider: string,
+    model: string,
+    field: 'input' | 'output' | 'cached',
+    rawVal: string,
+  ) => {
+    const num = parseFloat(rawVal)
+    if (Number.isNaN(num) || num < 0) return
+    const base = pricingDraft ?? pricingQuery.data?.pricing ?? {}
+    const next: ProviderPricingMap = { ...base }
+    next[provider] = { ...(next[provider] ?? {}) }
+    const current = next[provider][model] ?? { input: 1.0, output: 3.0, cached: 0.5 }
+    next[provider][model] = {
+      ...current,
+      [field]: num,
+    }
+    setPricingDraft(next)
+  }
+
+  const handleAddCustomModelRate = () => {
+    const p = newProvider.trim().toLowerCase()
+    const m = newModel.trim()
+    if (!p || !m) return
+    const inp = Math.max(0, parseFloat(newInputRate) || 0)
+    const out = Math.max(0, parseFloat(newOutputRate) || 0)
+    const cac = Math.max(0, parseFloat(newCachedRate) || 0)
+    const base = pricingDraft ?? pricingQuery.data?.pricing ?? {}
+    const next: ProviderPricingMap = { ...base }
+    next[p] = {
+      ...(next[p] ?? {}),
+      [m]: { input: inp, output: out, cached: cac },
+    }
+    setPricingDraft(next)
+    setNewProvider('')
+    setNewModel('')
+  }
 
   const rawProviders = query.data?.providers ?? []
   const accounts = useMemo(() => {
@@ -90,11 +278,17 @@ export default function AccountUsage() {
     )
   }, [accounts, providerSearch])
 
-  // Aggregate metrics
+  // Aggregate metrics using real per-provider/model pricing
   const totalAccounts = accounts.length
   const totalRequests = accounts.reduce((sum, a) => sum + a.monthlyUsage.requests, 0)
   const totalTokens = accounts.reduce((sum, a) => sum + a.monthlyUsage.tokens, 0)
-  const estimatedCost = fmtCost(totalTokens)
+  const totalCostDollars = useMemo(() => {
+    return accounts.reduce(
+      (sum, a) => sum + calculateBlendedTokensCostDollars(a.provider, undefined, a.monthlyUsage.tokens, pricingMap),
+      0,
+    )
+  }, [accounts, pricingMap])
+  const estimatedCost = fmtDollars(totalCostDollars)
 
   // Chart data calculation
   const hourlyBuckets = hourlyQuery.data?.buckets ?? []
@@ -107,7 +301,6 @@ export default function AccountUsage() {
         tokens: b.inputTokens + b.outputTokens,
       }))
     }
-    // Fallback: mock or empty points
     return [
       { time: '00:00', requests: 0, tokens: 0 },
       { time: '06:00', requests: 0, tokens: 0 },
@@ -117,29 +310,45 @@ export default function AccountUsage() {
     ]
   }, [hourlyBuckets])
 
-  // Top Models ranking from logs
+  // Top Models ranking from logs with exact input/output token pricing
   const topModels = useMemo(() => {
     const logs = logsQuery.data?.logs ?? []
-    const map: Record<string, { model: string; requests: number; tokens: number; errors: number }> = {}
+    const map: Record<
+      string,
+      { model: string; provider: string; requests: number; tokens: number; costDollars: number; errors: number }
+    > = {}
 
     for (const log of logs) {
       const modelName = log.requestedModel || log.modelId || 'unknown'
+      const inTok = log.inputTokens || 0
+      const outTok = log.outputTokens || 0
       if (!map[modelName]) {
-        map[modelName] = { model: modelName, requests: 0, tokens: 0, errors: 0 }
+        map[modelName] = {
+          model: modelName,
+          provider: log.platform,
+          requests: 0,
+          tokens: 0,
+          costDollars: 0,
+          errors: 0,
+        }
       }
       map[modelName].requests += 1
-      map[modelName].tokens += (log.inputTokens || 0) + (log.outputTokens || 0)
+      map[modelName].tokens += inTok + outTok
+      map[modelName].costDollars += calculateTokenCostDollars(log.platform, modelName, inTok, outTok, pricingMap)
       if (log.status === 'error') map[modelName].errors += 1
     }
 
     const list = Object.values(map)
     list.sort((a, b) => b.tokens - a.tokens || b.requests - a.requests)
     return list.slice(0, 5)
-  }, [logsQuery.data?.logs])
+  }, [logsQuery.data?.logs, pricingMap])
 
-  // Top Providers ranking from accounts & logs
+  // Top Providers ranking from accounts
   const topProviders = useMemo(() => {
-    const map: Record<string, { provider: string; name: string; requests: number; tokens: number; accountsCount: number }> = {}
+    const map: Record<
+      string,
+      { provider: string; name: string; requests: number; tokens: number; costDollars: number; accountsCount: number }
+    > = {}
 
     for (const acc of accounts) {
       if (!map[acc.provider]) {
@@ -148,18 +357,54 @@ export default function AccountUsage() {
           name: acc.providerName || acc.provider,
           requests: 0,
           tokens: 0,
+          costDollars: 0,
           accountsCount: 0,
         }
       }
       map[acc.provider].requests += acc.monthlyUsage.requests
       map[acc.provider].tokens += acc.monthlyUsage.tokens
+      map[acc.provider].costDollars += calculateBlendedTokensCostDollars(
+        acc.provider,
+        undefined,
+        acc.monthlyUsage.tokens,
+        pricingMap,
+      )
       map[acc.provider].accountsCount += 1
     }
 
     const list = Object.values(map)
     list.sort((a, b) => b.tokens - a.tokens || b.requests - a.requests)
     return list.slice(0, 5)
-  }, [accounts])
+  }, [accounts, pricingMap])
+
+  // Flattened pricing rows for Pricing Settings UI
+  const pricingRows = useMemo(() => {
+    const map = pricingMap ?? {}
+    const rows: Array<{
+      provider: string
+      model: string
+      rate: ModelPricingRate
+      isOverridden: boolean
+    }> = []
+    const overrides = pricingQuery.data?.overrides ?? {}
+    const q = pricingFilter.trim().toLowerCase()
+
+    for (const provider of Object.keys(map).sort()) {
+      const models = map[provider] ?? {}
+      for (const model of Object.keys(models).sort()) {
+        if (q && !provider.toLowerCase().includes(q) && !model.toLowerCase().includes(q)) {
+          continue
+        }
+        rows.push({
+          provider,
+          model,
+          rate: models[model],
+          isOverridden: Boolean(overrides[provider]?.[model]),
+        })
+      }
+    }
+    return rows
+  }, [pricingMap, pricingQuery.data?.overrides, pricingFilter])
 
   if (query.isPending) return <AccountLoadState />
   if (query.isError) return <AccountLoadState error retry={() => void query.refetch()} />
@@ -171,8 +416,263 @@ export default function AccountUsage() {
           <h1>{s.usage}</h1>
           <p>{s.usageHelp}</p>
         </div>
-        <span className="x-heading-icon"><BarChart3 size={28} /></span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <button
+            type="button"
+            className="x-button"
+            onClick={() => setShowPricingModal(prev => !prev)}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+          >
+            <Sliders size={15} />
+            Pricing Settings ($/1M tokens)
+          </button>
+          <span className="x-heading-icon"><BarChart3 size={28} /></span>
+        </div>
       </div>
+
+      {/* Pricing Settings Panel / Drawer */}
+      {showPricingModal && (
+        <section className="x-panel" style={{ padding: '1.25rem', marginBottom: '1.5rem', border: '1px solid var(--primary, #3b82f6)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem' }}>
+            <div>
+              <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Coins size={18} color="#f59e0b" />
+                Pricing Settings ($ / 1M Tokens)
+              </h2>
+              <p className="x-caption" style={{ margin: '0.25rem 0 0 0' }}>
+                Cấu hình đơn giá Input, Output và Cached ($/1M tokens) theo từng Provider/Model để tính chính xác chi phí trên Usage và Request Logs.
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+              {canEditPricing && (
+                <>
+                  <button
+                    type="button"
+                    className="x-button"
+                    disabled={resetPricingMutation.isPending}
+                    onClick={() => resetPricingMutation.mutate(undefined)}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                  >
+                    <RotateCcw size={14} />
+                    Reset to Defaults
+                  </button>
+                  <button
+                    type="button"
+                    className="x-button x-primary"
+                    disabled={!pricingDraft || savePricingMutation.isPending}
+                    onClick={() => pricingDraft && savePricingMutation.mutate(pricingDraft)}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                  >
+                    <Save size={14} />
+                    {savePricingMutation.isPending ? s.saving : 'Save Pricing'}
+                  </button>
+                </>
+              )}
+              <button
+                type="button"
+                className="x-button"
+                onClick={() => setShowPricingModal(false)}
+                aria-label="Close Pricing Settings"
+              >
+                <X size={15} />
+              </button>
+            </div>
+          </div>
+
+          {savePricingMutation.isError && (
+            <div className="x-error" role="alert" style={{ marginBottom: '0.75rem' }}>
+              {savePricingMutation.error.message}
+            </div>
+          )}
+          {savePricingMutation.isSuccess && (
+            <p role="status" className="x-test-ok" style={{ marginBottom: '0.75rem' }}>
+              Đã lưu bảng giá thành công.
+            </p>
+          )}
+
+          {/* Add Custom Model Rate Row */}
+          {canEditPricing && (
+            <div
+              style={{
+                display: 'flex',
+                gap: '0.5rem',
+                flexWrap: 'wrap',
+                alignItems: 'flex-end',
+                padding: '0.75rem',
+                borderRadius: '8px',
+                background: 'var(--bg-subtle, rgba(0,0,0,0.04))',
+                marginBottom: '1rem',
+              }}
+            >
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', fontSize: '0.75rem' }}>
+                Provider
+                <input
+                  type="text"
+                  placeholder="e.g. openai"
+                  value={newProvider}
+                  onChange={e => setNewProvider(e.target.value)}
+                  style={{ width: '120px', padding: '0.35rem 0.5rem', borderRadius: '6px', border: '1px solid var(--border)' }}
+                />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', fontSize: '0.75rem' }}>
+                Model ID
+                <input
+                  type="text"
+                  placeholder="e.g. gpt-4.5-preview"
+                  value={newModel}
+                  onChange={e => setNewModel(e.target.value)}
+                  style={{ width: '180px', padding: '0.35rem 0.5rem', borderRadius: '6px', border: '1px solid var(--border)' }}
+                />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', fontSize: '0.75rem' }}>
+                Input ($/1M)
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={newInputRate}
+                  onChange={e => setNewInputRate(e.target.value)}
+                  style={{ width: '95px', padding: '0.35rem 0.5rem', borderRadius: '6px', border: '1px solid var(--border)' }}
+                />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', fontSize: '0.75rem' }}>
+                Output ($/1M)
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={newOutputRate}
+                  onChange={e => setNewOutputRate(e.target.value)}
+                  style={{ width: '95px', padding: '0.35rem 0.5rem', borderRadius: '6px', border: '1px solid var(--border)' }}
+                />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', fontSize: '0.75rem' }}>
+                Cached ($/1M)
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={newCachedRate}
+                  onChange={e => setNewCachedRate(e.target.value)}
+                  style={{ width: '95px', padding: '0.35rem 0.5rem', borderRadius: '6px', border: '1px solid var(--border)' }}
+                />
+              </label>
+              <button
+                type="button"
+                className="x-button"
+                onClick={handleAddCustomModelRate}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
+              >
+                <Plus size={14} /> Thêm đơn giá
+              </button>
+            </div>
+          )}
+
+          {/* Filter Input */}
+          <div style={{ marginBottom: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+            <input
+              type="text"
+              placeholder="Tìm nhanh provider hoặc model trong bảng giá..."
+              value={pricingFilter}
+              onChange={e => setPricingFilter(e.target.value)}
+              style={{
+                padding: '0.4rem 0.75rem',
+                borderRadius: '6px',
+                border: '1px solid var(--border)',
+                width: '280px',
+                fontSize: '0.8125rem',
+              }}
+            />
+            <span className="x-caption">{pricingRows.length} models</span>
+          </div>
+
+          <div className="x-table-wrap" style={{ maxHeight: '320px', overflowY: 'auto' }}>
+            <table className="x-table">
+              <thead>
+                <tr>
+                  <th>Provider</th>
+                  <th>Model</th>
+                  <th>Input ($/1M)</th>
+                  <th>Output ($/1M)</th>
+                  <th>Cached ($/1M)</th>
+                  {canEditPricing && <th>Thao tác</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {pricingRows.map(({ provider, model, rate, isOverridden }) => (
+                  <tr key={`${provider}/${model}`}>
+                    <td><strong>{provider}</strong></td>
+                    <td>
+                      <code>{model}</code>
+                      {isOverridden && (
+                        <span
+                          style={{
+                            marginLeft: '0.4rem',
+                            fontSize: '0.68rem',
+                            padding: '0.1rem 0.35rem',
+                            borderRadius: '4px',
+                            background: 'rgba(245, 158, 11, 0.15)',
+                            color: '#f59e0b',
+                          }}
+                        >
+                          Custom
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        disabled={!canEditPricing}
+                        value={rate.input}
+                        onChange={e => handleRateChange(provider, model, 'input', e.target.value)}
+                        style={{ width: '85px', padding: '0.25rem 0.4rem', borderRadius: '4px', border: '1px solid var(--border)' }}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        disabled={!canEditPricing}
+                        value={rate.output}
+                        onChange={e => handleRateChange(provider, model, 'output', e.target.value)}
+                        style={{ width: '85px', padding: '0.25rem 0.4rem', borderRadius: '4px', border: '1px solid var(--border)' }}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        disabled={!canEditPricing}
+                        value={rate.cached ?? 0}
+                        onChange={e => handleRateChange(provider, model, 'cached', e.target.value)}
+                        style={{ width: '85px', padding: '0.25rem 0.4rem', borderRadius: '4px', border: '1px solid var(--border)' }}
+                      />
+                    </td>
+                    {canEditPricing && (
+                      <td>
+                        {isOverridden && (
+                          <button
+                            type="button"
+                            className="x-button x-small"
+                            onClick={() => resetPricingMutation.mutate({ provider, model })}
+                          >
+                            Reset
+                          </button>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {/* Primary KPI Stats Cards */}
       <div className="x-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
@@ -338,7 +838,7 @@ export default function AccountUsage() {
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <strong style={{ fontSize: '0.9rem', color: '#10b981' }}>{fmtTokens(m.tokens)}</strong>
-                    <div style={{ fontSize: '0.75rem', color: '#f59e0b' }}>{fmtCost(m.tokens)}</div>
+                    <div style={{ fontSize: '0.75rem', color: '#f59e0b' }}>{fmtDollars(m.costDollars)}</div>
                   </div>
                 </div>
               ))}
@@ -377,7 +877,7 @@ export default function AccountUsage() {
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <strong style={{ fontSize: '0.9rem', color: '#10b981' }}>{fmtTokens(p.tokens)}</strong>
-                    <div style={{ fontSize: '0.75rem', color: '#f59e0b' }}>{fmtCost(p.tokens)}</div>
+                    <div style={{ fontSize: '0.75rem', color: '#f59e0b' }}>{fmtDollars(p.costDollars)}</div>
                   </div>
                 </div>
               ))}
@@ -435,29 +935,37 @@ export default function AccountUsage() {
               </tr>
             </thead>
             <tbody>
-              {filteredAccounts.map(account => (
-                <tr key={account.id}>
-                  <th>
-                    <Link to={`/x/providers/${encodeURIComponent(account.provider)}`}>
-                      {account.label || account.providerName}
-                    </Link>
-                  </th>
-                  <td>{account.providerName}</td>
-                  <td>
-                    {account.monthlyUsage.requests.toLocaleString()}
-                    <small> / {account.monthlyRequestCap || '∞'}</small>
-                  </td>
-                  <td>
-                    {account.monthlyUsage.tokens.toLocaleString()}
-                    <small> / {account.monthlyTokenCap || '∞'}</small>
-                  </td>
-                  <td>
-                    <span style={{ color: '#f59e0b', fontWeight: 500 }}>
-                      {fmtCost(account.monthlyUsage.tokens)}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              {filteredAccounts.map(account => {
+                const accountCost = calculateBlendedTokensCostDollars(
+                  account.provider,
+                  undefined,
+                  account.monthlyUsage.tokens,
+                  pricingMap,
+                )
+                return (
+                  <tr key={account.id}>
+                    <th>
+                      <Link to={`/x/providers/${encodeURIComponent(account.provider)}`}>
+                        {account.label || account.providerName}
+                      </Link>
+                    </th>
+                    <td>{account.providerName}</td>
+                    <td>
+                      {account.monthlyUsage.requests.toLocaleString()}
+                      <small> / {account.monthlyRequestCap || '∞'}</small>
+                    </td>
+                    <td>
+                      {account.monthlyUsage.tokens.toLocaleString()}
+                      <small> / {account.monthlyTokenCap || '∞'}</small>
+                    </td>
+                    <td>
+                      <span style={{ color: '#f59e0b', fontWeight: 500 }}>
+                        {fmtDollars(accountCost)}
+                      </span>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
           {!filteredAccounts.length && (
