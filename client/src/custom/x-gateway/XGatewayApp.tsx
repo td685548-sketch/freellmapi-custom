@@ -68,6 +68,7 @@ function XGatewayShell() {
     ...(canView ? [{ to: '/x/usage', label: s.usage, icon: BarChart3 }, { to: '/x/logs', label: m.logs, icon: ScrollText }] : []),
   ]
   const current = items.find(item => location.pathname.startsWith(item.to))?.label ?? s.workspace
+  const isPlayground = location.pathname.startsWith('/x/playground')
   return <div className="x-console x-layout">
     {menuOpen && <button className="x-nav-scrim" aria-label={s.close} onClick={() => setMenuOpen(false)} />}
     <aside className={`x-sidebar ${menuOpen ? 'x-sidebar-open' : ''}`}>
@@ -80,8 +81,8 @@ function XGatewayShell() {
         <Link to="/models/chat" className="x-nav-item x-back-link-nav"><ArrowLeft size={16} /><span>{s.back}</span></Link>
       </div>
     </aside>
-    <div className="x-main"><header className="x-header"><button className="x-icon-button x-mobile-menu" aria-label={s.menu} onClick={() => setMenuOpen(true)}><Menu size={21} /></button><div className="x-breadcrumb"><span>{s.workspace}</span><ChevronRight size={14} /><strong>{current}</strong></div><div className="x-header-actions"><label className="x-language"><span className="x-sr-only">{s.language}</span><select value={locale === 'vi' ? 'vi' : 'en'} onChange={event => setLocale(event.target.value as 'vi' | 'en')}><option value="en">English</option><option value="vi">Tiếng Việt</option></select></label><button className="x-icon-button" aria-label={s.theme} onClick={() => setTheme(resolvedDark ? 'light' : 'dark')}>{resolvedDark ? <Sun size={18} /> : <Moon size={18} />}</button><span className="x-avatar" title={session.session?.email}>{session.session?.email?.slice(0, 1).toUpperCase() ?? 'X'}</span></div></header>
-      <main className="x-content"><ErrorBoundary><Routes>
+    <div className={`x-main ${isPlayground ? 'x-main-playground' : ''}`}><header className="x-header"><button className="x-icon-button x-mobile-menu" aria-label={s.menu} onClick={() => setMenuOpen(true)}><Menu size={21} /></button><div className="x-breadcrumb"><span>{s.workspace}</span><ChevronRight size={14} /><strong>{current}</strong></div><div className="x-header-actions"><label className="x-language"><span className="x-sr-only">{s.language}</span><select value={locale === 'vi' ? 'vi' : 'en'} onChange={event => setLocale(event.target.value as 'vi' | 'en')}><option value="en">English</option><option value="vi">Tiếng Việt</option></select></label><button className="x-icon-button" aria-label={s.theme} onClick={() => setTheme(resolvedDark ? 'light' : 'dark')}>{resolvedDark ? <Sun size={18} /> : <Moon size={18} />}</button><span className="x-avatar" title={session.session?.email}>{session.session?.email?.slice(0, 1).toUpperCase() ?? 'X'}</span></div></header>
+      <main className={`x-content ${isPlayground ? 'x-content-playground' : ''}`}><ErrorBoundary><Routes>
         <Route index element={<Navigate to={canView ? '/x/providers' : '/x/endpoint'} replace />} />
         <Route path="providers" element={protectedPage(<Providers />)} />
         <Route path="providers/:providerId" element={protectedPage(<ProviderAccounts />)} />
