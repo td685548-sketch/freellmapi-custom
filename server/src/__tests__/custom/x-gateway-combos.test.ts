@@ -7,7 +7,9 @@ import { createSession, createUser } from '../../services/auth.js';
 import { mintUserApiKey } from '../../services/user-keys.js';
 import {
   buildComboPresets,
+  normalizeConfidenceThreshold,
   resetComboRotation,
+  resolveComboPolicy,
   rotateComboEntries,
   validateCombo,
   validateComboMeta,
@@ -64,19 +66,33 @@ describe('combo strategy metadata and validation', () => {
     const created = createCombo('smart-box', [{ platform: 'groq', modelId: 'm1' }], undefined, {
       strategy: 'smart',
       description: '  routed by latency  ',
+      smartPolicy: 'custom',
+      sessionSticky: true,
+      confidenceThreshold: 0.65,
     });
     expect(created.strategy).toBe('smart');
     expect(created.description).toBe('routed by latency');
+    expect(created).toMatchObject({ smartPolicy: 'custom', sessionSticky: true, confidenceThreshold: 0.65 });
     expect(listCombos().find(c => c.id === created.id)).toMatchObject({
       strategy: 'smart',
       description: 'routed by latency',
+      smartPolicy: 'custom',
+      sessionSticky: true,
+      confidenceThreshold: 0.65,
     });
 
     const updated = updateCombo(created.id, 'smart-box', [{ platform: 'groq', modelId: 'm2' }], {
-      strategy: 'fusion',
+      strategy: 'smart',
       description: '',
+      smartPolicy: 'strict',
+      confidenceThreshold: 0.9,
     });
-    expect(updated).toMatchObject({ strategy: 'fusion' });
+    expect(updated).toMatchObject({
+      strategy: 'smart',
+      smartPolicy: 'strict',
+      confidenceThreshold: 0.9,
+    });
+    expect(updated?.sessionSticky).toBeUndefined();
     expect(updated?.description).toBeUndefined();
     expect(updated?.entries).toEqual([{ platform: 'groq', modelId: 'm2' }]);
 
@@ -88,6 +104,37 @@ describe('combo strategy metadata and validation', () => {
       strategy: 'fallback',
       entries: [{ platform: 'groq', modelId: 'legacy' }],
     });
+  });
+
+  it('validates and resolves smart router policies', () => {
+    expect(validateComboMeta('smart', undefined, {
+      smartPolicy: 'strict',
+      sessionSticky: true,
+      confidenceThreshold: 0.6,
+    })).toBeNull();
+    expect(validateComboMeta('smart', undefined, { smartPolicy: 'always' as never })).toMatch(/Smart policy/);
+    expect(validateComboMeta('smart', undefined, { sessionSticky: 'yes' as never })).toMatch(/sessionSticky/);
+    expect(validateComboMeta('smart', undefined, { confidenceThreshold: 1.5 })).toMatch(/between 0 and 1/);
+    expect(validateCombo('policy-combo', [{ platform: 'groq', modelId: 'm' }], {
+      strategy: 'smart',
+      smartPolicy: 'custom',
+      confidenceThreshold: 2,
+    })).toEqual({ valid: false, error: 'confidenceThreshold must be a number between 0 and 1' });
+
+    expect(resolveComboPolicy()).toEqual({ smartPolicy: 'smart', sessionSticky: true, confidenceThreshold: 0.8 });
+    expect(resolveComboPolicy({ smartPolicy: 'per-turn' })).toEqual({
+      smartPolicy: 'per-turn',
+      sessionSticky: false,
+      confidenceThreshold: 0.8,
+    });
+    expect(resolveComboPolicy({ smartPolicy: 'custom', sessionSticky: false, confidenceThreshold: 0.55 })).toEqual({
+      smartPolicy: 'custom',
+      sessionSticky: false,
+      confidenceThreshold: 0.55,
+    });
+    expect(normalizeConfidenceThreshold(4)).toBe(1);
+    expect(normalizeConfidenceThreshold(-1)).toBe(0);
+    expect(normalizeConfidenceThreshold('nope', 0.7)).toBe(0.7);
   });
 });
 
@@ -120,7 +167,10 @@ describe('round robin, smart ordering and fusion', () => {
     ], undefined, { strategy: 'round-robin' });
 
     const first = resolveCandidateRoutes('combo:rr');
-    expect(first.combo).toEqual({ name: 'rr', strategy: 'round-robin' });
+    expect(first.combo).toMatchObject({ name: 'rr', strategy: 'round-robin' });
+    expect(first.combo?.smartPolicy).toBe('smart');
+    expect(first.combo?.sessionSticky).toBe(true);
+    expect(first.combo?.confidenceThreshold).toBe(0.8);
     expect(first.candidates.map(c => c.account.id)).toEqual([slow, fast]);
     expect(first.candidates.map(c => c.step)).toEqual([0, 1]);
     expect(resolveCandidateRoutes('combo:rr').candidates.map(c => c.account.id)).toEqual([fast, slow]);
@@ -270,19 +320,57 @@ describe('combo presets and fusion over HTTP', () => {
       name: 'ok-strategy',
       entries: [{ platform: 'groq', modelId: 'llama-3.3-70b-versatile' }],
       strategy: 'smart',
+      smartPolicy: 'strict',
+      sessionSticky: true,
+      confidenceThreshold: 0.6,
       description: 'from the API',
     });
     expect(ok.status).toBe(201);
-    const combo = await ok.json() as { id: number; strategy: string };
-    expect(combo.strategy).toBe('smart');
+    const combo = await ok.json() as {
+      id: number;
+      strategy: string;
+      smartPolicy?: string;
+      sessionSticky?: boolean;
+      confidenceThreshold?: number;
+    };
+    expect(combo).toMatchObject({
+      strategy: 'smart',
+      smartPolicy: 'strict',
+      sessionSticky: true,
+      confidenceThreshold: 0.6,
+    });
+
+    const badPolicy = await call('/combos', admin, 'POST', {
+      name: 'bad-policy',
+      entries: [{ platform: 'groq', modelId: 'llama-3.3-70b-versatile' }],
+      strategy: 'smart',
+      smartPolicy: 'always',
+    });
+    expect(badPolicy.status).toBe(400);
+
+    const badThreshold = await call('/combos', admin, 'POST', {
+      name: 'bad-threshold',
+      entries: [{ platform: 'groq', modelId: 'llama-3.3-70b-versatile' }],
+      strategy: 'smart',
+      confidenceThreshold: 1.5,
+    });
+    expect(badThreshold.status).toBe(400);
 
     const updated = await call(`/combos/${combo.id}`, admin, 'PUT', {
       name: 'ok-strategy',
       entries: [{ platform: 'groq', modelId: 'llama-3.3-70b-versatile' }],
-      strategy: 'fusion',
+      strategy: 'smart',
+      smartPolicy: 'custom',
+      sessionSticky: false,
+      confidenceThreshold: 0.55,
     });
     expect(updated.status).toBe(200);
-    expect((await updated.json() as { strategy: string }).strategy).toBe('fusion');
+    expect(await updated.json()).toMatchObject({
+      strategy: 'smart',
+      smartPolicy: 'custom',
+      sessionSticky: false,
+      confidenceThreshold: 0.55,
+    });
   });
 
   it('races the first two steps of a fusion combo and returns the fastest success', async () => {

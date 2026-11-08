@@ -2,15 +2,79 @@ import { useMemo, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowDown, ArrowUp, Check, Eye, Layers, Mic, Pencil, Plus, Search, Sparkles, Trash2, X } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
+import { useI18n } from '@/i18n'
 import { useUserSession } from '../../use-session'
 import { useSessionRevision } from '../../session-state'
 import { useAccounts } from '../api'
 import { mgmtApi, type ComboEntry, type ComboPayload, type ComboStrategy, type XCombo } from '../management-api'
 import { useMgmtStrings } from '../management-strings'
 
-interface Draft { id?: number; name: string; entries: ComboEntry[]; strategy: ComboStrategy; description: string }
+/** Router policy fields live on the server combo but not yet in the shared
+ *  management API types (owned by another track), so the console carries them
+ *  through local intersections instead of editing that module. */
+export type ComboSmartPolicy = 'smart' | 'strict' | 'per-turn' | 'custom'
+
+interface ComboPolicyFields {
+  smartPolicy?: ComboSmartPolicy
+  sessionSticky?: boolean
+  confidenceThreshold?: number
+}
+
+type PolicyCombo = XCombo & ComboPolicyFields
+type PolicyPayload = ComboPayload & ComboPolicyFields
+
+interface Draft {
+  id?: number
+  name: string
+  entries: ComboEntry[]
+  strategy: ComboStrategy
+  description: string
+  smartPolicy: ComboSmartPolicy
+  sessionSticky: boolean
+  confidenceThreshold: number
+}
 
 const STRATEGIES: ComboStrategy[] = ['fallback', 'round-robin', 'smart', 'fusion']
+const SMART_POLICIES: ComboSmartPolicy[] = ['smart', 'strict', 'per-turn', 'custom']
+const DEFAULT_CONFIDENCE_THRESHOLD = 0.8
+
+const POLICY_LABELS = {
+  en: {
+    title: 'Router Policy',
+    help: 'Smart combos can keep a conversation on one route so the provider prompt cache stays warm.',
+    smart: 'Smart Switch ≥80%',
+    strict: 'Strict Lock',
+    perTurn: 'Per-Turn',
+    custom: 'Custom Threshold',
+    threshold: 'Confidence threshold',
+    sticky: 'Pin route for the session',
+    stickyOn: 'The chosen route is pinned for this conversation and released only when it fails or gets much slower.',
+    stickyOff: 'Every turn is ranked independently; no route is pinned.',
+    customHelp: 'The pinned route is replaced only when an alternative is better by at least this margin.',
+    smartHelp: 'Switch when the pinned route errors or loses 80% of its relative health.',
+    strictHelp: 'Never switch away from the pinned route while it still exists.',
+    perTurnHelp: 'Re-rank every turn. No session stickiness.',
+  },
+  vi: {
+    title: 'Chính sách Router',
+    help: 'Combo Smart có thể ghim một route cho cả phiên để giữ prompt cache của provider luôn ấm.',
+    smart: 'Smart Switch ≥80%',
+    strict: 'Strict Lock',
+    perTurn: 'Per-Turn',
+    custom: 'Ngưỡng tùy chỉnh',
+    threshold: 'Ngưỡng tin cậy',
+    sticky: 'Ghim route cho phiên',
+    stickyOn: 'Route đã chọn được ghim cho cuộc hội thoại này và chỉ đổi khi lỗi hoặc chậm đi rõ rệt.',
+    stickyOff: 'Mỗi lượt được xếp hạng độc lập; không ghim route.',
+    customHelp: 'Route được ghim chỉ bị thay khi route khác tốt hơn ít nhất bằng mức chênh này.',
+    smartHelp: 'Chỉ đổi khi route đang ghim lỗi hoặc mất 80% sức khỏe tương đối.',
+    strictHelp: 'Không bao giờ đổi khỏi route đã ghim khi route đó vẫn còn.',
+    perTurnHelp: 'Xếp hạng lại mỗi lượt. Không ghim phiên.',
+  },
+} as const
+
+const policyKey = (policy: ComboSmartPolicy): 'smart' | 'strict' | 'perTurn' | 'custom' =>
+  policy === 'strict' ? 'strict' : policy === 'per-turn' ? 'perTurn' : policy === 'custom' ? 'custom' : 'smart'
 
 export interface CapacityPool {
   enabled: boolean
@@ -25,6 +89,8 @@ export interface CapacityAdapterSettings {
 
 export default function Combos() {
   const s = useMgmtStrings()
+  const { locale } = useI18n()
+  const policyLabels = POLICY_LABELS[locale === 'vi' ? 'vi' : 'en']
   const client = useQueryClient()
   const revision = useSessionRevision()
   const session = useUserSession()
@@ -80,12 +146,18 @@ export default function Combos() {
     setSelected(new Set())
     await client.invalidateQueries({ queryKey: ['x-combos'] })
   }
-  const toPayload = (d: Draft): ComboPayload => ({
-    name: d.name,
-    entries: d.entries,
-    strategy: d.strategy,
-    description: d.description.trim() || undefined,
-  })
+  const toPayload = (d: Draft): ComboPayload => {
+    const payload: PolicyPayload = {
+      name: d.name,
+      entries: d.entries,
+      strategy: d.strategy,
+      description: d.description.trim() || undefined,
+      smartPolicy: d.strategy === 'smart' ? d.smartPolicy : undefined,
+      sessionSticky: d.strategy === 'smart' ? d.sessionSticky : undefined,
+      confidenceThreshold: d.strategy === 'smart' ? d.confidenceThreshold : undefined,
+    }
+    return payload
+  }
   const save = useMutation({
     meta: { silenceToast: true },
     mutationFn: (d: Draft) => d.id ? mgmtApi.updateCombo(d.id, toPayload(d)) : mgmtApi.createCombo(toPayload(d)),
@@ -101,8 +173,18 @@ export default function Combos() {
   })
   const changeStrategy = useMutation({
     meta: { silenceToast: true },
-    mutationFn: ({ combo, strategy }: { combo: XCombo; strategy: ComboStrategy }) =>
-      mgmtApi.updateCombo(combo.id, { name: combo.name, entries: combo.entries, strategy, description: combo.description }),
+    mutationFn: ({ combo, strategy }: { combo: PolicyCombo; strategy: ComboStrategy }) => {
+      const payload: PolicyPayload = {
+        name: combo.name,
+        entries: combo.entries,
+        strategy,
+        description: combo.description,
+        smartPolicy: combo.smartPolicy,
+        sessionSticky: combo.sessionSticky,
+        confidenceThreshold: combo.confidenceThreshold,
+      }
+      return mgmtApi.updateCombo(combo.id, payload)
+    },
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['x-combos'] })
     },
@@ -129,16 +211,28 @@ export default function Combos() {
   })
   const startNew = () => {
     save.reset()
-    setDraft({ name: '', entries: [{ platform: providers[0]?.id ?? '', modelId: '' }], strategy: 'fallback', description: '' })
+    setDraft({
+      name: '',
+      entries: [{ platform: providers[0]?.id ?? '', modelId: '' }],
+      strategy: 'fallback',
+      description: '',
+      smartPolicy: 'smart',
+      sessionSticky: true,
+      confidenceThreshold: DEFAULT_CONFIDENCE_THRESHOLD,
+    })
   }
-  const startEdit = (c: XCombo) => {
+  const startEdit = (c: PolicyCombo) => {
     save.reset()
+    const smartPolicy = c.smartPolicy ?? 'smart'
     setDraft({
       id: c.id,
       name: c.name,
       entries: c.entries.map(e => ({ ...e })),
       strategy: c.strategy ?? 'fallback',
       description: c.description ?? '',
+      smartPolicy,
+      sessionSticky: c.sessionSticky ?? smartPolicy !== 'per-turn',
+      confidenceThreshold: c.confidenceThreshold ?? DEFAULT_CONFIDENCE_THRESHOLD,
     })
   }
 
@@ -235,6 +329,55 @@ export default function Combos() {
         {STRATEGIES.map(strategy => <option key={strategy} value={strategy}>{strategyLabels[strategy]}</option>)}
       </select></label>
       <p className="x-caption">{s.strategyHelp}</p>
+      {draft.strategy === 'smart' && <fieldset className="x-panel" style={{ background: 'var(--x-surface-subtle)', padding: 12, display: 'grid', gap: 8, border: 0, margin: 0 }}>
+        <legend style={{ fontWeight: 600, padding: '0 4px' }}>{policyLabels.title}</legend>
+        <p className="x-caption" style={{ margin: 0 }}>{policyLabels.help}</p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+          {SMART_POLICIES.map(policy => <label key={policy} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+            <input
+              type="radio"
+              name="comboSmartPolicy"
+              checked={draft.smartPolicy === policy}
+              onChange={() => setDraft({
+                ...draft,
+                smartPolicy: policy,
+                sessionSticky: policy !== 'per-turn',
+                confidenceThreshold: policy === 'smart' ? DEFAULT_CONFIDENCE_THRESHOLD : draft.confidenceThreshold,
+              })}
+            />
+            <span>{policy === 'custom' && draft.confidenceThreshold !== DEFAULT_CONFIDENCE_THRESHOLD
+              ? `${policyLabels[policyKey(policy)]} ${Math.round(draft.confidenceThreshold * 100)}%`
+              : policyLabels[policyKey(policy)]}</span>
+          </label>)}
+        </div>
+        {draft.smartPolicy === 'custom' && <label style={{ display: 'grid', gap: 4 }}>
+          <span>{policyLabels.threshold}: <strong>{Math.round(draft.confidenceThreshold * 100)}%</strong></span>
+          <input
+            type="range"
+            min={50}
+            max={95}
+            step={1}
+            value={Math.round(draft.confidenceThreshold * 100)}
+            aria-label={policyLabels.threshold}
+            onChange={e => setDraft({ ...draft, confidenceThreshold: Number(e.target.value) / 100 })}
+          />
+          <span className="x-caption">{policyLabels.customHelp}</span>
+        </label>}
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: draft.smartPolicy === 'per-turn' ? 'not-allowed' : 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={draft.sessionSticky}
+            disabled={draft.smartPolicy === 'per-turn'}
+            onChange={e => setDraft({ ...draft, sessionSticky: e.target.checked })}
+          />
+          <span>{policyLabels.sticky}</span>
+        </label>
+        <p className="x-caption" style={{ margin: 0 }}>
+          {draft.sessionSticky
+            ? policyLabels[draft.smartPolicy === 'strict' ? 'strictHelp' : draft.smartPolicy === 'custom' ? 'customHelp' : 'smartHelp']
+            : draft.smartPolicy === 'per-turn' ? policyLabels.perTurnHelp : policyLabels.stickyOff}
+        </p>
+      </fieldset>}
       <div className="x-mgmt-steps">{draft.entries.map((entry, i) => <div className="x-mgmt-step" key={i}>
         <span className="x-mgmt-index">{i + 1}</span>
         <select aria-label={s.provider} value={entry.platform} onChange={e => setEntry(i, { platform: e.target.value })}>
@@ -261,14 +404,19 @@ export default function Combos() {
     </div>}
     {bulkRemove.isError && <div className="x-error" role="alert">{bulkRemove.error.message}</div>}
     {changeStrategy.isError && <div className="x-error" role="alert">{changeStrategy.error.message}</div>}
-    <div className="x-mgmt-list">{filtered.map(c => {
+    <div className="x-mgmt-list">{filtered.map(raw => {
+      const c = raw as PolicyCombo
       const strategy = c.strategy ?? 'fallback'
+      const policy = c.smartPolicy ?? 'smart'
       return <section className="x-panel x-mgmt-card" key={c.id}>
         <header>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
             {canEdit && <input type="checkbox" checked={selected.has(c.id)} aria-label={`${s.select} ${c.name}`} onChange={() => toggleSelected(c.id)} />}
             <h2 style={{ margin: 0 }}>{c.name}</h2>
             <span className="x-badge">{strategyLabels[strategy]}</span>
+            {strategy === 'smart' && <span className="x-badge" title={policyLabels[policyKey(policy)]}>
+              {policyLabels[policyKey(policy)]}{policy === 'custom' ? ` ${Math.round((c.confidenceThreshold ?? DEFAULT_CONFIDENCE_THRESHOLD) * 100)}%` : ''}
+            </span>}
           </div>
           {canEdit && <div className="x-mgmt-actions" style={{ margin: 0 }}>
             <select aria-label={s.strategy} value={strategy} disabled={changeStrategy.isPending} onChange={e => changeStrategy.mutate({ combo: c, strategy: e.target.value as ComboStrategy })}>

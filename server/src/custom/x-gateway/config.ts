@@ -4,11 +4,14 @@ import { maskProxyUrl } from '../../lib/key-proxy.js';
 import type { SaverLevel } from '../output-savers/prompts.js';
 import {
   DEFAULT_COMBO_STRATEGY,
+  isComboSmartPolicy,
   isComboStrategy,
   MAX_COMBO_DESCRIPTION,
   normalizeComboStrategy,
+  normalizeConfidenceThreshold,
   resetComboRotation,
   type ComboEntry,
+  type ComboSmartPolicy,
   type ComboStrategy,
 } from './combos.js';
 
@@ -24,6 +27,11 @@ export interface XGatewayCombo {
   entries: ComboEntry[];
   /** Routing strategy; older rows default to `fallback`. */
   strategy?: ComboStrategy;
+  /** Session stickiness policy, only meaningful for the `smart` strategy. */
+  smartPolicy?: ComboSmartPolicy;
+  sessionSticky?: boolean;
+  /** 0–1; higher means the pinned route is replaced less eagerly. */
+  confidenceThreshold?: number;
   description?: string;
   createdBy?: number | null;
   createdAt?: string;
@@ -33,6 +41,9 @@ export interface XGatewayCombo {
 export interface ComboMeta {
   strategy?: ComboStrategy;
   description?: string;
+  smartPolicy?: ComboSmartPolicy;
+  sessionSticky?: boolean;
+  confidenceThreshold?: number;
 }
 
 export interface XGatewayMediaDefaults {
@@ -119,7 +130,16 @@ function parseSavers(raw: string | undefined): XGatewaySaverDefaults {
  * are stored alongside the entries in a small envelope instead of new columns, so
  * existing rows (bare arrays) and older readers keep working unchanged.
  */
-function parseComboPayload(raw: string): { entries: ComboEntry[]; strategy?: ComboStrategy; description?: string } {
+interface ParsedComboPayload {
+  entries: ComboEntry[];
+  strategy?: ComboStrategy;
+  description?: string;
+  smartPolicy?: ComboSmartPolicy;
+  sessionSticky?: boolean;
+  confidenceThreshold?: number;
+}
+
+function parseComboPayload(raw: string): ParsedComboPayload {
   try {
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) return { entries: parsed as ComboEntry[] };
@@ -129,6 +149,12 @@ function parseComboPayload(raw: string): { entries: ComboEntry[]; strategy?: Com
         entries: record.entries as ComboEntry[],
         strategy: isComboStrategy(record.strategy) ? record.strategy : undefined,
         description: typeof record.description === 'string' && record.description ? record.description : undefined,
+        smartPolicy: isComboSmartPolicy(record.smartPolicy) ? record.smartPolicy : undefined,
+        sessionSticky: typeof record.sessionSticky === 'boolean' ? record.sessionSticky : undefined,
+        confidenceThreshold:
+          typeof record.confidenceThreshold === 'number' && Number.isFinite(record.confidenceThreshold)
+            ? normalizeConfidenceThreshold(record.confidenceThreshold)
+            : undefined,
       };
     }
   } catch {
@@ -137,12 +163,30 @@ function parseComboPayload(raw: string): { entries: ComboEntry[]; strategy?: Com
   return { entries: [] };
 }
 
+/** Only persist policy fields the caller actually supplied, so untouched rows
+ *  keep their previous envelope (and legacy bare-array rows stay bare). */
 function serializeComboPayload(entries: ComboEntry[], meta?: ComboMeta): string {
   const strategy = normalizeComboStrategy(meta?.strategy);
   const description = (meta?.description ?? '').trim().slice(0, MAX_COMBO_DESCRIPTION);
+  const smartPolicy = isComboSmartPolicy(meta?.smartPolicy) ? meta.smartPolicy : undefined;
+  const sessionSticky = typeof meta?.sessionSticky === 'boolean' ? meta.sessionSticky : undefined;
+  const confidenceThreshold =
+    typeof meta?.confidenceThreshold === 'number' && Number.isFinite(meta.confidenceThreshold)
+      ? normalizeConfidenceThreshold(meta.confidenceThreshold)
+      : undefined;
+  const hasPolicy = smartPolicy !== undefined
+    || sessionSticky !== undefined
+    || confidenceThreshold !== undefined;
   // Keep the legacy bare-array shape when there is nothing extra to persist.
-  if (strategy === DEFAULT_COMBO_STRATEGY && !description) return JSON.stringify(entries);
-  return JSON.stringify({ entries, strategy, description });
+  if (strategy === DEFAULT_COMBO_STRATEGY && !description && !hasPolicy) return JSON.stringify(entries);
+  return JSON.stringify({
+    entries,
+    strategy,
+    description,
+    ...(smartPolicy !== undefined ? { smartPolicy } : {}),
+    ...(sessionSticky !== undefined ? { sessionSticky } : {}),
+    ...(confidenceThreshold !== undefined ? { confidenceThreshold } : {}),
+  });
 }
 
 function loadCombosFromDb(db: ReturnType<typeof getDb>): XGatewayCombo[] {
@@ -162,6 +206,9 @@ function loadCombosFromDb(db: ReturnType<typeof getDb>): XGatewayCombo[] {
         name: r.name,
         entries: payload.entries,
         strategy: payload.strategy ?? DEFAULT_COMBO_STRATEGY,
+        ...(payload.smartPolicy !== undefined ? { smartPolicy: payload.smartPolicy } : {}),
+        ...(payload.sessionSticky !== undefined ? { sessionSticky: payload.sessionSticky } : {}),
+        ...(payload.confidenceThreshold !== undefined ? { confidenceThreshold: payload.confidenceThreshold } : {}),
         description: payload.description,
         createdBy: r.created_by,
         createdAt: r.created_at,
@@ -294,6 +341,11 @@ export function createCombo(name: string, entries: ComboEntry[], createdBy?: num
     name: lower,
     entries,
     strategy,
+    ...(isComboSmartPolicy(meta?.smartPolicy) ? { smartPolicy: meta.smartPolicy } : {}),
+    ...(typeof meta?.sessionSticky === 'boolean' ? { sessionSticky: meta.sessionSticky } : {}),
+    ...(typeof meta?.confidenceThreshold === 'number' && Number.isFinite(meta.confidenceThreshold)
+      ? { confidenceThreshold: normalizeConfidenceThreshold(meta.confidenceThreshold) }
+      : {}),
     ...(description ? { description } : {}),
     createdBy: createdBy ?? null,
     createdAt: now,

@@ -20,6 +20,68 @@ export function normalizeComboStrategy(value: unknown): ComboStrategy {
   return isComboStrategy(value) ? value : DEFAULT_COMBO_STRATEGY;
 }
 
+/**
+ * How a `smart` combo pins the route that serves a conversation.
+ *
+ * - `smart`     pin per conversation, switch only when the pinned route fails
+ *               or its health confidence drops below `confidenceThreshold`.
+ * - `strict`    pin per conversation and never switch while the route exists.
+ * - `per-turn`  never pin; re-rank every turn (old `smart` behaviour).
+ * - `custom`    like `smart` but the operator tunes `confidenceThreshold`.
+ */
+export type ComboSmartPolicy = 'smart' | 'strict' | 'per-turn' | 'custom';
+
+export const COMBO_SMART_POLICIES: readonly ComboSmartPolicy[] = ['smart', 'strict', 'per-turn', 'custom'];
+export const DEFAULT_COMBO_SMART_POLICY: ComboSmartPolicy = 'smart';
+export const DEFAULT_CONFIDENCE_THRESHOLD = 0.8;
+
+export function isComboSmartPolicy(value: unknown): value is ComboSmartPolicy {
+  return typeof value === 'string' && (COMBO_SMART_POLICIES as readonly string[]).includes(value);
+}
+
+export function normalizeComboSmartPolicy(value: unknown): ComboSmartPolicy {
+  return isComboSmartPolicy(value) ? value : DEFAULT_COMBO_SMART_POLICY;
+}
+
+/** Clamp a confidence threshold into the documented 0–1 range. */
+export function normalizeConfidenceThreshold(
+  value: unknown,
+  fallback = DEFAULT_CONFIDENCE_THRESHOLD,
+): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return Math.min(1, Math.max(0, value));
+}
+
+export interface ComboPolicy {
+  smartPolicy: ComboSmartPolicy;
+  /** `true` keeps a conversation on the same route (warm prompt cache). */
+  sessionSticky: boolean;
+  confidenceThreshold: number;
+}
+
+export interface ComboPolicyInput {
+  smartPolicy?: unknown;
+  sessionSticky?: unknown;
+  confidenceThreshold?: unknown;
+}
+
+/**
+ * Effective policy for a combo. Absent fields get the defaults that keep the
+ * previous behaviour for existing rows: smart policy, sticky sessions, 80%.
+ * `per-turn` implies non-sticky unless a row explicitly stores `true`.
+ */
+export function resolveComboPolicy(input?: ComboPolicyInput): ComboPolicy {
+  const smartPolicy = normalizeComboSmartPolicy(input?.smartPolicy);
+  const sessionSticky = typeof input?.sessionSticky === 'boolean'
+    ? input.sessionSticky
+    : smartPolicy !== 'per-turn';
+  return {
+    smartPolicy,
+    sessionSticky,
+    confidenceThreshold: normalizeConfidenceThreshold(input?.confidenceThreshold),
+  };
+}
+
 export interface ComboEntry {
   platform: string;
   modelId: string;
@@ -45,7 +107,11 @@ export function validateComboName(name: string): ComboValidationError | null {
   return null;
 }
 
-export function validateComboMeta(strategy: unknown, description: unknown): string | null {
+export function validateComboMeta(
+  strategy: unknown,
+  description: unknown,
+  policy?: ComboPolicyInput,
+): string | null {
   if (strategy !== undefined && !isComboStrategy(strategy)) {
     return `Strategy must be one of: ${COMBO_STRATEGIES.join(', ')}`;
   }
@@ -53,6 +119,18 @@ export function validateComboMeta(strategy: unknown, description: unknown): stri
     if (typeof description !== 'string') return 'Description must be a string';
     if (description.trim().length > MAX_COMBO_DESCRIPTION) {
       return `Description must be at most ${MAX_COMBO_DESCRIPTION} characters`;
+    }
+  }
+  if (policy?.smartPolicy !== undefined && !isComboSmartPolicy(policy.smartPolicy)) {
+    return `Smart policy must be one of: ${COMBO_SMART_POLICIES.join(', ')}`;
+  }
+  if (policy?.sessionSticky !== undefined && typeof policy.sessionSticky !== 'boolean') {
+    return 'sessionSticky must be a boolean';
+  }
+  if (policy?.confidenceThreshold !== undefined) {
+    const value = policy.confidenceThreshold;
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
+      return 'confidenceThreshold must be a number between 0 and 1';
     }
   }
   return null;
@@ -79,6 +157,9 @@ export interface ValidateComboOptions {
   totalCombos?: number;
   strategy?: unknown;
   description?: unknown;
+  smartPolicy?: unknown;
+  sessionSticky?: unknown;
+  confidenceThreshold?: unknown;
 }
 
 export function validateCombo(
@@ -95,7 +176,11 @@ export function validateCombo(
     return { valid: false, error: nameError.error };
   }
 
-  const metaError = validateComboMeta(opts?.strategy, opts?.description);
+  const metaError = validateComboMeta(opts?.strategy, opts?.description, {
+    smartPolicy: opts?.smartPolicy,
+    sessionSticky: opts?.sessionSticky,
+    confidenceThreshold: opts?.confidenceThreshold,
+  });
   if (metaError) {
     return { valid: false, error: metaError };
   }
