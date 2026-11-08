@@ -185,8 +185,10 @@ describe('explicit 20-model loading in the Chat Models page', () => {
   })
   it('discards staged edits across A to B to A chain switches', async () => {
     await render(); await click(container.querySelector('[aria-label="toggle 1"]') as HTMLElement)
+    await click(button('Load 20 more models')); expect(rows()).toBe(40)
     for (const activeProfileId of [2, 1]) {
       await act(async () => { client.setQueryData(['profiles', 'active'], { activeProfileId }) }); await flush()
+      expect(rows()).toBe(20)
     }
     expect(container.querySelector('[aria-label="toggle 1"]')?.getAttribute('aria-pressed')).toBe('true')
     expect(button('common.saveChanges')).toBeUndefined()

@@ -58,6 +58,9 @@ export function useModelList(options: ModelListOptions) {
       return { ...previous, pages: previous.pages.slice(0, 1), pageParams: previous.pageParams.slice(0, 1) }
     },
     staleTime: 30_000,
+    // Returning to a chain/filter starts at 20 again; never restore its old
+    // multi-page browser cache. Shared ranking work remains cached server-side.
+    gcTime: 0,
     refetchInterval: false,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
@@ -88,6 +91,7 @@ export function useModelList(options: ModelListOptions) {
     initialData: initialLive,
     initialDataUpdatedAt: query.dataUpdatedAt,
     staleTime: 30_000,
+    gcTime: 0,
     refetchInterval: 30_000,
     refetchOnWindowFocus: false,
     retry: false,
