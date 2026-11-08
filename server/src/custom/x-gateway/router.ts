@@ -25,6 +25,7 @@ import {
 import { xGatewayAuth } from './auth.js';
 import { isModelAllowedForKey, type ValidatedXGatewayClientKey } from './client-keys.js';
 import { augmentCandidatesWithCapacityAdapter } from './capacity-adapter.js';
+import { DEFAULT_COMBO_STRATEGY, rotateComboEntries, type ComboStrategy } from './combos.js';
 import { getConfigSnapshot } from './config.js';
 import { runInGatewayScope } from './context.js';
 import { xGatewayProtocolsRouter } from './protocols.js';
@@ -34,6 +35,8 @@ export const xGatewayRouter = Router();
 export interface CandidateRoute {
   account: AccountRow & { requests: number; tokens: number };
   modelId: string;
+  /** Combo step this candidate came from (0-based, after round-robin rotation). */
+  step?: number;
 }
 
 function isWithinAccountCaps(account: AccountRow & { requests: number; tokens: number }): boolean {
@@ -68,6 +71,7 @@ export function resolveCandidateRoutes(
 ): {
   candidates: CandidateRoute[];
   notFoundError?: string;
+  combo?: { name: string; strategy: ComboStrategy };
 } {
   const rawModel = (requestedModel ?? 'auto').trim() || 'auto';
   const lower = rawModel.toLowerCase();
@@ -88,16 +92,23 @@ export function resolveCandidateRoutes(
     if (!combo) {
       return { candidates: [], notFoundError: `Combo '${rawModel}' not found` };
     }
+    const strategy = combo.strategy ?? DEFAULT_COMBO_STRATEGY;
+    // Round-robin rotates the starting step; the remaining order is untouched,
+    // so a failed step still falls through to the ones behind it.
+    const steps = strategy === 'round-robin' ? rotateComboEntries(combo.name, combo.entries) : combo.entries;
     const candidates: CandidateRoute[] = [];
-    for (const step of combo.entries) {
+    steps.forEach((step, stepIndex) => {
       const targetProvider = normalizeXGatewayProviderId(step.platform) ?? step.platform.toLowerCase();
       for (const account of usable) {
         if (account.provider === targetProvider) {
-          candidates.push({ account, modelId: step.modelId });
+          candidates.push({ account, modelId: step.modelId, step: stepIndex });
         }
       }
-    }
-    return { candidates };
+    });
+    return {
+      candidates: strategy === 'smart' ? sortCandidatesByHealth(candidates) : candidates,
+      combo: { name: combo.name, strategy },
+    };
   }
 
   const slashIdx = rawModel.indexOf('/');
@@ -127,6 +138,111 @@ export function resolveCandidateRoutes(
   return {
     candidates: usable.map(account => ({ account, modelId: rawModel })),
   };
+}
+
+/*
+ * Smart routing keeps a small in-memory health record per (account, model).
+ * Latency is an exponential moving average so a single fast/slow request does
+ * not reorder the whole combo, and consecutive failures carry a decayed penalty
+ * that disappears once the route succeeds again. Unknown routes sit in the
+ * middle, which makes a cold process behave like plain `fallback`.
+ */
+const ROUTE_HEALTH_TTL_MS = 5 * 60_000;
+const FAILURE_PENALTY_MS = 2_500;
+const UNKNOWN_LATENCY_MS = 1_200;
+
+interface RouteHealth {
+  samples: number;
+  latencyMs: number;
+  consecutiveErrors: number;
+  lastFailureAt: number;
+}
+
+const routeHealth = new Map<string, RouteHealth>();
+
+function healthKey(candidate: Pick<CandidateRoute, 'account' | 'modelId'>): string {
+  return `${candidate.account.id}:${candidate.modelId}`;
+}
+
+export function recordRouteOutcome(key: string, outcome: { latencyMs?: number; error?: boolean }): void {
+  const existing = routeHealth.get(key);
+  if (outcome.error) {
+    routeHealth.set(key, {
+      samples: existing?.samples ?? 0,
+      latencyMs: existing?.latencyMs ?? UNKNOWN_LATENCY_MS,
+      consecutiveErrors: (existing?.consecutiveErrors ?? 0) + 1,
+      lastFailureAt: Date.now(),
+    });
+    return;
+  }
+  if (outcome.latencyMs === undefined) return;
+  const samples = (existing?.samples ?? 0) + 1;
+  const latencyMs = existing && existing.samples > 0
+    ? existing.latencyMs * 0.7 + outcome.latencyMs * 0.3
+    : outcome.latencyMs;
+  routeHealth.set(key, {
+    samples,
+    latencyMs,
+    consecutiveErrors: 0,
+    lastFailureAt: existing?.lastFailureAt ?? 0,
+  });
+}
+
+export function resetRouteHealth(): void {
+  routeHealth.clear();
+}
+
+function routeScore(health: RouteHealth | undefined): number {
+  if (!health) return UNKNOWN_LATENCY_MS;
+  const failing = health.consecutiveErrors > 0
+    && Date.now() - health.lastFailureAt < ROUTE_HEALTH_TTL_MS;
+  return health.latencyMs + (failing ? health.consecutiveErrors * FAILURE_PENALTY_MS : 0);
+}
+
+/** Stable sort: healthier routes first, original step order on ties. */
+export function sortCandidatesByHealth<T extends Pick<CandidateRoute, 'account' | 'modelId'>>(candidates: T[]): T[] {
+  return [...candidates].sort((a, b) => routeScore(routeHealth.get(healthKey(a))) - routeScore(routeHealth.get(healthKey(b))));
+}
+
+/**
+ * Fusion fans a request out to the first two distinct combo steps. Candidates
+ * for the same step (several accounts of one provider) collapse to the first.
+ */
+export function pickFusionCandidates<T extends { step?: number }>(candidates: T[]): T[] {
+  const picked: T[] = [];
+  const seenSteps = new Set<number>();
+  for (const candidate of candidates) {
+    if (candidate.step !== undefined) {
+      if (seenSteps.has(candidate.step)) continue;
+      seenSteps.add(candidate.step);
+    }
+    picked.push(candidate);
+    if (picked.length >= 2) break;
+  }
+  return picked;
+}
+
+/** Resolve with the first fulfilled promise; reject only when all of them fail. */
+function raceFirstSuccess<T>(tasks: Array<Promise<T>>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    let failures = 0;
+    let lastError: unknown;
+    for (const task of tasks) {
+      task.then(value => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      }).catch(err => {
+        lastError = err;
+        failures += 1;
+        if (!settled && failures === tasks.length) {
+          settled = true;
+          reject(lastError);
+        }
+      });
+    }
+  });
 }
 
 export function applyGatewaySavers(req: Request, messages: ChatMessage[]): {
@@ -202,14 +318,18 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
   res.once('close', onClose);
   try {
   await runInGatewayScope(scope, async () => {
-    const { candidates: rawCandidates, notFoundError } = resolveCandidateRoutes(requestedModel);
+    const { candidates: rawCandidates, notFoundError, combo } = resolveCandidateRoutes(requestedModel);
     if (notFoundError) {
       res.status(404).json({
         error: { message: notFoundError, type: 'invalid_request_error', code: 'model_not_found' },
       });
       return;
     }
-    const candidates = augmentCandidatesWithCapacityAdapter(rawCandidates, messages);
+    const strategy = combo?.strategy ?? DEFAULT_COMBO_STRATEGY;
+    if (combo) res.setHeader('X-Combo-Strategy', strategy);
+    // The adapter only ever returns account/model pairs, so it can keep the
+    // combo step metadata that `resolveCandidateRoutes` attached.
+    const candidates = augmentCandidatesWithCapacityAdapter(rawCandidates, messages) as CandidateRoute[];
     if (candidates.length === 0) {
       res.status(503).json({
         error: {
@@ -238,36 +358,151 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
     const estimatedPromptTokens = estimateInputTokens(messages);
     let lastError: unknown = null;
 
-    for (const { account, modelId } of candidates) {
-      if (controller.signal.aborted) return;
+    /** One non-streaming attempt, isolated so fusion can run two in parallel. */
+    const attemptNonStream = async (candidate: CandidateRoute, signal: AbortSignal) => {
+      const { account, modelId } = candidate;
       const provider = resolveXGatewayProvider(account.provider, account.base_url);
-      if (!provider) continue;
+      if (!provider) throw new Error(`Provider '${account.provider}' is not available.`);
+      const credential = decrypt(account.encrypted_key, account.iv, account.auth_tag);
+      const effectiveProxy = resolveXGatewayAccountProxy(account);
+      const startedAt = Date.now();
+      const completion = await withQuotaTracking(account, modelId, effectiveProxy, () =>
+        provider.chatCompletion(
+          credential,
+          messages,
+          modelId,
+          { ...options, signal },
+          { platform: account.platform, keyId: account.id, modelId },
+        ),
+      );
+      return { candidate, completion, latencyMs: Date.now() - startedAt };
+    };
+
+    const succeedNonStream = (result: Awaited<ReturnType<typeof attemptNonStream>>) => {
+      const { account, modelId } = result.candidate;
+      const latencyMs = Date.now() - startMs;
+      const promptTokens = result.completion.usage?.prompt_tokens ?? estimatedPromptTokens;
+      const completionTokens = result.completion.usage?.completion_tokens ?? 0;
+
+      recordXGatewayKeyUsage(account.id, promptTokens + completionTokens);
+      logRequest(
+        account.provider,
+        modelId,
+        null,
+        'success',
+        promptTokens,
+        completionTokens,
+        latencyMs,
+        null,
+        latencyMs,
+        requestedModel === 'auto' ? null : requestedModel,
+        null,
+        'x-gateway',
+      );
+
+      res.setHeader('X-Routed-Via', `${account.provider}/${modelId}`);
+      res.status(200).json(result.completion);
+    };
+
+    if (!isStream && strategy === 'fusion') {
+      // Fusion races the first two distinct combo steps; the first success wins
+      // and the slower attempt is aborted. One step (or a single account) simply
+      // behaves like fallback.
+      const fusionCandidates = pickFusionCandidates(candidates);
+      if (fusionCandidates.length > 1) {
+        const children = fusionCandidates.map(() => new AbortController());
+        const abortChildren = () => { for (const child of children) child.abort(); };
+        const onAbort = () => abortChildren();
+        controller.signal.addEventListener('abort', onAbort);
+        try {
+          const winner = await raceFirstSuccess(fusionCandidates.map((candidate, index) =>
+            attemptNonStream(candidate, children[index].signal)));
+          if (controller.signal.aborted) return;
+          recordRouteOutcome(healthKey(winner.candidate), { latencyMs: winner.latencyMs });
+          succeedNonStream(winner);
+          return;
+        } catch (err) {
+          if (controller.signal.aborted) return;
+          lastError = err;
+          for (const candidate of fusionCandidates) {
+            recordRouteOutcome(healthKey(candidate), { error: true });
+          }
+          // Fall through to the sequential loop, which retries every step in order.
+        } finally {
+          controller.signal.removeEventListener('abort', onAbort);
+          abortChildren();
+        }
+      }
+    }
+
+    for (const candidate of candidates) {
+      if (controller.signal.aborted) return;
+      const { account, modelId } = candidate;
+
+      if (!isStream) {
+        try {
+          const result = await attemptNonStream(candidate, controller.signal);
+          recordRouteOutcome(healthKey(candidate), { latencyMs: result.latencyMs });
+          succeedNonStream(result);
+          return;
+        } catch (err) {
+          recordRouteOutcome(healthKey(candidate), { error: true });
+          lastError = err;
+          continue;
+        }
+      }
+
+      const provider = resolveXGatewayProvider(account.provider, account.base_url);
+      if (!provider) {
+        lastError = new Error(`Provider '${account.provider}' is not available.`);
+        recordRouteOutcome(healthKey(candidate), { error: true });
+        continue;
+      }
 
       let credential: string;
       try {
         credential = decrypt(account.encrypted_key, account.iv, account.auth_tag);
       } catch (err) {
         lastError = err;
+        recordRouteOutcome(healthKey(candidate), { error: true });
         continue;
       }
 
       const effectiveProxy = resolveXGatewayAccountProxy(account);
+      const streamStartedAt = Date.now();
 
-      if (!isStream) {
-        try {
-          const completion = await withQuotaTracking(account, modelId, effectiveProxy, () =>
-            provider.chatCompletion(
-              credential,
-              messages,
-              modelId,
-              options,
-              { platform: account.platform, keyId: account.id, modelId },
-            ),
+      try {
+        await withQuotaTracking(account, modelId, effectiveProxy, async () => {
+          const stream = provider.streamChatCompletion(
+            credential,
+            messages,
+            modelId,
+            options,
+            { platform: account.platform, keyId: account.id, modelId },
           );
-          const latencyMs = Date.now() - startMs;
-          const promptTokens = completion.usage?.prompt_tokens ?? estimatedPromptTokens;
-          const completionTokens = completion.usage?.completion_tokens ?? 0;
+          let ttfbMs = 0;
+          let promptTokens = estimatedPromptTokens;
+          let completionTokens = 0;
+          for await (const chunk of stream) {
+            if (controller.signal.aborted) return;
+            if (!res.headersSent) {
+              res.setHeader('Content-Type', 'text/event-stream');
+              res.setHeader('Cache-Control', 'no-cache');
+              res.setHeader('X-Accel-Buffering', 'no');
+              res.setHeader('X-Routed-Via', `${account.provider}/${modelId}`);
+              ttfbMs = Date.now() - startMs;
+            }
+            if (chunk.usage?.prompt_tokens != null) promptTokens = chunk.usage.prompt_tokens;
+            if (chunk.usage?.completion_tokens != null) completionTokens = chunk.usage.completion_tokens;
+            res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+          }
+          if (controller.signal.aborted) return;
+          if (!res.headersSent) throw new Error('Provider returned an empty stream.');
+          res.write('data: [DONE]\n\n');
+          res.end();
 
+          const latencyMs = Date.now() - startMs;
+          recordRouteOutcome(healthKey(candidate), { latencyMs: Date.now() - streamStartedAt });
           recordXGatewayKeyUsage(account.id, promptTokens + completionTokens);
           logRequest(
             account.provider,
@@ -278,78 +513,23 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
             completionTokens,
             latencyMs,
             null,
-            latencyMs,
+            ttfbMs,
             requestedModel === 'auto' ? null : requestedModel,
             null,
             'x-gateway',
           );
-
-          res.setHeader('X-Routed-Via', `${account.provider}/${modelId}`);
-          res.status(200).json(completion);
+        });
+        return;
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        recordRouteOutcome(healthKey(candidate), { error: true });
+        if (res.headersSent) {
+          res.write(`data: ${JSON.stringify({ error: { message: sanitizeProviderErrorMessage(err instanceof Error ? err.message : 'Stream interrupted') } })}\n\n`);
+          res.end();
           return;
-        } catch (err) {
-          lastError = err;
-          continue;
         }
-      } else {
-        try {
-          await withQuotaTracking(account, modelId, effectiveProxy, async () => {
-            const stream = provider.streamChatCompletion(
-              credential,
-              messages,
-              modelId,
-              options,
-              { platform: account.platform, keyId: account.id, modelId },
-            );
-            let ttfbMs = 0;
-            let promptTokens = estimatedPromptTokens;
-            let completionTokens = 0;
-            for await (const chunk of stream) {
-              if (controller.signal.aborted) return;
-              if (!res.headersSent) {
-                res.setHeader('Content-Type', 'text/event-stream');
-                res.setHeader('Cache-Control', 'no-cache');
-                res.setHeader('X-Accel-Buffering', 'no');
-                res.setHeader('X-Routed-Via', `${account.provider}/${modelId}`);
-                ttfbMs = Date.now() - startMs;
-              }
-              if (chunk.usage?.prompt_tokens != null) promptTokens = chunk.usage.prompt_tokens;
-              if (chunk.usage?.completion_tokens != null) completionTokens = chunk.usage.completion_tokens;
-              res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-            }
-            if (controller.signal.aborted) return;
-            if (!res.headersSent) throw new Error('Provider returned an empty stream.');
-            res.write('data: [DONE]\n\n');
-            res.end();
-
-            const latencyMs = Date.now() - startMs;
-            recordXGatewayKeyUsage(account.id, promptTokens + completionTokens);
-            logRequest(
-              account.provider,
-              modelId,
-              null,
-              'success',
-              promptTokens,
-              completionTokens,
-              latencyMs,
-              null,
-              ttfbMs,
-              requestedModel === 'auto' ? null : requestedModel,
-              null,
-              'x-gateway',
-            );
-          });
-          return;
-        } catch (err) {
-          if (controller.signal.aborted) return;
-          if (res.headersSent) {
-            res.write(`data: ${JSON.stringify({ error: { message: sanitizeProviderErrorMessage(err instanceof Error ? err.message : 'Stream interrupted') } })}\n\n`);
-            res.end();
-            return;
-          }
-          lastError = err;
-          continue;
-        }
+        lastError = err;
+        continue;
       }
     }
 
