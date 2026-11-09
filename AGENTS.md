@@ -130,3 +130,27 @@ gh pr merge <pr-number-or-branch> --merge
 git checkout main
 git pull origin main
 ```
+
+---
+
+## 6. GitHub Terms of Service, CI Safety & Abuse Prevention Guidelines (MANDATORY)
+
+> **CRITICAL LESSON FROM INCIDENT (11/2026):**  
+> Read the complete post-mortem and compliance rules in [`docs/GITHUB_COMPLIANCE_AND_SAFETY_GUIDE.md`](docs/GITHUB_COMPLIANCE_AND_SAFETY_GUIDE.md). All AI agents and developers must strictly follow these safeguards:
+
+### Rule 1: Zero Tunneling or Prohibited Utilities in CI Workflows
+- **NEVER** download, run, or package tunneling binaries (such as `ngrok`, `cloudflared`, `frp`, `pinggy`, `tor`, or reverse shells) on GitHub Actions runners.
+- Any project requiring external network tunneling tools or native APK assembly with third-party network binaries must build **100% locally** on development machines via scripts, never on cloud CI runners.
+
+### Rule 2: Ban on Binary Executables in Git Tracking
+- **NEVER** commit executable binary files (`.apk`, `.so`, `.exe`, `.dll`, `.ipa`, `.idsig`) into Git repositories.
+- Always enforce proper exclusions in `.gitignore`. Distribute binaries only through official GitHub Releases.
+
+### Rule 3: Neutral Technical & Academic Documentation
+- **NEVER** use aggressive or blacklisted scraping/proxy terminology in public `README.md` or repository descriptions (e.g., *"Bypass Cloudflare"*, *"Bypass bot protection"*, *"Residential proxy farm"*, *"Scraping tools"*).
+- Always use standard software engineering and academic language (e.g., *"Local Development & Testing Gateway"*, *"Network Sockets Research"*, *"Resilient HTTP Client"*).
+
+### Rule 4: No Rapid-Fire Ban Evasion Accounts
+- If an account is suspended or under manual review, **DO NOT** create alternate accounts and immediately push dozens of repositories from the same environment/IP. This triggers GitHub's automated abuse filters, secondary rate limits, and cascading suspensions.
+- Resolve account issues through official support channels with clear academic and educational context.
+
