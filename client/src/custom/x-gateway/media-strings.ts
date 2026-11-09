@@ -7,6 +7,7 @@ const en = {
   tabTts: 'Text to Speech (TTS)',
   tabStt: 'Speech to Text (STT)',
   tabEmbedding: 'Embeddings',
+  tabWeb: 'Web Search & Fetch',
   
   endpointBadge: 'Wire Endpoint',
   configTitle: 'Default Settings',
@@ -62,6 +63,16 @@ const en = {
   dimensionsCount: 'Dimensions',
   sampleVector: 'Vector Sample (first 8 floats)',
   totalTokens: 'Total Tokens',
+
+  webQuery: 'Search Query / Web Question',
+  webQueryPlaceholder: 'Search the web or ask a question (e.g. latest tech news, financial report)...',
+  fetchUrl: 'Target URL to Fetch (Optional)',
+  fetchUrlPlaceholder: 'https://example.com/article',
+  searchWeb: 'Search & Fetch Web',
+  searchingWeb: 'Searching…',
+  webResult: 'Web Search & Fetch Results',
+  sources: 'Sources & Citations',
+  copyWebResult: 'Copy Results',
   
   codeSnippetTitle: 'API Code Snippets',
   codeSnippetSubtitle: 'Call this media endpoint directly from your application or command line.',
@@ -85,6 +96,7 @@ const vi: Record<keyof typeof en, string> = {
   tabTts: 'Giọng nói (TTS)',
   tabStt: 'Nhận diện âm thanh (STT)',
   tabEmbedding: 'Embeddings (Vector)',
+  tabWeb: 'Tìm kiếm & Đọc Web',
   
   endpointBadge: 'Endpoint giao thức',
   configTitle: 'Cấu hình mặc định',
@@ -140,6 +152,16 @@ const vi: Record<keyof typeof en, string> = {
   dimensionsCount: 'Số chiều (Dimensions)',
   sampleVector: 'Mẫu Vector (8 số thực đầu tiên)',
   totalTokens: 'Tổng số token',
+
+  webQuery: 'Truy vấn tìm kiếm / Câu hỏi Web',
+  webQueryPlaceholder: 'Tìm kiếm trên web hoặc đặt câu hỏi (ví dụ: tin tức AI mới nhất, thị trường chứng khoán)...',
+  fetchUrl: 'URL trang web cần đọc (Tùy chọn)',
+  fetchUrlPlaceholder: 'https://example.com/bai-viet',
+  searchWeb: 'Tìm kiếm & Đọc Web',
+  searchingWeb: 'Đang tìm kiếm…',
+  webResult: 'Kết quả Tìm kiếm & Đọc Web',
+  sources: 'Nguồn & Tham khảo',
+  copyWebResult: 'Sao chép kết quả',
   
   codeSnippetTitle: 'Mã gọi API trực tiếp',
   codeSnippetSubtitle: 'Gọi trực tiếp endpoint này từ ứng dụng hoặc command line của bạn.',

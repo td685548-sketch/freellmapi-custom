@@ -2,11 +2,14 @@ import { useState, useEffect, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  Activity,
+  AlertTriangle,
   ArrowLeft,
   CircleCheck,
   Clock,
   Ellipsis,
   KeyRound,
+  LoaderCircle,
   Pencil,
   Plus,
   RefreshCw,
@@ -19,7 +22,7 @@ import {
 import { Dialog, DialogPopup, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { apiFetch } from '@/lib/api'
 import type { ProviderAccount } from '../../../../../shared/x-accounts'
-import { accountsApi, refreshAccounts, useAccounts } from '../api'
+import { accountsApi, refreshAccounts, useAccounts, type BatchTestResponse } from '../api'
 import { useSessionRevision } from '../../session-state'
 import { proxyPoolApi } from '../proxy-pool-api'
 import { usePoolStrings } from '../proxy-pool-strings'
@@ -125,6 +128,42 @@ export default function ProviderAccounts() {
   const [remove, setRemove] = useState<ProviderAccount | null>(null)
   const [tab, setTab] = useState<'accounts' | 'models'>('accounts')
   const [testResult, setTestResult] = useState<{ id: number; ok: boolean } | null>(null)
+  const [batchSummary, setBatchSummary] = useState<BatchTestResponse['summary'] | null>(null)
+  const [customModelId, setCustomModelId] = useState('')
+  const [customModelName, setCustomModelName] = useState('')
+  const [aliasFrom, setAliasFrom] = useState('')
+  const [aliasTo, setAliasTo] = useState('')
+  const [modelPingStates, setModelPingStates] = useState<
+    Record<string, { loading?: boolean; latencyMs?: number; ok?: boolean; message?: string }>
+  >({})
+
+  const handlePingModel = async (modelId: string) => {
+    if (!providerId) return
+    setModelPingStates(prev => ({
+      ...prev,
+      [modelId]: { loading: true },
+    }))
+    try {
+      const res = await accountsApi.pingModel(providerId, modelId)
+      setModelPingStates(prev => ({
+        ...prev,
+        [modelId]: { loading: false, latencyMs: res.latencyMs, ok: res.ok, message: res.message },
+      }))
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Ping failed'
+      setModelPingStates(prev => ({
+        ...prev,
+        [modelId]: { loading: false, ok: false, message },
+      }))
+    }
+  }
+
+  const modelConfigQuery = useQuery({
+    queryKey: ['x-provider-models', providerId, revision],
+    queryFn: ({ signal }) => accountsApi.getProviderModels(providerId!, signal),
+    enabled: Boolean(providerId && tab === 'models'),
+    retry: false,
+  })
 
   // Auto-Ping Modal state
   const [autoPingAccount, setAutoPingAccount] = useState<ProviderAccount | null>(null)
@@ -199,6 +238,36 @@ export default function ProviderAccounts() {
     },
   })
 
+  const batchTestProvider = useMutation({
+    meta: { silenceToast: true },
+    mutationFn: (pid: string) => accountsApi.testBatch({ providerId: pid }),
+    onSuccess: async (res) => {
+      setBatchSummary(res.summary)
+      await refreshAccounts(client)
+    },
+  })
+
+  const toggleAllAccounts = useMutation({
+    meta: { silenceToast: true },
+    mutationFn: ({ pid, enabled }: { pid: string; enabled: boolean }) => accountsApi.toggleProvider(pid, enabled),
+    onSuccess: async () => {
+      await refreshAccounts(client)
+    },
+  })
+
+  const updateProviderModels = useMutation({
+    meta: { silenceToast: true },
+    mutationFn: (body: {
+      disabledModels?: string[]
+      customModels?: Array<{ id: string; name?: string }>
+      modelAliases?: Record<string, string>
+    }) => accountsApi.updateProviderModels(providerId!, body),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: ['x-provider-models', providerId] })
+      await refreshAccounts(client)
+    },
+  })
+
   if (query.isPending) return <AccountLoadState />
   if (query.isError) return <AccountLoadState error retry={() => void query.refetch()} />
   const provider = query.data.providers.find(item => item.id === providerId)
@@ -220,6 +289,23 @@ export default function ProviderAccounts() {
   }
 
   const previewSlots = getScheduleSlots(pingAnchor, pingWindowHours, pingSlotsPerDay)
+  const allAccountsEnabled = provider.accounts.length > 0 && provider.accounts.every(a => a.enabled)
+  const disabledSet = new Set(modelConfigQuery.data?.disabledModels ?? [])
+  const customModelsList = modelConfigQuery.data?.customModels ?? []
+  const modelAliasesMap = modelConfigQuery.data?.modelAliases ?? {}
+  const catalogAndCustomModels = (() => {
+    const map = new Map<string, { id: string; name: string; isCustom?: boolean }>()
+    for (const m of modelConfigQuery.data?.catalogModels ?? models) {
+      map.set(m.id, { id: m.id, name: m.name })
+    }
+    for (const m of models) {
+      if (!map.has(m.id)) map.set(m.id, { id: m.id, name: m.name })
+    }
+    for (const cm of customModelsList) {
+      map.set(cm.id, { id: cm.id, name: cm.name || cm.id, isCustom: true })
+    }
+    return Array.from(map.values())
+  })()
 
   return <>
     <Link to="/x/providers" className="x-back-link"><ArrowLeft size={16} />{s.providers}</Link>
@@ -231,8 +317,40 @@ export default function ProviderAccounts() {
           <p>{provider.accounts.length} {s.accounts.toLowerCase()} · {provider.category === 'oauth' && !provider.authMethods.some(m => m === 'oauth_pkce' || m === 'device_code') ? `${s.oauth} / ${s.apiKey}` : provider.authMethods.map(method => method === 'api_key' ? s.apiKey : method === 'cookie' ? s.cookie : method === 'device_code' ? s.device : s.oauth).join(' / ')}</p>
         </div>
       </div>
-      {canConnect && <button className="x-button x-primary" onClick={() => { change.reset(); setConnect(true) }}><Plus size={16} />{s.addAccount}</button>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {permissions.test && provider.accounts.length > 1 && (
+          <button
+            type="button"
+            className="x-button"
+            disabled={batchTestProvider.isPending}
+            onClick={() => {
+              setBatchSummary(null)
+              batchTestProvider.mutate(provider.id)
+            }}
+          >
+            <ShieldCheck size={15} />
+            {batchTestProvider.isPending ? s.testing : `Batch test (${provider.accounts.length})`}
+          </button>
+        )}
+        {permissions.edit && provider.accounts.length > 1 && (
+          <button
+            type="button"
+            className="x-button"
+            disabled={toggleAllAccounts.isPending}
+            onClick={() => toggleAllAccounts.mutate({ pid: provider.id, enabled: !allAccountsEnabled })}
+          >
+            {allAccountsEnabled ? 'Pause all' : 'Enable all'}
+          </button>
+        )}
+        {canConnect && <button className="x-button x-primary" onClick={() => { change.reset(); setConnect(true) }}><Plus size={16} />{s.addAccount}</button>}
+      </div>
     </div>
+    {batchSummary && (
+      <p className="x-test-ok" role="status">
+        <CircleCheck size={16} />
+        Batch check: {batchSummary.passed}/{batchSummary.total} healthy
+      </p>
+    )}
     {provider.id === 'github-copilot' && <p className="x-notice">{s.copilotNotice}</p>}
     {change.isError && <div className="x-error" role="alert">{change.error.message}</div>}
 
@@ -339,7 +457,255 @@ export default function ProviderAccounts() {
         })}
       </div>
       <div className="x-info-row"><ShieldCheck size={20} /><div><h3>{s.routing}</h3><p>{s.routingHelp}</p><p>{s.sharedPool}</p></div></div>
-    </section> : <section id="x-models-panel" role="tabpanel" aria-labelledby="x-models-tab" className="x-panel x-model-list">{models.length ? models.map(model => <div key={model.id}><strong>{model.name}</strong><code>{model.id}</code></div>) : <p className="x-muted">{s.noModels}</p>}</section>}
+    </section> : (
+      <section id="x-models-panel" role="tabpanel" aria-labelledby="x-models-tab" className="x-panel x-model-list">
+        {!permissions.edit ? (
+          models.length ? (
+            <div style={{ display: 'grid', gap: 8 }}>
+              {models.map(model => (
+                <div key={model.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <strong>{model.name}</strong><code>{model.id}</code>
+                  </div>
+                  {permissions.test && (
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      {modelPingStates[model.id]?.loading ? (
+                        <span className="x-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <LoaderCircle size={12} className="x-spin" /> Ping...
+                        </span>
+                      ) : modelPingStates[model.id]?.ok !== undefined ? (
+                        modelPingStates[model.id]?.ok ? (
+                          <span
+                            className="x-badge"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              color: '#10b981',
+                              background: 'rgba(16, 185, 129, 0.1)',
+                              borderColor: 'rgba(16, 185, 129, 0.3)',
+                            }}
+                            title={modelPingStates[model.id]?.message || 'Ping successful'}
+                          >
+                            <Activity size={12} /> {modelPingStates[model.id]?.latencyMs}ms
+                          </span>
+                        ) : (
+                          <span
+                            className="x-badge x-danger"
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                            title={modelPingStates[model.id]?.message}
+                          >
+                            <AlertTriangle size={12} /> {modelPingStates[model.id]?.message || 'Error'}
+                          </span>
+                        )
+                      ) : null}
+                      <button
+                        type="button"
+                        className="x-button x-small"
+                        style={{ padding: '3px 8px', fontSize: '0.75rem', height: '26px' }}
+                        disabled={modelPingStates[model.id]?.loading}
+                        onClick={() => handlePingModel(model.id)}
+                        aria-label={`Ping model ${model.id}`}
+                        title={`Ping ${model.id}`}
+                      >
+                        <Activity size={12} /> Ping
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : <p className="x-muted">{s.noModels}</p>
+        ) : (
+          <div style={{ display: 'grid', gap: 16 }}>
+            <form
+              style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}
+              onSubmit={e => {
+                e.preventDefault()
+                const trimmedId = customModelId.trim()
+                if (!trimmedId) return
+                const nextCustom = [
+                  ...customModelsList.filter(cm => cm.id !== trimmedId),
+                  { id: trimmedId, name: customModelName.trim() || trimmedId },
+                ]
+                updateProviderModels.mutate({ customModels: nextCustom })
+                setCustomModelId('')
+                setCustomModelName('')
+              }}
+            >
+              <input
+                type="text"
+                placeholder="Custom model ID (e.g. gpt-4.1-mini)"
+                value={customModelId}
+                onChange={e => setCustomModelId(e.target.value)}
+                style={{ flex: '1 1 200px', padding: '7px 10px', borderRadius: 8, border: '1px solid var(--x-border)', background: 'var(--x-surface-subtle)', color: 'var(--x-ink)' }}
+              />
+              <input
+                type="text"
+                placeholder="Display name (optional)"
+                value={customModelName}
+                onChange={e => setCustomModelName(e.target.value)}
+                style={{ flex: '1 1 180px', padding: '7px 10px', borderRadius: 8, border: '1px solid var(--x-border)', background: 'var(--x-surface-subtle)', color: 'var(--x-ink)' }}
+              />
+              <button type="submit" className="x-button x-small x-primary" disabled={updateProviderModels.isPending || !customModelId.trim()}>
+                <Plus size={14} />Add Model
+              </button>
+            </form>
+
+            <form
+              style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}
+              onSubmit={e => {
+                e.preventDefault()
+                const from = aliasFrom.trim()
+                const to = aliasTo.trim()
+                if (!from || !to) return
+                updateProviderModels.mutate({
+                  modelAliases: { ...modelAliasesMap, [from]: to },
+                })
+                setAliasFrom('')
+                setAliasTo('')
+              }}
+            >
+              <input
+                type="text"
+                placeholder="Model alias (e.g. sonnet-latest)"
+                value={aliasFrom}
+                onChange={e => setAliasFrom(e.target.value)}
+                style={{ flex: '1 1 180px', padding: '7px 10px', borderRadius: 8, border: '1px solid var(--x-border)', background: 'var(--x-surface-subtle)', color: 'var(--x-ink)' }}
+              />
+              <input
+                type="text"
+                placeholder="Target model ID"
+                value={aliasTo}
+                onChange={e => setAliasTo(e.target.value)}
+                style={{ flex: '1 1 180px', padding: '7px 10px', borderRadius: 8, border: '1px solid var(--x-border)', background: 'var(--x-surface-subtle)', color: 'var(--x-ink)' }}
+              />
+              <button type="submit" className="x-button x-small" disabled={updateProviderModels.isPending || !aliasFrom.trim() || !aliasTo.trim()}>
+                <Plus size={14} />Add Alias
+              </button>
+            </form>
+
+            {Object.keys(modelAliasesMap).length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {Object.entries(modelAliasesMap).map(([alias, target]) => (
+                  <span key={alias} className="x-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <code>{alias}</code> → <code>{target}</code>
+                    <button
+                      type="button"
+                      className="x-icon-button"
+                      aria-label={`Remove alias ${alias}`}
+                      onClick={() => {
+                        const nextAliases = { ...modelAliasesMap }
+                        delete nextAliases[alias]
+                        updateProviderModels.mutate({ modelAliases: nextAliases })
+                      }}
+                    >
+                      <X size={12} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {catalogAndCustomModels.length ? (
+              <div style={{ display: 'grid', gap: 8 }}>
+                {catalogAndCustomModels.map(model => {
+                  const isDisabled = disabledSet.has(model.id)
+                  return (
+                    <div key={model.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', opacity: isDisabled ? 0.55 : 1 }}>
+                        <strong>{model.name}</strong>
+                        <code>{model.id}</code>
+                        {model.isCustom && <span className="x-badge">Custom</span>}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {permissions.test && (
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                            {modelPingStates[model.id]?.loading ? (
+                              <span className="x-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                <LoaderCircle size={12} className="x-spin" /> Ping...
+                              </span>
+                            ) : modelPingStates[model.id]?.ok !== undefined ? (
+                              modelPingStates[model.id]?.ok ? (
+                                <span
+                                  className="x-badge"
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    color: '#10b981',
+                                    background: 'rgba(16, 185, 129, 0.1)',
+                                    borderColor: 'rgba(16, 185, 129, 0.3)',
+                                  }}
+                                  title={modelPingStates[model.id]?.message || 'Ping successful'}
+                                >
+                                  <Activity size={12} /> {modelPingStates[model.id]?.latencyMs}ms
+                                </span>
+                              ) : (
+                                <span
+                                  className="x-badge x-danger"
+                                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                                  title={modelPingStates[model.id]?.message}
+                                >
+                                  <AlertTriangle size={12} /> {modelPingStates[model.id]?.message || 'Error'}
+                                </span>
+                              )
+                            ) : null}
+                            <button
+                              type="button"
+                              className="x-button x-small"
+                              style={{ padding: '3px 8px', fontSize: '0.75rem', height: '26px' }}
+                              disabled={modelPingStates[model.id]?.loading}
+                              onClick={() => handlePingModel(model.id)}
+                              aria-label={`Ping model ${model.id}`}
+                              title={`Ping ${model.id}`}
+                            >
+                              <Activity size={12} /> Ping
+                            </button>
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          role="switch"
+                          className="x-switch"
+                          aria-checked={!isDisabled}
+                          aria-label={`${isDisabled ? s.enable : s.disable} model ${model.id}`}
+                          disabled={updateProviderModels.isPending}
+                          onClick={() => {
+                            const nextDisabled = isDisabled
+                              ? Array.from(disabledSet).filter(id => id !== model.id)
+                              : [...Array.from(disabledSet), model.id]
+                            updateProviderModels.mutate({ disabledModels: nextDisabled })
+                          }}
+                        >
+                          <span />
+                        </button>
+                        {model.isCustom && (
+                          <button
+                            type="button"
+                            className="x-icon-button x-danger"
+                            aria-label={`Delete custom model ${model.id}`}
+                            disabled={updateProviderModels.isPending}
+                            onClick={() => {
+                              const nextCustom = customModelsList.filter(cm => cm.id !== model.id)
+                              updateProviderModels.mutate({ customModels: nextCustom })
+                            }}
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <p className="x-muted">{s.noModels}</p>
+            )}
+          </div>
+        )}
+      </section>
+    )}
 
     {connect && <ConnectAccountDialog provider={provider} account={connect === true ? undefined : connect} onClose={() => setConnect(null)} />}
 

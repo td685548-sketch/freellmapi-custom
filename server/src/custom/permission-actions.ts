@@ -73,17 +73,17 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
     if (path.startsWith('/api/x-gateway/playground/')) return 'use_x_gateway';
     if (path.startsWith('/api/x-gateway/tools')) return 'use_x_gateway';
     if (path.startsWith('/api/x-gateway/translator')) return 'use_x_gateway';
-    if (path.startsWith('/api/x-gateway/tunnel')) return read ? 'use_x_gateway' : 'edit_x_settings';
     if (path.startsWith('/api/x-gateway/skills')) return read ? 'use_x_gateway' : 'edit_x_settings';
     if (path.startsWith('/api/x-gateway/media/test')) return 'use_x_gateway';
     if (path.startsWith('/api/x-gateway/media')) return read ? 'use_x_gateway' : 'edit_x_settings';
     if (path.startsWith('/api/x-gateway/proxy-pool')) {
       return read ? 'use_x_gateway' : 'edit_x_settings';
     }
+    if (path === '/api/x-gateway/proxy/test') return 'edit_x_settings';
     if (path === '/api/x-gateway/enabled' || path === '/api/x-gateway/defaults' || path === '/api/x-gateway/proxy') {
       return read ? 'use_x_gateway' : 'edit_x_settings';
     }
-    if (path === '/api/x-gateway/keys' || /^\/api\/x-gateway\/keys\/\d+$/.test(path)) {
+    if (path === '/api/x-gateway/keys' || /^\/api\/x-gateway\/keys\/\d+(?:\/access)?$/.test(path)) {
       return 'use_x_gateway';
     }
     if (path === '/api/x-gateway/models') return 'edit_x_combos';

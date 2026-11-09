@@ -9,7 +9,7 @@ import { apiFetch } from '@/lib/api'
 import type { ProviderAccountsResponse, ProviderAccount, ProviderAccountPollResponse } from '../../../../shared/x-accounts'
 import Providers from './pages/Providers'
 import ProviderAccounts from './pages/ProviderAccounts'
-import { ConnectAccountDialog, extractCookieCredential } from './ConnectAccountDialog'
+import { ConnectAccountDialog, extractCookieCredential, parseBulkCredentialLines } from './ConnectAccountDialog'
 import { AccountCallback } from './AccountCallback'
 import { trustedLoginUrl } from './api'
 
@@ -87,6 +87,54 @@ beforeEach(() => {
     if (path.endsWith('/poll')) return pollResults.shift() ?? { status: 'pending', interval: 1 }
     if (path.endsWith('/complete')) return { status: 'connected', accountId: 99 }
     if (path.endsWith('/test')) return { ok: true }
+    if (path === '/api/x-accounts/test-batch' && init?.method === 'POST') {
+      return {
+        results: [{ id: 1, label: 'Work', provider: 'openrouter', ok: true }],
+        summary: { total: 2, passed: 2, failed: 0 },
+      }
+    }
+    if (path.endsWith('/toggle') && init?.method === 'POST') {
+      return { ok: true, providerId: 'openrouter', enabled: true, updated: 2 }
+    }
+    if (path.endsWith('/models') && (!init?.method || init.method === 'GET')) {
+      return {
+        providerId: 'openrouter',
+        catalogModels: [{ id: 'fixture-chat', name: 'Fixture Chat' }],
+        disabledModels: [],
+        customModels: [],
+        modelAliases: {},
+      }
+    }
+    if (path.endsWith('/models') && init?.method === 'PUT') {
+      const bodyObj = JSON.parse(String(init.body ?? '{}'))
+      return {
+        providerId: 'openrouter',
+        catalogModels: [{ id: 'fixture-chat', name: 'Fixture Chat' }],
+        disabledModels: bodyObj.disabledModels ?? [],
+        customModels: bodyObj.customModels ?? [],
+        modelAliases: bodyObj.modelAliases ?? {},
+      }
+    }
+    if (path === '/api/x-accounts/bulk' && init?.method === 'POST') {
+      return { ids: [101, 102], count: 2 }
+    }
+    if (path.endsWith('/models/ping') && init?.method === 'POST') {
+      const bodyObj = JSON.parse(String(init.body ?? '{}'))
+      return { ok: true, latencyMs: 64, model: bodyObj.model, message: 'Pong' }
+    }
+    if (path === '/api/x-accounts/nodes' && (!init?.method || init.method === 'GET')) {
+      return { ok: true, nodes: [] }
+    }
+    if (path === '/api/x-accounts/nodes' && init?.method === 'POST') {
+      const bodyObj = JSON.parse(String(init.body ?? '{}'))
+      return { ok: true, node: { ...bodyObj, id: 'custom-ollama-1' } }
+    }
+    if (path.startsWith('/api/x-accounts/nodes/') && init?.method === 'DELETE') {
+      return { ok: true, nodeId: path.split('/').pop() }
+    }
+    if (path === '/api/x-accounts/nodes/validate' && init?.method === 'POST') {
+      return { ok: true, valid: true, latencyMs: 42, models: ['llama3.3', 'qwen2.5'] }
+    }
     if (path === '/api/x-gateway/proxy-pool') return { entries: [] }
     return undefined
   })
@@ -216,6 +264,47 @@ describe('provider catalog', () => {
     await flush()
     expect(container.textContent).toContain('OpenRouter')
   })
+
+  it('opens Add Compatible Provider modal, validates endpoint, and creates node', async () => {
+    mount(<Providers />)
+    await flush()
+
+    const addBtn = Array.from(body().querySelectorAll<HTMLButtonElement>('button')).find(
+      b => b.textContent?.includes('Add Compatible Provider'),
+    )!
+    expect(addBtn).toBeDefined()
+    click(addBtn)
+    await flush()
+    await waitFor(() => Boolean(body().querySelector('.x-dialog input[placeholder="e.g. Local vLLM"]')))
+
+    // Enter name & prefix
+    enter(body().querySelector<HTMLInputElement>('.x-dialog input[placeholder="e.g. Local vLLM"]')!, 'Local Ollama')
+    enter(body().querySelector<HTMLInputElement>('.x-dialog input[placeholder="e.g. vllm"]')!, 'ollama')
+
+    // Click validate
+    const validateBtn = Array.from(body().querySelectorAll<HTMLButtonElement>('button')).find(
+      b => b.textContent?.includes('Validate Endpoint'),
+    )!
+    expect(validateBtn).toBeDefined()
+    click(validateBtn)
+    await flush()
+    await waitFor(() => body().textContent!.includes('Valid (42ms)'))
+    expect(body().textContent).toContain('llama3.3')
+
+    // Submit form
+    const saveBtn = Array.from(body().querySelectorAll<HTMLButtonElement>('button')).find(
+      b => b.textContent?.includes('Save Provider Node'),
+    )!
+    click(saveBtn)
+    await flush()
+    const saveCall = vi.mocked(apiFetch).mock.calls.find(([p, i]) => p === '/api/x-accounts/nodes' && i?.method === 'POST')!
+    expect(saveCall).toBeDefined()
+    expect(JSON.parse(String(saveCall[1]!.body))).toMatchObject({
+      name: 'Local Ollama',
+      prefix: 'ollama',
+      type: 'openai-compatible',
+    })
+  })
 })
 
 describe('provider accounts', () => {
@@ -266,6 +355,56 @@ describe('provider accounts', () => {
     click(body().querySelector('.x-destructive')!)
     await flush()
     expect(vi.mocked(apiFetch).mock.calls.some(([p, i]) => p === '/api/x-accounts/1' && i?.method === 'DELETE')).toBe(true)
+  })
+
+  it('supports batch testing all accounts, toggling all provider accounts, and managing provider models', async () => {
+    mount(providerRoute(), '/x/providers/openrouter')
+    await flush()
+
+    // Batch test provider accounts
+    click(button('Batch test (2)'))
+    await flush()
+    expect(vi.mocked(apiFetch).mock.calls.some(([p, i]) => p === '/api/x-accounts/test-batch' && i?.method === 'POST')).toBe(true)
+    expect(body().textContent).toContain('Batch check: 2/2 healthy')
+
+    // Switch to Models tab and manage models
+    click(body().querySelector('#x-models-tab')!)
+    await flush()
+    const modelSwitch = body().querySelector('#x-models-panel [role="switch"]')!
+    click(modelSwitch)
+    await flush()
+    expect(
+      vi.mocked(apiFetch).mock.calls.some(
+        ([p, i]) =>
+          p === '/api/x-accounts/providers/openrouter/models' &&
+          i?.method === 'PUT' &&
+          JSON.parse(String(i.body)).disabledModels.includes('fixture-chat'),
+      ),
+    ).toBe(true)
+  })
+
+  it('supports single model ping with real-time latency display', async () => {
+    mount(providerRoute(), '/x/providers/openrouter')
+    await flush()
+
+    // Switch to Models tab
+    click(body().querySelector('#x-models-tab')!)
+    await flush()
+
+    // Find Ping button
+    const pingBtn = Array.from(body().querySelectorAll<HTMLButtonElement>('#x-models-panel button')).find(
+      b => b.textContent?.includes('Ping')
+    )!
+    expect(pingBtn).toBeDefined()
+    click(pingBtn)
+    await flush()
+    await waitFor(() => body().textContent!.includes('64ms'))
+    expect(body().textContent).toContain('64ms')
+    expect(
+      vi.mocked(apiFetch).mock.calls.some(
+        ([p, i]) => p === '/api/x-accounts/providers/openrouter/models/ping' && i?.method === 'POST'
+      )
+    ).toBe(true)
   })
 })
 
@@ -424,5 +563,13 @@ describe('extractCookieCredential', () => {
   it('handles invalid or non-cookie JSON gracefully by returning trimmed raw text', () => {
     expect(extractCookieCredential('{ "invalid": 123 }')).toBe('{ "invalid": 123 }')
     expect(extractCookieCredential('invalid json {')).toBe('invalid json {')
+  })
+
+  it('parses multi-line bulk credentials with custom labels or auto-numbered labels', () => {
+    const parsed = parseBulkCredentialLines('Team A | gsk_key1\ngsk_key2\n# comment\n', 'Groq')
+    expect(parsed).toEqual([
+      { label: 'Team A', key: 'gsk_key1' },
+      { label: 'Groq #2', key: 'gsk_key2' },
+    ])
   })
 })

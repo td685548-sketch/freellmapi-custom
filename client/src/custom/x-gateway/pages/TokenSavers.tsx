@@ -15,9 +15,14 @@ import { useUserSession } from '../../use-session'
 import { useSessionRevision } from '../../session-state'
 import { useXStrings } from '../strings'
 
-const levels = ['off', 'lite', 'full', 'ultra'] as const
+const levels = ['off', 'lite', 'full', 'ultra', 'wenyan'] as const
 type Level = typeof levels[number]
-type Settings = { caveman: Level; ponytail: Level }
+type Settings = { caveman: Level; ponytail: Level; customPrompt?: string }
+
+const getLevelLabel = (level: Level, s: Record<string, string>) => {
+  if (level === 'wenyan') return 'Wenyan (古文)';
+  return s[level] || level;
+}
 
 interface RtkResponse {
   enabled: boolean
@@ -194,7 +199,7 @@ export default function TokenSavers() {
                             mutation.reset()
                           }}
                         />
-                        {s[level]}
+                        {getLevelLabel(level, s)}
                       </label>
                     ))}
                   </div>
@@ -202,6 +207,44 @@ export default function TokenSavers() {
               </section>
             ))}
           </div>
+
+          {/* Custom Saver System Prompt */}
+          <section className="x-panel" style={{ marginTop: '1.25rem', padding: '1.25rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <FileCode2 size={20} color="#10b981" />
+                <h2 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 600 }}>Custom Saver System Prompt</h2>
+              </div>
+              <span style={{ fontSize: '0.8rem', padding: '0.2rem 0.5rem', borderRadius: '4px', background: 'var(--bg-subtle, rgba(0,0,0,0.06))', fontWeight: 500 }}>
+                Est. ~{Math.ceil((value.customPrompt || '').length / 4)} tokens ({(value.customPrompt || '').length} chars)
+              </span>
+            </div>
+            <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
+              Custom system prompt prepended or appended to chat requests to enforce maximum token efficiency and concise answers.
+            </p>
+            <textarea
+              rows={4}
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                borderRadius: '8px',
+                border: '1px solid var(--border)',
+                backgroundColor: 'var(--bg-subtle, rgba(0,0,0,0.03))',
+                fontFamily: 'ui-monospace, monospace',
+                fontSize: '0.85rem',
+                lineHeight: '1.45',
+                resize: 'vertical',
+                boxSizing: 'border-box',
+              }}
+              placeholder="e.g. Respond with absolute technical conciseness. Avoid filler, greetings, and boilerplate. Direct code or fragments only."
+              value={value.customPrompt || ''}
+              disabled={!canEdit || mutation.isPending}
+              onChange={e => {
+                setDraft({ ...value, customPrompt: e.target.value })
+                mutation.reset()
+              }}
+            />
+          </section>
 
           <p className="x-footnote">{s.saverCost}</p>
           {mutation.isError && <div role="alert" className="x-error">{mutation.error.message}</div>}

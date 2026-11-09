@@ -58,8 +58,10 @@ export default function CLITools() {
   const [selectedToolId, setSelectedToolId] = useState<string>('claude');
   const [selectedKeyId, setSelectedKeyId] = useState<string>('auto');
   const [newKeyMaterial, setNewKeyMaterial] = useState<string | null>(null);
-  const [urlMode, setUrlMode] = useState<'origin' | 'local' | 'custom'>('origin');
-  const [customUrlInput, setCustomUrlInput] = useState<string>('http://localhost:3001/x/v1');
+  const [urlMode, setUrlMode] = useState<'origin' | 'custom'>('origin');
+  const [customUrlInput, setCustomUrlInput] = useState<string>(
+    typeof window !== 'undefined' ? `${window.location.origin}/x/v1` : 'https://your-domain.onrender.com/x/v1'
+  );
   const [shellTab, setShellTab] = useState<ShellTab>('bash');
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'cli' | 'ide' | 'agent'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -97,8 +99,7 @@ export default function CLITools() {
 
   // Resolve active Base URL
   const activeBaseUrl = useMemo(() => {
-    if (urlMode === 'local') return 'http://localhost:3001/x/v1';
-    if (urlMode === 'custom') return customUrlInput.trim() || 'http://localhost:3001/x/v1';
+    if (urlMode === 'custom') return customUrlInput.trim() || 'https://your-domain.onrender.com/x/v1';
     if (typeof window !== 'undefined') {
       return `${window.location.origin}/x/v1`;
     }
@@ -340,7 +341,7 @@ export default function CLITools() {
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <select
                 value={urlMode}
-                onChange={(e) => setUrlMode(e.target.value as 'origin' | 'local' | 'custom')}
+                onChange={(e) => setUrlMode(e.target.value as 'origin' | 'custom')}
                 style={{
                   padding: '7px 10px',
                   borderRadius: 6,
@@ -351,7 +352,6 @@ export default function CLITools() {
                 }}
               >
                 <option value="origin">{s.originUrl}</option>
-                <option value="local">{s.localUrl}</option>
                 <option value="custom">{s.customUrl}</option>
               </select>
               {urlMode === 'custom' ? (

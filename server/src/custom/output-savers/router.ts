@@ -17,12 +17,13 @@ import {
 export const outputSaversRouter = Router();
 
 function view() {
-  const { levels, sources } = readOutputSaverSettings();
+  const { levels, sources, customPrompt } = readOutputSaverSettings();
   return {
     caveman: levels.caveman,
     ponytail: levels.ponytail,
+    customPrompt: customPrompt ?? '',
     sources,
-    injectedChars: buildSaverBlock(levels).length,
+    injectedChars: buildSaverBlock(levels, customPrompt).length,
   };
 }
 
@@ -31,7 +32,7 @@ outputSaversRouter.get('/', (_req, res) => {
 });
 
 const updateSchema = outputSaversUpdateSchema.refine(
-  body => body.caveman !== undefined || body.ponytail !== undefined,
+  body => body.caveman !== undefined || body.ponytail !== undefined || body.customPrompt !== undefined,
 );
 
 outputSaversRouter.put('/', (req, res) => {
@@ -40,7 +41,7 @@ outputSaversRouter.put('/', (req, res) => {
     res.status(400).json({
       error: {
         type: 'invalid_request_error',
-        message: 'Supply caveman and/or ponytail as one of off|lite|full|ultra.',
+        message: 'Supply caveman, ponytail as one of off|lite|full|ultra|wenyan, or customPrompt.',
       },
     });
     return;

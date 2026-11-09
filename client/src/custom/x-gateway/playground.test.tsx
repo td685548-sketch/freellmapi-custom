@@ -104,4 +104,28 @@ describe('Playground component', () => {
       expect(container.textContent).toContain('Attach images');
     });
   });
+
+  it('renders messages container with independent scroll and bottom composer', async () => {
+    act(() => {
+      root.render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <Playground />
+          </MemoryRouter>
+        </QueryClientProvider>
+      );
+    });
+
+    await vi.waitFor(() => {
+      const messagesContainer = container.querySelector('.x-chat-messages');
+      expect(messagesContainer).not.toBeNull();
+      expect(messagesContainer?.classList.contains('overflow-y-auto')).toBe(true);
+
+      const composer = container.querySelector('.x-chat-composer');
+      expect(composer).not.toBeNull();
+
+      const page = container.querySelector('.x-playground-page');
+      expect(page).not.toBeNull();
+    });
+  });
 });

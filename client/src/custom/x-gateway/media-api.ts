@@ -2,7 +2,7 @@ import { apiFetch, getToken } from '@/lib/api';
 
 const base = '/api/x-gateway/media';
 
-export type MediaKind = 'image' | 'tts' | 'stt' | 'embedding';
+export type MediaKind = 'image' | 'tts' | 'stt' | 'embedding' | 'web';
 
 export interface MediaProviderItem {
   id: string;
@@ -31,6 +31,7 @@ export interface MediaDefaults {
   tts?: { defaultModel?: string; defaultVoice?: string; defaultFormat?: string };
   stt?: { defaultModel?: string; defaultLanguage?: string };
   embedding?: { defaultModel?: string; defaultDimensions?: number | null };
+  web?: { defaultModel?: string };
 }
 
 export interface MediaConfigResponse {
@@ -78,6 +79,17 @@ export interface EmbeddingTestResult {
   latencyMs: number;
 }
 
+export interface WebTestResult {
+  ok: boolean;
+  query: string;
+  results?: Array<{ title?: string; content?: string; url?: string }>;
+  content?: string;
+  provider: string;
+  accountLabel?: string;
+  model: string;
+  latencyMs: number;
+}
+
 export const mediaApi = {
   getConfig: (signal?: AbortSignal) =>
     apiFetch<MediaConfigResponse>(`${base}/config`, { signal }),
@@ -116,6 +128,12 @@ export const mediaApi = {
 
   testEmbedding: (body: { model?: string; input: string; dimensions?: number }) =>
     apiFetch<EmbeddingTestResult>(`${base}/test/embedding`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  testWeb: (body: { model?: string; query: string; fetchUrl?: string }) =>
+    apiFetch<WebTestResult>(`${base}/test/web`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),

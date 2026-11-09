@@ -9,7 +9,7 @@
 
 | Remote Name | Repository URL | Purpose |
 | :--- | :--- | :--- |
-| **`origin`** | `https://github.com/thanhdo257205/freellmapi-custom.git` | **Main Workspace**: Where custom features, invite-system, and extensions live. All feature commits are pushed here. |
+| **`origin`** | `https://github.com/emyeutruongem/freellmapi-custom.git` | **Main Workspace**: Where custom features, invite-system, and extensions live. All feature commits are pushed here. |
 | **`upstream`** | `https://github.com/tashfeenahmed/freellmapi.git` | **Original Source**: The official FreeLLMAPI repository. Used strictly as a read-only source for pulling updates and bug fixes. |
 
 ---

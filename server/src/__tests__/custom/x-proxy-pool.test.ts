@@ -1,12 +1,41 @@
 import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest';
 import type { Server } from 'http';
+import https from 'https';
+import { EventEmitter } from 'events';
+import express from 'express';
 import { initDb } from '../../db/index.js';
-import { createApp } from '../../app.js';
 import { createUser, createSession } from '../../services/auth.js';
 import { setOutboundProxyUrl } from '../../custom/x-gateway/config.js';
 import { createApiKeyAccount, accountRow, resolveXGatewayAccountProxy } from '../../custom/provider-accounts/store.js';
-import { listProxyPool } from '../../custom/x-gateway/proxy-pool.js';
+import {
+  getProxyPoolConfig,
+  isStrictProxyEnabled,
+  listProxyPool,
+  shouldBypassProxyPool,
+} from '../../custom/x-gateway/proxy-pool.js';
 import { applyProxyMode } from '../../lib/proxy.js';
+import { requireAuth } from '../../middleware/requireAuth.js';
+import { requireActionPermission } from '../../custom/permission-actions.js';
+import { xProxyPoolRouter } from '../../custom/x-gateway/proxy-pool-router.js';
+import { providerAccountsRouter } from '../../custom/provider-accounts/router.js';
+
+function createTestApp() {
+  const app = express();
+  app.use(express.json());
+  app.use(
+    '/api/x-gateway/proxy-pool',
+    requireAuth,
+    requireActionPermission('manage_x_gateway'),
+    xProxyPoolRouter,
+  );
+  app.use(
+    '/api/x-accounts',
+    requireAuth,
+    requireActionPermission('manage_keys'),
+    providerAccountsRouter,
+  );
+  return app;
+}
 
 describe('X Gateway Proxy Pool', () => {
   let server: Server;
@@ -27,13 +56,58 @@ describe('X Gateway Proxy Pool', () => {
     const { getDb } = await import('../../db/index.js');
     getDb().prepare("UPDATE users SET permissions = '[\"use_x_gateway\"]' WHERE id = ?").run(member.userId);
 
-    server = createApp().listen(0, '127.0.0.1');
+    server = createTestApp().listen(0, '127.0.0.1');
     await new Promise<void>(resolve => server.once('listening', () => resolve()));
     const { port } = server.address() as { port: number };
     base = `http://127.0.0.1:${port}`;
 
+    const fakeRequest = ((_opts: any, cb: any) => {
+      const req = new EventEmitter() as any;
+      req.write = () => {};
+      req.destroy = () => {};
+      req.end = () => {
+        const res = new EventEmitter() as any;
+        res.statusCode = 204;
+        res.statusMessage = 'OK';
+        res.headers = {};
+        res.destroy = () => {};
+        if (typeof cb === 'function') cb(res);
+        setImmediate(() => res.emit('end'));
+      };
+      return req;
+    }) as any;
+
+    vi.spyOn(https, 'request').mockImplementation(fakeRequest);
+
     vi.spyOn(global, 'fetch').mockImplementation(async (url: any, init: any) => {
-      if (String(url).startsWith(`http://127.0.0.1:${port}`)) return realFetch(url, init);
+      const urlStr = String(url);
+      if (urlStr.startsWith(`http://127.0.0.1:${port}`)) return realFetch(url, init);
+
+      if (urlStr === 'https://api.cloudflare.com/client/v4/accounts') {
+        return new Response(JSON.stringify({ success: true, result: [{ id: 'cf-acc-999' }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (urlStr.includes('api.cloudflare.com/client/v4/accounts/') && urlStr.includes('/workers/subdomain')) {
+        return new Response(JSON.stringify({ success: true, result: { subdomain: 'my-team' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (urlStr.includes('api.cloudflare.com/client/v4/accounts/') && urlStr.includes('/workers/scripts/')) {
+        return new Response(JSON.stringify({ success: true, result: { id: 'cf-worker' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (urlStr === 'https://api.vercel.com/v13/deployments') {
+        return new Response(JSON.stringify({ id: 'dpl_test', url: 'vercel-test-relay.vercel.app' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
       return new Response(null, { status: 204 });
     });
   });
@@ -206,5 +280,184 @@ describe('X Gateway Proxy Pool', () => {
     expect(inRelayMode.body.ok).toBe(true);
     expect(inRelayMode.body.status).toBe(204);
     applyProxyMode('forward');
+  });
+
+  it('batch-imports proxies in multiple formats (URLs, host:port:user:pass, host:port)', async () => {
+    const rawProxies = [
+      '# comment line',
+      'http://user1:pass1@198.51.100.21:8080',
+      'socks5://user2:pass2@198.51.100.22:1080',
+      '198.51.100.23:8080:user3:pass3',
+      '198.51.100.24:3128',
+      'bad_proxy_line_here',
+    ].join('\n');
+
+    const unauth = await requestX('/api/x-gateway/proxy-pool/batch-import', {
+      method: 'POST',
+      key: memberSession,
+      body: { proxies: rawProxies },
+    });
+    expect(unauth.status).toBe(403);
+
+    const res = await requestX('/api/x-gateway/proxy-pool/batch-import', {
+      method: 'POST',
+      key: adminSession,
+      body: { proxies: rawProxies },
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.importedCount).toBe(4);
+    expect(res.body.failedCount).toBe(1);
+    expect(res.body.failed[0].line).toBe('bad_proxy_line_here');
+    expect(res.body.imported).toHaveLength(4);
+
+    // Verify secrets are masked
+    expect(JSON.stringify(res.body)).not.toContain('pass1');
+    expect(JSON.stringify(res.body)).not.toContain('pass2');
+    expect(JSON.stringify(res.body)).not.toContain('pass3');
+  });
+
+  it('tests all enabled proxies in batch with health summary', async () => {
+    const res = await requestX('/api/x-gateway/proxy-pool/test-all', {
+      method: 'POST',
+      key: adminSession,
+      body: {},
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(typeof res.body.total).toBe('number');
+    expect(typeof res.body.healthy).toBe('number');
+    expect(typeof res.body.unhealthy).toBe('number');
+    expect(typeof res.body.latencyMs).toBe('number');
+    expect(Array.isArray(res.body.results)).toBe(true);
+    expect(res.body.results.length).toBe(res.body.total);
+    for (const item of res.body.results) {
+      expect(item).toHaveProperty('id');
+      expect(item).toHaveProperty('name');
+      expect(item).toHaveProperty('ok');
+    }
+  });
+
+  it('performs bulk actions: enable, disable, and delete', async () => {
+    const p1 = await requestX('/api/x-gateway/proxy-pool', {
+      method: 'POST',
+      key: adminSession,
+      body: { name: 'Bulk 1', proxyUrl: 'http://198.51.100.41:8080' },
+    });
+    const p2 = await requestX('/api/x-gateway/proxy-pool', {
+      method: 'POST',
+      key: adminSession,
+      body: { name: 'Bulk 2', proxyUrl: 'http://198.51.100.42:8080' },
+    });
+    const id1 = p1.body.entry.id;
+    const id2 = p2.body.entry.id;
+
+    // Bulk disable
+    const dis = await requestX('/api/x-gateway/proxy-pool/bulk-action', {
+      method: 'POST',
+      key: adminSession,
+      body: { action: 'disable', ids: [id1, id2] },
+    });
+    expect(dis.status).toBe(200);
+    expect(dis.body.affected).toBe(2);
+
+    const list1 = await requestX('/api/x-gateway/proxy-pool', { key: adminSession });
+    const entry1 = list1.body.entries.find((e: any) => e.id === id1);
+    const entry2 = list1.body.entries.find((e: any) => e.id === id2);
+    expect(entry1.enabled).toBe(false);
+    expect(entry2.enabled).toBe(false);
+
+    // Bulk enable
+    const ena = await requestX('/api/x-gateway/proxy-pool/bulk-action', {
+      method: 'POST',
+      key: adminSession,
+      body: { action: 'enable', ids: [id1, id2] },
+    });
+    expect(ena.status).toBe(200);
+    expect(ena.body.affected).toBe(2);
+
+    // Bulk delete
+    const del = await requestX('/api/x-gateway/proxy-pool/bulk-action', {
+      method: 'POST',
+      key: adminSession,
+      body: { action: 'delete', ids: [id1, id2] },
+    });
+    expect(del.status).toBe(200);
+    expect(del.body.affected).toBe(2);
+
+    const list2 = await requestX('/api/x-gateway/proxy-pool', { key: adminSession });
+    expect(list2.body.entries.some((e: any) => e.id === id1 || e.id === id2)).toBe(false);
+  });
+
+  it('manages proxy pool config: noProxy bypass list and strictProxy flag', async () => {
+    const initial = await requestX('/api/x-gateway/proxy-pool/config', { key: adminSession });
+    expect(initial.status).toBe(200);
+    expect(initial.body.config).toHaveProperty('noProxy');
+    expect(initial.body.config).toHaveProperty('strictProxy');
+
+    const update = await requestX('/api/x-gateway/proxy-pool/config', {
+      method: 'POST',
+      key: adminSession,
+      body: {
+        noProxy: ['openai.com', 'groq', 'api.anthropic.com'],
+        strictProxy: true,
+      },
+    });
+    expect(update.status).toBe(200);
+    expect(update.body.config.strictProxy).toBe(true);
+    expect(update.body.config.noProxy).toEqual(['openai.com', 'groq', 'api.anthropic.com']);
+
+    // Check helper functions
+    const conf = getProxyPoolConfig();
+    expect(conf.strictProxy).toBe(true);
+    expect(isStrictProxyEnabled()).toBe(true);
+    expect(shouldBypassProxyPool('https://api.openai.com/v1/chat')).toBe(true);
+    expect(shouldBypassProxyPool('groq')).toBe(true);
+    expect(shouldBypassProxyPool('https://api.google.com/generate')).toBe(false);
+  });
+
+  it('deploys serverless relay workers to Cloudflare and Vercel and registers them in pool', async () => {
+    // Check relay template endpoint
+    const tmpl = await requestX('/api/x-gateway/proxy-pool/relay-template', { key: adminSession });
+    expect(tmpl.status).toBe(200);
+    expect(tmpl.body.cloudflare).toContain('fetch-relay-target');
+    expect(tmpl.body.vercel).toContain('fetch-relay-target');
+
+    // Deploy to Cloudflare
+    const cfDeploy = await requestX('/api/x-gateway/proxy-pool/deploy-worker', {
+      method: 'POST',
+      key: adminSession,
+      body: {
+        provider: 'cloudflare',
+        apiToken: 'cf_dummy_token_123',
+        workerName: 'cf-unit-relay',
+      },
+    });
+
+    expect(cfDeploy.status).toBe(201);
+    expect(cfDeploy.body.ok).toBe(true);
+    expect(cfDeploy.body.provider).toBe('cloudflare');
+    expect(cfDeploy.body.url).toBe('https://cf-unit-relay.my-team.workers.dev');
+    expect(cfDeploy.body.entry).toHaveProperty('id');
+    expect(cfDeploy.body.entry.proxyUrl).toBe('https://cf-unit-relay.my-team.workers.dev');
+
+    // Deploy to Vercel
+    const vercelDeploy = await requestX('/api/x-gateway/proxy-pool/deploy-worker', {
+      method: 'POST',
+      key: adminSession,
+      body: {
+        provider: 'vercel',
+        apiToken: 'vercel_dummy_token_456',
+        workerName: 'vercel-unit-relay',
+      },
+    });
+
+    expect(vercelDeploy.status).toBe(201);
+    expect(vercelDeploy.body.ok).toBe(true);
+    expect(vercelDeploy.body.provider).toBe('vercel');
+    expect(vercelDeploy.body.url).toBe('https://vercel-test-relay.vercel.app');
+    expect(vercelDeploy.body.entry).toHaveProperty('id');
   });
 });

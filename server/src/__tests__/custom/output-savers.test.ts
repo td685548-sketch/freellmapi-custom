@@ -264,6 +264,7 @@ describe('GET and PUT /api/savers', () => {
     expect(before.body).toEqual({
       caveman: 'off',
       ponytail: 'off',
+      customPrompt: '',
       sources: { caveman: 'default', ponytail: 'default' },
       injectedChars: 0,
     });

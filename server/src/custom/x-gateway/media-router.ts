@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
+import { getDb } from '../../db/index.js';
 import { decrypt } from '../../lib/crypto.js';
 import { proxyFetch } from '../../lib/proxy.js';
 import { logRequest } from '../../lib/request-log.js';
@@ -20,6 +21,14 @@ import {
 import { accountBaseUrl } from './protocols.js';
 import { withQuotaTracking } from './quota/tracking.js';
 import { resolveCandidateRoutes } from './router.js';
+import {
+  getDefaultPricing,
+  getMergedPricing,
+  getPricingOverrides,
+  resetPricingOverrides,
+  updatePricingOverrides,
+  validatePricingPatch,
+} from './pricing.js';
 
 export const xGatewayMediaRouter = Router();
 
@@ -27,6 +36,8 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024, files: 1 },
 });
+
+export type MediaProviderKind = 'image' | 'tts' | 'stt' | 'embedding' | 'web';
 
 const mediaConfigSchema = z.object({
   image: z.object({ defaultModel: z.string().trim().max(100).optional() }).optional(),
@@ -42,6 +53,9 @@ const mediaConfigSchema = z.object({
   embedding: z.object({
     defaultModel: z.string().trim().max(100).optional(),
     defaultDimensions: z.number().int().min(1).max(32_768).nullable().optional(),
+  }).optional(),
+  web: z.object({
+    defaultModel: z.string().trim().max(100).optional(),
   }).optional(),
 }).strict();
 
@@ -66,7 +80,13 @@ const embeddingTestSchema = z.object({
   dimensions: z.number().int().min(1).max(32_768).optional(),
 }).strict();
 
-const KNOWN_KINDS: Record<'image' | 'tts' | 'stt' | 'embedding', {
+const webTestSchema = z.object({
+  model: z.string().trim().max(200).optional(),
+  query: z.string().trim().min(1).max(4000),
+  fetchUrl: z.string().trim().url().optional(),
+}).strict();
+
+const KNOWN_KINDS: Record<MediaProviderKind, {
   label: string;
   endpoint: string;
   defaultProviders: string[];
@@ -101,9 +121,16 @@ const KNOWN_KINDS: Record<'image' | 'tts' | 'stt' | 'embedding', {
     matcher: /embed/i,
     suggestedModels: ['text-embedding-3-small', 'text-embedding-3-large', 'gemini-embedding-001', 'text-embedding-004', 'mistral-embed', 'BAAI/bge-m3'],
   },
+  web: {
+    label: 'Web Search & Fetch',
+    endpoint: '/x/v1/chat/completions',
+    defaultProviders: ['perplexity', 'tavily', 'exa', 'brave', 'jina', 'firecrawl', 'google', 'openai', 'groq'],
+    matcher: /web|search|crawl|reader|fetch|sonar|perplexity|tavily|exa|brave|jina|firecrawl/i,
+    suggestedModels: ['sonar-pro', 'sonar', 'tavily-search', 'exa-search', 'jina-reader', 'gpt-4o-search-preview'],
+  },
 };
 
-function getProvidersForKind(kindKey: 'image' | 'tts' | 'stt' | 'embedding') {
+function getProvidersForKind(kindKey: MediaProviderKind) {
   const spec = KNOWN_KINDS[kindKey];
   const defaults = new Set(spec.defaultProviders);
   const matched = new Set<string>();
@@ -141,8 +168,30 @@ function getProvidersForKind(kindKey: 'image' | 'tts' | 'stt' | 'embedding') {
   }).sort((a, b) => (b.connectedAccounts - a.connectedAccounts) || a.name.localeCompare(b.name));
 }
 
+function getExtendedMediaDefaults(): XGatewayMediaDefaults & { web?: { defaultModel?: string } } {
+  const baseDefaults = getMediaDefaults();
+  try {
+    const db = getDb();
+    const mediaRow = db.prepare("SELECT value FROM x_gateway_config WHERE key = 'media_defaults'").get() as { value: string } | undefined;
+    if (mediaRow?.value) {
+      const parsed = JSON.parse(mediaRow.value);
+      if (parsed.web) {
+        return {
+          ...baseDefaults,
+          web: {
+            defaultModel: typeof parsed.web?.defaultModel === 'string' ? parsed.web.defaultModel : 'auto',
+          },
+        };
+      }
+    }
+  } catch {
+    // fallback
+  }
+  return { ...baseDefaults, web: { defaultModel: 'auto' } };
+}
+
 xGatewayMediaRouter.get('/media/config', (_req: Request, res: Response) => {
-  const defaults = getMediaDefaults();
+  const defaults = getExtendedMediaDefaults();
   const kinds = {
     image: {
       ...KNOWN_KINDS.image,
@@ -165,6 +214,11 @@ xGatewayMediaRouter.get('/media/config', (_req: Request, res: Response) => {
       providers: getProvidersForKind('embedding'),
       suggestedDimensions: [512, 1024, 1536, 3072],
     },
+    web: {
+      ...KNOWN_KINDS.web,
+      providers: getProvidersForKind('web'),
+      suggestedEngines: ['perplexity', 'tavily', 'exa', 'brave', 'jina', 'firecrawl'],
+    },
   };
 
   res.json({ defaults, kinds });
@@ -177,16 +231,17 @@ xGatewayMediaRouter.put('/media/config', (req: Request, res: Response) => {
     return;
   }
 
-  const current = getMediaDefaults();
-  const next: XGatewayMediaDefaults = {
+  const current = getExtendedMediaDefaults();
+  const next = {
     image: { ...current.image, ...parsed.data.image },
     tts: { ...current.tts, ...parsed.data.tts },
     stt: { ...current.stt, ...parsed.data.stt },
     embedding: { ...current.embedding, ...parsed.data.embedding },
+    web: { ...current.web, ...parsed.data.web },
   };
 
   const userId = (req as Request & { user?: { userId?: number } }).user?.userId;
-  setMediaDefaults(next, userId);
+  setMediaDefaults(next as any, userId);
   res.json({ ok: true, defaults: next });
 });
 
@@ -601,4 +656,176 @@ xGatewayMediaRouter.post('/media/test/embedding', async (req: Request, res: Resp
   const message = lastError instanceof Error ? lastError.message : 'All X Gateway embedding accounts failed.';
   res.status(502).json({ error: { message } });
 });
+
+xGatewayMediaRouter.post('/media/test/web', async (req: Request, res: Response) => {
+  const parsed = webTestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: { message: 'Invalid web search request', details: parsed.error.issues } });
+    return;
+  }
+
+  const startMs = Date.now();
+  const extended = getExtendedMediaDefaults();
+  const defaultModel = extended.web?.defaultModel || 'auto';
+  const requestedModel = parsed.data.model && parsed.data.model !== 'auto' ? parsed.data.model : defaultModel;
+  const { candidates, notFoundError } = resolveCandidateRoutes(requestedModel);
+
+  if (notFoundError) {
+    res.status(404).json({ error: { message: notFoundError } });
+    return;
+  }
+  if (candidates.length === 0) {
+    res.status(503).json({ error: { message: 'No enabled X Gateway provider accounts available.' } });
+    return;
+  }
+
+  let lastError: unknown = null;
+  for (const { account, modelId } of candidates) {
+    const baseUrl = accountBaseUrl(account);
+    if (!baseUrl) continue;
+    let credential: string;
+    try {
+      credential = decrypt(account.encrypted_key, account.iv, account.auth_tag);
+    } catch (err) {
+      lastError = err;
+      continue;
+    }
+
+    const effectiveProxy = resolveXGatewayAccountProxy(account);
+    try {
+      const userPrompt = parsed.data.fetchUrl
+        ? `Please fetch, read, and summarize the webpage at ${parsed.data.fetchUrl}. Query context: ${parsed.data.query}`
+        : `Search the web and provide detailed, concise, up-to-date findings for: ${parsed.data.query}`;
+
+      const payload = {
+        model: requestedModel === 'auto' ? modelId : requestedModel,
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a web search and web extraction engine. Return clear, concise findings with citation sources and URLs if found.',
+          },
+          {
+            role: 'user',
+            content: userPrompt,
+          },
+        ],
+        max_tokens: 1000,
+        temperature: 0.3,
+      };
+
+      const upstreamRes = await withQuotaTracking(account, modelId, effectiveProxy, () =>
+        proxyFetch(
+          `${baseUrl}/chat/completions`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${credential}`,
+            },
+            body: JSON.stringify(payload),
+          },
+          account.platform,
+          'chat',
+          60_000,
+        ),
+      );
+
+      if (!upstreamRes.ok) {
+        const text = await upstreamRes.text().catch(() => '');
+        throw new Error(`HTTP ${upstreamRes.status}: ${text.slice(0, 200)}`);
+      }
+
+      const data = (await upstreamRes.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+        usage?: { prompt_tokens?: number; completion_tokens?: number };
+      };
+      const content = data.choices?.[0]?.message?.content || '';
+      const latencyMs = Date.now() - startMs;
+
+      recordXGatewayKeyUsage(account.id, 1);
+      logRequest(
+        account.provider,
+        modelId,
+        null,
+        'success',
+        parsed.data.query.length,
+        content.length,
+        latencyMs,
+        null,
+        latencyMs,
+        requestedModel,
+        null,
+        'x-gateway',
+      );
+
+      res.json({
+        ok: true,
+        query: parsed.data.query,
+        content,
+        results: [
+          {
+            title: `Search: ${parsed.data.query}`,
+            content,
+            url: parsed.data.fetchUrl || undefined,
+          },
+        ],
+        provider: account.provider,
+        accountLabel: account.label,
+        model: modelId,
+        latencyMs,
+      });
+      return;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  const message = lastError instanceof Error ? lastError.message : 'All X Gateway web search accounts failed.';
+  res.status(502).json({ error: { message } });
+});
+
+// ---------------------------------------------------------------------------
+// Model Pricing Configuration Routes (/api/x-gateway/pricing)
+// ---------------------------------------------------------------------------
+
+xGatewayMediaRouter.get('/pricing', (_req: Request, res: Response) => {
+  res.json({
+    pricing: getMergedPricing(),
+    defaults: getDefaultPricing(),
+    overrides: getPricingOverrides(),
+  });
+});
+
+xGatewayMediaRouter.patch('/pricing', (req: Request, res: Response) => {
+  const validated = validatePricingPatch(req.body);
+  if (!validated.ok) {
+    res.status(400).json({ error: { message: validated.error } });
+    return;
+  }
+  const pricing = updatePricingOverrides(validated.patch);
+  res.json({
+    ok: true,
+    pricing,
+    defaults: getDefaultPricing(),
+    overrides: getPricingOverrides(),
+  });
+});
+
+xGatewayMediaRouter.delete('/pricing', (req: Request, res: Response) => {
+  const provider = typeof req.query.provider === 'string' && req.query.provider.trim()
+    ? req.query.provider.trim()
+    : undefined;
+  const model = typeof req.query.model === 'string' && req.query.model.trim()
+    ? req.query.model.trim()
+    : undefined;
+
+  const pricing = resetPricingOverrides(provider, model);
+  res.json({
+    ok: true,
+    pricing,
+    defaults: getDefaultPricing(),
+    overrides: getPricingOverrides(),
+  });
+});
+
 
