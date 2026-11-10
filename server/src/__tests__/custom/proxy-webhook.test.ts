@@ -73,7 +73,7 @@ describe('MiProxy Webhook & Proxy Auto-Update', () => {
       }
     });
 
-    vi.spyOn(proxyLib, 'probeProxyUrl').mockImplementation(async (url, options) => {
+    vi.spyOn(proxyLib, 'probeProxyUrl').mockImplementation(async (url, _options) => {
       // Mock probe test without downloading or executing any external binaries (ngrok/pinggy)
       if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
         return { ok: true, latencyMs: 65, error: undefined, status: 204 };
