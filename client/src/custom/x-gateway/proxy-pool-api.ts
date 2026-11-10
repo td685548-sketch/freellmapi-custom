@@ -10,6 +10,13 @@ export interface XProxyPoolEntry {
   boundAccounts: number
   createdAt: string
   updatedAt: string
+  webhookEnabled?: boolean
+  webhookToken?: string | null
+  lastWebhookAt?: number
+  lastTestOk?: boolean | null
+  lastTestLatency?: number | null
+  lastTestMessage?: string | null
+  lastTestAt?: string | null
 }
 
 export interface XProxyPoolTestResult {
@@ -61,8 +68,21 @@ export const proxyPoolApi = {
   list: (signal?: AbortSignal) => apiFetch<{ entries: XProxyPoolEntry[] }>(base, { signal }),
   create: (body: { name: string; proxyUrl: string }) =>
     apiFetch<{ entry: XProxyPoolEntry }>(base, { method: 'POST', body: JSON.stringify(body) }),
-  update: (id: number, body: { name?: string; proxyUrl?: string; enabled?: boolean }) =>
-    apiFetch<{ entry: XProxyPoolEntry }>(`${base}/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  update: (
+    id: number,
+    body: {
+      name?: string
+      proxyUrl?: string
+      enabled?: boolean
+      webhookEnabled?: boolean
+      webhookToken?: string | null
+    },
+  ) => apiFetch<{ entry: XProxyPoolEntry }>(`${base}/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  regenerateWebhookToken: (id: number) =>
+    apiFetch<{ entry: XProxyPoolEntry }>(`${base}/${id}/regenerate-webhook-token`, {
+      method: 'POST',
+      body: '{}',
+    }),
   remove: (id: number) => apiFetch<{ ok: true }>(`${base}/${id}`, { method: 'DELETE' }),
   test: (id: number) => apiFetch<XProxyPoolTestResult>(`${base}/${id}/test`, { method: 'POST', body: '{}' }),
   testAll: () => apiFetch<XProxyPoolTestAllResult>(`${base}/test-all`, { method: 'POST', body: '{}' }),

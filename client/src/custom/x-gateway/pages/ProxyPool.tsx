@@ -8,6 +8,7 @@ import {
   Network,
   Pencil,
   Plus,
+  RefreshCw,
   Settings,
   ShieldCheck,
   Square,
@@ -105,6 +106,7 @@ export default function ProxyPool() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [testResults, setTestResults] = useState<Record<number, XProxyPoolTestResult>>({})
   const [testAllSummary, setTestAllSummary] = useState<XProxyPoolTestAllResult | null>(null)
+  const [copiedWebhookId, setCopiedWebhookId] = useState<number | null>(null)
 
   const done = async () => {
     setDraft(null)
@@ -125,6 +127,19 @@ export default function ProxyPool() {
   const toggle = useMutation({
     meta: { silenceToast: true },
     mutationFn: (entry: XProxyPoolEntry) => proxyPoolApi.update(entry.id, { enabled: !entry.enabled }),
+    onSuccess: done,
+  })
+
+  const toggleWebhook = useMutation({
+    meta: { silenceToast: true },
+    mutationFn: (entry: XProxyPoolEntry) =>
+      proxyPoolApi.update(entry.id, { webhookEnabled: !entry.webhookEnabled }),
+    onSuccess: done,
+  })
+
+  const regenerateToken = useMutation({
+    meta: { silenceToast: true },
+    mutationFn: (id: number) => proxyPoolApi.regenerateWebhookToken(id),
     onSuccess: done,
   })
 
@@ -782,11 +797,129 @@ export default function ProxyPool() {
                   {testRes.ok ? `${s.testOk} · ${testRes.latencyMs} ms` : testRes.message ?? s.testFailed}
                 </div>
               )}
+              {!testRes && entry.lastTestOk !== null && entry.lastTestOk !== undefined && (
+                <div
+                  style={{ margin: '6px 0 10px', fontSize: '12px' }}
+                  className={entry.lastTestOk ? 'x-test-ok' : 'x-error'}
+                  role="status"
+                >
+                  {entry.lastTestOk
+                    ? `${s.testOk} · ${entry.lastTestLatency ?? 0} ms`
+                    : entry.lastTestMessage ?? s.testFailed}
+                  {entry.lastTestAt && (
+                    <span style={{ opacity: 0.65, marginLeft: 6, fontSize: '11px' }}>
+                      ({new Date(entry.lastTestAt).toLocaleTimeString()})
+                    </span>
+                  )}
+                </div>
+              )}
               {testSingle.isError && testSingle.variables === entry.id && (
                 <p className="x-error" role="alert" style={{ margin: '6px 0 10px' }}>
                   {testSingle.error.message}
                 </p>
               )}
+
+              {/* MiProxy Webhook section */}
+              <div
+                style={{
+                  margin: '8px 0 12px',
+                  padding: '10px 12px',
+                  background: 'var(--x-alt)',
+                  border: '1px solid var(--x-border)',
+                  borderRadius: '7px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Network size={14} style={{ opacity: 0.8 }} />
+                    <span style={{ fontSize: '13px', fontWeight: 600 }}>{s.webhook}</span>
+                  </div>
+                  {canEdit && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: '12px', opacity: 0.75 }}>
+                        {entry.webhookEnabled ? s.enabled : s.disabled}
+                      </span>
+                      <button
+                        className="x-switch"
+                        role="switch"
+                        aria-checked={Boolean(entry.webhookEnabled)}
+                        aria-label={`${s.webhook}: ${entry.name}`}
+                        disabled={toggleWebhook.isPending}
+                        onClick={() => toggleWebhook.mutate(entry)}
+                      >
+                        <span />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {entry.webhookEnabled && entry.webhookToken && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <input
+                        readOnly
+                        value={`${window.location.origin}/api/proxy-webhook?token=${encodeURIComponent(entry.webhookToken)}`}
+                        style={{
+                          fontSize: '11px',
+                          fontFamily: 'monospace',
+                          padding: '4px 8px',
+                          flex: 1,
+                          background: 'var(--x-bg, #fff)',
+                          border: '1px solid var(--x-border)',
+                          borderRadius: '4px',
+                        }}
+                        onClick={e => (e.target as HTMLInputElement).select()}
+                      />
+                      <button
+                        type="button"
+                        className="x-button x-small"
+                        title={s.copyWebhookUrl}
+                        onClick={() => {
+                          navigator.clipboard.writeText(
+                            `${window.location.origin}/api/proxy-webhook?token=${encodeURIComponent(entry.webhookToken!)}`,
+                          )
+                          setCopiedWebhookId(entry.id)
+                          setTimeout(() => setCopiedWebhookId(null), 2500)
+                        }}
+                      >
+                        {copiedWebhookId === entry.id ? <Check size={13} /> : <Copy size={13} />}
+                        {copiedWebhookId === entry.id ? s.copied : s.copyWebhookUrl}
+                      </button>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          className="x-icon-button"
+                          title={s.regenerateToken}
+                          disabled={regenerateToken.isPending}
+                          onClick={() => {
+                            if (window.confirm(s.regenerateTokenConfirm)) {
+                              regenerateToken.mutate(entry.id)
+                            }
+                          }}
+                        >
+                          <RefreshCw size={13} />
+                        </button>
+                      )}
+                    </div>
+
+                    <p className="x-caption" style={{ fontSize: '11px', margin: 0, opacity: 0.75 }}>
+                      {s.webhookHelp}
+                    </p>
+
+                    {entry.lastWebhookAt ? (
+                      <div style={{ fontSize: '11px', opacity: 0.85, color: 'var(--x-primary, #6366f1)' }}>
+                        {s.webhookUpdated.replace(
+                          '{time}',
+                          new Date(entry.lastWebhookAt).toLocaleString(),
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+              </div>
 
               {canEdit && (
                 <div

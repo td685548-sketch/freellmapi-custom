@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { getDb, getSetting, setSetting } from '../../db/index.js';
 import { decryptProxyUrl, encryptProxyUrl, isValidKeyProxyUrl, KEY_PROXY_URL_ERROR, maskProxyUrl } from '../../lib/key-proxy.js';
 
@@ -19,6 +20,13 @@ export interface ProxyPoolEntry {
   boundAccounts: number;
   createdAt: string;
   updatedAt: string;
+  webhookEnabled: boolean;
+  webhookToken: string | null;
+  lastWebhookAt: number;
+  lastTestOk: boolean | null;
+  lastTestLatency: number | null;
+  lastTestMessage: string | null;
+  lastTestAt: string | null;
 }
 
 export class ProxyPoolError extends Error {
@@ -35,6 +43,13 @@ interface PoolRow {
   created_at: string;
   updated_at: string;
   boundAccounts?: number;
+  webhook_token?: string | null;
+  webhook_enabled?: number;
+  last_webhook_at?: number;
+  last_test_ok?: number | null;
+  last_test_latency?: number | null;
+  last_test_message?: string | null;
+  last_test_at?: string | null;
 }
 
 function toEntry(row: PoolRow): ProxyPoolEntry {
@@ -46,6 +61,13 @@ function toEntry(row: PoolRow): ProxyPoolEntry {
     boundAccounts: Number(row.boundAccounts ?? 0),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    webhookEnabled: Number(row.webhook_enabled ?? 0) === 1,
+    webhookToken: row.webhook_token ?? null,
+    lastWebhookAt: Number(row.last_webhook_at ?? 0),
+    lastTestOk: row.last_test_ok === null || row.last_test_ok === undefined ? null : Number(row.last_test_ok) === 1,
+    lastTestLatency: row.last_test_latency !== null && row.last_test_latency !== undefined ? Number(row.last_test_latency) : null,
+    lastTestMessage: row.last_test_message ?? null,
+    lastTestAt: row.last_test_at ?? null,
   };
 }
 
@@ -135,7 +157,16 @@ export function pickAutoProxyPoolId(): number | null {
   return row ? Number(row.id) : null;
 }
 
-export function createProxyPoolEntry(name: string, proxyUrl: string, createdBy?: number): ProxyPoolEntry {
+export function generateWebhookToken(): string {
+  return crypto.randomBytes(16).toString('hex');
+}
+
+export function createProxyPoolEntry(
+  name: string,
+  proxyUrl: string,
+  createdBy?: number,
+  webhookEnabled?: boolean,
+): ProxyPoolEntry {
   const cleanName = validateName(name);
   const cleanUrl = validateUrl(proxyUrl);
   const count = getDb().prepare('SELECT COUNT(*) AS n FROM x_gateway_proxy_pool').get() as { n: number };
@@ -144,11 +175,15 @@ export function createProxyPoolEntry(name: string, proxyUrl: string, createdBy?:
   }
   const enc = encryptProxyUrl(cleanUrl);
   const now = new Date().toISOString();
+  const token = webhookEnabled ? generateWebhookToken() : null;
   try {
     const result = getDb().prepare(`
-      INSERT INTO x_gateway_proxy_pool (name, proxy_encrypted, proxy_iv, proxy_auth_tag, enabled, created_by, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 1, ?, ?, ?)
-    `).run(cleanName, enc.encrypted, enc.iv, enc.authTag, createdBy ?? null, now, now);
+      INSERT INTO x_gateway_proxy_pool (
+        name, proxy_encrypted, proxy_iv, proxy_auth_tag, enabled, created_by, created_at, updated_at,
+        webhook_token, webhook_enabled
+      )
+      VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+    `).run(cleanName, enc.encrypted, enc.iv, enc.authTag, createdBy ?? null, now, now, token, webhookEnabled ? 1 : 0);
     return entryWithCount(Number(result.lastInsertRowid));
   } catch (err) {
     if (isUniqueViolation(err)) throw new ProxyPoolError(409, 'An entry with this name already exists.');
@@ -158,7 +193,13 @@ export function createProxyPoolEntry(name: string, proxyUrl: string, createdBy?:
 
 export function updateProxyPoolEntry(
   id: number,
-  patch: { name?: string; proxyUrl?: string; enabled?: boolean },
+  patch: {
+    name?: string;
+    proxyUrl?: string;
+    enabled?: boolean;
+    webhookEnabled?: boolean;
+    webhookToken?: string | null;
+  },
 ): ProxyPoolEntry {
   const existing = rowById(id);
   if (!existing) throw new ProxyPoolError(404, 'Proxy pool entry not found.');
@@ -168,16 +209,85 @@ export function updateProxyPoolEntry(
     enc = encryptProxyUrl(validateUrl(patch.proxyUrl));
   }
   const nextEnabled = patch.enabled !== undefined ? (patch.enabled ? 1 : 0) : Number(existing.enabled);
+
+  let nextWebhookEnabled = existing.webhook_enabled ? Number(existing.webhook_enabled) : 0;
+  let nextWebhookToken = existing.webhook_token ?? null;
+
+  if (patch.webhookEnabled !== undefined) {
+    nextWebhookEnabled = patch.webhookEnabled ? 1 : 0;
+    if (nextWebhookEnabled && !nextWebhookToken && !patch.webhookToken) {
+      nextWebhookToken = generateWebhookToken();
+    }
+  }
+  if (patch.webhookToken !== undefined) {
+    nextWebhookToken = patch.webhookToken;
+  }
+
   try {
     getDb().prepare(`
       UPDATE x_gateway_proxy_pool
-      SET name = ?, proxy_encrypted = ?, proxy_iv = ?, proxy_auth_tag = ?, enabled = ?, updated_at = ?
+      SET name = ?, proxy_encrypted = ?, proxy_iv = ?, proxy_auth_tag = ?, enabled = ?,
+          webhook_enabled = ?, webhook_token = ?, updated_at = ?
       WHERE id = ?
-    `).run(nextName, enc.encrypted, enc.iv, enc.authTag, nextEnabled, new Date().toISOString(), id);
+    `).run(
+      nextName,
+      enc.encrypted,
+      enc.iv,
+      enc.authTag,
+      nextEnabled,
+      nextWebhookEnabled,
+      nextWebhookToken,
+      new Date().toISOString(),
+      id,
+    );
   } catch (err) {
     if (isUniqueViolation(err)) throw new ProxyPoolError(409, 'An entry with this name already exists.');
     throw err;
   }
+  return entryWithCount(id);
+}
+
+export function regenerateProxyWebhookToken(id: number): ProxyPoolEntry {
+  const existing = rowById(id);
+  if (!existing) throw new ProxyPoolError(404, 'Proxy pool entry not found.');
+  const newToken = generateWebhookToken();
+  getDb().prepare(`
+    UPDATE x_gateway_proxy_pool
+    SET webhook_token = ?, webhook_enabled = 1, updated_at = ?
+    WHERE id = ?
+  `).run(newToken, new Date().toISOString(), id);
+  return entryWithCount(id);
+}
+
+export function recordProxyTestResult(
+  id: number,
+  ok: boolean,
+  latencyMs: number,
+  message?: string | null,
+): void {
+  const now = new Date().toISOString();
+  getDb().prepare(`
+    UPDATE x_gateway_proxy_pool
+    SET last_test_ok = ?, last_test_latency = ?, last_test_message = ?, last_test_at = ?, updated_at = ?
+    WHERE id = ?
+  `).run(ok ? 1 : 0, latencyMs, message ?? null, now, now, id);
+}
+
+export function updateProxyWebhookUrl(
+  id: number,
+  newUrl: string,
+  timestamp: number,
+): ProxyPoolEntry {
+  const existing = rowById(id);
+  if (!existing) throw new ProxyPoolError(404, 'Proxy pool entry not found.');
+  const cleanUrl = validateUrl(newUrl);
+  const enc = encryptProxyUrl(cleanUrl);
+  const now = new Date().toISOString();
+  getDb().prepare(`
+    UPDATE x_gateway_proxy_pool
+    SET proxy_encrypted = ?, proxy_iv = ?, proxy_auth_tag = ?, last_webhook_at = ?, updated_at = ?
+    WHERE id = ?
+  `).run(enc.encrypted, enc.iv, enc.authTag, timestamp, now, id);
   return entryWithCount(id);
 }
 
