@@ -8,10 +8,11 @@ import { handleXGatewayChat } from './router.js';
 
 export const xPlaygroundRouter = Router();
 const image = z.object({ type: z.literal('image_url'), image_url: z.object({
-  url: z.string().max(10_000_000).refine(
-    url => url.startsWith('data:image/') || /^https?:\/\//i.test(url),
-    { message: 'Must be a valid data:image URI or http(s) URL' }
-  ),
+  url: z.string().max(6_000_000).regex(/^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/i)
+    .refine(url => {
+      const comma = url.indexOf(',');
+      return comma !== -1 && Buffer.byteLength(url.slice(comma + 1), 'base64') <= 4_194_304;
+    }),
 }).strict() }).strict();
 const content = z.union([z.string().max(100_000), z.array(z.union([
   z.object({ type: z.literal('text'), text: z.string().max(100_000) }).strict(), image,
