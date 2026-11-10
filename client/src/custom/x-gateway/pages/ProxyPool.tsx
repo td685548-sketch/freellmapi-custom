@@ -151,21 +151,23 @@ export default function ProxyPool() {
   const testSingle = useMutation({
     meta: { silenceToast: true },
     mutationFn: async (id: number) => ({ id, ...(await proxyPoolApi.test(id)) }),
-    onSuccess: result => {
+    onSuccess: async result => {
       setTestResults(prev => ({ ...prev, [result.id]: result }))
+      await client.invalidateQueries({ queryKey: ['x-proxy-pool'] })
     },
   })
 
   const testAll = useMutation({
     meta: { silenceToast: true },
     mutationFn: () => proxyPoolApi.testAll(),
-    onSuccess: summary => {
+    onSuccess: async summary => {
       setTestAllSummary(summary)
       const mapped: Record<number, XProxyPoolTestResult> = {}
       for (const r of summary.results) {
         mapped[r.id] = r
       }
       setTestResults(prev => ({ ...prev, ...mapped }))
+      await client.invalidateQueries({ queryKey: ['x-proxy-pool'] })
     },
   })
 
@@ -857,25 +859,47 @@ export default function ProxyPool() {
                 </div>
 
                 {entry.webhookEnabled && entry.webhookToken && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        width: '100%',
+                        boxSizing: 'border-box',
+                      }}
+                    >
                       <input
                         readOnly
                         value={`${window.location.origin}/api/proxy-webhook?token=${encodeURIComponent(entry.webhookToken)}`}
                         style={{
                           fontSize: '11px',
                           fontFamily: 'monospace',
-                          padding: '4px 8px',
-                          flex: 1,
-                          background: 'var(--x-bg, #fff)',
-                          border: '1px solid var(--x-border)',
-                          borderRadius: '4px',
+                          padding: '5px 8px',
+                          flex: '1 1 auto',
+                          minWidth: 0,
+                          background: 'var(--x-bg, #0f172a)',
+                          color: 'var(--x-text, inherit)',
+                          border: '1px solid var(--x-border, #334155)',
+                          borderRadius: '5px',
+                          outline: 'none',
                         }}
                         onClick={e => (e.target as HTMLInputElement).select()}
                       />
                       <button
                         type="button"
                         className="x-button x-small"
+                        style={{
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 5,
+                          height: '28px',
+                          padding: '0 10px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                        }}
                         title={s.copyWebhookUrl}
                         onClick={() => {
                           navigator.clipboard.writeText(
@@ -885,14 +909,24 @@ export default function ProxyPool() {
                           setTimeout(() => setCopiedWebhookId(null), 2500)
                         }}
                       >
-                        {copiedWebhookId === entry.id ? <Check size={13} /> : <Copy size={13} />}
-                        {copiedWebhookId === entry.id ? s.copied : s.copyWebhookUrl}
+                        {copiedWebhookId === entry.id ? <Check size={13} color="#10b981" /> : <Copy size={13} />}
+                        <span>{copiedWebhookId === entry.id ? s.copied : s.copy}</span>
                       </button>
                       {canEdit && (
                         <button
                           type="button"
                           className="x-icon-button"
+                          style={{
+                            flexShrink: 0,
+                            width: '28px',
+                            height: '28px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            borderRadius: '5px',
+                          }}
                           title={s.regenerateToken}
+                          aria-label={s.regenerateToken}
                           disabled={regenerateToken.isPending}
                           onClick={() => {
                             if (window.confirm(s.regenerateTokenConfirm)) {
@@ -900,17 +934,39 @@ export default function ProxyPool() {
                             }
                           }}
                         >
-                          <RefreshCw size={13} />
+                          <RefreshCw
+                            size={13}
+                            className={regenerateToken.isPending && regenerateToken.variables === entry.id ? 'x-spin' : ''}
+                          />
                         </button>
                       )}
                     </div>
 
-                    <p className="x-caption" style={{ fontSize: '11px', margin: 0, opacity: 0.75 }}>
+                    <p className="x-caption" style={{ fontSize: '11px', margin: 0, opacity: 0.75, lineHeight: 1.4 }}>
                       {s.webhookHelp}
                     </p>
 
                     {entry.lastWebhookAt ? (
-                      <div style={{ fontSize: '11px', opacity: 0.85, color: 'var(--x-primary, #6366f1)' }}>
+                      <div
+                        style={{
+                          fontSize: '11px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 5,
+                          color: 'var(--x-primary, #6366f1)',
+                          opacity: 0.9,
+                          fontWeight: 500,
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: '50%',
+                            background: '#10b981',
+                            display: 'inline-block',
+                          }}
+                        />
                         {s.webhookUpdated.replace(
                           '{time}',
                           new Date(entry.lastWebhookAt).toLocaleString(),
