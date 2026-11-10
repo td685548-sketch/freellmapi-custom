@@ -169,4 +169,58 @@ describe('Playground component', () => {
     expect(button).not.toBeNull();
     expect(button?.textContent).toContain('Copy');
   });
+
+  it('supports pasting and drag-dropping image attachments into chat composer', async () => {
+    act(() => {
+      root.render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <Playground />
+          </MemoryRouter>
+        </QueryClientProvider>
+      );
+    });
+
+    await vi.waitFor(() => {
+      const textarea = container.querySelector('textarea');
+      expect(textarea).not.toBeNull();
+    });
+
+    const textarea = container.querySelector('textarea')!;
+    const composer = container.querySelector('.x-chat-composer')!;
+
+    // Test dragover and dragleave states
+    act(() => {
+      composer.dispatchEvent(
+        new Event('dragover', { bubbles: true, cancelable: true })
+      );
+    });
+    act(() => {
+      composer.dispatchEvent(
+        new Event('dragleave', { bubbles: true, cancelable: true })
+      );
+    });
+
+    // Test paste event with image data
+    const mockFile = new File(['fake-image-content'], 'screenshot.png', { type: 'image/png' });
+    const pasteEvent = new Event('paste', { bubbles: true, cancelable: true }) as any;
+    pasteEvent.clipboardData = {
+      items: [
+        {
+          type: 'image/png',
+          getAsFile: () => mockFile,
+        },
+      ],
+    };
+
+    act(() => {
+      textarea.dispatchEvent(pasteEvent);
+    });
+
+    // FileReader in optimizeImageFile should resolve and render attachment preview
+    await vi.waitFor(() => {
+      const attachments = container.querySelector('.x-chat-attachments');
+      expect(attachments).not.toBeNull();
+    });
+  });
 });

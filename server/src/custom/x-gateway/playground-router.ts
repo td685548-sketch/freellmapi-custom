@@ -8,12 +8,14 @@ import { handleXGatewayChat } from './router.js';
 
 export const xPlaygroundRouter = Router();
 const image = z.object({ type: z.literal('image_url'), image_url: z.object({
-  url: z.string().max(1_400_000).regex(/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/)
-    .refine(url => Buffer.byteLength(url.slice(url.indexOf(',') + 1), 'base64') <= 1_048_576),
+  url: z.string().max(10_000_000).refine(
+    url => url.startsWith('data:image/') || /^https?:\/\//i.test(url),
+    { message: 'Must be a valid data:image URI or http(s) URL' }
+  ),
 }).strict() }).strict();
 const content = z.union([z.string().max(100_000), z.array(z.union([
   z.object({ type: z.literal('text'), text: z.string().max(100_000) }).strict(), image,
-])).min(1).max(8).refine(parts => parts.filter(p => p.type === 'image_url').length <= 4)]);
+])).min(1).max(12).refine(parts => parts.filter(p => p.type === 'image_url').length <= 4)]);
 const schema = z.object({
   model: z.string().trim().min(1).max(200),
   messages: z.array(z.object({ role: z.enum(['system', 'user', 'assistant']), content }).strict()).min(1).max(100),

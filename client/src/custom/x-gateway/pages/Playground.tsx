@@ -36,6 +36,82 @@ import { useUserSession } from '../../use-session';
 import { useSessionRevision } from '../../session-state';
 import '../playground.css';
 
+async function optimizeImageFile(file: File): Promise<{ id: string; name: string; url: string }> {
+  // If file is GIF or already small (<= 800KB), keep as-is to avoid re-encoding
+  if (file.type === 'image/gif' || file.size <= 800_000) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        resolve({
+          id: crypto.randomUUID(),
+          name: file.name || 'image.png',
+          url: reader.result as string,
+        });
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // Otherwise downscale and compress via canvas
+  return new Promise((resolve) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const MAX_DIM = 1920;
+      let width = img.width;
+      let height = img.height;
+
+      if (width > MAX_DIM || height > MAX_DIM) {
+        if (width > height) {
+          height = Math.round((height * MAX_DIM) / width);
+          width = MAX_DIM;
+        } else {
+          width = Math.round((width * MAX_DIM) / height);
+          height = MAX_DIM;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressedUrl = canvas.toDataURL('image/jpeg', 0.85);
+        resolve({
+          id: crypto.randomUUID(),
+          name: file.name ? file.name.replace(/\.[^.]+$/, '.jpg') : 'pasted-image.jpg',
+          url: compressedUrl,
+        });
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () =>
+        resolve({
+          id: crypto.randomUUID(),
+          name: file.name || 'image.png',
+          url: reader.result as string,
+        });
+      reader.readAsDataURL(file);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      const reader = new FileReader();
+      reader.onload = () =>
+        resolve({
+          id: crypto.randomUUID(),
+          name: file.name || 'image.png',
+          url: reader.result as string,
+        });
+      reader.readAsDataURL(file);
+    };
+    img.src = objectUrl;
+  });
+}
+
 export default function Playground() {
   const s = usePlaygroundStrings();
   const session = useUserSession();
@@ -185,39 +261,89 @@ export default function Playground() {
     );
   };
 
-  // Image attachment handler (max 4 images, <= 1MB each, standard formats)
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setInputError(null);
-    const files = Array.from(e.target.files || []);
-    if (!files.length) return;
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
 
-    if (attachments.length + files.length > 4) {
-      setInputError(s.imageError);
-      return;
-    }
+  // Unified image processor supporting paperclip pick, clipboard paste (Ctrl+V) and drag-and-drop
+  const processFiles = useCallback(
+    async (files: File[]) => {
+      setInputError(null);
+      if (!files.length) return;
 
-    const validTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
-    for (const file of files) {
-      if (!validTypes.includes(file.type) || file.size > 1_048_576) {
+      if (attachments.length + files.length > 4) {
         setInputError(s.imageError);
         return;
       }
 
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const url = event.target?.result as string;
-        if (url) {
-          setAttachments((prev) => [
-            ...prev,
-            { id: crypto.randomUUID(), name: file.name, url },
-          ]);
-        }
-      };
-      reader.readAsDataURL(file);
-    }
+      const validFiles = files.filter(
+        (f) => f.type.startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(f.name)
+      );
 
+      if (validFiles.length === 0) {
+        setInputError(s.imageError);
+        return;
+      }
+
+      try {
+        const optimized = await Promise.all(validFiles.map(optimizeImageFile));
+        setAttachments((prev) => [...prev, ...optimized].slice(0, 4));
+      } catch {
+        setInputError(s.imageError);
+      }
+    },
+    [attachments.length, s.imageError]
+  );
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) {
+      void processFiles(files);
+    }
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
+    }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items || items.length === 0) return;
+
+    const files: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          files.push(file);
+        }
+      }
+    }
+
+    if (files.length > 0) {
+      e.preventDefault();
+      void processFiles(files);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    if (e.dataTransfer?.types?.includes('Files')) {
+      e.preventDefault();
+      setIsDraggingOver(true);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingOver(false);
+    const files = Array.from(e.dataTransfer?.files || []).filter((f) =>
+      f.type.startsWith('image/')
+    );
+    if (files.length > 0) {
+      void processFiles(files);
     }
   };
 
@@ -291,16 +417,32 @@ export default function Playground() {
       requestMessages.push({ role: 'system', content: systemPrompt.trim() });
     }
 
-    for (const msg of activeChat.messages) {
-      if (msg.images && msg.images.length > 0) {
-        const parts: PlaygroundContent = [
-          { type: 'text', text: msg.content },
-          ...msg.images.map((img) => ({
+    // Helper to format multimodal content parts safely without empty text blocks
+    const buildParts = (text: string, images?: ChatImage[]): PlaygroundContent => {
+      const parts: PlaygroundContent = [];
+      const trimmed = text.trim();
+      if (trimmed) {
+        parts.push({ type: 'text', text: trimmed });
+      }
+      if (images && images.length > 0) {
+        for (const img of images) {
+          parts.push({
             type: 'image_url' as const,
             image_url: { url: img.url },
-          })),
-        ];
-        requestMessages.push({ role: msg.role, content: parts });
+          });
+        }
+      }
+      // If user submitted an image without prompt, add a concise default instruction
+      // to avoid 400 errors on upstream vision models requiring non-empty text.
+      if (parts.length > 0 && !parts.some((p) => p.type === 'text')) {
+        parts.unshift({ type: 'text', text: 'Describe or analyze this image.' });
+      }
+      return parts;
+    };
+
+    for (const msg of activeChat.messages) {
+      if (msg.images && msg.images.length > 0) {
+        requestMessages.push({ role: msg.role, content: buildParts(msg.content, msg.images) });
       } else {
         requestMessages.push({ role: msg.role, content: msg.content });
       }
@@ -308,14 +450,7 @@ export default function Playground() {
 
     // Add current user turn
     if (userTurn.images && userTurn.images.length > 0) {
-      const parts: PlaygroundContent = [
-        { type: 'text', text: userTurn.content },
-        ...userTurn.images.map((img) => ({
-          type: 'image_url' as const,
-          image_url: { url: img.url },
-        })),
-      ];
-      requestMessages.push({ role: 'user', content: parts });
+      requestMessages.push({ role: 'user', content: buildParts(userTurn.content, userTurn.images) });
     } else {
       requestMessages.push({ role: 'user', content: userTurn.content });
     }
@@ -660,7 +795,14 @@ export default function Playground() {
           )}
 
           {/* Composer & Input Area */}
-          <div className="x-chat-composer mt-auto flex-shrink-0 border border-border rounded-xl overflow-hidden bg-background">
+          <div
+            className={`x-chat-composer mt-auto flex-shrink-0 border rounded-xl overflow-hidden bg-background transition-colors ${
+              isDraggingOver ? 'border-primary ring-2 ring-primary/30 bg-primary/5' : 'border-border'
+            }`}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
             {/* Attachment Previews */}
             {attachments.length > 0 && (
               <div className="x-chat-attachments flex gap-2 p-2 border-b border-border flex-wrap bg-muted/20">
@@ -694,6 +836,7 @@ export default function Playground() {
                   void handleSend();
                 }
               }}
+              onPaste={handlePaste}
               placeholder={s.placeholder}
               disabled={isStreaming}
               className="w-full p-3 border-0 bg-transparent text-sm focus:outline-hidden resize-none"

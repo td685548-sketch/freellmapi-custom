@@ -28,7 +28,7 @@ import {
 } from '../provider-accounts/store.js';
 import { xGatewayAuth } from './auth.js';
 import { isModelAllowedForKey, type ValidatedXGatewayClientKey } from './client-keys.js';
-import { augmentCandidatesWithCapacityAdapter } from './capacity-adapter.js';
+import { augmentCandidatesWithCapacityAdapter, looksLikeVisionModel } from './capacity-adapter.js';
 import {
   DEFAULT_COMBO_STRATEGY,
   resolveComboPolicy,
@@ -39,6 +39,7 @@ import {
 } from './combos.js';
 import { getConfigSnapshot } from './config.js';
 import { runInGatewayScope } from './context.js';
+import { preprocessGatewayMessages } from './token-savers-pipeline.js';
 import { xGatewayProtocolsRouter } from './protocols.js';
 
 export const xGatewayRouter = Router();
@@ -56,7 +57,7 @@ function isWithinAccountCaps(account: AccountRow & { requests: number; tokens: n
   return true;
 }
 
-export type CandidateModality = 'chat' | 'image';
+export type CandidateModality = 'chat' | 'image' | 'vision';
 
 const IMAGE_MODEL_RE =
   /(?:^|[^a-z])(image|imagen|dall-?e|flux|diffusion|sdxl|seedream|ideogram|recraft|midjourney|qwen-image|wanx)(?:[^a-z]|$)/i;
@@ -65,6 +66,7 @@ const IMAGE_MODEL_RE =
  * `auto` normally means "first model of the account", which is a chat model.
  * Image routes need the account's image model instead, or the chat model gets
  * forwarded to `/images/generations` and rejected upstream.
+ * Vision routes need a model that can process image inputs.
  */
 function pickCandidateModel(models: { id: string; name?: string }[], modality: CandidateModality): string {
   if (modality === 'image') {
@@ -72,6 +74,10 @@ function pickCandidateModel(models: { id: string; name?: string }[], modality: C
     if (image) return image.id;
     const generic = models.find(m => m.id.toLowerCase() === 'default' || m.id.toLowerCase() === 'auto');
     if (generic) return generic.id;
+  }
+  if (modality === 'vision') {
+    const vision = models.find(m => looksLikeVisionModel(m.id));
+    if (vision) return vision.id;
   }
   return models[0]?.id ?? 'default';
 }
@@ -120,6 +126,13 @@ export function resolveCandidateRoutes(
     for (const account of usable) {
       const models = accountModels(account);
       candidates.push({ account, modelId: pickCandidateModel(models, modality) });
+    }
+    if (modality === 'vision') {
+      candidates.sort((a, b) => {
+        const aVision = looksLikeVisionModel(a.modelId) ? 1 : 0;
+        const bVision = looksLikeVisionModel(b.modelId) ? 1 : 0;
+        return bVision - aVision;
+      });
     }
     return { candidates };
   }
@@ -510,25 +523,39 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
     return;
   }
   const isStream = body.stream === true;
-  const { messages, appliedSavers } = applyGatewaySavers(req, rawMessages);
+  const controller = new AbortController();
+  const onClose = () => { if (!res.writableEnded) controller.abort(); };
+  res.once('close', onClose);
+
+  const pipelineResult = await preprocessGatewayMessages(req, res, {
+    messages: rawMessages,
+    rawBody: body,
+    requestedModel,
+    format: 'openai',
+    signal: controller.signal,
+  });
+  const messages = pipelineResult.messages;
+  const appliedSavers = pipelineResult.appliedSavers;
 
   const scope = {
     gateway: 'x' as const,
     outputSavers: appliedSavers,
     inputSaver: getConfigSnapshot().savers.input,
-    inputTokensSaved: 0,
+    inputTokensSaved: pipelineResult.tokensSavedEst,
   };
 
   res.setHeader('X-Gateway', 'x');
-  res.setHeader('X-Output-Saver-Applied', appliedSavers.join(','));
-  res.setHeader('X-Input-Tokens-Saved', '0');
-
-  const controller = new AbortController();
-  const onClose = () => { if (!res.writableEnded) controller.abort(); };
-  res.once('close', onClose);
   try {
   await runInGatewayScope(scope, async () => {
-    const { candidates: rawCandidates, notFoundError, combo } = resolveCandidateRoutes(requestedModel);
+    const hasImage = messages.some(m => {
+      if (Array.isArray(m.content)) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return m.content.some((p: any) => p?.type === 'image_url' || p?.type === 'image' || p?.image_url);
+      }
+      return false;
+    });
+    const modality: CandidateModality = hasImage ? 'vision' : 'chat';
+    const { candidates: rawCandidates, notFoundError, combo } = resolveCandidateRoutes(requestedModel, modality);
     if (notFoundError) {
       res.status(404).json({
         error: { message: notFoundError, type: 'invalid_request_error', code: 'model_not_found' },
