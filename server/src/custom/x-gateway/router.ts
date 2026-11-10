@@ -39,7 +39,6 @@ import {
 } from './combos.js';
 import { getConfigSnapshot } from './config.js';
 import { runInGatewayScope } from './context.js';
-import { preprocessGatewayMessages } from './token-savers-pipeline.js';
 import { xGatewayProtocolsRouter } from './protocols.js';
 
 export const xGatewayRouter = Router();
@@ -523,28 +522,22 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
     return;
   }
   const isStream = body.stream === true;
-  const controller = new AbortController();
-  const onClose = () => { if (!res.writableEnded) controller.abort(); };
-  res.once('close', onClose);
-
-  const pipelineResult = await preprocessGatewayMessages(req, res, {
-    messages: rawMessages,
-    rawBody: body,
-    requestedModel,
-    format: 'openai',
-    signal: controller.signal,
-  });
-  const messages = pipelineResult.messages;
-  const appliedSavers = pipelineResult.appliedSavers;
+  const { messages, appliedSavers } = applyGatewaySavers(req, rawMessages);
 
   const scope = {
     gateway: 'x' as const,
     outputSavers: appliedSavers,
     inputSaver: getConfigSnapshot().savers.input,
-    inputTokensSaved: pipelineResult.tokensSavedEst,
+    inputTokensSaved: 0,
   };
 
   res.setHeader('X-Gateway', 'x');
+  res.setHeader('X-Output-Saver-Applied', appliedSavers.join(','));
+  res.setHeader('X-Input-Tokens-Saved', '0');
+
+  const controller = new AbortController();
+  const onClose = () => { if (!res.writableEnded) controller.abort(); };
+  res.once('close', onClose);
   try {
   await runInGatewayScope(scope, async () => {
     const hasImage = messages.some(m => {
