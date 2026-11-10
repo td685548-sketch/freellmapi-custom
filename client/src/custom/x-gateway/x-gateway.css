@@ -6,8 +6,8 @@
 
 /* Management pages: combos, playground, console log */
 .x-main-playground { height: 100dvh; max-height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
-.x-content-playground { flex: 1 1 0%; min-height: 0; height: calc(100dvh - 76px); max-height: calc(100dvh - 76px); display: flex; flex-direction: column; padding: 12px 24px 14px; max-width: 100%; width: 100%; overflow: hidden; }
-@media (max-width: 850px) { .x-content-playground { height: calc(100dvh - 64px); max-height: calc(100dvh - 64px); padding: 8px 10px 10px; } }
+.x-content-playground { flex: 1 1 0%; min-height: 0; height: calc(100dvh - 76px); max-height: calc(100dvh - 76px); display: flex; flex-direction: column; padding: 8px 16px 10px 16px; max-width: 100% !important; width: 100% !important; margin: 0 !important; overflow: hidden; }
+@media (max-width: 850px) { .x-content-playground { height: calc(100dvh - 64px); max-height: calc(100dvh - 64px); padding: 6px 8px 8px 8px; } }
 .x-mgmt-form { display: grid; gap: 12px; padding: 16px; margin-bottom: 16px; }
 .x-mgmt-form label { display: grid; gap: 4px; font-size: 13px; }
 .x-mgmt-form input, .x-mgmt-form select, .x-mgmt-form textarea { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border, #8884); background: transparent; color: inherit; font: inherit; }

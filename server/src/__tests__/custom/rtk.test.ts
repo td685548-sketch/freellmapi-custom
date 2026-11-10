@@ -150,17 +150,24 @@ describe('RTK (Runtime Tool-Result Compressor)', () => {
   describe('compressToolOutput and stats', () => {
     it('compresses tool output and tracks saved bytes', () => {
       const gitStatus = [
-        '## main...origin/main',
-        'M  src/components/dashboard/overview-metrics.tsx',
-        'M  src/components/navigation/sidebar-links.tsx',
-        'M  src/lib/analytics/token-usage-reporter.ts',
-        '?? tests/fixtures/sample-git-repository-diff.txt',
-        '?? tests/fixtures/sample-build-log-output.log',
+        'On branch main',
+        'Your branch is up to date with \'origin/main\'.',
+        '',
+        'Changes to be committed:',
+        '  (use "git restore --staged <file>..." to unstage)',
+        '        modified:   src/components/dashboard/overview-metrics.tsx',
+        '        modified:   src/components/navigation/sidebar-links.tsx',
+        '        modified:   src/lib/analytics/token-usage-reporter.ts',
+        '',
+        'Untracked files:',
+        '  (use "git add <file>..." to include in what will be committed)',
+        '        tests/fixtures/sample-git-repository-diff.txt',
+        '        tests/fixtures/sample-build-log-output.log',
       ].join('\n');
 
       const res = compressToolOutput(gitStatus);
       expect(res.filter).toBe('git-status');
-      expect(res.bytesSaved).toBeGreaterThanOrEqual(0);
+      expect(res.bytesSaved).toBeGreaterThan(0);
       expect(res.compressed).toContain('* main');
     });
 

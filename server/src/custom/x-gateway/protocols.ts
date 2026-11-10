@@ -28,10 +28,10 @@ import { xGatewayAuth } from './auth.js';
 import { getConfigSnapshot, getMediaDefaults } from './config.js';
 import { runInGatewayScope } from './context.js';
 import {
-  applyGatewaySavers,
   resolveCandidateRoutes,
   type CandidateRoute,
 } from './router.js';
+import { preprocessGatewayMessages } from './token-savers-pipeline.js';
 
 export const xGatewayProtocolsRouter = Router();
 
@@ -156,6 +156,7 @@ function convertAnthropicMessages(body: Record<string, any>): {
           role: 'tool',
           tool_call_id: String(block.tool_use_id ?? ''),
           content: flattenToolResultContent(block.content),
+          ...(block.is_error === true ? { is_error: true } : {}),
         });
       }
     }
@@ -243,18 +244,29 @@ xGatewayProtocolsRouter.post('/messages', xGatewayAuth, async (req: Request, res
   const requestedModel = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'auto';
   const isStream = body.stream === true;
   const converted = convertAnthropicMessages(body);
-  const { messages, appliedSavers } = applyGatewaySavers(req, converted.messages);
+
+  const controller = new AbortController();
+  const onClose = () => { if (!res.writableEnded) controller.abort(); };
+  res.once('close', onClose);
+
+  const pipelineResult = await preprocessGatewayMessages(req, res, {
+    messages: converted.messages,
+    rawBody: body,
+    requestedModel,
+    format: 'claude',
+    signal: controller.signal,
+  });
+  const messages = pipelineResult.messages;
+  const appliedSavers = pipelineResult.appliedSavers;
 
   const scope = {
     gateway: 'x' as const,
     outputSavers: appliedSavers,
     inputSaver: getConfigSnapshot().savers.input,
-    inputTokensSaved: 0,
+    inputTokensSaved: pipelineResult.tokensSavedEst,
   };
 
   res.setHeader('X-Gateway', 'x');
-  res.setHeader('X-Output-Saver-Applied', appliedSavers.join(','));
-  res.setHeader('X-Input-Tokens-Saved', '0');
 
   await runInGatewayScope(scope, async () => {
     const { candidates, notFoundError } = resolveAnthropicCandidates(requestedModel);
@@ -529,6 +541,7 @@ function convertResponsesInput(body: Record<string, any>): {
           role: 'tool',
           tool_call_id: String(item.call_id ?? ''),
           content: output,
+          ...(item.is_error === true ? { is_error: true } : {}),
         });
         continue;
       }
@@ -629,18 +642,29 @@ xGatewayProtocolsRouter.post('/responses', xGatewayAuth, async (req: Request, re
 
   const requestedModel = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'auto';
   const isStream = body.stream === true;
-  const { messages, appliedSavers } = applyGatewaySavers(req, converted.messages);
+
+  const controller = new AbortController();
+  const onClose = () => { if (!res.writableEnded) controller.abort(); };
+  res.once('close', onClose);
+
+  const pipelineResult = await preprocessGatewayMessages(req, res, {
+    messages: converted.messages,
+    rawBody: body,
+    requestedModel,
+    format: 'openai-responses',
+    signal: controller.signal,
+  });
+  const messages = pipelineResult.messages;
+  const appliedSavers = pipelineResult.appliedSavers;
 
   const scope = {
     gateway: 'x' as const,
     outputSavers: appliedSavers,
     inputSaver: getConfigSnapshot().savers.input,
-    inputTokensSaved: 0,
+    inputTokensSaved: pipelineResult.tokensSavedEst,
   };
 
   res.setHeader('X-Gateway', 'x');
-  res.setHeader('X-Output-Saver-Applied', appliedSavers.join(','));
-  res.setHeader('X-Input-Tokens-Saved', '0');
 
   await runInGatewayScope(scope, async () => {
     const { candidates, notFoundError } = resolveCandidateRoutes(requestedModel);

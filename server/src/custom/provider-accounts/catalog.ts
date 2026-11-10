@@ -6,6 +6,7 @@ import { OpenAICompatProvider } from '../../providers/openai-compat.js';
 import { CopilotProvider } from './copilot.js';
 import { COPILOT_BASE_URL } from './http.js';
 import { AnthropicWireProvider, WebCookieProvider } from './web-cookie.js';
+import { QoderProvider } from './qoder.js';
 
 export interface XGatewayCatalogProvider {
   id: string;
@@ -7559,6 +7560,9 @@ export function resolveXGatewayProvider(providerId: string, baseUrl?: string | n
   if (normalized === 'custom') {
     if (!trimmedUrl) return undefined;
     return resolveProvider('custom', trimmedUrl);
+  }
+  if (normalized === 'qoder' || normalized === 'qoder-cn') {
+    return new QoderProvider(normalized);
   }
 
   const catalogEntry = getXGatewayProvider(normalized);

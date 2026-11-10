@@ -9,6 +9,15 @@ const TRUNCATE_HEAD_LINES = 25;
 const TRUNCATE_TAIL_LINES = 15;
 const STATUS_MAX_FILES = 8;
 const STATUS_MAX_UNTRACKED = 5;
+const GREP_PER_FILE_MAX = 5;
+const FIND_PER_DIR_MAX = 10;
+const FIND_TOTAL_DIR_MAX = 20;
+const TREE_MAX_LINES = 100;
+const DEDUP_LINE_MAX = 150;
+const GIT_LOG_MAX_LINES = 100;
+const LS_NOISE_DIRS = ['node_modules', '.git', '.next', 'dist', 'build', 'target', '.turbo', '.cache'];
+const LS_DATE_RE = /\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+(\d{4}|\d{2}:\d{2})\s+/;
+export const SEARCH_LIST_HEADER_RE = /^Result of search in '[^']*' \(total (\d+) files?\):/;
 
 // Regex patterns
 const RE_GIT_DIFF = /^diff --git /m;
@@ -67,6 +76,15 @@ export function getRtkStats(): RtkStats {
   return { ...statsState, filterHits: { ...statsState.filterHits } };
 }
 
+export function resetRtkStats(): RtkStats {
+  statsState.totalCompressions = 0;
+  statsState.bytesBefore = 0;
+  statsState.bytesAfter = 0;
+  statsState.tokensSavedEst = 0;
+  statsState.filterHits = {};
+  return getRtkStats();
+}
+
 export function recordRtkCompression(filter: string, before: number, after: number): void {
   const savedBytes = Math.max(0, before - after);
   statsState.totalCompressions += 1;
@@ -77,7 +95,7 @@ export function recordRtkCompression(filter: string, before: number, after: numb
 }
 
 // -------------------------------------------------------------
-// Filters
+// Filters ported from 9Router (open-sse/rtk/filters/*)
 // -------------------------------------------------------------
 
 export function filterGitStatus(input: string): string {
@@ -191,6 +209,54 @@ export function filterGitDiff(input: string): string {
   return out.length > 0 ? out.join('\n') : input;
 }
 
+export function filterGitLog(text: string, maxLines = GIT_LOG_MAX_LINES): string {
+  if (!text) return '';
+  const lines = String(text).split('\n');
+  const out: string[] = [];
+  let inCommit = false;
+  let subjectSeen = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    if (out.length >= maxLines) {
+      out.push(`... (+${lines.length - i} more lines truncated)`);
+      break;
+    }
+    const raw = lines[i];
+    const line = raw.trimEnd();
+    const trimmed = line.trim();
+
+    if (/^commit [0-9a-f]{7,40}$/i.test(trimmed) || /^[*|/\\ ]+commit [0-9a-f]{7,40}/i.test(trimmed)) {
+      inCommit = true;
+      subjectSeen = false;
+      out.push(line);
+      continue;
+    }
+
+    if (inCommit) {
+      if (/^[*|/\\ ]*(Author|Date):/i.test(trimmed)) {
+        out.push(trimmed);
+        continue;
+      }
+      if (trimmed === '') continue;
+      if (!subjectSeen && /^[*|/\\ ]* {4}\S/.test(line)) {
+        out.push('  Subject: ' + trimmed);
+        subjectSeen = true;
+        continue;
+      }
+      if (/^\d+ file\w* changed/.test(trimmed)) {
+        out.push('  ' + trimmed);
+        continue;
+      }
+      if (/^diff --git /.test(trimmed)) {
+        out.push('  ... diff body omitted');
+        inCommit = false;
+        continue;
+      }
+    }
+  }
+  return out.length > 0 ? out.join('\n') : text;
+}
+
 export function filterBuildOutput(input: string): string {
   const lines = input.split('\n');
   if (lines.length < 5) return input;
@@ -262,13 +328,260 @@ export function filterBuildOutput(input: string): string {
   return result.length > 0 ? result.join('\n') : smartTruncate(input);
 }
 
+export function filterGrep(input: string, maxPerFile = GREP_PER_FILE_MAX): string {
+  const byFile = new Map<string, Array<[string, string]>>();
+  let total = 0;
+
+  for (const line of input.split('\n')) {
+    const first = line.indexOf(':');
+    if (first === -1) continue;
+    const second = line.indexOf(':', first + 1);
+    if (second === -1) continue;
+    const file = line.slice(0, first);
+    const lineNumStr = line.slice(first + 1, second);
+    const content = line.slice(second + 1);
+    if (!/^\d+$/.test(lineNumStr)) continue;
+    total++;
+    if (!byFile.has(file)) byFile.set(file, []);
+    byFile.get(file)!.push([lineNumStr, content]);
+  }
+
+  if (total === 0) return input;
+
+  const files = Array.from(byFile.keys()).sort();
+  let out = `${total} matches in ${files.length}F:\n\n`;
+
+  for (const file of files) {
+    const matches = byFile.get(file)!;
+    out += `[file] ${file} (${matches.length}):\n`;
+    const show = matches.slice(0, maxPerFile);
+    for (const [lineNum, content] of show) {
+      out += `  ${lineNum.padStart(4)}: ${content.trim()}\n`;
+    }
+    if (matches.length > maxPerFile) {
+      out += `  +${matches.length - maxPerFile}\n`;
+    }
+    out += '\n';
+  }
+
+  return out.trimEnd();
+}
+
+export function filterFind(input: string, perDirMax = FIND_PER_DIR_MAX, totalDirMax = FIND_TOTAL_DIR_MAX): string {
+  const lines = input.split('\n').filter(l => l.trim());
+  if (lines.length === 0) return input;
+
+  const byDir = new Map<string, string[]>();
+
+  for (const path of lines) {
+    const lastSep = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+    let dir: string;
+    let basename: string;
+    if (lastSep === -1) {
+      dir = '.';
+      basename = path;
+    } else {
+      dir = path.slice(0, lastSep) || '/';
+      basename = path.slice(lastSep + 1);
+    }
+    if (!byDir.has(dir)) byDir.set(dir, []);
+    byDir.get(dir)!.push(basename);
+  }
+
+  const dirs = Array.from(byDir.keys()).sort();
+  let out = `${lines.length} files in ${dirs.length} dirs:\n\n`;
+
+  const showDirs = dirs.slice(0, totalDirMax);
+  for (const dir of showDirs) {
+    const files = byDir.get(dir)!;
+    const dirLabel = dir.replace(/\\/g, '/');
+    out += `${dirLabel}/  (${files.length})\n`;
+    const showFiles = files.slice(0, perDirMax);
+    for (const f of showFiles) out += `  ${f}\n`;
+    if (files.length > perDirMax) {
+      out += `  +${files.length - perDirMax}\n`;
+    }
+  }
+  if (dirs.length > totalDirMax) {
+    out += `\n+${dirs.length - totalDirMax} more dirs\n`;
+  }
+
+  return out.trimEnd();
+}
+
+export function filterTree(input: string, maxLines = TREE_MAX_LINES): string {
+  const lines = input.split('\n');
+  if (lines.length === 0) return input;
+
+  const filtered: string[] = [];
+  for (const line of lines) {
+    if (line.includes('director') && line.includes('file')) continue;
+    if (line.trim() === '' && filtered.length === 0) continue;
+    filtered.push(line);
+  }
+
+  while (filtered.length > 0 && filtered[filtered.length - 1].trim() === '') {
+    filtered.pop();
+  }
+
+  if (filtered.length > maxLines) {
+    const cut = filtered.length - maxLines;
+    return filtered.slice(0, maxLines).join('\n') + `\n... +${cut} more lines`;
+  }
+
+  return filtered.join('\n');
+}
+
+function humanSize(bytes: number): string {
+  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)}M`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)}K`;
+  return `${bytes}B`;
+}
+
+function parseLsLine(line: string): { fileType: string; size: number; name: string } | null {
+  const m = LS_DATE_RE.exec(line);
+  if (!m) return null;
+  const name = line.slice(m.index + m[0].length);
+  const beforeDate = line.slice(0, m.index);
+  const beforeParts = beforeDate.split(/\s+/).filter(Boolean);
+  if (beforeParts.length < 4) return null;
+
+  const perms = beforeParts[0];
+  const fileType = perms.charAt(0);
+
+  let size = 0;
+  for (let i = beforeParts.length - 1; i >= 0; i--) {
+    const n = Number(beforeParts[i]);
+    if (Number.isInteger(n) && String(n) === beforeParts[i]) { size = n; break; }
+  }
+  return { fileType, size, name };
+}
+
+export function filterLs(input: string): string {
+  const dirs: string[] = [];
+  const files: Array<[string, string]> = [];
+
+  for (const line of input.split('\n')) {
+    if (line.startsWith('total ') || line.length === 0) continue;
+    const parsed = parseLsLine(line);
+    if (!parsed) continue;
+    if (parsed.name === '.' || parsed.name === '..') continue;
+    if (LS_NOISE_DIRS.includes(parsed.name)) continue;
+
+    if (parsed.fileType === 'd') {
+      dirs.push(parsed.name);
+    } else if (parsed.fileType === '-' || parsed.fileType === 'l') {
+      files.push([parsed.name, humanSize(parsed.size)]);
+    }
+  }
+
+  if (dirs.length === 0 && files.length === 0) return input;
+
+  let out = '';
+  if (dirs.length > 0) {
+    out += `dirs (${dirs.length}): ${dirs.sort().join('  ')}\n`;
+  }
+  if (files.length > 0) {
+    out += `files (${files.length}):\n`;
+    for (const [name, size] of files.slice(0, 30)) {
+      out += `  ${name} (${size})\n`;
+    }
+    if (files.length > 30) {
+      out += `  +${files.length - 30} more files\n`;
+    }
+  }
+  return out.trim();
+}
+
+export function filterSearchList(input: string): string {
+  const lines = input.split('\n');
+  if (lines.length === 0) return input;
+
+  const header = lines[0] || '';
+  const rest = lines.slice(1);
+
+  const paths: string[] = [];
+  for (const raw of rest) {
+    const t = raw.trim();
+    if (!t.startsWith('- ')) continue;
+    paths.push(t.slice(2));
+  }
+  if (paths.length === 0) return input;
+
+  const byDir = new Map<string, string[]>();
+  for (const p of paths) {
+    const slash = p.lastIndexOf('/');
+    const dir = slash === -1 ? '.' : (p.slice(0, slash) || '/');
+    const name = slash === -1 ? p : p.slice(slash + 1);
+    if (!byDir.has(dir)) byDir.set(dir, []);
+    byDir.get(dir)!.push(name);
+  }
+
+  const dirs = Array.from(byDir.keys()).sort();
+  let out = `${header}\n${paths.length} files in ${dirs.length} dirs:\n\n`;
+
+  for (const dir of dirs.slice(0, 20)) {
+    const names = byDir.get(dir)!;
+    out += `${dir}/ (${names.length}):\n`;
+    for (const n of names.slice(0, 10)) out += `  ${n}\n`;
+    if (names.length > 10) {
+      out += `  +${names.length - 10}\n`;
+    }
+    out += '\n';
+  }
+  if (dirs.length > 20) {
+    out += `+${dirs.length - 20} more dirs\n`;
+  }
+
+  return out.replace(/\n+$/, '');
+}
+
+export function filterDedupLog(input: string, maxLines = DEDUP_LINE_MAX): string {
+  const lines = input.split('\n');
+  const out: string[] = [];
+  let prev: string | null = null;
+  let runCount = 0;
+  let blankStreak = 0;
+
+  const flushRun = () => {
+    if (prev !== null && runCount > 1) {
+      out.push(`  ... (${runCount - 1} duplicate lines)`);
+    }
+  };
+
+  for (const line of lines) {
+    if (line.trim() === '') {
+      if (blankStreak < 1) out.push(line);
+      blankStreak += 1;
+      flushRun();
+      prev = null;
+      runCount = 0;
+      continue;
+    }
+    blankStreak = 0;
+    if (line === prev) {
+      runCount += 1;
+      continue;
+    }
+    flushRun();
+    out.push(line);
+    prev = line;
+    runCount = 1;
+    if (out.length >= maxLines) {
+      out.push(`... (truncated at ${maxLines} lines)`);
+      return out.join('\n');
+    }
+  }
+  flushRun();
+  return out.join('\n');
+}
+
 export function filterReadNumbered(input: string): string {
   const lines = input.split('\n');
   const out: string[] = [];
   let blankCount = 0;
 
   for (const line of lines) {
-    // Strip "  123 | code" or "123: code" or "123  code"
     const cleaned = line.replace(/^\s*\d+[\s:|]+/, '');
     if (!cleaned.trim()) {
       blankCount++;
@@ -300,34 +613,35 @@ export function smartTruncate(input: string): string {
 // Autodetect & Compression Dispatcher
 // -------------------------------------------------------------
 
-export function autoDetectFilter(text: string): { name: string; run: (input: string) => string } | null {
-  const head = text.length > DETECT_WINDOW ? text.slice(0, DETECT_WINDOW) : text;
+function countMatches(str: string, regex: RegExp): number {
+  const re = new RegExp(regex.source, regex.flags.includes('g') ? regex.flags : regex.flags + 'g');
+  const m = str.match(re);
+  return m ? m.length : 0;
+}
 
-  if (RE_GIT_LOG.test(head)) {
-    return { name: 'git-log', run: input => smartTruncate(input) };
-  }
-  if (RE_GIT_DIFF.test(head) || RE_GIT_DIFF_HUNK.test(head)) {
-    return { name: 'git-diff', run: filterGitDiff };
-  }
-  if (RE_GIT_STATUS.test(head) || isMostlyPorcelain(head)) {
-    return { name: 'git-status', run: filterGitStatus };
-  }
-  if (RE_BUILD_OUTPUT.test(head)) {
-    return { name: 'build-output', run: filterBuildOutput };
-  }
-  if (RE_TREE_GLYPH.test(head) || RE_LS_TOTAL.test(head) || RE_LS_ROW.test(head)) {
-    return { name: 'directory-list', run: smartTruncate };
-  }
+function isGrepLine(line: string): boolean {
+  const first = line.indexOf(':');
+  if (first === -1) return false;
+  const second = line.indexOf(':', first + 1);
+  if (second === -1) return false;
+  const lineno = line.slice(first + 1, second);
+  return /^\d+$/.test(lineno);
+}
 
-  const lines = head.split('\n');
-  if (lines.length >= 10 && lines.some(l => /^\s*\d+[\s:|]/.test(l))) {
-    return { name: 'read-numbered', run: filterReadNumbered };
-  }
-  if (lines.length >= SMART_TRUNCATE_MIN_LINES) {
-    return { name: 'smart-truncate', run: smartTruncate };
-  }
+function isPathLike(line: string): boolean {
+  const t = line.trim();
+  if (t.length === 0) return false;
+  if (/^[A-Za-z]:[\\/]/.test(t)) return true;
+  if (t.includes(':')) return false;
+  return t.startsWith('.') || t.startsWith('/') || t.includes('/');
+}
 
-  return null;
+function isLineNumbered(lines: string[]): boolean {
+  let count = 0;
+  for (const l of lines) {
+    if (/^\s*\d+[\s:|]/.test(l)) count++;
+  }
+  return lines.length > 0 && count / lines.length >= 0.5;
 }
 
 function isMostlyPorcelain(head: string): boolean {
@@ -335,6 +649,79 @@ function isMostlyPorcelain(head: string): boolean {
   if (lines.length < 3) return false;
   const hits = lines.filter(l => RE_PORCELAIN.test(l)).length;
   return hits / lines.length >= 0.5;
+}
+
+export function autoDetectFilter(text: string): { name: string; run: (input: string) => string } | null {
+  const head = text.length > DETECT_WINDOW ? text.slice(0, DETECT_WINDOW) : text;
+
+  // 1. git-log
+  if (RE_GIT_LOG.test(head)) return { name: 'git-log', run: filterGitLog };
+
+  // 2. git-diff
+  if (RE_GIT_DIFF.test(head) || RE_GIT_DIFF_HUNK.test(head)) {
+    return { name: 'git-diff', run: filterGitDiff };
+  }
+
+  // 3. git-status (long form)
+  if (RE_GIT_STATUS.test(head)) {
+    return { name: 'git-status', run: filterGitStatus };
+  }
+
+  // 4. Build output BEFORE porcelain check
+  if (RE_BUILD_OUTPUT.test(head)) {
+    return { name: 'build-output', run: filterBuildOutput };
+  }
+
+  // 5. git-status (porcelain form)
+  if (isMostlyPorcelain(head)) {
+    return { name: 'git-status', run: filterGitStatus };
+  }
+
+  const lines = head.split('\n');
+  const nonEmpty = lines.filter(l => l.trim().length > 0);
+
+  // 6. grep: first 5 non-empty lines, ANY matches file:number:content
+  const first5 = nonEmpty.slice(0, 5);
+  if (first5.some(isGrepLine)) {
+    return { name: 'grep', run: filterGrep };
+  }
+
+  // 7. find: ALL non-empty lines path-like, >=3 lines
+  if (nonEmpty.length >= 3 && nonEmpty.every(isPathLike)) {
+    return { name: 'find', run: filterFind };
+  }
+
+  // 8. tree glyphs
+  if (RE_TREE_GLYPH.test(head)) {
+    return { name: 'tree', run: filterTree };
+  }
+
+  // 9. ls -la
+  if (RE_LS_TOTAL.test(head) || countMatches(head, RE_LS_ROW) >= 3) {
+    return { name: 'ls', run: filterLs };
+  }
+
+  // 10. search-list (Cursor glob)
+  if (SEARCH_LIST_HEADER_RE.test(head)) {
+    return { name: 'search-list', run: filterSearchList };
+  }
+
+  // 11. read-numbered
+  if (lines.length >= 10 && isLineNumbered(lines)) {
+    return { name: 'read-numbered', run: filterReadNumbered };
+  }
+
+  // 12. dedup-log for generic multi-line noise
+  if (nonEmpty.length >= 5) {
+    return { name: 'dedup-log', run: filterDedupLog };
+  }
+
+  // 13. smart-truncate fallback
+  if (text.split('\n').length >= SMART_TRUNCATE_MIN_LINES) {
+    return { name: 'smart-truncate', run: smartTruncate };
+  }
+
+  return null;
 }
 
 export function compressToolOutput(raw: string): {
@@ -359,11 +746,14 @@ export function compressToolOutput(raw: string): {
     const compressed = detector.run(raw);
     const bytesAfter = Buffer.byteLength(compressed, 'utf8');
     const bytesSaved = Math.max(0, bytesBefore - bytesAfter);
-    const savedPct = bytesBefore > 0 ? Math.round((bytesSaved / bytesBefore) * 100) : 0;
 
-    if (bytesSaved > 0) {
-      recordRtkCompression(detector.name, bytesBefore, bytesAfter);
+    // Safety: never return empty, never grow the input
+    if (!compressed || compressed.length === 0 || bytesAfter >= bytesBefore) {
+      return { compressed: raw, filter: detector.name, bytesBefore, bytesAfter: bytesBefore, bytesSaved: 0, savedPct: 0 };
     }
+
+    const savedPct = bytesBefore > 0 ? Math.round((bytesSaved / bytesBefore) * 100) : 0;
+    recordRtkCompression(detector.name, bytesBefore, bytesAfter);
 
     return {
       compressed,
@@ -398,7 +788,33 @@ export function compressMessages(body: unknown, enabled?: boolean): {
     if (!msg || typeof msg !== 'object') continue;
     const m = msg as Record<string, unknown>;
 
-    // Shape 1: OpenAI tool message: { role: 'tool', content: string }
+    // Shape 4: OpenAI Responses format — { type: 'function_call_output', output: string | [{type: 'input_text', text: string}] }
+    if (m.type === 'function_call_output') {
+      if (typeof m.output === 'string') {
+        const res = compressToolOutput(m.output);
+        if (res.bytesSaved > 0) {
+          m.output = res.compressed;
+          totalBefore += res.bytesBefore;
+          totalAfter += res.bytesAfter;
+          hits.push({ filter: res.filter, before: res.bytesBefore, after: res.bytesAfter });
+        }
+      } else if (Array.isArray(m.output)) {
+        for (const part of m.output) {
+          if (part && typeof part === 'object' && (part as any).type === 'input_text' && typeof (part as any).text === 'string') {
+            const res = compressToolOutput((part as any).text);
+            if (res.bytesSaved > 0) {
+              (part as any).text = res.compressed;
+              totalBefore += res.bytesBefore;
+              totalAfter += res.bytesAfter;
+              hits.push({ filter: res.filter, before: res.bytesBefore, after: res.bytesAfter });
+            }
+          }
+        }
+      }
+      continue;
+    }
+
+    // Shape 1: OpenAI tool message — { role: 'tool', content: string }
     if (m.role === 'tool' && typeof m.content === 'string') {
       const res = compressToolOutput(m.content);
       if (res.bytesSaved > 0) {
@@ -407,20 +823,54 @@ export function compressMessages(body: unknown, enabled?: boolean): {
         totalAfter += res.bytesAfter;
         hits.push({ filter: res.filter, before: res.bytesBefore, after: res.bytesAfter });
       }
+      continue;
     }
 
-    // Shape 2: Anthropic / OpenAI tool_result blocks in content array
+    // Shape 1b: OpenAI tool message with array content — { role: 'tool', content: [{ type: 'text', text: string }] }
+    if (m.role === 'tool' && Array.isArray(m.content)) {
+      for (const part of m.content) {
+        if (part && typeof part === 'object' && (part as any).type === 'text' && typeof (part as any).text === 'string') {
+          const res = compressToolOutput((part as any).text);
+          if (res.bytesSaved > 0) {
+            (part as any).text = res.compressed;
+            totalBefore += res.bytesBefore;
+            totalAfter += res.bytesAfter;
+            hits.push({ filter: res.filter, before: res.bytesBefore, after: res.bytesAfter });
+          }
+        }
+      }
+      continue;
+    }
+
+    // Shape 2 & 3: Blocks array with tool_result entries (Anthropic / Claude)
     if (Array.isArray(m.content)) {
       for (const block of m.content) {
         if (!block || typeof block !== 'object') continue;
         const b = block as Record<string, unknown>;
-        if (b.type === 'tool_result' && typeof b.content === 'string' && b.is_error !== true) {
+        if (b.type !== 'tool_result') continue;
+        if (b.is_error === true || b.status === 'error') continue; // PRESERVE ERROR OUTPUT
+
+        // String content
+        if (typeof b.content === 'string') {
           const res = compressToolOutput(b.content);
           if (res.bytesSaved > 0) {
             b.content = res.compressed;
             totalBefore += res.bytesBefore;
             totalAfter += res.bytesAfter;
             hits.push({ filter: res.filter, before: res.bytesBefore, after: res.bytesAfter });
+          }
+        } else if (Array.isArray(b.content)) {
+          // Array content: each { type: 'text', text: string }
+          for (const part of b.content) {
+            if (part && typeof part === 'object' && (part as any).type === 'text' && typeof (part as any).text === 'string') {
+              const res = compressToolOutput((part as any).text);
+              if (res.bytesSaved > 0) {
+                (part as any).text = res.compressed;
+                totalBefore += res.bytesBefore;
+                totalAfter += res.bytesAfter;
+                hits.push({ filter: res.filter, before: res.bytesBefore, after: res.bytesAfter });
+              }
+            }
           }
         }
       }

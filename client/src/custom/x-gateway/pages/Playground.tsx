@@ -4,19 +4,24 @@ import { Link } from 'react-router-dom';
 import {
   Check,
   ChevronDown,
+  ChevronUp,
   Copy,
+  Eraser,
+  Maximize2,
   MessageSquare,
+  Minimize2,
   PanelLeft,
   PanelLeftClose,
   Paperclip,
   Plus,
   RefreshCw,
   Send,
+  Sliders,
+  Sparkles,
   Square,
   Trash2,
   X,
   AlertCircle,
-  Sliders,
 } from 'lucide-react';
 import { usePlaygroundStrings } from '../playground-strings';
 import { PlaygroundMessageContent } from '../PlaygroundMessage';
@@ -170,20 +175,63 @@ export default function Playground() {
     });
   }, []);
 
+  // Full-width mode state (stretches chat container horizontally for large displays)
+  const [isFullWidth, setIsFullWidth] = useState(() => {
+    try {
+      return localStorage.getItem('x_playground_fullwidth') === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleFullWidth = useCallback(() => {
+    setIsFullWidth((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('x_playground_fullwidth', next ? '1' : '0');
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
+  // Expandable input box state ("khung chat dài hơn" / larger prompt workspace)
+  const [isInputExpanded, setIsInputExpanded] = useState(false);
+  const toggleInputExpanded = useCallback(() => {
+    setIsInputExpanded((prev) => !prev);
+  }, []);
+
+  // Settings open state
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  // Clear current conversation messages
+  const handleClearCurrentChat = useCallback(() => {
+    if (activeChat.messages.length === 0) return;
+    if (!window.confirm(s.clearConfirm)) return;
+    setChats((prev) =>
+      prev.map((c) => (c.id === activeChat.id ? { ...c, messages: [] } : c))
+    );
+  }, [activeChat.id, activeChat.messages.length, s.clearConfirm]);
+
   // Textarea dynamic height adjustment
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const adjustTextareaHeight = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
+    if (isInputExpanded) {
+      el.style.height = '180px';
+      return;
+    }
     el.style.height = 'auto';
-    const newHeight = Math.min(Math.max(el.scrollHeight, 64), 260);
+    const newHeight = Math.min(Math.max(el.scrollHeight, 60), 320);
     el.style.height = `${newHeight}px`;
-  }, []);
+  }, [isInputExpanded]);
 
   useEffect(() => {
     adjustTextareaHeight();
-  }, [inputText, adjustTextareaHeight]);
+  }, [inputText, isInputExpanded, adjustTextareaHeight]);
 
   // Settings
   const [systemPrompt, setSystemPrompt] = useState('');
@@ -588,15 +636,21 @@ export default function Playground() {
 
   return (
     <div className="x-page x-playground-page">
-      {/* Page Heading */}
-      <div className="x-page-heading x-playground-heading">
-        <div>
-          <h1>{s.title}</h1>
-          <p>{s.help}</p>
+      {/* Slim Header Bar */}
+      <div className="x-page-heading x-playground-heading flex items-center justify-between py-1 px-1 mb-1 flex-shrink-0">
+        <div className="flex items-center gap-2.5">
+          <div className="size-7 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center text-primary flex-shrink-0">
+            <MessageSquare size={15} />
+          </div>
+          <div className="flex items-baseline gap-2">
+            <h1 className="text-sm font-semibold tracking-tight text-foreground m-0 leading-tight">
+              {s.title}
+            </h1>
+            <p className="text-[11px] text-muted-foreground m-0 hidden sm:inline">
+              {s.help}
+            </p>
+          </div>
         </div>
-        <span className="x-heading-icon">
-          <MessageSquare size={24} />
-        </span>
       </div>
 
       {/* Gateway Disabled Banner */}
@@ -660,55 +714,115 @@ export default function Playground() {
 
         {/* Right Column: Chat Workspace */}
         <main className="x-panel x-chat-workspace flex flex-col">
-          {/* Top Toolbar: Model Selector & Actions */}
-          <div className="x-chat-toolbar flex items-end gap-3 pb-3 border-b border-border flex-shrink-0">
-            <button
-              type="button"
-              onClick={toggleSidebar}
-              className="x-sidebar-toggle-btn"
-              title={isSidebarOpen ? s.collapseSidebar : s.expandSidebar}
-              aria-label={isSidebarOpen ? s.collapseSidebar : s.expandSidebar}
-            >
-              {isSidebarOpen ? <PanelLeftClose size={16} /> : <PanelLeft size={16} />}
-            </button>
-
-            <label className="flex-1">
-              <span className="font-medium text-xs text-foreground mb-1 block">{s.model}</span>
-              <select
-                value={activeChat.model || 'auto'}
-                onChange={(e) => handleModelChange(e.target.value)}
-                disabled={isStreaming || isCatalogLoading}
-                className="w-full text-xs"
+          {/* Top Toolbar: Model Selector, Width Toggle & Actions */}
+          <div className="x-chat-toolbar flex items-center justify-between gap-2 px-3 py-2 border-b border-border bg-card/60 backdrop-blur-sm flex-shrink-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <button
+                type="button"
+                onClick={toggleSidebar}
+                className="x-sidebar-toggle-btn"
+                title={isSidebarOpen ? s.collapseSidebar : s.expandSidebar}
+                aria-label={isSidebarOpen ? s.collapseSidebar : s.expandSidebar}
               >
-                <option value="auto">auto (Gateway Auto Routing)</option>
-                {Object.entries(groupedModels).map(([group, models]) => (
-                  <optgroup key={group} label={group}>
-                    {models
-                      .filter((m) => m.id !== 'auto')
-                      .map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name} ({m.id})
-                        </option>
-                      ))}
-                  </optgroup>
-                ))}
-              </select>
-            </label>
+                {isSidebarOpen ? <PanelLeftClose size={15} /> : <PanelLeft size={15} />}
+              </button>
 
-            <button
-              className="x-button"
-              onClick={() => void refetchModels()}
-              disabled={isCatalogLoading || isStreaming}
-              title={s.refresh}
-            >
-              <RefreshCw size={14} className={isCatalogLoading ? 'animate-spin' : ''} />
-              <span className="hidden sm:inline">{s.refresh}</span>
-            </button>
+              <span className="text-xs font-medium text-foreground truncate max-w-[140px] sm:max-w-[200px] hidden md:inline">
+                {activeChat.title || s.newChat}
+              </span>
+            </div>
+
+            {/* Model Selector */}
+            <div className="flex items-center gap-1.5 flex-1 max-w-md mx-2 min-w-0">
+              <label className="flex-1 min-w-0 flex items-center gap-1.5 bg-background border border-border rounded-lg px-2.5 py-1 focus-within:border-primary shadow-xs">
+                <Sparkles size={14} className="text-primary flex-shrink-0" />
+                <span className="sr-only">{s.model}</span>
+                <select
+                  value={activeChat.model || 'auto'}
+                  onChange={(e) => handleModelChange(e.target.value)}
+                  disabled={isStreaming || isCatalogLoading}
+                  className="w-full text-xs bg-transparent border-0 outline-none p-0 cursor-pointer"
+                >
+                  <option value="auto">auto (Gateway Auto Routing)</option>
+                  {Object.entries(groupedModels).map(([group, models]) => (
+                    <optgroup key={group} label={group}>
+                      {models
+                        .filter((m) => m.id !== 'auto')
+                        .map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name} ({m.id})
+                          </option>
+                        ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </label>
+
+              <button
+                className="x-icon-button hover:text-primary transition flex-shrink-0"
+                onClick={() => void refetchModels()}
+                disabled={isCatalogLoading || isStreaming}
+                title={s.refresh}
+              >
+                <RefreshCw size={13} className={isCatalogLoading ? 'animate-spin' : ''} />
+                <span className="sr-only">{s.refresh}</span>
+              </button>
+            </div>
+
+            {/* Right Action Controls */}
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <button
+                type="button"
+                onClick={toggleFullWidth}
+                className={`x-icon-button ${isFullWidth ? 'text-primary bg-primary/10' : ''}`}
+                title={isFullWidth ? s.standardWidth : s.fullWidth}
+                aria-label={isFullWidth ? s.standardWidth : s.fullWidth}
+              >
+                {isFullWidth ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsSettingsOpen((prev) => !prev)}
+                className={`x-icon-button ${isSettingsOpen ? 'text-primary bg-primary/10' : ''}`}
+                title={s.settings}
+                aria-label={s.settings}
+              >
+                <Sliders size={14} />
+              </button>
+
+              {activeChat.messages.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClearCurrentChat}
+                  className="x-icon-button hover:text-destructive"
+                  title={s.clearChat}
+                  aria-label={s.clearChat}
+                >
+                  <Eraser size={14} />
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={handleNewChat}
+                disabled={isStreaming}
+                className="x-button x-primary py-1 px-2.5 text-xs inline-flex items-center gap-1 ml-1"
+                title={s.newChat}
+              >
+                <Plus size={13} />
+                <span className="hidden sm:inline">{s.newChat}</span>
+              </button>
+            </div>
           </div>
 
           {/* Collapsible Chat Settings */}
-          <details className="x-chat-settings mt-2 mb-2 text-xs flex-shrink-0">
-            <summary className="cursor-pointer font-medium text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 py-1">
+          <details
+            open={isSettingsOpen}
+            onToggle={(e) => setIsSettingsOpen(e.currentTarget.open)}
+            className="x-chat-settings px-4 py-2.5 bg-muted/20 border-b border-border text-xs flex-shrink-0 transition-all"
+          >
+            <summary className="cursor-pointer font-medium text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 py-0.5">
               <Sliders size={13} />
               <span>{s.settings}</span>
             </summary>
@@ -757,78 +871,100 @@ export default function Playground() {
           <div
             ref={messagesContainerRef}
             onScroll={handleScroll}
-            className="x-chat-messages flex-1 overflow-y-auto space-y-4 my-2 pr-1"
+            className="x-chat-messages flex-1 overflow-y-auto space-y-4 my-0 px-2 py-4"
           >
-            {activeChat.messages.length === 0 ? (
-              <div className="x-chat-welcome">
-                <MessageSquare size={36} />
-                <h2>{s.empty}</h2>
-                <p>{s.emptyHelp}</p>
-              </div>
-            ) : (
-              activeChat.messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`x-basic-turn ${
-                    msg.role === 'user' ? 'x-basic-user' : 'x-basic-assistant'
-                  }`}
-                >
-                  <header>
-                    <span className="font-semibold">
-                      {msg.role === 'user' ? s.you : s.assistant}
-                    </span>
-                    {msg.role === 'assistant' && msg.content && (
-                      <button
-                        className="x-icon-button hover:text-primary transition"
-                        onClick={() => handleCopyText(msg.content, msg.id)}
-                        title={s.copy}
-                      >
-                        {copiedTurnId === msg.id ? <Check size={13} /> : <Copy size={13} />}
-                      </button>
-                    )}
-                  </header>
-
-                  {msg.role === 'user' ? (
-                    <div className="x-user-text font-sans text-sm whitespace-pre-wrap leading-relaxed">
-                      {msg.content}
-                    </div>
-                  ) : (
-                    <PlaygroundMessageContent
-                      content={msg.content}
-                      isGenerating={msg.meta === s.generating}
-                      generatingLabel={s.generating}
-                    />
-                  )}
-
-                  {/* Render attached user images */}
-                  {msg.images && msg.images.length > 0 && (
-                    <div className="flex gap-2 mt-2 flex-wrap">
-                      {msg.images.map((img) => (
-                        <img
-                          key={img.id}
-                          src={img.url}
-                          alt={img.name}
-                          className="x-chat-image object-cover rounded-md max-h-36 border border-border"
-                        />
-                      ))}
-                    </div>
-                  )}
-
-                  {msg.meta && msg.meta !== s.generating && <small>{msg.meta}</small>}
+            <div className={`x-chat-thread ${isFullWidth ? 'x-thread-full' : 'x-thread-standard'}`}>
+              {activeChat.messages.length === 0 ? (
+                <div className="x-chat-welcome">
+                  <div className="size-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary mx-auto mb-3 shadow-xs">
+                    <MessageSquare size={24} />
+                  </div>
+                  <h2>{s.empty}</h2>
+                  <p>{s.emptyHelp}</p>
                 </div>
-              ))
-            )}
-            <div ref={messagesEndRef} />
+              ) : (
+                activeChat.messages.map((msg) => (
+                  <div
+                    key={msg.id}
+                    className={`x-basic-turn ${
+                      msg.role === 'user' ? 'x-basic-user' : 'x-basic-assistant'
+                    }`}
+                  >
+                    <header>
+                      <div className="flex items-center gap-2">
+                        {msg.role === 'assistant' ? (
+                          <>
+                            <div className="size-5 rounded-md bg-primary/10 text-primary flex items-center justify-center font-bold text-[10px]">
+                              AI
+                            </div>
+                            <span className="font-semibold text-foreground text-xs">
+                              {s.assistant}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="font-semibold text-primary text-xs">
+                            {s.you}
+                          </span>
+                        )}
+                      </div>
+
+                      {msg.role === 'assistant' && msg.content && (
+                        <button
+                          className="x-icon-button hover:text-primary transition"
+                          onClick={() => handleCopyText(msg.content, msg.id)}
+                          title={s.copy}
+                        >
+                          {copiedTurnId === msg.id ? <Check size={13} /> : <Copy size={13} />}
+                        </button>
+                      )}
+                    </header>
+
+                    {msg.role === 'user' ? (
+                      <div className="x-user-text font-sans text-sm whitespace-pre-wrap leading-relaxed">
+                        {msg.content}
+                      </div>
+                    ) : (
+                      <PlaygroundMessageContent
+                        content={msg.content}
+                        isGenerating={msg.meta === s.generating}
+                        generatingLabel={s.generating}
+                      />
+                    )}
+
+                    {/* Render attached user images */}
+                    {msg.images && msg.images.length > 0 && (
+                      <div className="flex gap-2 mt-2 flex-wrap">
+                        {msg.images.map((img) => (
+                          <img
+                            key={img.id}
+                            src={img.url}
+                            alt={img.name}
+                            className="x-chat-image object-cover rounded-md max-h-36 border border-border"
+                          />
+                        ))}
+                      </div>
+                    )}
+
+                    {msg.meta && msg.meta !== s.generating && (
+                      <div className="mt-2 pt-2 border-t border-border/40 text-[11px] text-muted-foreground flex items-center gap-2">
+                        <span>{msg.meta}</span>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+              <div ref={messagesEndRef} />
+            </div>
           </div>
 
           {/* Error Banner */}
           {(streamError || inputError) && (
-            <div className="x-error my-2 p-2.5 rounded-lg text-xs flex-shrink-0" role="alert">
+            <div className="x-error my-2 mx-4 p-2.5 rounded-lg text-xs flex-shrink-0" role="alert">
               {streamError || inputError}
             </div>
           )}
 
-          {/* Floating Scroll to bottom button (Gemini style) */}
+          {/* Floating Scroll to bottom button */}
           {!isNearBottom && activeChat.messages.length > 0 && (
             <button
               type="button"
@@ -846,104 +982,122 @@ export default function Playground() {
           )}
 
           {/* Composer & Input Area */}
-          <div
-            className={`x-chat-composer mt-auto flex-shrink-0 border rounded-xl overflow-hidden bg-background transition-colors ${
-              isDraggingOver ? 'border-primary ring-2 ring-primary/30 bg-primary/5' : 'border-border'
-            }`}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-          >
-            {/* Attachment Previews */}
-            {attachments.length > 0 && (
-              <div className="x-chat-attachments flex gap-2 p-2 border-b border-border flex-wrap bg-muted/20">
-                {attachments.map((att) => (
-                  <div key={att.id} className="relative group">
-                    <img
-                      src={att.url}
-                      alt={att.name}
-                      className="size-16 object-cover rounded-md border border-border"
-                    />
+          <div className={`x-composer-wrapper ${isFullWidth ? 'x-thread-full' : 'x-thread-standard'}`}>
+            <div
+              className={`x-chat-composer border rounded-2xl overflow-hidden bg-background transition-all shadow-md ${
+                isDraggingOver ? 'border-primary ring-2 ring-primary/30 bg-primary/5' : 'border-border'
+              }`}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
+              {/* Attachment Previews */}
+              {attachments.length > 0 && (
+                <div className="x-chat-attachments flex gap-2 p-2 border-b border-border flex-wrap bg-muted/20">
+                  {attachments.map((att) => (
+                    <div key={att.id} className="relative group">
+                      <img
+                        src={att.url}
+                        alt={att.name}
+                        className="size-16 object-cover rounded-md border border-border"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveAttachment(att.id)}
+                        className="absolute -top-1.5 -right-1.5 size-5 bg-background border border-border rounded-full flex items-center justify-center text-muted-foreground hover:text-destructive shadow-xs"
+                        title={s.remove}
+                      >
+                        <X size={11} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <textarea
+                ref={textareaRef}
+                rows={3}
+                value={inputText}
+                onChange={(e) => {
+                  setInputText(e.target.value);
+                  adjustTextareaHeight();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    void handleSend();
+                  }
+                }}
+                onPaste={(e) => {
+                  handlePaste(e);
+                  setTimeout(adjustTextareaHeight, 0);
+                }}
+                placeholder={s.placeholder}
+                disabled={isStreaming}
+                className="w-full p-3.5 border-0 bg-transparent text-sm focus:outline-hidden resize-none"
+              />
+
+              <div className="x-chat-composer-actions flex items-center justify-between p-2.5 border-t border-border bg-muted/10">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileChange}
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    multiple
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isStreaming || attachments.length >= 4}
+                    className="p-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition inline-flex items-center gap-1 text-xs"
+                    title={s.attach}
+                  >
+                    <Paperclip size={14} />
+                    <span className="hidden sm:inline">{s.attach}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={toggleInputExpanded}
+                    className={`p-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition inline-flex items-center gap-1 text-xs ${
+                      isInputExpanded ? 'text-primary border-primary/40 bg-primary/5' : ''
+                    }`}
+                    title={isInputExpanded ? s.collapseInput : s.expandInput}
+                    aria-label={isInputExpanded ? s.collapseInput : s.expandInput}
+                  >
+                    {isInputExpanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+                    <span className="hidden sm:inline">
+                      {isInputExpanded ? s.collapseInput : s.expandInput}
+                    </span>
+                  </button>
+
+                  <small className="text-[11px] text-muted-foreground">{s.shortcut}</small>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {isStreaming ? (
                     <button
                       type="button"
-                      onClick={() => handleRemoveAttachment(att.id)}
-                      className="absolute -top-1.5 -right-1.5 size-5 bg-background border border-border rounded-full flex items-center justify-center text-muted-foreground hover:text-destructive shadow-xs"
-                      title={s.remove}
+                      onClick={handleStopStream}
+                      className="x-button text-xs py-1.5 px-3 bg-destructive text-destructive-foreground hover:bg-destructive/90"
                     >
-                      <X size={11} />
+                      <Square size={13} />
+                      <span>{s.stop}</span>
                     </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <textarea
-              ref={textareaRef}
-              rows={3}
-              value={inputText}
-              onChange={(e) => {
-                setInputText(e.target.value);
-                adjustTextareaHeight();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  void handleSend();
-                }
-              }}
-              onPaste={(e) => {
-                handlePaste(e);
-                setTimeout(adjustTextareaHeight, 0);
-              }}
-              placeholder={s.placeholder}
-              disabled={isStreaming}
-              className="w-full p-3.5 border-0 bg-transparent text-sm focus:outline-hidden resize-none"
-            />
-
-            <div className="x-chat-composer-actions flex items-center justify-between p-2.5 border-t border-border bg-muted/10">
-              <div className="flex items-center gap-2">
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleFileChange}
-                  accept="image/png,image/jpeg,image/webp,image/gif"
-                  multiple
-                  className="hidden"
-                />
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isStreaming || attachments.length >= 4}
-                  className="p-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition inline-flex items-center gap-1 text-xs"
-                  title={s.attach}
-                >
-                  <Paperclip size={14} />
-                  <span className="hidden sm:inline">{s.attach}</span>
-                </button>
-                <small className="text-[11px] text-muted-foreground">{s.shortcut}</small>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {isStreaming ? (
-                  <button
-                    type="button"
-                    onClick={handleStopStream}
-                    className="x-button text-xs py-1.5 px-3 bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                  >
-                    <Square size={13} />
-                    <span>{s.stop}</span>
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => void handleSend()}
-                    disabled={!inputText.trim() && attachments.length === 0}
-                    className="x-button x-primary text-xs py-1.5 px-4 font-medium"
-                  >
-                    <Send size={13} />
-                    <span>{s.send}</span>
-                  </button>
-                )}
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void handleSend()}
+                      disabled={!inputText.trim() && attachments.length === 0}
+                      className="x-button x-primary text-xs py-1.5 px-4 font-medium"
+                    >
+                      <Send size={13} />
+                      <span>{s.send}</span>
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>

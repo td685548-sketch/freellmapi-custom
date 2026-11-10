@@ -40,6 +40,7 @@ import {
 import { getConfigSnapshot } from './config.js';
 import { runInGatewayScope } from './context.js';
 import { xGatewayProtocolsRouter } from './protocols.js';
+import { preprocessGatewayMessages } from './token-savers-pipeline.js';
 
 export const xGatewayRouter = Router();
 
@@ -522,27 +523,39 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
     return;
   }
   const isStream = body.stream === true;
-  const { messages, appliedSavers } = applyGatewaySavers(req, rawMessages);
+
+  const controller = new AbortController();
+  const onClose = () => { if (!res.writableEnded) controller.abort(); };
+  res.once('close', onClose);
+
+  const pipelineResult = await preprocessGatewayMessages(req, res, {
+    messages: rawMessages,
+    rawBody: body,
+    requestedModel,
+    format: 'openai',
+    signal: controller.signal,
+  });
+  const messages = pipelineResult.messages;
+  const appliedSavers = pipelineResult.appliedSavers;
 
   const scope = {
     gateway: 'x' as const,
     outputSavers: appliedSavers,
     inputSaver: getConfigSnapshot().savers.input,
-    inputTokensSaved: 0,
+    inputTokensSaved: pipelineResult.tokensSavedEst,
   };
 
   res.setHeader('X-Gateway', 'x');
-  res.setHeader('X-Output-Saver-Applied', appliedSavers.join(','));
-  res.setHeader('X-Input-Tokens-Saved', '0');
-
-  const controller = new AbortController();
-  const onClose = () => { if (!res.writableEnded) controller.abort(); };
-  res.once('close', onClose);
+  if (!res.getHeader('X-Output-Saver-Applied')) {
+    res.setHeader('X-Output-Saver-Applied', appliedSavers.join(','));
+  }
+  if (!res.getHeader('X-Input-Tokens-Saved')) {
+    res.setHeader('X-Input-Tokens-Saved', String(pipelineResult.tokensSavedEst));
+  }
   try {
   await runInGatewayScope(scope, async () => {
     const hasImage = messages.some(m => {
       if (Array.isArray(m.content)) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return m.content.some((p: any) => p?.type === 'image_url' || p?.type === 'image' || p?.image_url);
       }
       return false;
