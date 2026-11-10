@@ -223,4 +223,49 @@ describe('Playground component', () => {
       expect(attachments).not.toBeNull();
     });
   });
+
+  it('supports toggling full width and expanding input textarea', async () => {
+    act(() => {
+      root.render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <Playground />
+          </MemoryRouter>
+        </QueryClientProvider>
+      );
+    });
+
+    await vi.waitFor(() => {
+      const thread = container.querySelector('.x-chat-thread');
+      expect(thread).not.toBeNull();
+      expect(thread?.classList.contains('x-thread-standard')).toBe(true);
+    });
+
+    // Find full width toggle button
+    const fullWidthBtn = container.querySelector('button[title="Full width"]');
+    expect(fullWidthBtn).not.toBeNull();
+
+    act(() => {
+      fullWidthBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    // Thread switches to full width
+    await vi.waitFor(() => {
+      const thread = container.querySelector('.x-chat-thread');
+      expect(thread?.classList.contains('x-thread-full')).toBe(true);
+    });
+
+    // Find expand input button
+    const expandBtn = container.querySelector('button[title="Expand input box"]');
+    expect(expandBtn).not.toBeNull();
+
+    act(() => {
+      expandBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await vi.waitFor(() => {
+      const textarea = container.querySelector('textarea');
+      expect(textarea?.style.height).toBe('180px');
+    });
+  });
 });

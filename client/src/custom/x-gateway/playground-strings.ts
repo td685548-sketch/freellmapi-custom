@@ -18,6 +18,12 @@ const en = {
   toggleSidebar: 'Toggle conversation history',
   collapseSidebar: 'Collapse sidebar',
   expandSidebar: 'Expand sidebar',
+  fullWidth: 'Full width',
+  standardWidth: 'Standard width',
+  expandInput: 'Expand input box',
+  collapseInput: 'Collapse input box',
+  clearChat: 'Clear conversation',
+  clearConfirm: 'Clear all messages in this conversation?',
 };
 const vi: Record<keyof typeof en, string> = {
   title: 'Chat cơ bản / Playground', help: 'Trò chuyện với model và combo đã kết nối.',
@@ -38,5 +44,11 @@ const vi: Record<keyof typeof en, string> = {
   toggleSidebar: 'Bật/tắt lịch sử hội thoại',
   collapseSidebar: 'Thu gọn danh sách',
   expandSidebar: 'Mở rộng danh sách',
+  fullWidth: 'Mở rộng toàn màn hình',
+  standardWidth: 'Độ rộng tiêu chuẩn',
+  expandInput: 'Mở rộng khung nhập',
+  collapseInput: 'Thu gọn khung nhập',
+  clearChat: 'Xóa hội thoại',
+  clearConfirm: 'Xóa tất cả tin nhắn trong cuộc hội thoại này?',
 };
 export const usePlaygroundStrings = () => useI18n().locale === 'vi' ? vi : en;

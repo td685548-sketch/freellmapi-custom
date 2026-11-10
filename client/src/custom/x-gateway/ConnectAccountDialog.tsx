@@ -161,14 +161,14 @@ const OAUTH_CLI_GUIDES: Record<string, {
     placeholder: 'CodeBuddy CN OAuth token',
   },
   qoder: {
-    siteUrl: 'https://qoder.com/',
-    steps: 'Sign in at qoder.com and copy your Qoder token.',
-    placeholder: 'Qoder OAuth / API token',
+    siteUrl: 'https://qoder.com/account/integrations',
+    steps: 'Sign in at qoder.com/account/integrations and create a Personal Access Token (pt-...).',
+    placeholder: 'Personal Access Token (pt-...) hoặc token',
   },
   'qoder-cn': {
-    siteUrl: 'https://qoder.com/',
-    steps: 'Sign in to Qoder CN and copy your Qoder token.',
-    placeholder: 'Qoder CN token',
+    siteUrl: 'https://qoder.com.cn/account/integrations',
+    steps: 'Sign in to Qoder CN and create a Personal Access Token (pt-...).',
+    placeholder: 'Personal Access Token (pt-...) hoặc token',
   },
   'minimax-code': {
     siteUrl: 'https://platform.minimaxi.com/',
@@ -210,7 +210,7 @@ export function extractOAuthCredential(raw: string): string {
       if (tokens && typeof tokens.access_token === 'string' && tokens.access_token.trim()) {
         return tokens.access_token.trim()
       }
-      for (const field of ['accessToken', 'access_token', 'token', 'api_key', 'apiKey', 'OPENAI_API_KEY', 'value']) {
+      for (const field of ['accessToken', 'access_token', 'token', 'api_key', 'apiKey', 'OPENAI_API_KEY', 'value', 'personal_token', 'personalToken', 'pat']) {
         const val = parsed[field]
         if (typeof val === 'string' && val.trim()) {
           return val.trim()
