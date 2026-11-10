@@ -9,6 +9,7 @@ import { getOutboundProxyUrl } from '../x-gateway/config.js';
 import { pickAutoProxyPoolId, proxyPoolExists, resolvePoolProxyUrl } from '../x-gateway/proxy-pool.js';
 import { AccountError, COPILOT_BASE_URL } from './http.js';
 import { clearCopilotToken, type CopilotModel } from './copilot.js';
+import { serializeOAuthCredential, type OAuthCredential } from './oauth-credentials.js';
 import {
   X_GATEWAY_PROVIDERS,
   getXGatewayProvider,
@@ -771,6 +772,16 @@ export function setAccountStatus(id: number, status: 'healthy' | 'error' | 'unkn
     .prepare('UPDATE x_gateway_keys SET status = ?, last_checked_at = CURRENT_TIMESTAMP WHERE id = ?')
     .run(status, id);
   invalidateXGatewayKeyCache();
+}
+
+export function updateAccountCredential(id: number, credential: OAuthCredential | string, expectedCipher?: string): boolean {
+  const serialized = typeof credential === 'string' ? credential : serializeOAuthCredential(credential);
+  const { encrypted, iv, authTag } = encrypt(serialized);
+  const result = expectedCipher === undefined
+    ? getDb().prepare('UPDATE x_gateway_keys SET encrypted_key = ?, iv = ?, auth_tag = ? WHERE id = ?').run(encrypted, iv, authTag, id)
+    : getDb().prepare('UPDATE x_gateway_keys SET encrypted_key = ?, iv = ?, auth_tag = ? WHERE id = ? AND encrypted_key = ?').run(encrypted, iv, authTag, id, expectedCipher);
+  invalidateXGatewayKeyCache();
+  return result.changes > 0;
 }
 
 export function toggleProviderAccounts(providerId: string, enabled: boolean): number {

@@ -75,6 +75,66 @@ describe('Granular permissions UI', () => {
     expect(document.body.textContent).not.toContain('Save Permissions')
     expect(apiFetch).not.toHaveBeenCalled()
   })
+  it('separates FreeLLMAPI and X Gateway permissions into tabs and toggles between them', async () => {
+    const user: AdminUser = { id: 3, email: 'member@example.com', role: 'member', isPrimary: false, isSelf: false, permissions: [], activeKeys: 0, sessions: 1, createdAt: '' }
+    vi.mocked(apiFetch).mockResolvedValue({ success: true })
+    await render(<PermissionsDialog user={user} open onOpenChange={() => {}} onSuccess={() => {}} />)
+
+    const tabs = [...container.ownerDocument.querySelectorAll<HTMLButtonElement>('button[role="tab"]')]
+    expect(tabs.length).toBe(2)
+    const freellmTab = tabs.find(t => t.textContent?.includes('FreeLLMAPI'))!
+    const xGatewayTab = tabs.find(t => t.textContent?.includes('X Gateway'))!
+    expect(freellmTab).toBeDefined()
+    expect(xGatewayTab).toBeDefined()
+
+    expect(freellmTab.getAttribute('aria-selected')).toBe('true')
+    expect(xGatewayTab.getAttribute('aria-selected')).toBe('false')
+
+    await act(async () => { xGatewayTab.click() })
+    expect(freellmTab.getAttribute('aria-selected')).toBe('false')
+    expect(xGatewayTab.getAttribute('aria-selected')).toBe('true')
+
+    const useXLabel = [...container.ownerDocument.querySelectorAll('label')].find(l => l.textContent?.includes('Use X gateway'))!
+    expect(useXLabel).toBeDefined()
+    await act(async () => { (useXLabel.querySelector('input') as HTMLInputElement).click() })
+
+    const save = [...container.ownerDocument.querySelectorAll('button')].find(b => b.textContent === 'Save Permissions')!
+    await act(async () => save.click())
+
+    const call = vi.mocked(apiFetch).mock.calls.find(([path]) => path === '/api/admin/users/3/permissions')!
+    const permissions = JSON.parse(String(call[1]?.body)).permissions as string[]
+    expect(permissions).toContain('use_x_gateway')
+  })
+  it('separates FreeLLMAPI and X Gateway permissions into tabs and toggles between them', async () => {
+    const user: AdminUser = { id: 3, email: 'member@example.com', role: 'member', isPrimary: false, isSelf: false, permissions: [], activeKeys: 0, sessions: 1, createdAt: '' }
+    vi.mocked(apiFetch).mockResolvedValue({ success: true })
+    await render(<PermissionsDialog user={user} open onOpenChange={() => {}} onSuccess={() => {}} />)
+
+    const tabs = [...container.ownerDocument.querySelectorAll<HTMLButtonElement>('button[role="tab"]')]
+    expect(tabs.length).toBe(2)
+    const freellmTab = tabs.find(t => t.textContent?.includes('FreeLLMAPI'))!
+    const xGatewayTab = tabs.find(t => t.textContent?.includes('X Gateway'))!
+    expect(freellmTab).toBeDefined()
+    expect(xGatewayTab).toBeDefined()
+
+    expect(freellmTab.getAttribute('aria-selected')).toBe('true')
+    expect(xGatewayTab.getAttribute('aria-selected')).toBe('false')
+
+    await act(async () => { xGatewayTab.click() })
+    expect(freellmTab.getAttribute('aria-selected')).toBe('false')
+    expect(xGatewayTab.getAttribute('aria-selected')).toBe('true')
+
+    const useXLabel = [...container.ownerDocument.querySelectorAll('label')].find(l => l.textContent?.includes('Use X gateway'))!
+    expect(useXLabel).toBeDefined()
+    await act(async () => { (useXLabel.querySelector('input') as HTMLInputElement).click() })
+
+    const save = [...container.ownerDocument.querySelectorAll('button')].find(b => b.textContent === 'Save Permissions')!
+    await act(async () => save.click())
+
+    const call = vi.mocked(apiFetch).mock.calls.find(([path]) => path === '/api/admin/users/3/permissions')!
+    const permissions = JSON.parse(String(call[1]?.body)).permissions as string[]
+    expect(permissions).toContain('use_x_gateway')
+  })
   it('shows only masked key viewing for a view-only administrator', async () => {
     actor.permissions = ['view_keys']
     vi.mocked(apiFetch).mockResolvedValue([{ id: 1, platform: 'groq', label: 'Work', maskedKey: 'gsk_••••', status: 'healthy' }])

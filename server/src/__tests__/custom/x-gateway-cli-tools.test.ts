@@ -55,7 +55,7 @@ describe('X Gateway CLI Tools API', () => {
     expect(data.usableAccounts).toBeGreaterThanOrEqual(1);
   });
 
-  it('POST /api/x-gateway/tools/test succeeds when active provider account exists', async () => {
+  it('POST /api/x-gateway/tools/test requires a full key and model even when accounts exist', async () => {
     const res = await fetch(`${base}/api/x-gateway/tools/test`, {
       method: 'POST',
       headers: {
@@ -64,13 +64,10 @@ describe('X Gateway CLI Tools API', () => {
       },
       body: JSON.stringify({ toolId: 'claude' }),
     });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(400);
     const data = await res.json();
-    expect(data.ok).toBe(true);
-    expect(data.toolId).toBe('claude');
-    expect(typeof data.latencyMs).toBe('number');
-    expect(data.usableAccountsCount).toBeGreaterThanOrEqual(1);
-    expect(data.message).toContain('X Gateway is ready for claude');
+    expect(data.ok).toBe(false);
+    expect(data.error).toContain('full API key');
   });
 
   it('POST /api/x-gateway/tools/test validates request payload', async () => {

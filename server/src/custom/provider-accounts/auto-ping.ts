@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { getSetting, setSetting } from '../../db/index.js';
 import { accountRow, resolveXGatewayAccountProxy } from './store.js';
 import { resolveXGatewayProvider } from './catalog.js';
-import { decrypt } from '../../lib/crypto.js';
+import { resolveAccountCredential } from './oauth-lifecycle.js';
 import { withKeyProxy } from '../../lib/proxy.js';
 
 export interface AutoPingSchedule {
@@ -163,7 +163,9 @@ export async function pingAccount(accountId: number): Promise<{
   }
 
   try {
-    const credential = decrypt(row.encrypted_key, row.iv, row.auth_tag);
+    // Resolve (and refresh) subscription credentials before probing, so an
+    // expired OAuth token does not look like a broken account.
+    const credential = await resolveAccountCredential(row);
     const proxyUrl = resolveXGatewayAccountProxy(row);
 
     const ok = await withKeyProxy(proxyUrl, async () => {
