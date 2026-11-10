@@ -49,6 +49,7 @@ import { autoPingRouter } from './provider-accounts/auto-ping.js';
 import { consoleStreamRouter } from './x-gateway/console-stream-router.js';
 import { geminiRouter } from './x-gateway/gemini-router.js';
 import { xGatewayOllamaRouter } from './x-gateway/ollama-router.js';
+import { proxyWebhookRouter } from './proxy-webhook/router.js';
 
 // Everything this fork adds to the HTTP surface is wired here, so upstream's
 // app.ts keeps a handful of added lines instead of edited mount statements.
@@ -206,6 +207,9 @@ export function registerCustomRoutes(app: Express): void {
   app.use('/api/x-gateway', xGatewayConsoleRouter);
   // Public skills server for AI coding agents (Claude, Cursor, Codex, OpenCode, Cline)
   app.use('/x-skills', xSkillsPublicRouter);
+
+  // MiProxy dynamic webhook endpoint for automated proxy updates
+  app.use(['/api/proxy-webhook', '/api/x-gateway/proxy-webhook'], proxyWebhookRouter);
 
   // Custom fork routes with their dedicated permission gates
   app.use('/api/auth', externalAuthRouter, customAuthRouter);

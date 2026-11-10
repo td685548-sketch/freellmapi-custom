@@ -81,6 +81,7 @@ const CUSTOM_X_GATEWAY_PROXY_AND_API_KEYS_FILENAME = '20261107_130000_custom_x_g
 const CUSTOM_X_GATEWAY_QUOTA_FILENAME = '20261107_140000_custom_x_gateway_quota.ts';
 const CUSTOM_X_GATEWAY_PROXY_POOL_FILENAME = '20261107_150000_custom_x_gateway_proxy_pool.ts';
 const CUSTOM_X_GATEWAY_KEY_ACCESS_FILENAME = '20261107_160000_custom_x_gateway_key_access.ts';
+const CUSTOM_PROXY_WEBHOOK_FILENAME = '20261111_001500_custom_proxy_webhook.ts';
 
 interface SchemaRow {
   type: string;
@@ -208,6 +209,7 @@ describe('migration round trip', () => {
         CUSTOM_X_GATEWAY_QUOTA_FILENAME,
         CUSTOM_X_GATEWAY_PROXY_POOL_FILENAME,
         CUSTOM_X_GATEWAY_KEY_ACCESS_FILENAME,
+        CUSTOM_PROXY_WEBHOOK_FILENAME,
       ]);
     } finally {
       db.close();

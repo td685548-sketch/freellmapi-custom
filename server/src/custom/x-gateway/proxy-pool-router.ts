@@ -15,6 +15,8 @@ import {
   POOL_NAME_MAX,
   proxyPoolEntryUrl,
   ProxyPoolError,
+  recordProxyTestResult,
+  regenerateProxyWebhookToken,
   updateProxyPoolConfig,
   updateProxyPoolEntry,
   VERCEL_RELAY_CODE,
@@ -34,6 +36,8 @@ const patchSchema = z.object({
   name: nameSchema.optional(),
   proxyUrl: urlSchema.optional(),
   enabled: z.boolean().optional(),
+  webhookEnabled: z.boolean().optional(),
+  webhookToken: z.string().trim().max(128).nullable().optional(),
 }).strict().refine(b => Object.keys(b).length > 0);
 
 const batchImportSchema = z.object({
@@ -231,6 +235,11 @@ xProxyPoolRouter.patch('/:id', (req, res) => {
   res.json({ entry: updateProxyPoolEntry(entryId(req), body) });
 });
 
+xProxyPoolRouter.post('/:id/regenerate-webhook-token', (req, res) => {
+  const id = entryId(req);
+  res.json({ entry: regenerateProxyWebhookToken(id) });
+});
+
 xProxyPoolRouter.delete('/:id', (req, res) => {
   const id = entryId(req);
   if (!deleteProxyPoolEntry(id)) throw new ProxyPoolError(404, 'Proxy pool entry not found.');
@@ -240,13 +249,15 @@ xProxyPoolRouter.delete('/:id', (req, res) => {
 // Probe the proxy with a tiny no-content endpoint; any HTTP answer proves the
 // tunnel works. Credentials are stripped before returning any probe error message.
 xProxyPoolRouter.post('/:id/test', async (req, res) => {
-  const url = proxyPoolEntryUrl(entryId(req));
+  const id = entryId(req);
+  const url = proxyPoolEntryUrl(id);
   const isRelay = url.startsWith('https://') && (url.includes('.workers.dev') || url.includes('.vercel.app'));
   const result = await probeProxyUrl(url, {
     targetUrl: 'https://www.gstatic.com/generate_204',
     timeoutMs: 12_000,
     mode: isRelay ? 'fetch-relay' : 'forward',
   });
+  recordProxyTestResult(id, result.ok, result.latencyMs, result.ok ? null : redactProbeError(result.error));
   res.json({
     ok: result.ok,
     latencyMs: result.latencyMs,

@@ -55,6 +55,16 @@ const en = {
   copyTemplate: 'Copy Worker Script',
   copied: 'Copied to clipboard!',
   manualDeployHint: 'Want to paste manually in Cloudflare Dashboard? Copy the lightweight script below.',
+  webhook: 'MiProxy Webhook',
+  webhookEnabled: 'Auto-update via MiProxy',
+  webhookUrl: 'Webhook URL',
+  copyWebhookUrl: 'Copy Webhook URL',
+  regenerateToken: 'Change Token',
+  regenerateTokenConfirm: 'Generating a new token will invalidate the old webhook URL in MiProxy. Are you sure?',
+  webhookUpdated: 'Updated via webhook: {time}',
+  lastTest: 'Last probe: {status}',
+  webhookCopied: 'Webhook URL copied to clipboard!',
+  webhookHelp: 'Paste this URL into Android app MiProxy to auto-update IP/port when network changes or tunnel restarts.',
 } as const
 
 const vi: Record<keyof typeof en, string> = {
@@ -112,6 +122,16 @@ const vi: Record<keyof typeof en, string> = {
   copyTemplate: 'Sao chép mã nguồn Worker',
   copied: 'Đã sao chép vào bộ nhớ tạm!',
   manualDeployHint: 'Muốn tự dán lên Cloudflare Dashboard? Nhấp sao chép mã nguồn Worker Relay nhẹ bên dưới.',
+  webhook: 'MiProxy Webhook',
+  webhookEnabled: 'Tự động cập nhật qua MiProxy',
+  webhookUrl: 'URL Webhook',
+  copyWebhookUrl: 'Sao chép URL Webhook',
+  regenerateToken: 'Đổi Token',
+  regenerateTokenConfirm: 'Tạo token mới sẽ vô hiệu hóa URL webhook cũ trong app MiProxy. Bạn có chắc không?',
+  webhookUpdated: 'Cập nhật qua webhook: {time}',
+  lastTest: 'Kiểm tra gần nhất: {status}',
+  webhookCopied: 'Đã sao chép URL webhook vào bộ nhớ tạm!',
+  webhookHelp: 'Dán URL này vào ô webhook trên app Android MiProxy để tự động cập nhật khi đổi mạng hoặc reset tunnel.',
 }
 
 export function usePoolStrings() {
