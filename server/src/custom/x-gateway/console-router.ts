@@ -26,7 +26,7 @@ import { xQuotaRouter } from './quota/router.js';
 import { xPlaygroundRouter } from './playground-router.js';
 import { xProxyPoolRouter } from './proxy-pool-router.js';
 import { xGatewayMediaRouter } from './media-router.js';
-import { xCliToolsRouter } from './cli-tools-router.js';
+import { xOperationsRouter as xCliToolsRouter } from './operations-router.js';
 import { xTranslatorRouter } from './translator-router.js';
 import { xSkillsRouter } from './skills-router.js';
 

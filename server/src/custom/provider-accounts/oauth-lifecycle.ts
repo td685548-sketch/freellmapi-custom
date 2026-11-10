@@ -144,8 +144,7 @@ async function refreshCredential(
   if (entry.inFlight) return entry.inFlight;
   if (entry.transientFailure && Date.now() < entry.retryAfter) throw entry.transientFailure;
 
-  let task: Promise<OAuthCredential>;
-  task = performRefresh(row, current, descriptor, entry).finally(() => {
+  const task: Promise<OAuthCredential> = performRefresh(row, current, descriptor, entry).finally(() => {
     if (entry.inFlight === task) entry.inFlight = null;
   });
   entry.inFlight = task;
