@@ -556,7 +556,6 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
   await runInGatewayScope(scope, async () => {
     const hasImage = messages.some(m => {
       if (Array.isArray(m.content)) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return m.content.some((p: any) => p?.type === 'image_url' || p?.type === 'image' || p?.image_url);
       }
       return false;

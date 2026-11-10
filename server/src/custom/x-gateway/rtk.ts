@@ -238,7 +238,7 @@ export function filterGitLog(text: string, maxLines = GIT_LOG_MAX_LINES): string
         continue;
       }
       if (trimmed === '') continue;
-      if (!subjectSeen && /^[*|/\\ ]*    \S/.test(line)) {
+      if (!subjectSeen && /^[*|/\\ ]* {4}\S/.test(line)) {
         out.push('  Subject: ' + trimmed);
         subjectSeen = true;
         continue;
