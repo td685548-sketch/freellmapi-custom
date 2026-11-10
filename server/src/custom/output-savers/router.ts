@@ -5,14 +5,22 @@ import {
   setOutputSaverLevels,
   outputSaversUpdateSchema,
 } from './config.js';
-import { isRtkEnabled, setRtkEnabled, getRtkStats } from '../x-gateway/rtk.js';
+import { isRtkEnabled, setRtkEnabled, getRtkStats, resetRtkStats } from '../x-gateway/rtk.js';
 import {
   isPxpipeEnabled,
-  setPxpipeEnabled,
   getPxpipeMinChars,
-  setPxpipeMinChars,
+  getPxpipeTimeoutMs,
+  setPxpipeConfig,
   getPxpipeStats,
+  getPxpipeStatus,
+  runPxpipeSelfTest,
 } from '../x-gateway/pxpipe.js';
+import {
+  getHeadroomStatus,
+  setHeadroomConfig,
+  probeHeadroomConnection,
+  resetHeadroomStats,
+} from '../x-gateway/headroom.js';
 
 export const outputSaversRouter = Router();
 
@@ -64,7 +72,13 @@ outputSaversRouter.put('/rtk', (req, res) => {
   }
   res.set('Cache-Control', 'no-store').json({
     enabled: isRtkEnabled(),
+    stats: getRtkStats(),
   });
+});
+
+outputSaversRouter.post('/rtk/reset', (_req, res) => {
+  const stats = resetRtkStats();
+  res.set('Cache-Control', 'no-store').json({ ok: true, stats });
 });
 
 // pxpipe routes
@@ -72,22 +86,85 @@ outputSaversRouter.get('/pxpipe', (_req, res) => {
   res.set('Cache-Control', 'no-store').json({
     enabled: isPxpipeEnabled(),
     minChars: getPxpipeMinChars(),
+    timeoutMs: getPxpipeTimeoutMs(),
+    status: getPxpipeStatus(),
   });
 });
 
 outputSaversRouter.put('/pxpipe', (req, res) => {
-  if (req.body && typeof req.body.enabled === 'boolean') {
-    setPxpipeEnabled(req.body.enabled);
-  }
-  if (req.body && typeof req.body.minChars === 'number') {
-    setPxpipeMinChars(req.body.minChars);
+  if (req.body && typeof req.body === 'object') {
+    setPxpipeConfig({
+      enabled: typeof req.body.enabled === 'boolean' ? req.body.enabled : undefined,
+      minChars: typeof req.body.minChars === 'number' ? req.body.minChars : undefined,
+      timeoutMs: typeof req.body.timeoutMs === 'number' ? req.body.timeoutMs : undefined,
+    });
   }
   res.set('Cache-Control', 'no-store').json({
     enabled: isPxpipeEnabled(),
     minChars: getPxpipeMinChars(),
+    timeoutMs: getPxpipeTimeoutMs(),
+    status: getPxpipeStatus(),
   });
 });
 
 outputSaversRouter.get('/pxpipe/stats', (_req, res) => {
   res.set('Cache-Control', 'no-store').json(getPxpipeStats());
+});
+
+outputSaversRouter.post('/pxpipe/test', (_req, res) => {
+  try {
+    const result = runPxpipeSelfTest();
+    res.set('Cache-Control', 'no-store').json(result);
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
+// Headroom routes
+outputSaversRouter.get('/headroom', async (req, res) => {
+  const probeLive = req.query.probe === '1' || req.query.probe === 'true';
+  const status = await getHeadroomStatus(probeLive);
+  res.set('Cache-Control', 'no-store').json(status);
+});
+
+outputSaversRouter.put('/headroom', async (req, res) => {
+  if (req.body && typeof req.body === 'object') {
+    setHeadroomConfig({
+      enabled: typeof req.body.enabled === 'boolean' ? req.body.enabled : undefined,
+      url: typeof req.body.url === 'string' ? req.body.url : undefined,
+      timeoutMs: typeof req.body.timeoutMs === 'number' ? req.body.timeoutMs : undefined,
+      compressUserMessages: typeof req.body.compressUserMessages === 'boolean' ? req.body.compressUserMessages : undefined,
+    });
+  }
+  const status = await getHeadroomStatus(false);
+  res.set('Cache-Control', 'no-store').json(status);
+});
+
+outputSaversRouter.post('/headroom/test', async (req, res) => {
+  const url = typeof req.body?.url === 'string' ? req.body.url : undefined;
+  const timeoutMs = typeof req.body?.timeoutMs === 'number' ? req.body.timeoutMs : undefined;
+  const result = await probeHeadroomConnection({ url, timeoutMs });
+  res.set('Cache-Control', 'no-store').json(result);
+});
+
+outputSaversRouter.post('/headroom/reset', (_req, res) => {
+  const stats = resetHeadroomStats();
+  res.set('Cache-Control', 'no-store').json({ ok: true, stats });
+});
+
+// Unified Saver Stats
+outputSaversRouter.get('/stats', async (_req, res) => {
+  const headroomStatus = await getHeadroomStatus(false);
+  res.set('Cache-Control', 'no-store').json({
+    outputSavers: view(),
+    rtk: {
+      enabled: isRtkEnabled(),
+      stats: getRtkStats(),
+    },
+    headroom: headroomStatus,
+    pxpipe: {
+      ...getPxpipeStatus(),
+      stats: getPxpipeStats(),
+    },
+  });
 });

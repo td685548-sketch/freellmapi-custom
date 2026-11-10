@@ -9,7 +9,21 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts'
-import { Activity, Cpu, Feather, FileCode2, Save, Scissors, Sparkles, TrendingDown } from 'lucide-react'
+import {
+  Activity,
+  Cpu,
+  Feather,
+  FileCode2,
+  HardDrive,
+  RefreshCw,
+  Save,
+  Scissors,
+  Sparkles,
+  TrendingDown,
+  Wifi,
+  AlertCircle,
+  CheckCircle2,
+} from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { useUserSession } from '../../use-session'
 import { useSessionRevision } from '../../session-state'
@@ -38,6 +52,13 @@ interface RtkResponse {
 interface PxpipeResponse {
   enabled: boolean
   minChars: number
+  timeoutMs: number
+  status: {
+    installed: boolean
+    version: string
+    running: boolean
+    mode: string
+  }
 }
 
 interface PxpipeTimelineEntry {
@@ -67,7 +88,47 @@ interface PxpipeStatsResponse {
   config: {
     enabled: boolean
     minChars: number
+    timeoutMs: number
   }
+}
+
+interface HeadroomStatusResponse {
+  config: {
+    enabled: boolean
+    url: string
+    maskedUrl: string
+    timeoutMs: number
+    compressUserMessages: boolean
+    source: string
+  }
+  stats: {
+    requests: number
+    compressed: number
+    bypassed: number
+    errors: number
+    bytesBefore: number
+    bytesAfter: number
+    tokensBeforeEst: number
+    tokensAfterEst: number
+    tokensSavedEst: number
+    proxyReportedTokensSaved: number
+    lastSuccessAt: string | null
+    lastError: string | null
+    lastErrorAt: string | null
+  }
+  status: {
+    ok: boolean
+    state: 'unconfigured' | 'disabled' | 'ready' | 'unreachable' | 'blocked'
+    reachable: boolean
+    ready: boolean
+    endpoint: string
+    latencyMs: number
+    status?: number
+    version?: string | null
+    error?: string | null
+    checkedAt: string
+  }
+  envVars: string[]
 }
 
 const fmtTokens = (n: number) => {
@@ -84,28 +145,24 @@ export default function TokenSavers() {
   const session = useUserSession()
   const canEdit = session.hasPermission('manage_compression')
 
-  // Existing output savers query
   const query = useQuery({
     queryKey: ['x-output-savers', revision],
     queryFn: ({ signal }) => apiFetch<Settings>('/api/savers', { signal }),
     retry: false,
   })
 
-  // RTK status query
   const rtkQuery = useQuery({
     queryKey: ['x-rtk-settings', revision],
     queryFn: ({ signal }) => apiFetch<RtkResponse>('/api/savers/rtk', { signal }),
     retry: false,
   })
 
-  // pxpipe settings query
   const pxpipeQuery = useQuery({
     queryKey: ['x-pxpipe-settings', revision],
     queryFn: ({ signal }) => apiFetch<PxpipeResponse>('/api/savers/pxpipe', { signal }),
     retry: false,
   })
 
-  // pxpipe stats query
   const statsQuery = useQuery({
     queryKey: ['x-pxpipe-stats', revision],
     queryFn: ({ signal }) => apiFetch<PxpipeStatsResponse>('/api/savers/pxpipe/stats', { signal }),
@@ -113,9 +170,21 @@ export default function TokenSavers() {
     retry: false,
   })
 
+  const headroomQuery = useQuery({
+    queryKey: ['x-headroom-status', revision],
+    queryFn: ({ signal }) => apiFetch<HeadroomStatusResponse>('/api/savers/headroom', { signal }),
+    refetchInterval: 30_000,
+    retry: false,
+  })
+
   const [draft, setDraft] = useState<Settings | null>(null)
   const [selectedWindow, setSelectedWindow] = useState<'today' | 'last7d' | 'last30d' | 'all'>('last7d')
   const [pxpipeMinCharsDraft, setPxpipeMinCharsDraft] = useState<number | null>(null)
+
+  const [headroomUrlDraft, setHeadroomUrlDraft] = useState<string | null>(null)
+  const [headroomTimeoutDraft, setHeadroomTimeoutDraft] = useState<number | null>(null)
+  const [testResult, setTestResult] = useState<any>(null)
+  const [pxpipeSelfTestResult, setPxpipeSelfTestResult] = useState<any>(null)
 
   const mutation = useMutation({
     meta: { silenceToast: true },
@@ -136,7 +205,7 @@ export default function TokenSavers() {
 
   const pxpipeMutation = useMutation({
     meta: { silenceToast: true },
-    mutationFn: (params: { enabled?: boolean; minChars?: number }) =>
+    mutationFn: (params: { enabled?: boolean; minChars?: number; timeoutMs?: number }) =>
       apiFetch<PxpipeResponse>('/api/savers/pxpipe', { method: 'PUT', body: JSON.stringify(params) }),
     onSuccess: async () => {
       setPxpipeMinCharsDraft(null)
@@ -145,14 +214,64 @@ export default function TokenSavers() {
     },
   })
 
+  const headroomMutation = useMutation({
+    meta: { silenceToast: true },
+    mutationFn: (patch: { enabled?: boolean; url?: string; timeoutMs?: number; compressUserMessages?: boolean }) =>
+      apiFetch<HeadroomStatusResponse>('/api/savers/headroom', { method: 'PUT', body: JSON.stringify(patch) }),
+    onSuccess: async () => {
+      setHeadroomUrlDraft(null)
+      setHeadroomTimeoutDraft(null)
+      await client.invalidateQueries({ queryKey: ['x-headroom-status'] })
+    },
+  })
+
+  const headroomTestMutation = useMutation({
+    meta: { silenceToast: true },
+    mutationFn: (params: { url?: string; timeoutMs?: number }) =>
+      apiFetch<any>('/api/savers/headroom/test', { method: 'POST', body: JSON.stringify(params) }),
+    onSuccess: (res) => {
+      setTestResult(res)
+    },
+    onError: (err: any) => {
+      setTestResult({ ok: false, error: err?.message || 'Test failed' })
+    },
+  })
+
+  const pxpipeTestMutation = useMutation({
+    meta: { silenceToast: true },
+    mutationFn: () => apiFetch<any>('/api/savers/pxpipe/test', { method: 'POST' }),
+    onSuccess: (res) => {
+      setPxpipeSelfTestResult(res)
+    },
+    onError: (err: any) => {
+      setPxpipeSelfTestResult({ ok: false, error: err?.message || 'Self-test failed' })
+    },
+  })
+
   const value = draft ?? query.data
   const rtkData = rtkQuery.data
   const pxpipeData = pxpipeQuery.data
   const statsData = statsQuery.data
+  const headroomData = headroomQuery.data
 
   const currentWindowStats = statsData?.windows?.[selectedWindow]
   const timeline = statsData?.timeline ?? []
   const hasTimelineData = timeline.some(d => d.tokensSavedEst > 0)
+
+  const headroomStatusBadge = (state?: string) => {
+    switch (state) {
+      case 'ready':
+        return <span style={{ color: '#10b981', display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem', fontWeight: 600 }}><CheckCircle2 size={14} /> {s.headroomReady}</span>
+      case 'disabled':
+        return <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 500 }}>{s.headroomDisabled}</span>
+      case 'unconfigured':
+        return <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 500 }}>{s.headroomUnconfigured}</span>
+      case 'blocked':
+        return <span style={{ color: '#ef4444', display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem', fontWeight: 600 }}><AlertCircle size={14} /> {s.headroomBlocked}</span>
+      default:
+        return <span style={{ color: '#f59e0b', display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem', fontWeight: 600 }}><AlertCircle size={14} /> {s.headroomUnreachable}</span>
+    }
+  }
 
   return (
     <>
@@ -260,17 +379,17 @@ export default function TokenSavers() {
         </form>
       )}
 
-      {/* Advanced Token Compression Suite: RTK & pxpipe */}
+      {/* Advanced Token Compression Suite: RTK, Headroom & pxpipe */}
       <div style={{ marginTop: '2.5rem' }}>
         <div className="x-page-heading" style={{ marginBottom: '1rem' }}>
           <div>
             <h2>Token Compression Suite</h2>
-            <p>Runtime Tool-Result Compressor & Prompt Density Pipeline (RTK + pxpipe)</p>
+            <p>Runtime Tool-Result Compressor, External Headroom Microservice & Vision Density Engine</p>
           </div>
           <span className="x-heading-icon"><Sparkles size={24} /></span>
         </div>
 
-        <div className="x-saver-grid">
+        <div className="x-saver-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))' }}>
           {/* RTK Card */}
           <section className="x-panel x-saver">
             <span className="x-dialog-icon"><Cpu size={24} /></span>
@@ -299,6 +418,101 @@ export default function TokenSavers() {
                   <span>Ước tính tiết kiệm: <strong style={{ color: '#10b981' }}>{fmtTokens(rtkData.stats.tokensSavedEst)} tokens</strong></span>
                 </div>
               )}
+            </div>
+          </section>
+
+          {/* Headroom /v1/compress Card */}
+          <section className="x-panel x-saver">
+            <span className="x-dialog-icon"><HardDrive size={24} /></span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+              <h2>{s.headroom}</h2>
+              <button
+                type="button"
+                className="x-switch"
+                role="switch"
+                aria-checked={headroomData?.config?.enabled ?? false}
+                disabled={!canEdit || headroomMutation.isPending}
+                onClick={() => headroomMutation.mutate({ enabled: !(headroomData?.config?.enabled ?? false) })}
+              >
+                <span />
+              </button>
+            </div>
+            <p>{s.headroomHelp}</p>
+
+            <div style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '0.8125rem', fontWeight: 500 }}>{s.headroomUrl}:</span>
+                {headroomStatusBadge(headroomData?.status?.state)}
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <input
+                  type="text"
+                  placeholder="https://headroom.example.com"
+                  style={{
+                    padding: '0.375rem 0.5rem',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border)',
+                    backgroundColor: 'var(--bg-subtle, rgba(0,0,0,0.05))',
+                    flex: 1,
+                    fontSize: '0.875rem',
+                  }}
+                  value={headroomUrlDraft ?? headroomData?.config?.url ?? ''}
+                  disabled={!canEdit || headroomMutation.isPending}
+                  onChange={e => setHeadroomUrlDraft(e.target.value)}
+                />
+                <input
+                  type="number"
+                  placeholder="3000ms"
+                  min="500"
+                  max="30000"
+                  step="500"
+                  style={{
+                    padding: '0.375rem 0.5rem',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border)',
+                    backgroundColor: 'var(--bg-subtle, rgba(0,0,0,0.05))',
+                    width: '90px',
+                    fontSize: '0.875rem',
+                  }}
+                  value={headroomTimeoutDraft ?? headroomData?.config?.timeoutMs ?? 3000}
+                  disabled={!canEdit || headroomMutation.isPending}
+                  onChange={e => setHeadroomTimeoutDraft(Number(e.target.value))}
+                />
+                {(headroomUrlDraft !== null || headroomTimeoutDraft !== null) && (
+                  <button
+                    type="button"
+                    className="x-button x-small x-primary"
+                    disabled={!canEdit || headroomMutation.isPending}
+                    onClick={() => headroomMutation.mutate({
+                      url: headroomUrlDraft ?? headroomData?.config?.url,
+                      timeoutMs: headroomTimeoutDraft ?? headroomData?.config?.timeoutMs,
+                    })}
+                  >
+                    {s.save}
+                  </button>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.25rem' }}>
+                <button
+                  type="button"
+                  className="x-button x-small"
+                  disabled={headroomTestMutation.isPending}
+                  onClick={() => headroomTestMutation.mutate({ url: headroomUrlDraft ?? headroomData?.config?.url })}
+                >
+                  <Wifi size={14} />
+                  {headroomTestMutation.isPending ? s.headroomTesting : s.headroomTest}
+                </button>
+                {testResult && (
+                  <span style={{ fontSize: '0.75rem', color: testResult.ok ? '#10b981' : '#ef4444' }}>
+                    {testResult.ok ? `OK (${testResult.latencyMs}ms)` : (testResult.error || 'Failed')}
+                  </span>
+                )}
+              </div>
+
+              <small style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                Render Production: Deploy Headroom as a sidecar/service and set env <code>X_HEADROOM_URL</code>. Localhost is strictly blocked on Render via SSRF guard.
+              </small>
             </div>
           </section>
 
@@ -354,8 +568,26 @@ export default function TokenSavers() {
                   </button>
                 )}
               </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.25rem' }}>
+                <button
+                  type="button"
+                  className="x-button x-small"
+                  disabled={pxpipeTestMutation.isPending}
+                  onClick={() => pxpipeTestMutation.mutate()}
+                >
+                  <RefreshCw size={14} />
+                  {pxpipeTestMutation.isPending ? s.pxpipeTesting : s.pxpipeSelfTest}
+                </button>
+                {pxpipeSelfTestResult && (
+                  <span style={{ fontSize: '0.75rem', color: pxpipeSelfTestResult.ok ? '#10b981' : '#ef4444' }}>
+                    {pxpipeSelfTestResult.ok ? `${s.pxpipeSelfTestOk} (${pxpipeSelfTestResult.durationMs}ms)` : (pxpipeSelfTestResult.error || 'Failed')}
+                  </span>
+                )}
+              </div>
+
               <small style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                {s.pxpipeThresholdHelp}
+                {s.pxpipeThresholdHelp} Applies to vision-capable models (Claude 3.5, GPT-4o, Gemini 2.0).
               </small>
             </div>
           </section>

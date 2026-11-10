@@ -21,8 +21,8 @@ import { getConfigSnapshot } from './config.js';
 import { runInGatewayScope } from './context.js';
 import {
   resolveCandidateRoutes,
-  applyGatewaySavers,
 } from './router.js';
+import { preprocessGatewayMessages } from './token-savers-pipeline.js';
 import {
   validateXGatewayClientKey,
   isModelAllowedForKey,
@@ -77,7 +77,7 @@ function parseGeminiRequest(body: Record<string, unknown>, model: string, isStre
 
       if (Array.isArray(c.parts)) {
         const parts: any[] = [];
-        for (const part of c.parts) {
+        for (const part of (c.parts as any[])) {
           if (part.text) {
             parts.push({ type: 'text', text: part.text });
           } else if (part.inlineData?.data && part.inlineData?.mimeType) {
@@ -86,6 +86,31 @@ function parseGeminiRequest(body: Record<string, unknown>, model: string, isStre
               image_url: {
                 url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`,
               },
+            });
+          } else if (part.functionCall) {
+            messages.push({
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: `call_${part.functionCall.name ?? 'unknown'}`,
+                  type: 'function',
+                  function: {
+                    name: String(part.functionCall.name ?? ''),
+                    arguments: JSON.stringify(part.functionCall.args || {}),
+                  },
+                },
+              ],
+            });
+          } else if (part.functionResponse) {
+            const isError = Boolean(part.functionResponse.response?.error);
+            messages.push({
+              role: 'tool',
+              tool_call_id: `call_${part.functionResponse.name ?? 'unknown'}`,
+              content: typeof part.functionResponse.response === 'string'
+                ? part.functionResponse.response
+                : JSON.stringify(part.functionResponse.response ?? {}),
+              ...(isError ? { is_error: true } : {}),
             });
           }
         }
@@ -184,7 +209,20 @@ geminiRouter.post(/^\/models\/(.+)$/, async (req: Request, res: Response, next: 
 
   const body = (req.body && typeof req.body === 'object') ? req.body as Record<string, unknown> : {};
   const parsed = parseGeminiRequest(body, requestedModel, isStream);
-  const { messages, appliedSavers } = applyGatewaySavers(req, parsed.messages);
+
+  const controller = new AbortController();
+  const onClose = () => { if (!res.writableEnded) controller.abort(); };
+  res.once('close', onClose);
+
+  const pipelineResult = await preprocessGatewayMessages(req, res, {
+    messages: parsed.messages,
+    rawBody: body,
+    requestedModel,
+    format: 'gemini',
+    signal: controller.signal,
+  });
+  const messages = pipelineResult.messages;
+  const appliedSavers = pipelineResult.appliedSavers;
 
   if (messages.length === 0) {
     res.status(400).json({ error: { message: 'contents must be provided', code: 400, status: 'INVALID_ARGUMENT' } });
@@ -195,12 +233,8 @@ geminiRouter.post(/^\/models\/(.+)$/, async (req: Request, res: Response, next: 
     gateway: 'x' as const,
     outputSavers: appliedSavers,
     inputSaver: getConfigSnapshot().savers.input,
-    inputTokensSaved: 0,
+    inputTokensSaved: pipelineResult.tokensSavedEst,
   };
-
-  const controller = new AbortController();
-  const onClose = () => { if (!res.writableEnded) controller.abort(); };
-  res.once('close', onClose);
 
   try {
     await runInGatewayScope(scope, async () => {
