@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api';
 import Playground from './pages/Playground';
+import { PlaygroundMessageContent } from './PlaygroundMessage';
 
 vi.mock('@/lib/api', () => ({
   apiFetch: vi.fn(),
@@ -127,5 +128,45 @@ describe('Playground component', () => {
       const page = container.querySelector('.x-playground-page');
       expect(page).not.toBeNull();
     });
+  });
+
+  it('renders markdown headers, html tags and custom components in assistant message', async () => {
+    const rawContent = `## 1. Chấm điểm
+
+<row align="center" gap={2}>
+  <title size="2xl" color="success" tabularNums>6/10</title>
+  <badge color="success">Khá tốt</badge>
+</row>
+
+<box border radius="lg" padding={3} gap={2}>
+  **Although it is raining heavily today, we decided to go camping anyway.**
+
+  <row justify="end">
+    <button size="sm" variant="ghost">Copy</button>
+  </row>
+</box>
+
+## 2. Câu tiếng Anh chuẩn`;
+
+    act(() => {
+      root.render(<PlaygroundMessageContent content={rawContent} />);
+    });
+
+    expect(container.textContent).toContain('1. Chấm điểm');
+    expect(container.textContent).toContain('2. Câu tiếng Anh chuẩn');
+    expect(container.textContent).toContain('6/10');
+    expect(container.textContent).toContain('Khá tốt');
+    expect(container.textContent).toContain('Although it is raining heavily today');
+
+    const h2Elements = container.querySelectorAll('h2');
+    expect(h2Elements.length).toBe(2);
+
+    const strong = container.querySelector('strong');
+    expect(strong).not.toBeNull();
+    expect(strong?.textContent).toContain('Although it is raining heavily today');
+
+    const button = container.querySelector('button');
+    expect(button).not.toBeNull();
+    expect(button?.textContent).toContain('Copy');
   });
 });

@@ -17,6 +17,7 @@ import {
   Sliders,
 } from 'lucide-react';
 import { usePlaygroundStrings } from '../playground-strings';
+import { PlaygroundMessageContent } from '../PlaygroundMessage';
 import {
   loadPlaygroundModels,
   streamPlayground,
@@ -601,16 +602,17 @@ export default function Playground() {
                     )}
                   </header>
 
-                  <pre className="x-user-text font-sans text-sm whitespace-pre-wrap leading-relaxed">
-                    {msg.content || (msg.meta === s.generating ? (
-                      <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                        <span className="size-2 bg-primary rounded-full animate-ping" />
-                        {s.generating}
-                      </span>
-                    ) : (
-                      ''
-                    ))}
-                  </pre>
+                  {msg.role === 'user' ? (
+                    <div className="x-user-text font-sans text-sm whitespace-pre-wrap leading-relaxed">
+                      {msg.content}
+                    </div>
+                  ) : (
+                    <PlaygroundMessageContent
+                      content={msg.content}
+                      isGenerating={msg.meta === s.generating}
+                      generatingLabel={s.generating}
+                    />
+                  )}
 
                   {/* Render attached user images */}
                   {msg.images && msg.images.length > 0 && (
