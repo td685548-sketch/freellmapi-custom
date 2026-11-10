@@ -15,6 +15,9 @@ const en = {
   noModels: 'No connected models yet. Connect a provider or configure a combo.', providers: 'Connect providers',
   failed: 'Could not send the message.', tokens: 'tokens', shortcut: 'Enter to send · Shift+Enter for a new line',
   limit: 'Start a new chat after 98 messages.',
+  toggleSidebar: 'Toggle conversation history',
+  collapseSidebar: 'Collapse sidebar',
+  expandSidebar: 'Expand sidebar',
 };
 const vi: Record<keyof typeof en, string> = {
   title: 'Chat cơ bản / Playground', help: 'Trò chuyện với model và combo đã kết nối.',
@@ -32,5 +35,8 @@ const vi: Record<keyof typeof en, string> = {
   noModels: 'Chưa có model kết nối. Hãy kết nối nhà cung cấp hoặc tạo combo.', providers: 'Kết nối nhà cung cấp',
   failed: 'Không gửi được tin nhắn.', tokens: 'token', shortcut: 'Enter để gửi · Shift+Enter để xuống dòng',
   limit: 'Hãy tạo chat mới sau 98 tin nhắn.',
+  toggleSidebar: 'Bật/tắt lịch sử hội thoại',
+  collapseSidebar: 'Thu gọn danh sách',
+  expandSidebar: 'Mở rộng danh sách',
 };
 export const usePlaygroundStrings = () => useI18n().locale === 'vi' ? vi : en;

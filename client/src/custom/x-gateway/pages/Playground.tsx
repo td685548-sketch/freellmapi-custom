@@ -6,6 +6,8 @@ import {
   ChevronDown,
   Copy,
   MessageSquare,
+  PanelLeft,
+  PanelLeftClose,
   Paperclip,
   Plus,
   RefreshCw,
@@ -146,6 +148,43 @@ export default function Playground() {
   const [attachments, setAttachments] = useState<ChatImage[]>([]);
   const [inputError, setInputError] = useState<string | null>(null);
 
+  // Sidebar toggle state (collapsible to give full width to chat)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    try {
+      const saved = localStorage.getItem('x_playground_sidebar');
+      return saved !== 'false';
+    } catch {
+      return true;
+    }
+  });
+
+  const toggleSidebar = useCallback(() => {
+    setIsSidebarOpen((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('x_playground_sidebar', String(next));
+      } catch {
+        // ignore storage error
+      }
+      return next;
+    });
+  }, []);
+
+  // Textarea dynamic height adjustment
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const adjustTextareaHeight = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const newHeight = Math.min(Math.max(el.scrollHeight, 64), 260);
+    el.style.height = `${newHeight}px`;
+  }, []);
+
+  useEffect(() => {
+    adjustTextareaHeight();
+  }, [inputText, adjustTextareaHeight]);
+
   // Settings
   const [systemPrompt, setSystemPrompt] = useState('');
   const [temperature, setTemperature] = useState<number>(0.7);
@@ -229,6 +268,7 @@ export default function Playground() {
     setChats((prev) => [created, ...prev.slice(0, 19)]);
     setActiveChatId(created.id);
     setInputText('');
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
     setAttachments([]);
     setInputError(null);
     setStreamError(null);
@@ -405,6 +445,7 @@ export default function Playground() {
     );
 
     setInputText('');
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
     setAttachments([]);
     setIsStreaming(true);
 
@@ -572,7 +613,7 @@ export default function Playground() {
       )}
 
       {/* Main 2-Column Playground Layout */}
-      <div className="x-basic-chat">
+      <div className={`x-basic-chat ${!isSidebarOpen ? 'sidebar-collapsed' : ''}`}>
         {/* Left Column: Conversations History */}
         <aside className="x-panel x-chat-history">
           <button
@@ -621,6 +662,16 @@ export default function Playground() {
         <main className="x-panel x-chat-workspace flex flex-col">
           {/* Top Toolbar: Model Selector & Actions */}
           <div className="x-chat-toolbar flex items-end gap-3 pb-3 border-b border-border flex-shrink-0">
+            <button
+              type="button"
+              onClick={toggleSidebar}
+              className="x-sidebar-toggle-btn"
+              title={isSidebarOpen ? s.collapseSidebar : s.expandSidebar}
+              aria-label={isSidebarOpen ? s.collapseSidebar : s.expandSidebar}
+            >
+              {isSidebarOpen ? <PanelLeftClose size={16} /> : <PanelLeft size={16} />}
+            </button>
+
             <label className="flex-1">
               <span className="font-medium text-xs text-foreground mb-1 block">{s.model}</span>
               <select
@@ -827,19 +878,26 @@ export default function Playground() {
             )}
 
             <textarea
-              rows={2}
+              ref={textareaRef}
+              rows={3}
               value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
+              onChange={(e) => {
+                setInputText(e.target.value);
+                adjustTextareaHeight();
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   void handleSend();
                 }
               }}
-              onPaste={handlePaste}
+              onPaste={(e) => {
+                handlePaste(e);
+                setTimeout(adjustTextareaHeight, 0);
+              }}
               placeholder={s.placeholder}
               disabled={isStreaming}
-              className="w-full p-3 border-0 bg-transparent text-sm focus:outline-hidden resize-none"
+              className="w-full p-3.5 border-0 bg-transparent text-sm focus:outline-hidden resize-none"
             />
 
             <div className="x-chat-composer-actions flex items-center justify-between p-2.5 border-t border-border bg-muted/10">
