@@ -117,9 +117,8 @@ export async function preprocessGatewayMessages(
 
   const model = options.targetModel || options.requestedModel || 'unknown';
   const provider = options.targetProvider;
-  const format = options.format || 'openai';
 
-  let messages = [...options.messages];
+  let messages: ChatMessage[] = structuredClone(options.messages);
   const appliedSavers: string[] = [];
   let rtkTokensSavedEst = 0;
   let headroomTokensSavedEst = 0;
@@ -130,7 +129,7 @@ export async function preprocessGatewayMessages(
   // 1. RTK (Runtime Tool-Result Compressor)
   if (!allInputBypassed && !rtkBypassed && isRtkEnabled()) {
     try {
-      const targetBody = options.rawBody || { messages };
+      const targetBody = { messages };
       const rtkRes = compressMessages(targetBody);
       if (rtkRes && rtkRes.hits.length > 0) {
         const savedBytes = Math.max(0, rtkRes.bytesBefore - rtkRes.bytesAfter);
@@ -148,10 +147,9 @@ export async function preprocessGatewayMessages(
   // 2. Headroom (/v1/compress external proxy)
   if (!allInputBypassed && !headroomBypassed) {
     try {
-      const targetBody = options.rawBody ? options.rawBody : { messages };
+      const targetBody = { messages };
       const headroomRes = await compressWithHeadroom(targetBody, {
         model,
-        format: format === 'claude' ? 'claude' : format === 'gemini' ? 'gemini' : format === 'openai-responses' ? 'openai-responses' : undefined,
         signal: options.signal,
       });
 
@@ -207,11 +205,10 @@ export async function preprocessGatewayMessages(
   if (!allInputBypassed && !pxpipeBypassed && isPxpipeEnabled()) {
     try {
       if (isVisionCapableModel(model, provider)) {
-        const pxFormat = format === 'claude' ? 'claude' : format === 'gemini' ? 'gemini' : 'openai';
         const pxResult = compressMessagesWithPxpipeVision(messages, {
           model,
           provider,
-          format: pxFormat,
+          format: 'openai',
         });
 
         if (pxResult.summary.applied) {

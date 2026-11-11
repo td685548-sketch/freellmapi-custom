@@ -1,3 +1,5 @@
+import { subscriptionRouter } from './subscription-router.js';
+import { resolveAccountProvider } from './execution.js';
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import type { Permission } from '@freellmapi/shared/user-access.js';
@@ -8,7 +10,7 @@ import { decrypt } from '../../lib/crypto.js';
 import { KEY_PROXY_URL_MAX } from '../../lib/key-proxy.js';
 import { withKeyProxy } from '../../lib/proxy.js';
 import { AccountError } from './http.js';
-import { getXGatewayProvider, normalizeXGatewayProviderId, resolveXGatewayProvider } from './catalog.js';
+import { getXGatewayProvider, normalizeXGatewayProviderId } from './catalog.js';
 import {
   accountModels,
   accountRow,
@@ -36,6 +38,7 @@ import {
 export const providerAccountsRouter = Router();
 providerAccountsRouter.use(requireAuth, requirePermission('use_x_gateway'));
 providerAccountsRouter.use((_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
+providerAccountsRouter.use('/subscriptions', subscriptionRouter);
 
 type SessionRequest = Request & { user?: SessionUser; sessionToken?: string };
 const labelSchema = z.string().trim().max(200).refine(s => [...s].every(c => c.charCodeAt(0) >= 32 && c.charCodeAt(0) !== 127));
@@ -394,7 +397,7 @@ providerAccountsRouter.post('/test-batch', requirePermission('test_keys'), async
   const results: Array<{ id: number; label: string; provider: string; ok: boolean; message?: string }> = [];
 
   for (const row of rows) {
-    const provider = resolveXGatewayProvider(row.provider, row.base_url);
+    const provider = resolveAccountProvider(row);
     if (!provider || !provider.supportsKeyValidation) {
       results.push({
         id: row.id,
@@ -501,7 +504,7 @@ providerAccountsRouter.post('/providers/:providerId/models/ping', requirePermiss
     return;
   }
 
-  const providerInstance = resolveXGatewayProvider(account.provider, account.base_url);
+  const providerInstance = resolveAccountProvider(account);
   if (!providerInstance) {
     res.json({
       ok: false,
@@ -591,7 +594,7 @@ providerAccountsRouter.delete('/:id', requirePermission('delete_keys'), (req, re
 providerAccountsRouter.post('/:id/test', requirePermission('test_keys'), async (req, res) => {
   const row = accountRow(id(req));
   const body = parse(testSchema, req.body ?? {});
-  const provider = resolveXGatewayProvider(row.provider, row.base_url);
+  const provider = resolveAccountProvider(row);
   if (!provider) throw new AccountError(400, 'Account provider is unavailable.');
   if (!body.message && !provider.supportsKeyValidation) {
     res.json({ ok: false, message: 'This provider does not support credential health checks.' });

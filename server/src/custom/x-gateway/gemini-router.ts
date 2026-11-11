@@ -1,3 +1,4 @@
+import { resolveAccountProvider } from '../provider-accounts/execution.js';
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import type { ChatMessage } from '@freellmapi/shared/types.js';
 import type { CompletionOptions } from '../../providers/base.js';
@@ -9,7 +10,6 @@ import { sanitizeProviderErrorMessage } from '../../lib/error-redaction.js';
 import { permissionGranted } from '@freellmapi/shared/permissions.js';
 import { validateUserApiKey } from '../../services/user-keys.js';
 import {
-  resolveXGatewayProvider,
 } from '../provider-accounts/catalog.js';
 import {
   accountModels,
@@ -265,7 +265,7 @@ geminiRouter.post(/^\/models\/(.+)$/, async (req: Request, res: Response, next: 
 
       for (const { account, modelId } of candidates) {
         if (controller.signal.aborted) return;
-        const provider = resolveXGatewayProvider(account.provider, account.base_url);
+        const provider = resolveAccountProvider(account);
         if (!provider) continue;
 
         let credential: string;

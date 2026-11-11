@@ -518,6 +518,8 @@ export interface ChatMessage {
   name?: string;
   tool_call_id?: string;
   tool_calls?: ChatToolCall[];
+  /** Preserve a failed tool result across native protocol translations. */
+  is_error?: boolean;
   // The model's thinking trace on an assistant turn. Some thinking models
   // (DeepSeek on OpenCode Zen) require it to be replayed verbatim on the next
   // turn or they 400; the proxy preserves and forwards it. See issue #255.

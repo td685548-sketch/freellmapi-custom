@@ -79,6 +79,7 @@ beforeEach(() => {
       return structuredClone(data)
     }
     if (path === '/api/x-accounts' && init?.method === 'POST') return { id: 99 }
+    if (path === '/api/x-accounts/subscriptions/import' && init?.method === 'POST') return { id: 99, status: 'unknown' }
     if (path.endsWith('/start')) {
       return path.includes('/openrouter/')
         ? { flow: 'oauth_pkce', attemptId: 'attempt-1', authorizationUrl: 'https://openrouter.ai/auth?callback_url=http%3A%2F%2Flocalhost%3A3000%2Fx%2Faccounts%2Fcallback%3FattemptId%3Dattempt-1', expiresAt: Date.now() + startExpires }
@@ -474,21 +475,23 @@ describe('connect dialog', () => {
     expect(vi.mocked(apiFetch).mock.calls.filter(([p]) => p.endsWith('/poll')).length).toBe(2)
   })
 
-  it('extracts accessToken from pasted CLI credentials JSON for OAuth CLI providers', async () => {
+  it('imports complete CLI credentials without dropping refresh tokens or claiming health', async () => {
     const claudeProvider = { id: 'claude', name: 'Claude Code', category: 'oauth' as const, authMethods: ['api_key' as const], accounts: [] }
     mount(<ConnectAccountDialog provider={claudeProvider} onClose={onClose} />)
     await flush()
-    expect(body().textContent).toContain('claude setup-token')
-    enter(body().querySelector<HTMLInputElement>('.x-dialog input[maxlength="100"]')!, 'My Claude')
-    const textarea = body().querySelector<HTMLTextAreaElement>('#x-account-credential')!
+    expect(body().textContent).toContain('Saving a credential does not verify upstream access')
+    enter(body().querySelector<HTMLInputElement>('.x-dialog input[maxlength="200"]')!, 'My Claude')
+    const credential = JSON.stringify({ claudeAiOauth: { accessToken: 'sk-ant-oat01-fixture', refreshToken: 'refresh-fixture', expiresAt: 2000000000000 } })
+    const textarea = body().querySelector<HTMLTextAreaElement>('.x-dialog textarea')!
     act(() => {
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, '{"claudeAiOauth":{"accessToken":"sk-ant-oat01-fixture"}}')
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, credential)
       textarea.dispatchEvent(new Event('input', { bubbles: true }))
     })
     submit(body().querySelector<HTMLFormElement>('.x-dialog form')!)
     await flush()
-    const call = vi.mocked(apiFetch).mock.calls.find(([p, i]) => p === '/api/x-accounts' && i?.method === 'POST')!
-    expect(JSON.parse(String(call[1]!.body))).toEqual({ provider: 'claude', key: 'sk-ant-oat01-fixture', label: 'My Claude' })
+    const call = vi.mocked(apiFetch).mock.calls.find(([p, i]) => p === '/api/x-accounts/subscriptions/import' && i?.method === 'POST')!
+    expect(JSON.parse(String(call[1]!.body))).toEqual({ provider: 'claude', credential, label: 'My Claude' })
+    expect(vi.mocked(apiFetch).mock.calls.some(([p, i]) => p === '/api/x-accounts' && i?.method === 'POST')).toBe(false)
     expect(onClose).toHaveBeenCalled()
   })
 
@@ -510,6 +513,16 @@ describe('connect dialog', () => {
 })
 
 describe('OAuth callback', () => {
+  it('reports saved credentials as unverified after a subscription callback', async () => {
+    window.history.replaceState(null, '', '/x/accounts/callback?state=sub_fixture&code=fixture-code')
+    mount(<StrictMode><AccountCallback /></StrictMode>, '/x/accounts/callback')
+    await flush()
+    expect(body().textContent).toContain('Credentials saved')
+    expect(body().textContent).toContain('Upstream inference is unverified')
+    expect(vi.mocked(apiFetch).mock.calls.filter(([p]) => p === '/api/x-accounts/subscriptions/sub_fixture/complete')).toHaveLength(1)
+    expect(window.location.search).toBe('')
+  })
+
   it('exchanges the code once under StrictMode, strips it from the URL and notifies the opener', async () => {
     window.history.replaceState(null, '', '/x/accounts/callback?attemptId=attempt-1&code=fixture-code')
     mount(<StrictMode><AccountCallback /></StrictMode>, '/x/accounts/callback')

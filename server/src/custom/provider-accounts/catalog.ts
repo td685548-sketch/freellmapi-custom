@@ -1,3 +1,6 @@
+import { CodexProvider } from './codex.js';
+import { GeminiCliProvider } from './gemini-cli.js';
+import { KiroProvider } from './kiro.js';
 import type { Platform } from '@freellmapi/shared/types.js';
 import type { ProviderAccountAuthMethod, ProviderCategory } from '@freellmapi/shared/x-accounts.js';
 import type { BaseProvider } from '../../providers/base.js';
@@ -7547,9 +7550,15 @@ export function platformForXGatewayProvider(providerId: string): Platform {
   return builtin ? (normalized as Platform) : 'custom';
 }
 
+export const X_GATEWAY_OAUTH_EXECUTORS = new Set(['codex', 'claude', 'gemini-cli', 'kiro', 'github-copilot', 'openrouter', 'qoder', 'qoder-cn', 'glm']);
+
 export function resolveXGatewayProvider(providerId: string, baseUrl?: string | null): BaseProvider | undefined {
   const normalized = normalizeXGatewayProviderId(providerId) ?? providerId;
   const trimmedUrl = baseUrl?.trim() || null;
+
+  if (normalized === 'codex') return new CodexProvider();
+  if (normalized === 'gemini-cli') return new GeminiCliProvider();
+  if (normalized === 'kiro') return new KiroProvider();
 
   if (normalized === 'github-copilot' || trimmedUrl === COPILOT_BASE_URL) {
     return new CopilotProvider();
@@ -7566,6 +7575,8 @@ export function resolveXGatewayProvider(providerId: string, baseUrl?: string | n
   }
 
   const catalogEntry = getXGatewayProvider(normalized);
+  if (catalogEntry?.category === 'oauth' && !X_GATEWAY_OAUTH_EXECUTORS.has(normalized)) return undefined;
+  if (normalized === 'claude') return new AnthropicWireProvider({ name: catalogEntry?.name ?? 'Claude', baseUrl: trimmedUrl ?? 'https://api.anthropic.com/v1', timeoutMs: 120_000 });
   const effectiveUrl = trimmedUrl ?? catalogEntry?.baseUrl?.trim();
 
   if (customNodesGetter) {

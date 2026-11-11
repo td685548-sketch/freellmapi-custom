@@ -1,3 +1,4 @@
+import { resolveAccountProvider } from '../provider-accounts/execution.js';
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { createHash } from 'node:crypto';
@@ -15,7 +16,6 @@ import { buildSaverBlock } from '../output-savers/prompts.js';
 import {
   getXGatewayProvider,
   normalizeXGatewayProviderId,
-  resolveXGatewayProvider,
 } from '../provider-accounts/catalog.js';
 import {
   accountModels,
@@ -610,7 +610,7 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
     /** One non-streaming attempt, isolated so fusion can run two in parallel. */
     const attemptNonStream = async (candidate: CandidateRoute, signal: AbortSignal) => {
       const { account, modelId } = candidate;
-      const provider = resolveXGatewayProvider(account.provider, account.base_url);
+      const provider = resolveAccountProvider(account);
       if (!provider) throw new Error(`Provider '${account.provider}' is not available.`);
       const credential = decrypt(account.encrypted_key, account.iv, account.auth_tag);
       const effectiveProxy = resolveXGatewayAccountProxy(account);
@@ -701,7 +701,7 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
         }
       }
 
-      const provider = resolveXGatewayProvider(account.provider, account.base_url);
+      const provider = resolveAccountProvider(account);
       if (!provider) {
         lastError = new Error(`Provider '${account.provider}' is not available.`);
         recordRouteOutcome(healthKey(candidate), { error: true });
@@ -999,7 +999,7 @@ async function searchViaChat(
   maxResults: number,
   signal: AbortSignal,
 ): Promise<WebSearchOutcome> {
-  const provider = resolveXGatewayProvider(account.provider, account.base_url);
+  const provider = resolveAccountProvider(account);
   if (!provider) throw new Error(`Provider '${account.provider}' is not available.`);
   const credential = decrypt(account.encrypted_key, account.iv, account.auth_tag);
   const messages: ChatMessage[] = [

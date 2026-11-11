@@ -9,6 +9,7 @@ import { getOutboundProxyUrl } from '../x-gateway/config.js';
 import { pickAutoProxyPoolId, proxyPoolExists, resolvePoolProxyUrl } from '../x-gateway/proxy-pool.js';
 import { AccountError, COPILOT_BASE_URL } from './http.js';
 import { clearCopilotToken, type CopilotModel } from './copilot.js';
+import { normalizeImportedCredential } from './oauth-providers.js';
 import { serializeOAuthCredential, type OAuthCredential } from './oauth-credentials.js';
 import {
   X_GATEWAY_PROVIDERS,
@@ -628,7 +629,13 @@ export function createApiKeyAccount(input: {
     throw new AccountError(400, 'Unknown provider.');
   }
   const catalogEntry = getXGatewayProvider(normalizedProvider)!;
-  const trimmedKey = input.key.trim();
+  let trimmedKey = input.key.trim();
+  if (['codex', 'claude', 'gemini-cli', 'kiro'].includes(normalizedProvider)) {
+    const normalized = normalizeImportedCredential(normalizedProvider, trimmedKey);
+    if (!normalized) throw new AccountError(400, 'Import a valid credential JSON with access token and refresh token for this provider.');
+    if (input.baseUrl && input.baseUrl.replace(/\/+$/, '') !== catalogEntry.baseUrl?.replace(/\/+$/, '')) throw new AccountError(400, 'Subscription credentials require the official provider endpoint.');
+    trimmedKey = normalized;
+  }
   if (!trimmedKey) {
     throw new AccountError(400, 'API key or credential is required.');
   }

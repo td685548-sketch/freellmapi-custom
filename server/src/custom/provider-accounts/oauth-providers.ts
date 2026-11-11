@@ -8,6 +8,7 @@
  */
 import {
   applyTokenResponse,
+  parseOAuthCredential,
   decodeJwtPayload,
   extractEmailFromJwt,
   type OAuthCredential,
@@ -33,6 +34,10 @@ export interface OAuthProviderDescriptor {
 
 const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 const CLAUDE_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
+import { proxyFetch } from '../../lib/proxy.js';
+import { readSubscriptionJson } from './subscription-http.js';
+import { refreshKiroCredential } from './kiro-auth.js';
+
 const GEMINI_CLIENT_ID = process.env.GEMINI_CLIENT_ID || '';
 const GEMINI_CLIENT_SECRET = process.env.GEMINI_CLIENT_SECRET || '';
 
@@ -40,6 +45,8 @@ export const GEMINI_CLOUDCODE_URL = 'https://cloudcode-pa.googleapis.com/v1inter
 export const GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v1/userinfo';
 
 export const OAUTH_PROVIDERS: Record<OAuthKind, OAuthProviderDescriptor> = {
+  kiro: { kind: 'kiro', name: 'Kiro AI', clientId: '', authorizeUrl: 'https://view.awsapps.com/start', tokenUrl: 'https://oidc.us-east-1.amazonaws.com/token',
+    scope: '', redirectUri: '', usePkce: false, extraAuthorizeParams: {}, exchangeEncoding: 'json', refreshEncoding: 'json', refreshLeadMs: 300_000, authMethod: 'oauth_pkce' },
   codex: {
     kind: 'codex',
     name: 'OpenAI Codex',
@@ -71,7 +78,7 @@ export const OAUTH_PROVIDERS: Record<OAuthKind, OAuthProviderDescriptor> = {
     extraAuthorizeParams: { code: 'true' },
     exchangeEncoding: 'json',
     refreshEncoding: 'json',
-    refreshLeadMs: 4 * 60 * 60_000,
+    refreshLeadMs: 5 * 60_000,
     authMethod: 'oauth_pkce',
   },
   'gemini-cli': {
@@ -93,6 +100,8 @@ export const OAUTH_PROVIDERS: Record<OAuthKind, OAuthProviderDescriptor> = {
 };
 
 export function oauthDescriptor(kind: string): OAuthProviderDescriptor | null {
+  if (kind === 'gemini-cli') return { ...OAUTH_PROVIDERS['gemini-cli'], clientId: process.env.GEMINI_CLIENT_ID ?? '', clientSecret: process.env.GEMINI_CLIENT_SECRET };
+
   return Object.prototype.hasOwnProperty.call(OAUTH_PROVIDERS, kind)
     ? OAUTH_PROVIDERS[kind as OAuthKind]
     : null;
@@ -148,7 +157,7 @@ async function tokenRequest(url: string, init: RequestInit): Promise<RawTokenRes
   if (target.protocol !== 'https:' || !tokenHosts.has(target.host)) {
     throw new Error('Unsupported OAuth token endpoint.');
   }
-  const response = await fetch(url, {
+  const response = await proxyFetch(url, {
     ...init,
     redirect: 'error',
     signal: AbortSignal.timeout(20_000),
@@ -157,16 +166,14 @@ async function tokenRequest(url: string, init: RequestInit): Promise<RawTokenRes
       'User-Agent': 'FreeLLMAPI/0.2.1 (provider-accounts)',
       ...(init.headers as Record<string, string> | undefined),
     },
-  });
-  const body = await response.json().catch(() => ({})) as RawTokenResponse;
+  }, 'custom', 'unknown');
+  const body = await readSubscriptionJson(response) as RawTokenResponse;
   if (!response.ok || typeof body.access_token !== 'string') {
     const error = new Error(
-      typeof body.error_description === 'string' ? body.error_description
-        : typeof body.error === 'string' ? body.error
-          : `OAuth token endpoint returned HTTP ${response.status}.`,
+      `OAuth token endpoint returned HTTP ${response.status}.`,
     ) as OAuthRefreshError;
     error.status = response.status;
-    error.code = typeof body.error === 'string' ? body.error : undefined;
+    error.code = ['invalid_grant', 'invalid_request', 'refresh_token_reused', 'unauthorized_client', 'access_denied'].includes(String(body.error)) ? String(body.error) : undefined;
     error.permanent = isPermanentOAuthError(error.code, error.message);
     throw error;
   }
@@ -228,6 +235,8 @@ export async function refreshOAuthCredential(
   descriptor: OAuthProviderDescriptor,
   credential: OAuthCredential,
 ): Promise<OAuthCredential> {
+  if (credential.kind === 'kiro') return refreshKiroCredential(credential);
+  if (credential.kind === 'gemini-cli' && (!descriptor.clientId || !descriptor.clientSecret)) throw new Error('Configure the OAuth client matching the imported Gemini CLI session before refreshing.');
   const payload: Record<string, string> = {
     grant_type: 'refresh_token',
     refresh_token: credential.refreshToken,
@@ -249,7 +258,7 @@ export async function refreshOAuthCredential(
 }
 
 function cloudCodeRequest(path: string, accessToken: string): Promise<Response> {
-  return fetch(`${GEMINI_CLOUDCODE_URL}:${path}`, {
+  return proxyFetch(`${GEMINI_CLOUDCODE_URL}:${path}`, {
     method: 'POST',
     redirect: 'error',
     signal: AbortSignal.timeout(20_000),
@@ -262,7 +271,7 @@ function cloudCodeRequest(path: string, accessToken: string): Promise<Response> 
     },
     // Matches the Gemini CLI client metadata: ideType 9, Linux x64 (3), plugin 2.
     body: JSON.stringify({ metadata: { ideType: 9, platform: 3, pluginType: 2 }, mode: 1 }),
-  });
+  }, 'google', 'unknown');
 }
 
 /** Resolve the Cloud Code Assist project id bound to a Google OAuth token. */
@@ -288,11 +297,11 @@ export async function fetchGeminiProjectId(accessToken: string): Promise<string 
 
 export async function fetchGoogleEmail(accessToken: string): Promise<string | null> {
   try {
-    const response = await fetch(`${GOOGLE_USERINFO_URL}?alt=json`, {
+    const response = await proxyFetch(`${GOOGLE_USERINFO_URL}?alt=json`, {
       headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
       redirect: 'error',
       signal: AbortSignal.timeout(15_000),
-    });
+    }, 'google', 'unknown');
     if (!response.ok) {
       await response.body?.cancel();
       return null;
@@ -356,6 +365,9 @@ export function normalizeImportedCredential(providerId: string, raw: string): st
   } catch {
     return null;
   }
+  if (parsed.kind !== undefined && parsed.kind !== providerId) return null;
+  if (typeof parsed.provider === 'string' && parsed.provider !== providerId) return null;
+  if (parsed.v !== undefined) { const credential = parseOAuthCredential(trimmed); return credential?.kind === providerId ? JSON.stringify(credential) : null; }
   const nested = (key: string): Record<string, unknown> | null => {
     const value = parsed[key];
     return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -379,8 +391,9 @@ export function normalizeImportedCredential(providerId: string, raw: string): st
   const rawExpiry = tokenSource.expiresAt ?? tokenSource.expiry_date ?? parsed.expiresAt ?? parsed.expiry_date;
   const numericExpiry = typeof rawExpiry === 'number'
     ? (rawExpiry < 1e12 ? rawExpiry * 1000 : rawExpiry)
-    : typeof rawExpiry === 'string' ? Date.parse(rawExpiry) : NaN;
-  const expiresAt = Number.isFinite(numericExpiry) && numericExpiry > 0 ? numericExpiry : Date.now() + 3600_000;
+    : typeof rawExpiry === 'string' ? (/^\d+$/.test(rawExpiry) ? Number(rawExpiry) * (Number(rawExpiry) < 1e12 ? 1000 : 1) : Date.parse(rawExpiry)) : NaN;
+  const jwt = decodeJwtPayload(accessToken);
+  const expiresAt = Number.isFinite(numericExpiry) && numericExpiry > 0 ? numericExpiry : typeof jwt?.exp === 'number' ? jwt.exp * 1000 : Date.now();
   const email = pick(tokenSource, 'email') ?? pick(parsed, 'email');
   const accountId = pick(tokenSource, 'account_id', 'accountId') ?? pick(parsed, 'account_id', 'accountId');
   const projectId = pick(tokenSource, 'projectId', 'project_id') ?? pick(parsed, 'projectId', 'project_id');
@@ -391,12 +404,25 @@ export function normalizeImportedCredential(providerId: string, raw: string): st
     accessToken,
     refreshToken,
     expiresAt,
-    lastRefreshAt: Date.now(),
+
     ...(email ? { email } : {}),
     ...(accountId || email ? { subject: accountId ?? email } : {}),
     ...(accountId ? { accountId } : {}),
     ...(projectId ? { projectId } : {}),
     ...(scope ? { scope } : {}),
   };
+  if (descriptor.kind === 'kiro') {
+    const extra = nested('providerSpecificData') ?? nested('clientRegistration') ?? parsed;
+    const region = pick(extra, 'region') ?? pick(parsed, 'region') ?? 'us-east-1';
+    if (!/^[a-z]{2}(?:-gov)?-[a-z]+-\d$/.test(region)) return null;
+    const clientId = pick(extra, 'clientId') ?? pick(parsed, 'clientId');
+    const clientSecret = pick(extra, 'clientSecret') ?? pick(parsed, 'clientSecret');
+    Object.assign(credential, { region, authMethod: clientId && clientSecret ? 'builder-id' : 'social', clientId, clientSecret, profileArn: pick(extra, 'profileArn') ?? pick(parsed, 'profileArn') });
+  }
+  if (descriptor.kind === 'codex') {
+    const claims = decodeJwtPayload(pick(tokenSource, 'id_token') ?? accessToken);
+    const auth = claims?.['https://api.openai.com/auth'] as Record<string, unknown> | undefined;
+    if (!accountId && typeof auth?.chatgpt_account_id === 'string') Object.assign(credential, { accountId: auth.chatgpt_account_id, subject: auth.chatgpt_account_id });
+  }
   return JSON.stringify(credential);
 }

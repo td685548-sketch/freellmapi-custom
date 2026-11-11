@@ -1,3 +1,4 @@
+import { SubscriptionConnectDialog } from './SubscriptionConnectDialog'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Copy, ExternalLink, LoaderCircle, ShieldCheck, X } from 'lucide-react'
@@ -280,7 +281,7 @@ export function parseBulkCredentialLines(
     .filter(item => Boolean(item.key))
 }
 
-export function ConnectAccountDialog({ provider, account, onClose }: {
+function LegacyConnectAccountDialog({ provider, account, onClose }: {
   provider: AccountProvider; account?: ProviderAccount; onClose: () => void
 }) {
   const s = useXStrings()
@@ -557,4 +558,8 @@ export function ConnectAccountDialog({ provider, account, onClose }: {
       </div>}
     </DialogPopup>
   </Dialog>
+}
+
+export function ConnectAccountDialog(props: { provider: AccountProvider; account?: ProviderAccount; onClose: () => void }) {
+  return ['codex', 'claude', 'gemini-cli', 'kiro'].includes(props.provider.id) ? <SubscriptionConnectDialog {...props} /> : <LegacyConnectAccountDialog {...props} />
 }

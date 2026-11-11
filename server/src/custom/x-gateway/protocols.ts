@@ -1,3 +1,6 @@
+import { ProtocolToolStream } from './protocol-tool-stream.js';
+import { requestSignal } from '../provider-accounts/request-signal.js';
+import { resolveAccountProvider } from '../provider-accounts/execution.js';
 import crypto from 'node:crypto';
 import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
@@ -16,7 +19,6 @@ import { withQuotaTracking } from './quota/tracking.js';
 import { logRequest } from '../../lib/request-log.js';
 import {
   getXGatewayProvider,
-  resolveXGatewayProvider,
 } from '../provider-accounts/catalog.js';
 import {
   accountModels,
@@ -286,6 +288,7 @@ xGatewayProtocolsRouter.post('/messages', xGatewayAuth, async (req: Request, res
     }
 
     const options: CompletionOptions = {
+      signal: requestSignal(req, res),
       temperature: typeof body.temperature === 'number' ? body.temperature : undefined,
       max_tokens: typeof body.max_tokens === 'number' && body.max_tokens > 0 ? body.max_tokens : 4096,
       top_p: typeof body.top_p === 'number' ? body.top_p : undefined,
@@ -298,7 +301,7 @@ xGatewayProtocolsRouter.post('/messages', xGatewayAuth, async (req: Request, res
     let lastError: unknown = null;
 
     for (const { account, modelId } of candidates) {
-      const provider = resolveXGatewayProvider(account.provider, account.base_url);
+      const provider = resolveAccountProvider(account);
       if (!provider) continue;
 
       let credential: string;
@@ -428,8 +431,10 @@ xGatewayProtocolsRouter.post('/messages', xGatewayAuth, async (req: Request, res
               content_block: { type: 'text', text: '' },
             });
 
+            const toolStream = new ProtocolToolStream('messages', (event, data) => writeAnthropicSse(res, event, data));
             const processChunk = (chunk: any) => {
               if (!chunk) return;
+              toolStream.process(chunk);
               if (chunk.usage?.prompt_tokens) promptTokens = chunk.usage.prompt_tokens;
               if (chunk.usage?.completion_tokens) completionTokens = chunk.usage.completion_tokens;
               const deltaText = chunk.choices?.[0]?.delta?.content;
@@ -452,10 +457,11 @@ xGatewayProtocolsRouter.post('/messages', xGatewayAuth, async (req: Request, res
 
             if (!completionTokens) completionTokens = Math.max(1, Math.ceil(textChars / 4));
 
+            toolStream.finish();
             writeAnthropicSse(res, 'content_block_stop', { type: 'content_block_stop', index: 0 });
             writeAnthropicSse(res, 'message_delta', {
               type: 'message_delta',
-              delta: { stop_reason: 'end_turn', stop_sequence: null },
+              delta: { stop_reason: toolStream.anthropicStopReason, stop_sequence: null },
               usage: { output_tokens: completionTokens },
             });
             writeAnthropicSse(res, 'message_stop', { type: 'message_stop' });
@@ -686,6 +692,7 @@ xGatewayProtocolsRouter.post('/responses', xGatewayAuth, async (req: Request, re
     }
 
     const options: CompletionOptions = {
+      signal: requestSignal(req, res),
       temperature: typeof body.temperature === 'number' ? body.temperature : undefined,
       max_tokens: typeof body.max_output_tokens === 'number' ? body.max_output_tokens : undefined,
       top_p: typeof body.top_p === 'number' ? body.top_p : undefined,
@@ -699,7 +706,7 @@ xGatewayProtocolsRouter.post('/responses', xGatewayAuth, async (req: Request, re
     let lastError: unknown = null;
 
     for (const { account, modelId } of candidates) {
-      const provider = resolveXGatewayProvider(account.provider, account.base_url);
+      const provider = resolveAccountProvider(account);
       if (!provider) continue;
 
       let credential: string;
@@ -812,8 +819,12 @@ xGatewayProtocolsRouter.post('/responses', xGatewayAuth, async (req: Request, re
               },
             });
 
+            writeEvent('response.content_part.added', { type: 'response.content_part.added', item_id: msgItemId, output_index: 0, content_index: 0, part: { type: 'output_text', text: '', annotations: [] } });
+
+            const toolStream = new ProtocolToolStream('responses', writeEvent);
             const processChunk = (chunk: any) => {
               if (!chunk) return;
+              toolStream.process(chunk);
               if (chunk.usage?.prompt_tokens) promptTokens = chunk.usage.prompt_tokens;
               if (chunk.usage?.completion_tokens) completionTokens = chunk.usage.completion_tokens;
               const delta = chunk.choices?.[0]?.delta?.content;
@@ -846,15 +857,23 @@ xGatewayProtocolsRouter.post('/responses', xGatewayAuth, async (req: Request, re
               text: fullText,
             });
 
-            const completed = buildResponsesPayload({
+            toolStream.finish();
+            const completed = toolStream.finalizeResponse(buildResponsesPayload({
               id: responseId,
               model: modelId,
               text: fullText,
-              toolCalls: [],
+              toolCalls: toolStream.calls,
               promptTokens,
               completionTokens,
-            });
-            writeEvent('response.completed', { type: 'response.completed', response: completed });
+            }));
+            let messageItem = completed.output.find(item => item.type === 'message');
+            if (!messageItem) {
+              messageItem = { type: 'message', id: msgItemId, status: 'completed', role: 'assistant', content: [{ type: 'output_text', text: fullText, annotations: [] }] };
+              completed.output.unshift(messageItem);
+            } else messageItem.id = msgItemId;
+            writeEvent('response.content_part.done', { type: 'response.content_part.done', item_id: msgItemId, output_index: 0, content_index: 0, part: { type: 'output_text', text: fullText, annotations: [] } });
+            writeEvent('response.output_item.done', { type: 'response.output_item.done', output_index: 0, item: messageItem });
+            writeEvent(completed.status === 'incomplete' ? 'response.incomplete' : 'response.completed', { type: completed.status === 'incomplete' ? 'response.incomplete' : 'response.completed', response: completed });
             res.end();
 
             const latencyMs = Date.now() - startMs;
@@ -941,6 +960,7 @@ xGatewayProtocolsRouter.post('/completions', xGatewayAuth, async (req: Request, 
   }
 
   const options: CompletionOptions = {
+    signal: requestSignal(req, res),
     temperature: typeof body.temperature === 'number' ? body.temperature : undefined,
     max_tokens: typeof body.max_tokens === 'number' && body.max_tokens > 0 ? body.max_tokens : 256,
     top_p: typeof body.top_p === 'number' ? body.top_p : undefined,
@@ -949,7 +969,7 @@ xGatewayProtocolsRouter.post('/completions', xGatewayAuth, async (req: Request, 
 
   let lastError: unknown = null;
   for (const { account, modelId } of candidates) {
-    const provider = resolveXGatewayProvider(account.provider, account.base_url);
+    const provider = resolveAccountProvider(account);
     if (!provider) continue;
     let credential: string;
     try {
@@ -1058,6 +1078,8 @@ xGatewayProtocolsRouter.post('/completions', xGatewayAuth, async (req: Request, 
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function accountBaseUrl(account: { provider: string; base_url: string | null }): string | null {
+  // Subscription grants are scoped to native inference, never generic media APIs.
+  if (['codex', 'claude', 'gemini-cli', 'kiro'].includes(account.provider)) return null;
   const customUrl = account.base_url?.trim();
   if (customUrl) return customUrl.replace(/\/+$/, '');
   const entry = getXGatewayProvider(account.provider);

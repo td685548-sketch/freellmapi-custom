@@ -1,3 +1,4 @@
+import { withProxyResponseObserver } from '../../lib/proxy.js';
 /**
  * Credential lifecycle for X Gateway subscription (OAuth) accounts.
  *
@@ -8,6 +9,7 @@
  * refreshes would log the user out of their ChatGPT session.
  */
 import { decrypt } from '../../lib/crypto.js';
+import { getDb } from '../../db/index.js';
 import { AccountError } from './http.js';
 import {
   needsRefresh,
@@ -23,6 +25,7 @@ import {
 } from './oauth-providers.js';
 import {
   setAccountStatus,
+  accountRow,
   updateAccountCredential,
   type AccountRow,
 } from './store.js';
@@ -36,6 +39,7 @@ const TRANSIENT_RETRY_COOLDOWN_MS = 30_000;
 const FORCED_REFRESH_THROTTLE_MS = 10_000;
 
 interface RefreshEntry {
+  cipher: string;
   inFlight: Promise<OAuthCredential> | null;
   /** Newest credential known to this process (may be newer than the cached row). */
   latest: OAuthCredential | null;
@@ -46,11 +50,17 @@ interface RefreshEntry {
 }
 
 const entries = new Map<number, RefreshEntry>();
+let activeDb: unknown;
+function syncDatabase(): void {
+  const db = getDb();
+  if (activeDb !== db) { entries.clear(); activeDb = db; }
+}
 
-function entryFor(id: number): RefreshEntry {
+function entryFor(id: number, cipher: string): RefreshEntry {
+  syncDatabase();
   let entry = entries.get(id);
   if (!entry) {
-    entry = { inFlight: null, latest: null, permanentFailure: null, transientFailure: null, retryAfter: 0 };
+    entry = { cipher, inFlight: null, latest: null, permanentFailure: null, transientFailure: null, retryAfter: 0 };
     entries.set(id, entry);
   }
   return entry;
@@ -74,8 +84,10 @@ export function clearOAuthRefreshStateForAccount(id: number): void {
 export function oauthCredentialForAccount(
   row: Pick<AccountRow, 'id' | 'encrypted_key' | 'iv' | 'auth_tag'>,
 ): OAuthCredential | null {
+  syncDatabase();
   const entry = entries.get(row.id);
-  if (entry?.latest) return entry.latest;
+  if (entry && entry.cipher !== row.encrypted_key) entries.delete(row.id);
+  else if (entry?.latest) return entry.latest;
   try {
     return parseOAuthCredential(decrypt(row.encrypted_key, row.iv, row.auth_tag));
   } catch {
@@ -83,10 +95,6 @@ export function oauthCredentialForAccount(
   }
 }
 
-function reasonOf(error: unknown): string {
-  if (error instanceof Error && error.message) return error.message.slice(0, 200);
-  return 'the provider rejected the refresh token';
-}
 
 function isPermanent(error: OAuthRefreshError | undefined): boolean {
   if (!error) return false;
@@ -101,20 +109,34 @@ async function performRefresh(
   entry: RefreshEntry,
 ): Promise<OAuthCredential> {
   try {
-    const next = await refreshOAuthCredential(descriptor, current);
+    const next = await withProxyResponseObserver(() => {}, () => refreshOAuthCredential(descriptor, current));
     // Persist before returning: a rotated refresh token that only lives in
     // memory is lost on restart and revokes the grant on the next use.
-    updateAccountCredential(row.id, next);
+    if (!updateAccountCredential(row.id, next, row.encrypted_key)) {
+      entries.delete(row.id);
+      const replaced = accountRow(row.id);
+      const credential = parseOAuthCredential(decrypt(replaced.encrypted_key, replaced.iv, replaced.auth_tag));
+      if (!credential || credential.kind !== current.kind) throw new AccountError(409, 'Account changed during refresh. Retry the request.');
+      return credential;
+    }
+    entry.cipher = accountRow(row.id).encrypted_key;
     entry.latest = next;
     entry.transientFailure = null;
     entry.retryAfter = 0;
     return next;
   } catch (cause) {
+    const replacement = accountRow(row.id);
+    if (replacement.encrypted_key !== row.encrypted_key) {
+      entries.delete(row.id);
+      const credential = parseOAuthCredential(decrypt(replacement.encrypted_key, replacement.iv, replacement.auth_tag));
+      if (credential?.kind === current.kind) return credential;
+      throw new AccountError(409, 'Account changed during refresh. Retry the request.');
+    }
     const error = cause as OAuthRefreshError;
     if (isPermanent(error)) {
       const failure = new AccountError(
         401,
-        `${descriptor.name} rejected the saved refresh token (${reasonOf(cause)}). Reconnect this account to continue.`,
+        `${descriptor.name} rejected the saved refresh token. Reconnect this account to continue.`,
       );
       entry.permanentFailure = failure;
       try {
@@ -126,7 +148,7 @@ async function performRefresh(
     }
     const transient = new AccountError(
       502,
-      `${descriptor.name} token refresh failed temporarily (${reasonOf(cause)}). Retrying shortly.`,
+      `${descriptor.name} token refresh failed temporarily. Retry shortly.`,
     );
     entry.transientFailure = transient;
     entry.retryAfter = Date.now() + TRANSIENT_RETRY_COOLDOWN_MS;
@@ -139,7 +161,7 @@ async function refreshCredential(
   current: OAuthCredential,
   descriptor: OAuthProviderDescriptor,
 ): Promise<OAuthCredential> {
-  const entry = entryFor(row.id);
+  const entry = entryFor(row.id, row.encrypted_key);
   if (entry.permanentFailure) throw entry.permanentFailure;
   if (entry.inFlight) return entry.inFlight;
   if (entry.transientFailure && Date.now() < entry.retryAfter) throw entry.transientFailure;
@@ -162,9 +184,12 @@ export async function resolveAccountCredential(
   row: AccountRow,
   options: { forceRefresh?: boolean } = {},
 ): Promise<string> {
+  row = accountRow(row.id);
+  if (!row.enabled) throw new AccountError(403, 'Provider account is paused.');
   const current = oauthCredentialForAccount(row);
   if (!current) return decrypt(row.encrypted_key, row.iv, row.auth_tag);
 
+  if (current.kind !== row.provider) throw new AccountError(400, 'Credential provider does not match this account.');
   const descriptor = oauthDescriptor(current.kind);
   if (!descriptor) {
     throw new AccountError(400, `OAuth account kind '${current.kind}' is not supported by this gateway.`);

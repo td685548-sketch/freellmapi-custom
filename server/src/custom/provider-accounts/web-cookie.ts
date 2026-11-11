@@ -1,3 +1,5 @@
+import { prepareClaudeOAuthBody } from './claude-oauth.js';
+import { parseOAuthCredential } from './oauth-credentials.js';
 import crypto from 'node:crypto';
 import type {
   ChatCompletionChunk,
@@ -654,6 +656,7 @@ export class AnthropicWireProvider extends BaseProvider {
               type: 'tool_result',
               tool_use_id: msg.tool_call_id ?? 'toolu_0',
               content: contentToString(msg.content),
+              ...(msg.is_error === true ? { is_error: true } : {}),
             },
           ],
         });
@@ -710,6 +713,11 @@ export class AnthropicWireProvider extends BaseProvider {
   }
 
   private buildHeaders(apiKey: string): Record<string, string> {
+    const credential = parseOAuthCredential(apiKey);
+    if (credential) {
+      if (credential.kind !== 'claude') throw new Error('Claude requires a matching OAuth credential.');
+      return { 'Content-Type': 'application/json', Authorization: `Bearer ${credential.accessToken}`, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14', 'User-Agent': 'claude-cli/2.1.280 (external, sdk-cli)', 'x-app': 'cli' };
+    }
     const token = apiKey.trim().replace(/^Bearer\s+/i, '');
     return {
       'Content-Type': 'application/json',
@@ -725,23 +733,26 @@ export class AnthropicWireProvider extends BaseProvider {
     modelId: string,
     options?: CompletionOptions,
   ): Promise<ChatCompletionResponse> {
-    const url = `${this.baseUrl}/messages`;
+    const url = parseOAuthCredential(apiKey)?.kind === 'claude'
+      ? 'https://api.anthropic.com/v1/messages?beta=true'
+      : `${this.baseUrl}/messages`;
     const res = await this.fetchWithTimeout(
       url,
       {
         method: 'POST',
         headers: this.buildHeaders(apiKey),
-        body: JSON.stringify(this.buildAnthropicBody(messages, modelId, false, options)),
+        body: JSON.stringify(prepareClaudeOAuthBody(apiKey, this.buildAnthropicBody(messages, modelId, false, options))),
       },
       options?.timeoutMs ?? this.timeoutMs,
       { signal: options?.signal, timeoutBounds: 'request' },
     );
 
     if (!res.ok) {
-      const errText = await res.text().catch(() => '');
+      await res.body?.cancel();
+      const errText = '';
       throw providerHttpError(
         res,
-        `${this.name} error (HTTP ${res.status}): ${errText.slice(0, 240) || res.statusText}`,
+        `${this.name} error (HTTP ${res.status}): Upstream request failed.`,
         errText,
       );
     }
@@ -799,23 +810,26 @@ export class AnthropicWireProvider extends BaseProvider {
     modelId: string,
     options?: CompletionOptions,
   ): AsyncGenerator<ChatCompletionChunk> {
-    const url = `${this.baseUrl}/messages`;
+    const url = parseOAuthCredential(apiKey)?.kind === 'claude'
+      ? 'https://api.anthropic.com/v1/messages?beta=true'
+      : `${this.baseUrl}/messages`;
     const res = await this.fetchWithTimeout(
       url,
       {
         method: 'POST',
         headers: this.buildHeaders(apiKey),
-        body: JSON.stringify(this.buildAnthropicBody(messages, modelId, true, options)),
+        body: JSON.stringify(prepareClaudeOAuthBody(apiKey, this.buildAnthropicBody(messages, modelId, true, options))),
       },
       options?.timeoutMs ?? this.timeoutMs,
       { signal: options?.signal },
     );
 
     if (!res.ok) {
-      const errText = await res.text().catch(() => '');
+      await res.body?.cancel();
+      const errText = '';
       throw providerHttpError(
         res,
-        `${this.name} stream error (HTTP ${res.status}): ${errText.slice(0, 240) || res.statusText}`,
+        `${this.name} stream error (HTTP ${res.status}): Upstream request failed.`,
         errText,
       );
     }

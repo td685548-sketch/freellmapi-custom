@@ -1,3 +1,4 @@
+import { crc32 } from '../../custom/provider-accounts/kiro-wire.js';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Server } from 'node:http';
 import { initDb, getDb } from '../../db/index.js';
@@ -60,7 +61,7 @@ describe('X account quota HTTP, routing and isolation', () => {
     const secret = encrypt('gsk_quota_secret');
     const seed = (provider: string) => Number(getDb().prepare(`INSERT INTO x_gateway_keys
       (provider,label,auth_method,encrypted_key,iv,auth_tag,status,enabled) VALUES (?,'Quota account','api_key',?,?,?,'healthy',1)`)
-      .run(provider, secret.encrypted, secret.iv, secret.authTag).lastInsertRowid);
+      .run(provider, ...(provider === 'kiro' ? (() => { const value = encrypt(JSON.stringify({ v: 1, kind: 'kiro', accessToken: 'kiro-fixture', refreshToken: 'refresh-fixture', expiresAt: Date.now() + 86400000, region: 'us-east-1', authMethod: 'social' })); return [value.encrypted, value.iv, value.authTag]; })() : [secret.encrypted, secret.iv, secret.authTag])).lastInsertRowid);
     first = seed('groq'); second = seed('claude'); third = seed('kiro'); invalidateXGatewayKeyCache();
     server = createApp().listen(0, '127.0.0.1'); await new Promise<void>(r => server.once('listening', r));
     base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
@@ -108,10 +109,18 @@ describe('X account quota HTTP, routing and isolation', () => {
     upstream.mockImplementation(async (url) => {
       visited.push(String(url));
       if (String(url).includes('anthropic.com') || String(url).includes('groq.com')) return new Response('{"error":{"message":"Temporarily unavailable"}}', { status: 503 });
-      return new Response(JSON.stringify({ id: 'quota-fallback', object: 'chat.completion', created: 1, model: 'fallback',
-        choices: [{ index: 0, message: { role: 'assistant', content: 'Free tier answered' }, finish_reason: 'stop' }],
-        usage: { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 },
-      }), { headers: { 'content-type': 'application/json' } });
+      // Kiro speaks AWS EventStream, not OpenAI Chat Completions JSON.
+      const header = (name: string, value: string) => {
+        const bytes = Buffer.from(value); const size = Buffer.alloc(2); size.writeUInt16BE(bytes.length);
+        return Buffer.concat([Buffer.from([name.length]), Buffer.from(name), Buffer.from([7]), size, bytes]);
+      };
+      const event = (type: string, payload: unknown) => {
+        const headers = Buffer.concat([header(':message-type', 'event'), header(':event-type', type)]);
+        const data = Buffer.from(JSON.stringify(payload)); const frame = Buffer.alloc(16 + headers.length + data.length);
+        frame.writeUInt32BE(frame.length); frame.writeUInt32BE(headers.length, 4); frame.writeUInt32BE(crc32(frame.subarray(0, 8)), 8);
+        headers.copy(frame, 12); data.copy(frame, 12 + headers.length); frame.writeUInt32BE(crc32(frame.subarray(0, -4)), frame.length - 4); return frame;
+      };
+      return new Response(Buffer.concat([event('assistantResponseEvent', { content: 'Free tier answered' }), event('messageStopEvent', { stopReason: 'end_turn' })]), { headers: { 'content-type': 'application/vnd.amazon.eventstream' } });
     });
     const response = await fetch(`${base}/x/v1/chat/completions`, { method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
