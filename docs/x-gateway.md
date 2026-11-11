@@ -119,6 +119,12 @@ agent streaming/tools need their own tests, even after a successful text probe.
 
 ## Deployment and remaining work
 
+Native subscription executors, browser import/login, refresh requirements and
+the provider availability matrix are documented in
+[Subscription providers on Render](x-gateway-subscriptions.md). HTTP fixture
+verification does not imply live access for an imported account. Protocol model
+allowlists apply to Messages/Responses/media as well as Chat Completions.
+
 See [Render deployment and smoke checks](x-gateway-render.md), including durable
 SQLite or the experimental Turso backend, encryption key, callbacks and proxy.
 

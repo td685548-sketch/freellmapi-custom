@@ -8,7 +8,7 @@
  */
 export const OAUTH_CREDENTIAL_VERSION = 1 as const;
 
-export type OAuthKind = 'codex' | 'claude' | 'gemini-cli';
+export type OAuthKind = 'codex' | 'claude' | 'gemini-cli' | 'kiro';
 
 export interface OAuthCredential {
   v: typeof OAUTH_CREDENTIAL_VERSION;
@@ -28,9 +28,14 @@ export interface OAuthCredential {
   /** Google Cloud Code Assist project (Gemini CLI). */
   projectId?: string;
   scope?: string;
+  region?: string;
+  profileArn?: string;
+  authMethod?: 'builder-id' | 'idc' | 'social';
+  clientId?: string;
+  clientSecret?: string;
 }
 
-const KINDS: readonly OAuthKind[] = ['codex', 'claude', 'gemini-cli'];
+const KINDS: readonly OAuthKind[] = ['codex', 'claude', 'gemini-cli', 'kiro'];
 
 export function isOAuthKind(value: unknown): value is OAuthKind {
   return typeof value === 'string' && (KINDS as readonly string[]).includes(value);
@@ -70,7 +75,7 @@ export function parseOAuthCredential(raw: string): OAuthCredential | null {
   const accessToken = text(data.accessToken);
   const refreshToken = text(data.refreshToken);
   const expiresAt = milliseconds(data.expiresAt);
-  if (!accessToken || !refreshToken || !expiresAt) return null;
+  if (!accessToken || !refreshToken || !expiresAt || !/^[\x21-\x7e]+$/.test(accessToken) || !/^[\x21-\x7e]+$/.test(refreshToken)) return null;
   const credential: OAuthCredential = { v: 1, kind: data.kind, accessToken, refreshToken, expiresAt };
   const email = text(data.email, 320);
   if (email) credential.email = email;
@@ -86,6 +91,12 @@ export function parseOAuthCredential(raw: string): OAuthCredential | null {
   if (scope) credential.scope = scope;
   const lastRefreshAt = milliseconds(data.lastRefreshAt);
   if (lastRefreshAt) credential.lastRefreshAt = lastRefreshAt;
+  for (const name of ['region', 'profileArn', 'clientId', 'clientSecret'] as const) {
+    const value = text(data[name]);
+    if (value) credential[name] = value;
+  }
+  if (data.authMethod === 'builder-id' || data.authMethod === 'idc' || data.authMethod === 'social') credential.authMethod = data.authMethod;
+  if (credential.kind === 'kiro' && !/^[a-z]{2}(?:-gov)?-[a-z]+-\d$/.test(credential.region ?? 'us-east-1')) return null;
   return credential;
 }
 
@@ -94,7 +105,7 @@ export function serializeOAuthCredential(credential: OAuthCredential): string {
 }
 
 export function oauthIdentity(credential: OAuthCredential): string | null {
-  return credential.subject ?? credential.email ?? credential.accountId ?? credential.projectId ?? null;
+  return credential.subject ?? credential.email ?? credential.accountId ?? null;
 }
 
 export function credentialExpired(credential: OAuthCredential, now = Date.now()): boolean {
@@ -130,8 +141,9 @@ export function applyTokenResponse(
   now = Date.now(),
 ): OAuthCredential {
   const accessToken = text(tokens.access_token);
-  if (!accessToken) throw new Error('Token endpoint omitted access_token.');
+  if (!accessToken || !/^[\x21-\x7e]+$/.test(accessToken)) throw new Error('Token endpoint returned an invalid access token.');
   const refreshToken = text(tokens.refresh_token) ?? current.refreshToken;
+  if (!refreshToken || !/^[\x21-\x7e]+$/.test(refreshToken)) throw new Error('Token endpoint omitted a valid refresh token.');
   const expiresIn = typeof tokens.expires_in === 'number' ? tokens.expires_in : Number(tokens.expires_in);
   const lifetimeMs = Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn * 1000 : 3600_000;
   const scope = text(tokens.scope, 2000);

@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { getConfigSnapshot } from './config.js';
-import { validateXGatewayClientKey } from './client-keys.js';
+import { isModelAllowedForKey, type ValidatedXGatewayClientKey, validateXGatewayClientKey } from './client-keys.js';
 import { permissionGranted } from '@freellmapi/shared/permissions.js';
 import { extractInferenceToken } from '../../middleware/user-rate-limit.js';
 import { validateUserApiKey, getMemoizedUserKey, type ValidatedUserKey } from '../../services/user-keys.js';
@@ -33,6 +33,14 @@ export function xGatewayAuth(req: Request, res: Response, next: NextFunction): v
     return;
   }
 
+  const access = (user as ValidatedXGatewayClientKey).access;
+  if (req.method === 'POST' && access?.restricted) {
+    const model = typeof req.body?.model === 'string' ? req.body.model : 'auto';
+    if (!isModelAllowedForKey(access, model)) {
+      res.status(403).json({ error: { message: 'Model or combo is not allowed for this API key.', type: 'permission_error', code: 'model_not_allowed' } });
+      return;
+    }
+  }
   (req as Request & { user?: ValidatedUserKey }).user = user;
   next();
 }

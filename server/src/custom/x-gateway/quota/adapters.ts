@@ -1,6 +1,10 @@
 import type { XQuotaWindow } from '@freellmapi/shared/x-quota.js';
 import { z } from 'zod';
-import { decrypt } from '../../../lib/crypto.js';
+import { withAccountCredential } from '../../provider-accounts/oauth-lifecycle.js';
+import { parseOAuthCredential } from '../../provider-accounts/oauth-credentials.js';
+import { kiroRegion } from '../../provider-accounts/kiro-auth.js';
+import { fetchGeminiProjectId } from '../../provider-accounts/oauth-providers.js';
+import { readSubscriptionJson } from '../../provider-accounts/subscription-http.js';
 import { proxyFetch, withKeyProxy } from '../../../lib/proxy.js';
 import { type AccountRow, resolveXGatewayAccountProxy } from '../../provider-accounts/store.js';
 import { getXGatewayProvider } from '../../provider-accounts/catalog.js';
@@ -8,6 +12,8 @@ import { COPILOT_PREFIX } from '../../provider-accounts/http.js';
 
 const endpoints: Record<string, string> = {
   claude: 'https://api.anthropic.com/api/oauth/usage',
+  'gemini-cli': 'https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota',
+  kiro: 'https://codewhisperer.us-east-1.amazonaws.com/getUsageLimits',
   codex: 'https://chatgpt.com/backend-api/wham/usage',
   'github-copilot': 'https://api.github.com/copilot_internal/user',
   openrouter: 'https://openrouter.ai/api/v1/key',
@@ -75,6 +81,22 @@ export function parseProviderQuota(provider: string, payload: unknown): XQuotaWi
         (quotaNumber(item.reset_after_seconds) != null ? quotaReset(item.reset_after_seconds) : null);
       result.push(window(id, 100, Math.max(0, 100 - used), resetAt, '%'));
     }
+  } else if (provider === 'gemini-cli' && Array.isArray(data.buckets)) {
+    for (const raw of data.buckets) {
+      const item = object(raw); const fraction = quotaNumber(item.remainingFraction);
+      if (typeof item.modelId !== 'string' || fraction == null || fraction > 1) continue;
+      // Each bucket belongs to a model, not the entire account.
+      result.push(window(item.modelId, 100, fraction * 100, quotaReset(item.resetTime), '%', false));
+    }
+  } else if (provider === 'kiro' && Array.isArray(data.usageBreakdownList)) {
+    for (const raw of data.usageBreakdownList) {
+      const item = object(raw); const limit = quotaNumber(item.usageLimitWithPrecision ?? item.usageLimit); const used = quotaNumber(item.currentUsageWithPrecision ?? item.currentUsage);
+      if (limit == null || used == null || typeof item.resourceType !== 'string') continue;
+      let remaining = Math.max(0, limit - used); let total = limit;
+      const trial = object(item.freeTrialInfo); const trialLimit = quotaNumber(trial.usageLimitWithPrecision); const trialUsed = quotaNumber(trial.currentUsageWithPrecision);
+      if (trial.freeTrialStatus === 'ACTIVE' && trialLimit != null && trialUsed != null) { total += trialLimit; remaining += Math.max(0, trialLimit - trialUsed); }
+      result.push(window(item.resourceType, total, remaining, quotaReset(data.nextDateReset ?? data.resetDate), 'credits'));
+    }
   } else if (provider === 'github-copilot') {
     const resetAt = quotaReset(data.quota_reset_date ?? data.limited_user_reset_date);
     const snapshots = object(data.quota_snapshots);
@@ -117,7 +139,9 @@ export function supportsQuota(account: Pick<AccountRow, 'provider' | 'base_url'>
 
 export async function fetchAccountQuota(account: AccountRow): Promise<XQuotaWindow[]> {
   if (!supportsQuota(account)) throw new Error('Quota API unavailable for this provider or custom endpoint.');
-  let secret = decrypt(account.encrypted_key, account.iv, account.auth_tag);
+  return withKeyProxy(resolveXGatewayAccountProxy(account), () => withAccountCredential(account, async credential => {
+  const structured = parseOAuthCredential(credential);
+  let secret = structured?.accessToken ?? credential;
   if (account.provider === 'github-copilot') {
     if (!secret.startsWith(COPILOT_PREFIX)) throw new Error('Reconnect Copilot with GitHub OAuth to read quota.');
     secret = secret.slice(COPILOT_PREFIX.length);
@@ -133,19 +157,31 @@ export async function fetchAccountQuota(account: AccountRow): Promise<XQuotaWind
     headers['Editor-Version'] = 'vscode/1.100.0';
     headers['Editor-Plugin-Version'] = 'copilot-chat/0.26.7';
   }
-  return withKeyProxy(resolveXGatewayAccountProxy(account), async () => {
-    const response = await proxyFetch(endpoints[account.provider], {
-      headers, signal: AbortSignal.timeout(10_000), redirect: 'error',
+  let url = endpoints[account.provider];
+  let method = 'GET'; let body: string | undefined;
+  if (account.provider === 'codex' && structured?.accountId) headers['ChatGPT-Account-ID'] = structured.accountId;
+  if (account.provider === 'gemini-cli') {
+    const project = structured?.projectId ?? await fetchGeminiProjectId(secret);
+    if (!project) throw new Error('Gemini CLI project is unknown; configure Code Assist access before checking quota.');
+    method = 'POST'; headers['Content-Type'] = 'application/json'; body = JSON.stringify({ project });
+  }
+  if (account.provider === 'kiro') {
+    const params = new URLSearchParams({ origin: 'AI_EDITOR', resourceType: 'AGENTIC_REQUEST', isEmailRequired: 'true' });
+    if (structured?.profileArn) params.set('profileArn', structured.profileArn);
+    url = `https://codewhisperer.${kiroRegion(structured?.region)}.amazonaws.com/getUsageLimits?${params}`;
+  }
+    const response = await proxyFetch(url, {
+      headers, method, body, signal: AbortSignal.timeout(10_000), redirect: 'error',
     }, account.platform, 'unknown');
     if (!response.ok) {
       await response.body?.cancel();
-      throw new Error(`Quota endpoint returned HTTP ${response.status}. Check account authorization or retry later.`);
+      throw Object.assign(new Error(`Quota endpoint returned HTTP ${response.status}. Check account authorization or retry later.`), { status: response.status });
     }
     if (account.provider === 'groq') {
       const windows = parseQuotaHeaders(response.headers);
       await response.body?.cancel();
       return windows;
     }
-    return parseProviderQuota(account.provider, await response.json());
-  });
+    return parseProviderQuota(account.provider, await readSubscriptionJson(response));
+  }));
 }

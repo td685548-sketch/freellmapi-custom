@@ -493,6 +493,7 @@ export function renderTextToPng(
   lines: string[],
   options?: { width?: number; lineHeight?: number; charWidth?: number }
 ): { pngBuffer: Buffer; width: number; height: number } {
+  if (lines.some(line => /[^\x20-\x7e\t]/.test(line))) throw new Error('PXPIPE ASCII renderer cannot preserve Unicode; keep the original text.');
   const charWidth = options?.charWidth ?? 6;
   const lineHeight = options?.lineHeight ?? 10;
   const maxLineLen = Math.max(1, ...lines.map(l => l.length));
@@ -731,6 +732,8 @@ export function compressMessagesWithPxpipeVision(
     }
 
     const textToImage = msg.content;
+    // The built-in font only covers ASCII. Preserve Unicode as text.
+    if (/[^\x20-\x7e\r\n\t]/.test(textToImage)) { newMessages.push(msg); continue; }
     const pages = renderTextToPngPages(textToImage);
     if (pages.length === 0) {
       newMessages.push(msg);
@@ -786,7 +789,8 @@ export function compressMessagesWithPxpipeVision(
           },
         });
       }
-      newMessages.push({ ...msg, parts });
+      const { content: _content, ...nativeMessage } = msg;
+      newMessages.push({ ...nativeMessage, parts });
     } else {
       const contentParts: any[] = [
         {

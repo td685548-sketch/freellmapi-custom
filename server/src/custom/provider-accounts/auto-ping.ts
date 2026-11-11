@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { getSetting, setSetting } from '../../db/index.js';
 import { accountRow, resolveXGatewayAccountProxy } from './store.js';
-import { resolveXGatewayProvider } from './catalog.js';
+import { resolveAccountProvider } from './execution.js';
 import { resolveAccountCredential } from './oauth-lifecycle.js';
 import { withKeyProxy } from '../../lib/proxy.js';
 
@@ -157,7 +157,7 @@ export async function pingAccount(accountId: number): Promise<{
     return { ok: false, latencyMs: Date.now() - start, message: 'Account not found' };
   }
 
-  const provider = resolveXGatewayProvider(row.provider, row.base_url);
+  const provider = resolveAccountProvider(row);
   if (!provider) {
     return { ok: false, latencyMs: Date.now() - start, message: 'Provider unavailable' };
   }
