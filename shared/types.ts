@@ -106,6 +106,9 @@ export type Platform =
   | 'nabh'
   // Daily-free video route; signed catalog only.
   | 'novai'
+  | 'varosity'
+  // Native TTS and transcription; one shared renewable monthly credit grant.
+  | 'rime'
   // Research API; chat and embeddings share a daily quota. Requests are logged.
   | 'freeinference'
   // Personal BYOK client; shared monthly account allowance, Telegram verification.
@@ -138,6 +141,10 @@ export type Platform =
   // published. Catalog rows live in the hosted catalog (premium now, free after
   // 30 days).
   | 'anyapi'
+  // PowerTokens — OpenAI-compatible gateway (api.powertokens.ai). Free model
+  // glm-4.7-flash ($0 / 1M in+out, 0 Credits). RPM/RPD unpublished. Hosted
+  // catalog only (no migration seed), same as the anyapi/bai gateways.
+  | 'powertokens'
   // AMD Radeon Cloud TokenFactory — OpenAI-compatible shared inference. Its
   // rotating public-model roster is free without consuming instance credits,
   // with recurring account-level allowance and request/concurrency controls.
@@ -364,6 +371,8 @@ export interface ApiKeyModel {
  *  and enabled yet still skipped by the router because of these. */
 export interface ApiKeyCooldown {
   modelId: string;
+  /** Why this route is benched; 'checkin' means APINex daily website visit required. */
+  source?: 'heuristic' | 'authoritative' | 'credit' | 'tier' | 'checkin';
   expiresAtMs: number;
   remainingMs: number;
 }
@@ -580,6 +589,9 @@ export interface ChatCompletionResponse {
     platform: Platform;
     model: string;
   };
+  // Anthropic auto-mode classifier results, when the upstream supplied them
+  // (#1589). Never synthesized here; absent when the upstream sends none.
+  safeguard_results?: unknown;
 }
 
 export interface ChatCompletionChunk {
@@ -598,6 +610,10 @@ export interface ChatCompletionChunk {
     finish_reason: string | null;
   }[];
   usage?: TokenUsage;
+  // Anthropic auto-mode classifier results carried on a stream chunk, when
+  // the upstream supplied them (#1589). Same rule as the non-streaming
+  // response: passed through verbatim, never synthesized.
+  safeguard_results?: unknown;
 }
 
 // ---- Analytics Types ----
