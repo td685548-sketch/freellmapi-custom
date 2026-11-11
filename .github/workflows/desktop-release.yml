@@ -74,7 +74,8 @@ jobs:
               desktop/dist-electron/*.zip
               desktop/dist-electron/*.blockmap
               desktop/dist-electron/latest-mac.yml
-          - os: ubuntu-latest
+          # Keep the RPM packaging toolchain stable; ubuntu-latest now uses 26.04.
+          - os: ubuntu-24.04
             ebArgs: --linux --x64
             artifact: linux-installer
             glob: |
