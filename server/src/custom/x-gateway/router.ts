@@ -26,6 +26,7 @@ import {
   recordXGatewayKeyUsage,
   resolveProviderModelAlias,
   resolveXGatewayAccountProxy,
+  resolveXGatewayModelAlias,
   type AccountRow,
 } from '../provider-accounts/store.js';
 import { xGatewayAuth as authenticateXGateway } from './auth.js';
@@ -188,7 +189,7 @@ export function resolveCandidateRoutes(
   notFoundError?: string;
   combo?: ComboRouteInfo;
 } {
-  const rawModel = parseModelThinkingSuffix(requestedModel).cleanModel;
+  const rawModel = resolveXGatewayModelAlias(parseModelThinkingSuffix(requestedModel).cleanModel);
   const lower = rawModel.toLowerCase();
   const usable = applyQuotaRouting(getUsableXGatewayKeys().filter(isWithinAccountCaps), lower === 'auto' || lower.startsWith('auto:'));
 

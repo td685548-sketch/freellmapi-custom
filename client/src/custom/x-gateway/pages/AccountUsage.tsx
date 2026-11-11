@@ -950,7 +950,9 @@ export default function AccountUsage() {
         </div>
       </div>
 
-      {breakdownTab !== 'provider' && (
+      {breakdownTab === 'request-details' && <RequestDetailsPanel />}
+
+      {breakdownTab !== 'provider' && breakdownTab !== 'request-details' && (
         <BreakdownPanel tab={breakdownTab} data={breakdown} loading={breakdownQuery.isPending} error={breakdownQuery.isError} />
       )}
 
@@ -1054,13 +1056,14 @@ export default function AccountUsage() {
   )
 }
 
-type BreakdownTab = 'provider' | 'model' | 'client' | 'endpoint'
+type BreakdownTab = 'provider' | 'model' | 'client' | 'endpoint' | 'request-details'
 
 const BREAKDOWN_TABS: Array<{ id: BreakdownTab; label: string }> = [
   { id: 'provider', label: 'By Provider & Account' },
   { id: 'model', label: 'By Model' },
   { id: 'client', label: 'By Client API Key' },
   { id: 'endpoint', label: 'By Endpoint' },
+  { id: 'request-details', label: 'Request Details' },
 ]
 
 const RANGE_OPTIONS: Array<{ id: TimeRange; label: string }> = [
@@ -1100,7 +1103,7 @@ function BreakdownPanel({
   loading,
   error,
 }: {
-  tab: Exclude<BreakdownTab, 'provider'>
+  tab: Exclude<BreakdownTab, 'provider' | 'request-details'>
   data: UsageBreakdown | undefined
   loading: boolean
   error: boolean
@@ -1196,5 +1199,282 @@ function BreakdownPanel({
         )}
       </div>
     </section>
+  )
+}
+
+interface RequestDetailRow {
+  id: number
+  provider: string
+  accountId: number | null
+  accountLabel: string | null
+  modelId: string
+  requestedModel: string | null
+  requestType: string
+  endpoint: string
+  status: string
+  latencyMs: number
+  inputTokens: number
+  outputTokens: number
+  cachedTokens: number
+  reasoningTokens: number
+  estimatedCost: number
+  error: string | null
+  createdAt: string
+}
+
+interface RequestDetailsResponse {
+  page: number
+  pageSize: number
+  totalCount: number
+  totalPages: number
+  details: RequestDetailRow[]
+  filters: { providers: string[]; models: string[] }
+}
+
+interface DetailFilters {
+  provider: string
+  model: string
+  status: '' | 'success' | 'error'
+  startDate: string
+  endDate: string
+}
+
+const EMPTY_DETAIL_FILTERS: DetailFilters = { provider: '', model: '', status: '', startDate: '', endDate: '' }
+const DETAIL_PAGE_SIZE = 20
+
+const filterInputStyle = {
+  padding: '0.35rem 0.55rem',
+  borderRadius: '6px',
+  border: '1px solid var(--border)',
+  backgroundColor: 'var(--bg-subtle, rgba(0,0,0,0.03))',
+  fontSize: '0.8125rem',
+} as const
+
+function StatusBadge({ status }: { status: string }) {
+  const ok = status === 'success'
+  return (
+    <span
+      style={{
+        padding: '0.1rem 0.5rem',
+        borderRadius: '999px',
+        fontSize: '0.72rem',
+        fontWeight: 600,
+        color: ok ? '#10b981' : '#ef4444',
+        background: ok ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)',
+      }}
+    >
+      {ok ? 'Success' : 'Error'}
+    </span>
+  )
+}
+
+const fmtDetailTime = (value: string) => {
+  const d = new Date(`${value.replace(' ', 'T')}${/[zZ]|[+-]\d{2}:?\d{2}$/.test(value) ? '' : 'Z'}`)
+  return Number.isNaN(d.getTime()) ? value : d.toLocaleString()
+}
+
+function RequestDetailsPanel() {
+  const revision = useSessionRevision()
+  const [page, setPage] = useState(1)
+  const [filters, setFilters] = useState<DetailFilters>(EMPTY_DETAIL_FILTERS)
+  const [selected, setSelected] = useState<RequestDetailRow | null>(null)
+
+  const detailsQuery = useQuery({
+    queryKey: ['x-request-details', page, filters, revision],
+    queryFn: ({ signal }) => {
+      const qs = new URLSearchParams({ page: String(page), pageSize: String(DETAIL_PAGE_SIZE) })
+      if (filters.provider) qs.set('provider', filters.provider)
+      if (filters.model.trim()) qs.set('model', filters.model.trim())
+      if (filters.status) qs.set('status', filters.status)
+      if (filters.startDate) qs.set('startDate', filters.startDate)
+      if (filters.endDate) qs.set('endDate', filters.endDate)
+      return apiFetch<RequestDetailsResponse>(`/api/x-gateway/usage/request-details?${qs.toString()}`, { signal })
+    },
+    placeholderData: previous => previous,
+    refetchInterval: 30_000,
+    retry: false,
+  })
+  const data = detailsQuery.data
+
+  const update = (patch: Partial<DetailFilters>) => {
+    setFilters(prev => ({ ...prev, ...patch }))
+    setPage(1)
+  }
+  const totalPages = data?.totalPages ?? 1
+
+  return (
+    <section className="x-panel" style={{ padding: '1.25rem' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center', marginBottom: '1rem' }}>
+        <select
+          aria-label="Provider"
+          value={filters.provider}
+          onChange={e => update({ provider: e.target.value })}
+          style={filterInputStyle}
+        >
+          <option value="">All providers</option>
+          {(data?.filters.providers ?? []).map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <input
+          aria-label="Model"
+          list="x-request-detail-models"
+          placeholder="Model..."
+          value={filters.model}
+          onChange={e => update({ model: e.target.value })}
+          style={{ ...filterInputStyle, width: 190 }}
+        />
+        <datalist id="x-request-detail-models">
+          {(data?.filters.models ?? []).map(m => <option key={m} value={m} />)}
+        </datalist>
+        <select
+          aria-label="Status"
+          value={filters.status}
+          onChange={e => update({ status: e.target.value as DetailFilters['status'] })}
+          style={filterInputStyle}
+        >
+          <option value="">All</option>
+          <option value="success">Success</option>
+          <option value="error">Error</option>
+        </select>
+        <label style={{ fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+          Start Date
+          <input type="date" value={filters.startDate} onChange={e => update({ startDate: e.target.value })} style={filterInputStyle} />
+        </label>
+        <label style={{ fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+          End Date
+          <input type="date" value={filters.endDate} onChange={e => update({ endDate: e.target.value })} style={filterInputStyle} />
+        </label>
+        <button
+          type="button"
+          className="x-button"
+          onClick={() => { setFilters(EMPTY_DETAIL_FILTERS); setPage(1) }}
+        >
+          Reset Filters
+        </button>
+      </div>
+
+      <div className="x-table-wrap">
+        <table className="x-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Provider &amp; Account</th>
+              <th>Model</th>
+              <th>Endpoint</th>
+              <th>Tokens (in / out)</th>
+              <th>Cost</th>
+              <th>Latency</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(data?.details ?? []).map(row => (
+              <tr
+                key={row.id}
+                onClick={() => setSelected(row)}
+                style={{ cursor: 'pointer' }}
+                tabIndex={0}
+                onKeyDown={e => { if (e.key === 'Enter') setSelected(row) }}
+              >
+                <td>{fmtDetailTime(row.createdAt)}</td>
+                <td>{row.provider}{row.accountLabel ? <small> / {row.accountLabel}</small> : null}</td>
+                <td>
+                  {row.requestedModel && row.requestedModel !== row.modelId
+                    ? <>{row.requestedModel} <small>&rarr;</small> {row.modelId}</>
+                    : row.modelId}
+                </td>
+                <td><code>{row.endpoint}</code></td>
+                <td>{row.inputTokens.toLocaleString()} / {row.outputTokens.toLocaleString()}</td>
+                <td><span style={{ color: '#f59e0b', fontWeight: 500 }}>{fmtDollars(row.estimatedCost)}</span></td>
+                <td>{row.latencyMs} ms</td>
+                <td><StatusBadge status={row.status} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {(detailsQuery.isPending || detailsQuery.isError || data?.details.length === 0) && (
+          <div className="x-empty">
+            <p>
+              {detailsQuery.isPending
+                ? 'Loading...'
+                : detailsQuery.isError
+                  ? 'Could not load request details.'
+                  : 'No requests match these filters.'}
+            </p>
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.75rem' }}>
+        <button type="button" className="x-button" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>
+          Prev
+        </button>
+        <span style={{ fontSize: '0.8125rem' }}>
+          Page {data?.page ?? page} of {totalPages}
+          {data ? <small> ({data.totalCount.toLocaleString()} requests)</small> : null}
+        </span>
+        <button type="button" className="x-button" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+          Next
+        </button>
+      </div>
+
+      {selected && <RequestDetailDrawer row={selected} onClose={() => setSelected(null)} />}
+    </section>
+  )
+}
+
+function RequestDetailDrawer({ row, onClose }: { row: RequestDetailRow; onClose: () => void }) {
+  const totalTokens = row.inputTokens + row.outputTokens
+  const fact = (label: string, value: React.ReactNode) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', padding: '0.35rem 0', borderBottom: '1px solid var(--border)', fontSize: '0.8125rem' }}>
+      <span style={{ opacity: 0.65 }}>{label}</span>
+      <span style={{ textAlign: 'right', wordBreak: 'break-all' }}>{value}</span>
+    </div>
+  )
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Request details"
+      onClick={onClose}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', justifyContent: 'flex-end' }}
+    >
+      <aside
+        onClick={e => e.stopPropagation()}
+        style={{ width: 'min(480px, 100%)', height: '100%', overflowY: 'auto', background: 'var(--bg, #fff)', padding: '1.25rem', boxShadow: '-8px 0 24px rgba(0,0,0,0.25)' }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <h3 style={{ margin: 0, fontSize: '1.05rem' }}>Request Details</h3>
+          <button type="button" aria-label="Close" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        {fact('Request ID', `#${row.id}`)}
+        {fact('Timestamp', fmtDetailTime(row.createdAt))}
+        {fact('Provider / Account', `${row.provider}${row.accountLabel ? ` / ${row.accountLabel}` : ''}`)}
+        {fact('Requested Model', row.requestedModel ?? 'auto')}
+        {fact('Routed Model', row.modelId)}
+        {fact('Endpoint', <code>{row.endpoint}</code>)}
+        {fact('Latency', `${row.latencyMs} ms`)}
+        {fact('Status', <StatusBadge status={row.status} />)}
+        {row.error && (
+          <div style={{ marginTop: '0.75rem', padding: '0.6rem', borderRadius: '6px', background: 'rgba(239,68,68,0.1)', color: '#ef4444', fontSize: '0.8125rem', wordBreak: 'break-word' }}>
+            {row.error}
+          </div>
+        )}
+
+        <h4 style={{ margin: '1.25rem 0 0.5rem', fontSize: '0.9rem' }}>Tokens &amp; Cost</h4>
+        <table className="x-table">
+          <tbody>
+            <tr><th>Input Tokens</th><td>{row.inputTokens.toLocaleString()}</td></tr>
+            <tr><th>Output Tokens</th><td>{row.outputTokens.toLocaleString()}</td></tr>
+            <tr><th>Cached Tokens</th><td>{row.cachedTokens.toLocaleString()}</td></tr>
+            <tr><th>Reasoning Tokens</th><td>{row.reasoningTokens.toLocaleString()}</td></tr>
+            <tr><th>Total Tokens</th><td>{totalTokens.toLocaleString()}</td></tr>
+            <tr><th>Total Cost USD</th><td><strong>{fmtDollars(row.estimatedCost)}</strong></td></tr>
+          </tbody>
+        </table>
+      </aside>
+    </div>
   )
 }

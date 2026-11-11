@@ -458,3 +458,113 @@ xGatewayManagementRouter.get('/usage/breakdown', (req, res) => {
 
   res.json({ range, since, month, topology, byModel, byAccount, byClientKey, byEndpoint });
 });
+
+/* ----------------------------------------------------------------------------
+ * Paginated request details (inspector tab).
+ * -------------------------------------------------------------------------- */
+
+/** `YYYY-MM-DD` or ISO timestamp -> the `YYYY-MM-DD HH:MM:SS` UTC form stored in `requests.created_at`. */
+function parseDetailDate(raw: unknown, endOfDay: boolean): string | null | undefined {
+  if (raw === undefined || raw === '') return undefined;
+  const text = String(raw).trim();
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(text);
+  const ms = Date.parse(dateOnly ? `${text}T${endOfDay ? '23:59:59' : '00:00:00'}Z` : text);
+  if (Number.isNaN(ms)) return null;
+  return new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function parseIntParam(raw: unknown, fallback: number): number {
+  if (raw === undefined || raw === '') return fallback;
+  const text = String(raw).trim();
+  return /^-?\d+$/.test(text) ? Number(text) : Number.NaN;
+}
+
+xGatewayManagementRouter.get('/usage/request-details', (req, res) => {
+  const page = parseIntParam(req.query.page, 1);
+  const pageSize = parseIntParam(req.query.pageSize, 20);
+  if (!Number.isInteger(page) || page < 1) { fail(res, 400, 'page must be an integer >= 1'); return; }
+  if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) {
+    fail(res, 400, 'pageSize must be an integer between 1 and 100');
+    return;
+  }
+  const status = req.query.status === undefined || req.query.status === '' ? null : String(req.query.status);
+  if (status !== null && status !== 'success' && status !== 'error') {
+    fail(res, 400, 'status must be success or error');
+    return;
+  }
+  const startDate = parseDetailDate(req.query.startDate, false);
+  const endDate = parseDetailDate(req.query.endDate, true);
+  if (startDate === null || endDate === null) { fail(res, 400, 'startDate/endDate must be ISO timestamps or YYYY-MM-DD'); return; }
+  let accountId: number | null = null;
+  if (req.query.accountId !== undefined && req.query.accountId !== '') {
+    const parsed = parseIntParam(req.query.accountId, Number.NaN);
+    if (!Number.isInteger(parsed)) { fail(res, 400, 'accountId must be an integer'); return; }
+    accountId = parsed;
+  }
+
+  const conditions = ["r.caller = 'x-gateway'"];
+  const params: unknown[] = [];
+  const provider = typeof req.query.provider === 'string' ? req.query.provider.trim() : '';
+  if (provider) { conditions.push('r.platform = ?'); params.push(provider); }
+  const model = typeof req.query.model === 'string' ? req.query.model.trim() : '';
+  if (model) {
+    const like = `%${model.replace(/[\\%_]/g, ch => `\\${ch}`)}%`;
+    conditions.push("(r.model_id LIKE ? ESCAPE '\\' OR r.requested_model LIKE ? ESCAPE '\\')");
+    params.push(like, like);
+  }
+  if (accountId !== null) { conditions.push('r.key_id = ?'); params.push(accountId); }
+  if (status) { conditions.push('r.status = ?'); params.push(status); }
+  if (startDate) { conditions.push('r.created_at >= ?'); params.push(startDate); }
+  if (endDate) { conditions.push('r.created_at <= ?'); params.push(endDate); }
+  const where = conditions.join(' AND ');
+
+  const db = getDb();
+  const totalCount = (db.prepare(`SELECT COUNT(*) AS n FROM requests r WHERE ${where}`).get(...params) as { n: number }).n;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+
+  // Account labels come from the X Gateway account table (log rows reference it via key_id).
+  const rows = db.prepare(
+    `SELECT r.id, r.platform, r.key_id AS accountId, k.label AS accountLabel, r.model_id AS modelId,
+            r.requested_model AS requestedModel, r.request_type AS requestType, r.status,
+            r.latency_ms AS latencyMs, r.input_tokens AS inputTokens, r.output_tokens AS outputTokens,
+            r.error, r.created_at AS createdAt
+       FROM requests r
+       LEFT JOIN x_gateway_keys k ON k.id = r.key_id
+      WHERE ${where}
+      ORDER BY r.id DESC LIMIT ? OFFSET ?`,
+  ).all(...params, pageSize, (page - 1) * pageSize) as Array<{
+    id: number; platform: string; accountId: number | null; accountLabel: string | null; modelId: string;
+    requestedModel: string | null; requestType: string | null; status: string; latencyMs: number;
+    inputTokens: number; outputTokens: number; error: string | null; createdAt: string;
+  }>;
+
+  const details = rows.map(r => ({
+    id: r.id,
+    provider: r.platform,
+    accountId: r.accountId,
+    accountLabel: r.accountLabel,
+    modelId: r.modelId,
+    requestedModel: r.requestedModel,
+    requestType: r.requestType ?? 'chat',
+    endpoint: endpointForRequestType(r.requestType),
+    status: r.status,
+    latencyMs: r.latencyMs,
+    inputTokens: r.inputTokens,
+    outputTokens: r.outputTokens,
+    // The request log does not record cache / reasoning splits.
+    cachedTokens: 0,
+    reasoningTokens: 0,
+    estimatedCost: round6(calculateRequestCost(r.platform, r.modelId, r.inputTokens, r.outputTokens)),
+    error: r.error,
+    createdAt: r.createdAt,
+  }));
+
+  const providers = (db.prepare(
+    "SELECT DISTINCT platform FROM requests WHERE caller = 'x-gateway' ORDER BY platform",
+  ).all() as Array<{ platform: string }>).map(r => r.platform);
+  const models = (db.prepare(
+    "SELECT DISTINCT model_id FROM requests WHERE caller = 'x-gateway' ORDER BY model_id LIMIT 500",
+  ).all() as Array<{ model_id: string }>).map(r => r.model_id);
+
+  res.json({ page, pageSize, totalCount, totalPages, details, filters: { providers, models } });
+});

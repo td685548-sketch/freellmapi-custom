@@ -83,6 +83,9 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
     if (path === '/api/x-gateway/enabled' || path === '/api/x-gateway/defaults' || path === '/api/x-gateway/proxy') {
       return read ? 'use_x_gateway' : 'edit_x_settings';
     }
+    if (path === '/api/x-gateway/pricing' || path === '/api/x-gateway/config-backup') {
+      return read ? 'use_x_gateway' : 'edit_x_settings';
+    }
     if (path === '/api/x-gateway/keys' || /^\/api\/x-gateway\/keys\/\d+(?:\/access)?$/.test(path)) {
       return 'use_x_gateway';
     }

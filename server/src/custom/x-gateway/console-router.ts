@@ -1,13 +1,17 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
 import type { SessionUser } from '../../services/auth.js';
+import { getSetting, setSetting } from '../../db/index.js';
 import { isValidKeyProxyUrl, KEY_PROXY_URL_ERROR, KEY_PROXY_URL_MAX, maskProxyUrl } from '../../lib/key-proxy.js';
 import { probeProxyUrl } from '../../lib/proxy.js';
 import {
+  createCombo,
   getConfigSnapshot,
+  listCombos,
   setDefaultSavers,
   setEnabled,
   setOutboundProxyUrl,
+  updateCombo,
   type XGatewaySaverDefaults,
 } from './config.js';
 import {
@@ -21,6 +25,14 @@ import {
   setCapacityAdapterSettings,
   type CapacityAdapterSettings,
 } from './capacity-adapter.js';
+import {
+  getDefaultPricing,
+  getMergedPricing,
+  getPricingOverrides,
+  resetPricingOverrides,
+  updatePricingOverrides,
+  validatePricingPatch,
+} from './pricing.js';
 import { xGatewayManagementRouter } from './management-router.js';
 import { xQuotaRouter } from './quota/router.js';
 import { xPlaygroundRouter } from './playground-router.js';
@@ -195,6 +207,193 @@ xGatewayConsoleRouter.put('/capacity-adapter', (req, res) => {
   };
   setCapacityAdapterSettings(next, uid);
   res.json(next);
+});
+
+xGatewayConsoleRouter.get('/pricing', (_req, res) => {
+  res.json({
+    pricing: getMergedPricing(),
+    overrides: getPricingOverrides(),
+    defaults: getDefaultPricing(),
+  });
+});
+
+xGatewayConsoleRouter.patch('/pricing', (req, res) => {
+  const validation = validatePricingPatch(req.body);
+  if (!validation.ok) {
+    throw new ConsoleError(400, validation.error);
+  }
+  const pricing = updatePricingOverrides(validation.patch);
+  res.json({
+    pricing,
+    overrides: getPricingOverrides(),
+  });
+});
+
+xGatewayConsoleRouter.delete('/pricing', (req, res) => {
+  const provider = typeof req.query.provider === 'string' && req.query.provider.trim() ? req.query.provider.trim() : undefined;
+  const model = typeof req.query.model === 'string' && req.query.model.trim() ? req.query.model.trim() : undefined;
+  const pricing = resetPricingOverrides(provider, model);
+  res.json({
+    pricing,
+    overrides: getPricingOverrides(),
+  });
+});
+
+function parseJsonSetting<T>(key: string, fallback: T): T {
+  try {
+    const raw = getSetting(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+xGatewayConsoleRouter.get('/config-backup', (_req, res) => {
+  let customNodes = parseJsonSetting<unknown[]>('x_gateway_custom_provider_nodes', []);
+  if (!Array.isArray(customNodes) || customNodes.length === 0) {
+    customNodes = parseJsonSetting<unknown[]>('x_gateway_custom_nodes', []);
+  }
+  let providerModelConfigs = parseJsonSetting<Record<string, unknown>>('x_gateway_provider_models', {});
+  if (!providerModelConfigs || typeof providerModelConfigs !== 'object' || Object.keys(providerModelConfigs).length === 0) {
+    providerModelConfigs = parseJsonSetting<Record<string, unknown>>('provider_model_configs', {});
+  }
+  const modelAliases = parseJsonSetting<Record<string, string>>('x_gateway_model_aliases', {});
+  const customModelCaps = parseJsonSetting<Record<string, unknown>>('x_gateway_custom_model_caps', {});
+
+  const backup = {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    defaults: getConfigSnapshot().savers,
+    combos: listCombos(),
+    capacityAdapter: getCapacityAdapterSettings(),
+    pricingOverrides: getPricingOverrides(),
+    customProviderNodes: customNodes,
+    providerModelConfigs,
+    modelAliases,
+    customModelCaps,
+  };
+  res.json(backup);
+});
+
+xGatewayConsoleRouter.post('/config-backup', (req, res) => {
+  const uid = userId(req);
+  const body = req.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new ConsoleError(400, 'Invalid backup payload.');
+  }
+
+  // 1. Defaults (savers)
+  if (body.defaults && typeof body.defaults === 'object' && !Array.isArray(body.defaults)) {
+    try {
+      const parsedDefaults = parse(defaultsSchema, body.defaults) as XGatewaySaverDefaults;
+      setDefaultSavers(parsedDefaults, uid);
+    } catch {
+      const current = getConfigSnapshot().savers;
+      const mergedDefaults: XGatewaySaverDefaults = {
+        caveman: typeof body.defaults.caveman === 'boolean' ? body.defaults.caveman : current.caveman,
+        ponytail: ['off', 'lite', 'full', 'ultra'].includes(body.defaults.ponytail) ? body.defaults.ponytail : current.ponytail,
+        input: ['off', 'lossless', 'standard'].includes(body.defaults.input) ? body.defaults.input : current.input,
+      };
+      setDefaultSavers(mergedDefaults, uid);
+    }
+  }
+
+  // 2. Capacity Adapter
+  if (body.capacityAdapter && typeof body.capacityAdapter === 'object') {
+    const ca = body.capacityAdapter;
+    const current = getCapacityAdapterSettings();
+    const next: CapacityAdapterSettings = {
+      vision: {
+        enabled: ca.vision?.enabled !== undefined ? Boolean(ca.vision.enabled) : current.vision.enabled,
+        roundRobin: ca.vision?.roundRobin !== undefined ? Boolean(ca.vision.roundRobin) : current.vision.roundRobin,
+        models: Array.isArray(ca.vision?.models)
+          ? ca.vision.models.filter((m: unknown): m is string => typeof m === 'string' && Boolean(m.trim()))
+          : current.vision.models,
+      },
+      audioInput: {
+        enabled: ca.audioInput?.enabled !== undefined ? Boolean(ca.audioInput.enabled) : current.audioInput.enabled,
+        roundRobin: ca.audioInput?.roundRobin !== undefined ? Boolean(ca.audioInput.roundRobin) : current.audioInput.roundRobin,
+        models: Array.isArray(ca.audioInput?.models)
+          ? ca.audioInput.models.filter((m: unknown): m is string => typeof m === 'string' && Boolean(m.trim()))
+          : current.audioInput.models,
+      },
+    };
+    setCapacityAdapterSettings(next, uid);
+  }
+
+  // 3. Pricing Overrides
+  let pricingProvidersCount = 0;
+  if (body.pricingOverrides && typeof body.pricingOverrides === 'object' && !Array.isArray(body.pricingOverrides)) {
+    if (Object.keys(body.pricingOverrides).length === 0) {
+      resetPricingOverrides();
+    } else {
+      const validation = validatePricingPatch(body.pricingOverrides);
+      if (validation.ok) {
+        updatePricingOverrides(validation.patch);
+        pricingProvidersCount = Object.keys(validation.patch).length;
+      }
+    }
+  }
+
+  // 4. Combos
+  let combosCount = 0;
+  if (Array.isArray(body.combos)) {
+    const existingCombos = listCombos();
+    const existingByName = new Map(existingCombos.map(c => [c.name.toLowerCase(), c]));
+    for (const item of body.combos) {
+      if (!item || typeof item !== 'object') continue;
+      const name = typeof item.name === 'string' ? item.name.trim() : '';
+      if (!name) continue;
+      const entries = Array.isArray(item.entries) ? item.entries : [];
+      const meta = {
+        strategy: item.strategy,
+        description: item.description,
+        smartPolicy: item.smartPolicy,
+        sessionSticky: item.sessionSticky,
+        confidenceThreshold: item.confidenceThreshold,
+      };
+      const match = existingByName.get(name.toLowerCase());
+      if (match) {
+        updateCombo(match.id, name, entries, meta);
+      } else {
+        createCombo(name, entries, uid, meta);
+      }
+      combosCount++;
+    }
+  }
+
+  // 5. Custom Provider Nodes
+  let customNodesCount = 0;
+  if (Array.isArray(body.customProviderNodes)) {
+    const serialized = JSON.stringify(body.customProviderNodes);
+    setSetting('x_gateway_custom_provider_nodes', serialized);
+    setSetting('x_gateway_custom_nodes', serialized);
+    customNodesCount = body.customProviderNodes.length;
+  }
+
+  // 6. Provider Model Configs
+  if (body.providerModelConfigs && typeof body.providerModelConfigs === 'object' && !Array.isArray(body.providerModelConfigs)) {
+    const serialized = JSON.stringify(body.providerModelConfigs);
+    setSetting('x_gateway_provider_models', serialized);
+  }
+
+  // 7. Model Aliases & Custom Model Capabilities
+  if (body.modelAliases && typeof body.modelAliases === 'object' && !Array.isArray(body.modelAliases)) {
+    setSetting('x_gateway_model_aliases', JSON.stringify(body.modelAliases));
+  }
+  if (body.customModelCaps && typeof body.customModelCaps === 'object' && !Array.isArray(body.customModelCaps)) {
+    setSetting('x_gateway_custom_model_caps', JSON.stringify(body.customModelCaps));
+  }
+
+  res.json({
+    ok: true,
+    restored: {
+      combosCount,
+      pricingProvidersCount,
+      customNodesCount,
+    },
+  });
 });
 
 xGatewayConsoleRouter.use(xPlaygroundRouter);

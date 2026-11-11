@@ -1613,3 +1613,147 @@ xGatewayProtocolsRouter.post(
   },
 );
 
+// ---------------------------------------------------------------------------
+// SystemOne decision endpoint (/x/v1/systemone)
+// Given a `state` and a map of `questions`, asks the routed model for a JSON
+// object holding one answer per question key.
+// ---------------------------------------------------------------------------
+
+/** Parses a model reply as JSON, tolerating a ```json fence or surrounding prose. */
+export function parseSystemOneAnswers(raw: string): Record<string, unknown> | null {
+  const attempts: string[] = [];
+  const text = raw.trim();
+  attempts.push(text);
+  const fence = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
+  if (fence?.[1]) attempts.push(fence[1].trim());
+  const first = text.indexOf('{');
+  const last = text.lastIndexOf('}');
+  if (first >= 0 && last > first) attempts.push(text.slice(first, last + 1));
+  for (const candidate of attempts) {
+    try {
+      const parsed: unknown = JSON.parse(candidate);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+    } catch {
+      // try the next candidate
+    }
+  }
+  return null;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+xGatewayProtocolsRouter.post('/systemone', xGatewayAuth, async (req: Request, res: Response) => {
+  const body = isPlainObject(req.body) ? req.body : {};
+  const invalid = (message: string) => {
+    res.status(400).json({ error: { message, type: 'invalid_request_error' } });
+  };
+  const model = typeof body.model === 'string' ? body.model.trim() : '';
+  if (!model) { invalid('model is required'); return; }
+  if (body.state === undefined || body.state === null) { invalid('state is required'); return; }
+  if (!isPlainObject(body.questions) || Object.keys(body.questions).length === 0) {
+    invalid('questions must be a non-empty object');
+    return;
+  }
+  const questions = body.questions;
+  for (const [key, value] of Object.entries(questions)) {
+    if (typeof value !== 'string' && !isPlainObject(value)) {
+      invalid(`question "${key}" must be a string or an object`);
+      return;
+    }
+  }
+
+  const access = (req as Request & { user?: ValidatedXGatewayClientKey }).user?.access;
+  if (access?.restricted && !isModelAllowedForKey(access, model)) {
+    res.status(403).json({ error: { message: 'Model is not allowed for this API key', type: 'permission_error' } });
+    return;
+  }
+
+  res.setHeader('X-Gateway', 'x');
+  const { candidates, notFoundError } = resolveCandidateRoutes(model);
+  if (notFoundError) {
+    res.status(404).json({ error: { message: notFoundError, type: 'invalid_request_error', code: 'model_not_found' } });
+    return;
+  }
+  if (candidates.length === 0) {
+    res.status(503).json({ error: { message: 'No enabled X Gateway provider accounts available.', type: 'service_unavailable' } });
+    return;
+  }
+
+  const keys = Object.keys(questions);
+  const messages: ChatMessage[] = [
+    {
+      role: 'system',
+      content:
+        'You are a decision engine. You receive a current STATE and a set of QUESTIONS keyed by id. '
+        + 'Answer every question using only the STATE. Respond with a single JSON object whose keys are exactly '
+        + `the question keys (${keys.join(', ')}) and whose values are your answers. `
+        + 'Output raw JSON only, with no markdown fences and no extra commentary.',
+    },
+    {
+      role: 'user',
+      content: `STATE:\n${JSON.stringify(body.state, null, 2)}\n\nQUESTIONS:\n${JSON.stringify(questions, null, 2)}`,
+    },
+  ];
+  const options: CompletionOptions = {
+    reasoning_effort: parseModelThinkingSuffix(model).thinkingEffort as CompletionOptions['reasoning_effort'],
+    signal: requestSignal(req, res),
+    temperature: typeof body.temperature === 'number' ? body.temperature : 0,
+    max_tokens: typeof body.max_tokens === 'number' && body.max_tokens > 0 ? body.max_tokens : 2048,
+  };
+
+  let lastError: unknown = null;
+  for (const { account, modelId } of candidates) {
+    const provider = resolveAccountProvider(account);
+    if (!provider) continue;
+    let credential: string;
+    try {
+      credential = decrypt(account.encrypted_key, account.iv, account.auth_tag);
+    } catch (err) {
+      lastError = err;
+      continue;
+    }
+    const startedAt = Date.now();
+    try {
+      const completion = await withQuotaTracking(account, modelId, resolveXGatewayAccountProxy(account), () =>
+        provider.chatCompletion(credential, messages, modelId, options),
+      );
+      const text = contentToString(completion.choices?.[0]?.message?.content ?? '');
+      const answers = parseSystemOneAnswers(text);
+      const promptTokens = completion.usage?.prompt_tokens ?? estimateInputTokens(messages);
+      const completionTokens = completion.usage?.completion_tokens ?? Math.max(1, Math.ceil(text.length / 4));
+      const latencyMs = Date.now() - startedAt;
+      recordXGatewayKeyUsage(account.id, promptTokens + completionTokens);
+      if (!answers) {
+        logRequest(account.provider, modelId, null, 'error', promptTokens, completionTokens, latencyMs,
+          'systemone: model reply was not valid JSON', latencyMs, model === 'auto' ? null : model, null, 'x-gateway');
+        lastError = new Error('Model reply was not a valid JSON object');
+        continue;
+      }
+      logRequest(account.provider, modelId, null, 'success', promptTokens, completionTokens, latencyMs,
+        null, latencyMs, model === 'auto' ? null : model, null, 'x-gateway');
+      res.setHeader('X-Routed-Via', `${account.provider}/${modelId}`);
+      res.json({
+        object: 'systemone.decision',
+        model: modelId,
+        answers,
+        usage: {
+          prompt_tokens: promptTokens,
+          completion_tokens: completionTokens,
+          total_tokens: promptTokens + completionTokens,
+        },
+      });
+      return;
+    } catch (err) {
+      lastError = err;
+      const latencyMs = Date.now() - startedAt;
+      logRequest(account.provider, modelId, null, 'error', 0, 0, latencyMs,
+        sanitizeProviderErrorMessage(err instanceof Error ? err.message : String(err)),
+        null, model === 'auto' ? null : model, null, 'x-gateway');
+    }
+  }
+
+  const message = lastError instanceof Error ? sanitizeProviderErrorMessage(lastError.message) : 'All X Gateway provider accounts failed.';
+  res.status(502).json({ error: { message, type: 'upstream_error' } });
+});

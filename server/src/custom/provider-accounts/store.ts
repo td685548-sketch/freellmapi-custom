@@ -6,7 +6,7 @@ import type {
   ProviderRoutingStrategy,
   ProviderThinkingMode,
 } from '@freellmapi/shared/x-accounts.js';
-import { getDb } from '../../db/index.js';
+import { getDb, getSetting, setSetting } from '../../db/index.js';
 import { decrypt, encrypt } from '../../lib/crypto.js';
 import { decryptProxyUrl, encryptProxyUrl, isValidKeyProxyUrl, KEY_PROXY_URL_ERROR, maskProxyUrl } from '../../lib/key-proxy.js';
 import { parseModelScope } from '../../lib/model-scope.js';
@@ -1005,4 +1005,176 @@ export function bulkAssignAccountProxy(input: {
     }
   });
   return { updated };
+}
+
+// ---------------------------------------------------------------------
+// Model aliases, custom model capabilities and catalog sync state
+// (stored as JSON blobs in the `settings` table)
+// ---------------------------------------------------------------------
+
+export const MODEL_ALIASES_SETTINGS_KEY = 'x_gateway_model_aliases';
+export const CUSTOM_MODEL_CAPS_SETTINGS_KEY = 'x_gateway_custom_model_caps';
+export const CATALOG_SYNC_SETTINGS_KEY = 'x_gateway_catalog_sync_state';
+
+const MODEL_ALIAS_PATTERN = /^[a-zA-Z0-9_.\-]+$/;
+const RESERVED_ALIAS_NAMES = new Set(['__proto__', 'constructor', 'prototype']);
+
+function readJsonSetting(key: string): unknown {
+  try {
+    const raw = getSetting(key);
+    return raw ? JSON.parse(raw) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function getModelAliases(): Record<string, string> {
+  const parsed = readJsonSetting(MODEL_ALIASES_SETTINGS_KEY);
+  if (!isPlainRecord(parsed)) return {};
+  const result: Record<string, string> = {};
+  for (const [alias, target] of Object.entries(parsed)) {
+    if (typeof target === 'string' && target.trim() && MODEL_ALIAS_PATTERN.test(alias) && !RESERVED_ALIAS_NAMES.has(alias)) {
+      result[alias] = target;
+    }
+  }
+  return result;
+}
+
+export function setModelAlias(alias: string, targetModel: string): Record<string, string> {
+  const name = String(alias ?? '').trim();
+  const target = String(targetModel ?? '').trim();
+  if (!name || name.length > 64 || !MODEL_ALIAS_PATTERN.test(name) || RESERVED_ALIAS_NAMES.has(name)) {
+    throw new AccountError(400, 'Alias must be 1-64 characters of letters, digits, "_", "." or "-".');
+  }
+  if (!target || target.length > 200) throw new AccountError(400, 'Target model is required (provider/modelId).');
+  const next = { ...getModelAliases(), [name]: target };
+  setSetting(MODEL_ALIASES_SETTINGS_KEY, JSON.stringify(next));
+  return next;
+}
+
+export function deleteModelAlias(alias: string): Record<string, string> {
+  const name = String(alias ?? '').trim();
+  const next = { ...getModelAliases() };
+  delete next[name];
+  setSetting(MODEL_ALIASES_SETTINGS_KEY, JSON.stringify(next));
+  return next;
+}
+
+/** Maps `alias` or `alias:<alias>` to its `provider/modelId` target; other models pass through. */
+export function resolveXGatewayModelAlias(model: string): string {
+  if (typeof model !== 'string') return model;
+  const aliases = getModelAliases();
+  const has = (key: string) => Object.prototype.hasOwnProperty.call(aliases, key);
+  if (has(model)) return aliases[model];
+  if (model.startsWith('alias:')) {
+    const name = model.slice('alias:'.length);
+    if (has(name)) return aliases[name];
+  }
+  return model;
+}
+
+export interface CustomModelCaps {
+  vision?: boolean;
+  audioInput?: boolean;
+  toolCall?: boolean;
+  reasoning?: boolean;
+}
+const CUSTOM_CAP_KEYS = ['vision', 'audioInput', 'toolCall', 'reasoning'] as const;
+
+function customCapsKey(provider: string, modelId: string): string {
+  const p = String(provider ?? '').trim();
+  const m = String(modelId ?? '').trim();
+  if (!p || !m) throw new AccountError(400, 'Provider and model ID are required.');
+  return `${normalizeXGatewayProviderId(p) ?? p}/${m}`;
+}
+
+function sanitizeCaps(input: unknown): CustomModelCaps {
+  const out: CustomModelCaps = {};
+  if (!isPlainRecord(input)) return out;
+  for (const key of CUSTOM_CAP_KEYS) {
+    if (typeof input[key] === 'boolean') out[key] = input[key] as boolean;
+  }
+  return out;
+}
+
+export function getCustomModelCaps(): Record<string, CustomModelCaps> {
+  const parsed = readJsonSetting(CUSTOM_MODEL_CAPS_SETTINGS_KEY);
+  const result: Record<string, CustomModelCaps> = {};
+  if (!isPlainRecord(parsed)) return result;
+  for (const [key, value] of Object.entries(parsed)) {
+    if (RESERVED_ALIAS_NAMES.has(key)) continue;
+    result[key] = sanitizeCaps(value);
+  }
+  return result;
+}
+
+export function setCustomModelCaps(provider: string, modelId: string, caps: CustomModelCaps): { key: string; caps: CustomModelCaps } {
+  const key = customCapsKey(provider, modelId);
+  const clean = sanitizeCaps(caps);
+  if (!Object.keys(clean).length) throw new AccountError(400, 'At least one boolean capability is required.');
+  setSetting(CUSTOM_MODEL_CAPS_SETTINGS_KEY, JSON.stringify({ ...getCustomModelCaps(), [key]: clean }));
+  return { key, caps: clean };
+}
+
+export function deleteCustomModelCaps(provider: string, modelId: string): Record<string, CustomModelCaps> {
+  const key = customCapsKey(provider, modelId);
+  const next = { ...getCustomModelCaps() };
+  delete next[key];
+  setSetting(CUSTOM_MODEL_CAPS_SETTINGS_KEY, JSON.stringify(next));
+  return next;
+}
+
+export interface CatalogSyncState {
+  syncedAt: string | null;
+  totalProviders: number;
+  totalModels: number;
+  customModelsCount: number;
+  aliasesCount: number;
+}
+
+export function getCatalogSyncState(): CatalogSyncState {
+  const parsed = readJsonSetting(CATALOG_SYNC_SETTINGS_KEY);
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : 0);
+  const rec = isPlainRecord(parsed) ? parsed : {};
+  return {
+    syncedAt: typeof rec.syncedAt === 'string' ? rec.syncedAt : null,
+    totalProviders: num(rec.totalProviders),
+    totalModels: num(rec.totalModels),
+    customModelsCount: num(rec.customModelsCount),
+    aliasesCount: num(rec.aliasesCount),
+  };
+}
+
+/**
+ * Rebuilds the model catalog from providers that have at least one enabled
+ * account (custom models and aliases included) and records the sync time.
+ */
+export function syncXGatewayCatalog(): CatalogSyncState & { providers: Array<{ id: string; name: string; models: number }> } {
+  const providers: Array<{ id: string; name: string; models: number }> = [];
+  let customModelsCount = 0;
+  for (const provider of listAccounts()) {
+    if (!provider.accounts.some(a => a.enabled)) continue;
+    const ids = new Set<string>();
+    for (const account of provider.accounts) {
+      if (!account.enabled) continue;
+      for (const model of account.models) ids.add(model.id);
+    }
+    const customs = getProviderModelConfig(provider.id).customModels;
+    for (const cm of customs) ids.add(cm.id);
+    customModelsCount += customs.length;
+    providers.push({ id: provider.id, name: provider.name, models: ids.size });
+  }
+  const state: CatalogSyncState = {
+    syncedAt: new Date().toISOString(),
+    totalProviders: providers.length,
+    totalModels: providers.reduce((sum, p) => sum + p.models, 0),
+    customModelsCount,
+    aliasesCount: Object.keys(getModelAliases()).length,
+  };
+  setSetting(CATALOG_SYNC_SETTINGS_KEY, JSON.stringify(state));
+  return { ...state, providers };
 }

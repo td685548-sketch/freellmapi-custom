@@ -7,6 +7,8 @@ import {
   batchImportProxies,
   bulkActionProxies,
   CLOUDFLARE_WORKER_RELAY_CODE,
+  DENO_RELAY_CODE,
+  NETLIFY_RELAY_CODE,
   createProxyPoolEntry,
   deleteProxyPoolEntry,
   deployServerlessRelay,
@@ -59,9 +61,10 @@ const configSchema = z.object({
 }).strict();
 
 const deployWorkerSchema = z.object({
-  provider: z.enum(['cloudflare', 'vercel']),
+  provider: z.enum(['cloudflare', 'vercel', 'deno', 'netlify']),
   apiToken: z.string().trim().min(1),
   accountId: z.string().trim().optional(),
+  orgDomain: z.string().trim().optional(),
   workerName: z.string().trim().min(1).max(POOL_NAME_MAX),
 }).strict();
 
@@ -83,6 +86,13 @@ function redactProbeError(error: string | undefined): string {
   if (!error) return 'Proxy unreachable or refused the connection.';
   // Strip any embedded credentials (e.g. user:pass@host) so secrets never leak to the client
   return error.replace(/([\w.%-]+):([^\s@/]+)@/g, '$1:***@');
+}
+
+function isServerlessRelay(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' && ['workers.dev', 'vercel.app', 'deno.dev', 'deno.net', 'netlify.app'].some(domain => parsed.hostname.endsWith(`.${domain}`));
+  } catch { return false; }
 }
 
 xProxyPoolRouter.get('/', (_req, res) => {
@@ -107,6 +117,8 @@ xProxyPoolRouter.get('/relay-template', (_req, res) => {
   res.json({
     cloudflare: CLOUDFLARE_WORKER_RELAY_CODE,
     vercel: VERCEL_RELAY_CODE,
+    deno: DENO_RELAY_CODE,
+    netlify: NETLIFY_RELAY_CODE,
   });
 });
 
@@ -146,7 +158,7 @@ xProxyPoolRouter.post('/test-all', async (_req, res, next) => {
       entries.map(async entry => {
         try {
           const url = proxyPoolEntryUrl(entry.id);
-          const isRelay = url.startsWith('https://') && (url.includes('.workers.dev') || url.includes('.vercel.app'));
+          const isRelay = isServerlessRelay(url);
           const result = await probeProxyUrl(url, {
             targetUrl: 'https://www.gstatic.com/generate_204',
             timeoutMs: 12_000,
@@ -215,6 +227,7 @@ xProxyPoolRouter.post('/deploy-worker', async (req, res, next) => {
       provider: body.provider,
       apiToken: body.apiToken,
       accountId: body.accountId,
+      orgDomain: body.orgDomain,
       workerName: body.workerName,
       createdBy: uid,
     });
@@ -251,7 +264,7 @@ xProxyPoolRouter.delete('/:id', (req, res) => {
 xProxyPoolRouter.post('/:id/test', async (req, res) => {
   const id = entryId(req);
   const url = proxyPoolEntryUrl(id);
-  const isRelay = url.startsWith('https://') && (url.includes('.workers.dev') || url.includes('.vercel.app'));
+  const isRelay = isServerlessRelay(url);
   const result = await probeProxyUrl(url, {
     targetUrl: 'https://www.gstatic.com/generate_204',
     timeoutMs: 12_000,

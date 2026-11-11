@@ -21,6 +21,7 @@ import { useSessionRevision } from '../../session-state'
 import {
   proxyPoolApi,
   type XProxyPoolDeployParams,
+  type XProxyPoolRelayProvider,
   type XProxyPoolEntry,
   type XProxyPoolTestAllResult,
   type XProxyPoolTestResult,
@@ -32,39 +33,6 @@ interface Draft {
   name: string
   proxyUrl: string
 }
-
-const DEFAULT_WORKER_SCRIPT = `addEventListener('fetch', event => {
-  event.respondWith(handleRequest(event.request));
-});
-
-async function handleRequest(request) {
-  const target = request.headers.get('fetch-relay-target');
-  if (!target) {
-    return new Response(JSON.stringify({ status: 'ok', service: 'freellmapi-worker-relay' }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' }
-    });
-  }
-
-  try {
-    const reqHeaders = new Headers(request.headers);
-    reqHeaders.delete('fetch-relay-target');
-    reqHeaders.delete('fetch-relay-authorization');
-    reqHeaders.delete('host');
-
-    return await fetch(target, {
-      method: request.method,
-      headers: reqHeaders,
-      body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,
-      redirect: 'manual'
-    });
-  } catch (err) {
-    return new Response(JSON.stringify({ error: String(err && err.message ? err.message : err) }), {
-      status: 502,
-      headers: { 'content-type': 'application/json' }
-    });
-  }
-};`
 
 export default function ProxyPool() {
   const s = usePoolStrings()
@@ -85,6 +53,15 @@ export default function ProxyPool() {
     retry: false,
   })
 
+  const templateQuery = useQuery({
+    queryKey: ['x-proxy-pool-relay-templates', revision],
+    queryFn: ({ signal }) => proxyPoolApi.getRelayTemplate(signal),
+    retry: false,
+    staleTime: 60_000,
+  })
+  const [scriptProvider, setScriptProvider] = useState<XProxyPoolRelayProvider>('cloudflare')
+  const [copyError, setCopyError] = useState(false)
+
   const [draft, setDraft] = useState<Draft | null>(null)
   const [showBatch, setShowBatch] = useState(false)
   const [batchText, setBatchText] = useState('')
@@ -95,6 +72,7 @@ export default function ProxyPool() {
     provider: 'cloudflare',
     apiToken: '',
     accountId: '',
+    orgDomain: '',
     workerName: 'freellmapi-relay',
   })
   const [copiedTemplate, setCopiedTemplate] = useState(false)
@@ -195,6 +173,7 @@ export default function ProxyPool() {
     meta: { silenceToast: true },
     mutationFn: (params: XProxyPoolDeployParams) => proxyPoolApi.deployWorker(params),
     onSuccess: async () => {
+      setDeployDraft(previous => ({ ...previous, apiToken: '' }))
       setShowDeploy(false)
       await done()
     },
@@ -230,13 +209,17 @@ export default function ProxyPool() {
     })
   }
 
-  const handleCopyTemplate = async () => {
+  const handleCopyTemplate = async (provider = scriptProvider) => {
+    const code = templateQuery.data?.[provider]
+    if (!code) return
+    setScriptProvider(provider)
+    setCopyError(false)
     try {
-      await navigator.clipboard.writeText(DEFAULT_WORKER_SCRIPT)
+      await navigator.clipboard.writeText(code)
       setCopiedTemplate(true)
       setTimeout(() => setCopiedTemplate(false), 2500)
     } catch {
-      // fallback
+      setCopyError(true)
     }
   }
 
@@ -392,7 +375,7 @@ export default function ProxyPool() {
             {s.entryName}
             <input
               value={draft.name}
-              maxLength={64}
+              maxLength={deployDraft.provider === 'deno' ? 32 : 64}
               required
               onChange={e => setDraft({ ...draft, name: e.target.value })}
             />
@@ -503,20 +486,29 @@ export default function ProxyPool() {
             {s.provider}
             <select
               value={deployDraft.provider}
-              onChange={e =>
-                setDeployDraft({ ...deployDraft, provider: e.target.value as 'cloudflare' | 'vercel' })
-              }
+              disabled={deploy.isPending}
+              onChange={e => {
+                const provider = e.target.value as XProxyPoolRelayProvider
+                setDeployDraft({ ...deployDraft, provider, apiToken: '' })
+                setScriptProvider(provider)
+                setCopiedTemplate(false)
+                setCopyError(false)
+                deploy.reset()
+              }}
             >
               <option value="cloudflare">Cloudflare Workers</option>
-              <option value="vercel">Vercel Serverless Function</option>
+              <option value="vercel">Vercel</option>
+              <option value="deno">Deno Deploy</option>
+              <option value="netlify">Netlify</option>
             </select>
           </label>
 
           <label>
-            {s.workerName}
+            {deployDraft.provider === 'deno' ? s.projectName : deployDraft.provider === 'netlify' ? s.siteName : s.workerName}
             <input
+              disabled={deploy.isPending}
               value={deployDraft.workerName}
-              maxLength={64}
+              maxLength={deployDraft.provider === 'deno' ? 32 : 64}
               required
               placeholder={s.workerNamePlaceholder}
               onChange={e => setDeployDraft({ ...deployDraft, workerName: e.target.value })}
@@ -524,16 +516,28 @@ export default function ProxyPool() {
           </label>
 
           <label>
-            {s.apiToken}
+            {deployDraft.provider === 'deno' ? s.denoToken : deployDraft.provider === 'netlify' ? s.netlifyToken : s.apiToken}
             <input
               type="password"
+              autoComplete="off"
+              disabled={deploy.isPending}
               value={deployDraft.apiToken}
               required
-              placeholder={s.apiTokenPlaceholder}
+              placeholder={deployDraft.provider === 'deno' ? s.denoToken : deployDraft.provider === 'netlify' ? s.netlifyToken : s.apiTokenPlaceholder}
               onChange={e => setDeployDraft({ ...deployDraft, apiToken: e.target.value })}
             />
           </label>
 
+          {deployDraft.provider === 'deno' && (
+            <label>
+              {s.orgDomain}
+              <input value={deployDraft.orgDomain ?? ''} placeholder={s.orgDomainPlaceholder}
+                disabled={deploy.isPending} maxLength={100}
+                onChange={e => setDeployDraft({ ...deployDraft, orgDomain: e.target.value })} />
+              <span className="x-caption">{s.orgDomainHelp}</span>
+            </label>
+          )}
+          {deployDraft.provider === 'netlify' && <p className="x-caption">{s.netlifyHint}</p>}
           {deployDraft.provider === 'cloudflare' && (
             <label>
               {s.accountId}
@@ -563,7 +567,8 @@ export default function ProxyPool() {
             <button
               type="button"
               className="x-button"
-              onClick={() => void handleCopyTemplate()}
+              onClick={() => void handleCopyTemplate(deployDraft.provider)}
+              disabled={!templateQuery.data?.[deployDraft.provider]}
               title={s.manualDeployHint}
             >
               {copiedTemplate ? <Check size={16} /> : <Copy size={16} />}
@@ -575,6 +580,37 @@ export default function ProxyPool() {
           </div>
         </form>
       )}
+
+      {deploy.isSuccess && <p className="x-caption" role="status">{s.deploySuccess}{' '}
+        <a href={deploy.data.url} target="_blank" rel="noreferrer">{deploy.data.url}</a></p>}
+
+      <section className="x-panel x-mgmt-form">
+        <h2>{s.relayTemplates}</h2>
+        <p className="x-caption">{s.manualDeployHint}</p>
+        <label>{s.templateProvider}
+          <select value={scriptProvider} onChange={e => {
+            setScriptProvider(e.target.value as XProxyPoolRelayProvider)
+            setCopiedTemplate(false)
+            setCopyError(false)
+          }}>
+            <option value="cloudflare">Cloudflare Workers</option>
+            <option value="vercel">Vercel</option>
+            <option value="deno">Deno Deploy</option>
+            <option value="netlify">Netlify</option>
+          </select>
+        </label>
+        {templateQuery.isPending && <p role="status">{s.loading}</p>}
+        {templateQuery.isError && <div role="alert">{s.templateLoadError}{' '}
+          <button type="button" className="x-button" onClick={() => void templateQuery.refetch()}>{s.retry}</button></div>}
+        <textarea aria-label={s.relayTemplates} readOnly rows={12} spellCheck={false}
+          value={templateQuery.data?.[scriptProvider] ?? ''} onFocus={e => e.currentTarget.select()} />
+        <button type="button" className="x-button" disabled={!templateQuery.data?.[scriptProvider]}
+          onClick={() => void handleCopyTemplate()}>
+          {copiedTemplate ? <Check size={16} /> : <Copy size={16} />}
+          {copiedTemplate ? s.copied : s.copyTemplate}
+        </button>
+        {copyError && <p role="alert">{s.copyFailed}</p>}
+      </section>
 
       {/* Proxy Settings Panel (noProxy & strictProxy) */}
       {showSettings && settingsDraft && (
