@@ -24,6 +24,7 @@ import CLITools from './pages/CLIOperations'
 import TranslatorInspector from './pages/TranslatorInspector'
 import Playground from './pages/Playground'
 import SkillsHub from './pages/SkillsHub'
+import ModelAvailabilityBadge from './components/ModelAvailabilityBadge'
 import { useMgmtStrings } from './management-strings'
 import { usePoolStrings } from './proxy-pool-strings'
 import { useMediaStrings } from './media-strings'
@@ -78,7 +79,7 @@ function XGatewayShell() {
         <Link to="/models/chat" className="x-nav-item x-back-link-nav"><ArrowLeft size={16} /><span>{s.back}</span></Link>
       </div>
     </aside>
-    <div className={`x-main ${isPlayground ? 'x-main-playground' : ''}`}><header className="x-header"><button className="x-icon-button x-mobile-menu" aria-label={s.menu} onClick={() => setMenuOpen(true)}><Menu size={21} /></button><div className="x-breadcrumb"><span>{s.workspace}</span><ChevronRight size={14} /><strong>{current}</strong></div><div className="x-header-actions"><label className="x-language"><span className="x-sr-only">{s.language}</span><select value={locale === 'vi' ? 'vi' : 'en'} onChange={event => setLocale(event.target.value as 'vi' | 'en')}><option value="en">English</option><option value="vi">Tiếng Việt</option></select></label><button className="x-icon-button" aria-label={s.theme} onClick={() => setTheme(resolvedDark ? 'light' : 'dark')}>{resolvedDark ? <Sun size={18} /> : <Moon size={18} />}</button><span className="x-avatar" title={session.session?.email}>{session.session?.email?.slice(0, 1).toUpperCase() ?? 'X'}</span></div></header>
+    <div className={`x-main ${isPlayground ? 'x-main-playground' : ''}`}><header className="x-header"><button className="x-icon-button x-mobile-menu" aria-label={s.menu} onClick={() => setMenuOpen(true)}><Menu size={21} /></button><div className="x-breadcrumb"><span>{s.workspace}</span><ChevronRight size={14} /><strong>{current}</strong></div><div className="x-header-actions">{canView && <ModelAvailabilityBadge />}<label className="x-language"><span className="x-sr-only">{s.language}</span><select value={locale === 'vi' ? 'vi' : 'en'} onChange={event => setLocale(event.target.value as 'vi' | 'en')}><option value="en">English</option><option value="vi">Tiếng Việt</option></select></label><button className="x-icon-button" aria-label={s.theme} onClick={() => setTheme(resolvedDark ? 'light' : 'dark')}>{resolvedDark ? <Sun size={18} /> : <Moon size={18} />}</button><span className="x-avatar" title={session.session?.email}>{session.session?.email?.slice(0, 1).toUpperCase() ?? 'X'}</span></div></header>
       <main className={`x-content ${isPlayground ? 'x-content-playground' : ''}`}><ErrorBoundary><Routes>
         <Route index element={<Navigate to={canView ? '/x/providers' : '/x/endpoint'} replace />} />
         <Route path="providers" element={protectedPage(<Providers />)} />

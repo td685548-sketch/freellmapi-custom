@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useState, useEffect, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -8,6 +8,7 @@ import {
   GitBranch,
   KeyRound,
   LoaderCircle,
+  Pencil,
   Plus,
   Search,
   Server,
@@ -17,8 +18,10 @@ import {
   X,
 } from 'lucide-react'
 import { Dialog, DialogDescription, DialogPopup, DialogTitle } from '@/components/ui/dialog'
-import { accountsApi, refreshAccounts, useAccounts, type BatchTestResponse, type ValidateNodeResponse } from '../api'
+import { apiFetch } from '@/lib/api'
+import { accountsApi, refreshAccounts, useAccounts, type BatchTestResponse, type ValidateNodeResponse, type CustomProviderNode } from '../api'
 import { useXStrings } from '../strings'
+import { useXGatewayCopy } from '../copy'
 import type { AccountProvider } from '../../../../../shared/x-accounts'
 
 const PROVIDER_ICON_FILES: Record<string, string> = {
@@ -80,13 +83,18 @@ export function AccountLoadState({ error, retry }: { error?: boolean; retry?: ()
 function ProviderCard({
   provider,
   onDeleteCustomNode,
+  onEditCustomNode,
   canDelete,
+  canEdit,
 }: {
-  provider: AccountProvider & { isCustomNode?: boolean; customNodeType?: string }
+  provider: AccountProvider & { isCustomNode?: boolean; customNodeType?: string; customNodeApiType?: string }
   onDeleteCustomNode?: (provider: AccountProvider) => void
+  onEditCustomNode?: (provider: AccountProvider) => void
   canDelete?: boolean
+  canEdit?: boolean
 }) {
   const s = useXStrings()
+  const copy = useXGatewayCopy()
   const enabled = provider.accounts.filter(account => account.enabled).length
   const login = provider.category === 'oauth' || provider.authMethods.some(method => method === 'oauth_pkce' || method === 'device_code')
   const isCookie = (provider.category === 'webCookie' || provider.authMethods.includes('cookie')) && !login
@@ -99,12 +107,29 @@ function ProviderCard({
         <span className={`x-badge ${provider.accounts.length ? 'x-green' : ''}`}>
           {provider.accounts.length ? <><span className="x-dot" />{s.connected}</> : s.available}
         </span>
+        {provider.isCustomNode && canEdit && onEditCustomNode && (
+          <button
+            type="button"
+            className="x-icon-button"
+            style={{ padding: '2px 4px', height: 'auto', width: 'auto' }}
+            title={copy.editCustomNode}
+            aria-label={`${copy.edit}: ${provider.name}`}
+            onClick={e => {
+              e.preventDefault()
+              e.stopPropagation()
+              onEditCustomNode(provider)
+            }}
+          >
+            <Pencil size={13} />
+          </button>
+        )}
         {provider.isCustomNode && canDelete && onDeleteCustomNode && (
           <button
             type="button"
             className="x-icon-button x-danger"
             style={{ padding: '2px 4px', height: 'auto', width: 'auto' }}
             title="Delete Custom Node"
+            aria-label={`${copy.delete}: ${provider.name}`}
             onClick={e => {
               e.preventDefault()
               e.stopPropagation()
@@ -416,6 +441,340 @@ export function AddCompatibleModal({ isOpen, onClose, onCreated }: AddCompatible
   )
 }
 
+interface EditCompatibleModalProps {
+  isOpen: boolean
+  node: (AccountProvider & { isCustomNode?: boolean; customNodeType?: string; customNodeApiType?: string }) | null
+  onClose: () => void
+  onUpdated: () => void
+}
+
+export function EditCompatibleModal({ isOpen, node, onClose, onUpdated }: EditCompatibleModalProps) {
+  const copy = useXGatewayCopy()
+  const [nodeType, setNodeType] = useState<'openai-compatible' | 'anthropic-compatible' | 'custom-embedding'>('openai-compatible')
+  const [name, setName] = useState('')
+  const [prefix, setPrefix] = useState('')
+  const [apiType, setApiType] = useState<'chat' | 'responses'>('chat')
+  const [baseUrl, setBaseUrl] = useState('')
+  const [checkKey, setCheckKey] = useState('')
+  const [checkModelId, setCheckModelId] = useState('')
+  const [models, setModels] = useState<string[]>([])
+  const [modelInput, setModelInput] = useState('')
+  const [validating, setValidating] = useState(false)
+  const [validationResult, setValidationResult] = useState<ValidateNodeResponse | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!node) return
+    setName(node.name || '')
+    setPrefix(node.alias || node.id.replace(/^custom-/, '') || '')
+    const t = (node.customNodeType as 'openai-compatible' | 'anthropic-compatible' | 'custom-embedding') || 'openai-compatible'
+    setNodeType(t)
+    setApiType((node.customNodeApiType as 'chat' | 'responses') || 'chat')
+    setBaseUrl(node.baseUrl || '')
+    setCheckKey('')
+    setCheckModelId('')
+    setValidationResult(null)
+    setError(null)
+    setModelInput('')
+
+    accountsApi.getCustomNodes().then(res => {
+      const match = res?.nodes?.find(n => n.id === node.id)
+      if (match) {
+        if (match.models && match.models.length > 0) {
+          setModels(match.models)
+        } else {
+          setModels([])
+        }
+        if (match.baseUrl) setBaseUrl(match.baseUrl)
+        if (match.prefix) setPrefix(match.prefix)
+        if (match.type) setNodeType(match.type)
+        if (match.apiType) setApiType(match.apiType)
+      }
+    }).catch(() => {
+      setModels([])
+    })
+  }, [node])
+
+  const handleTypeChange = (type: 'openai-compatible' | 'anthropic-compatible' | 'custom-embedding') => {
+    setNodeType(type)
+    setValidationResult(null)
+    if (!baseUrl.trim() || baseUrl === 'https://api.openai.com/v1' || baseUrl === 'https://api.anthropic.com/v1') {
+      if (type === 'anthropic-compatible') {
+        setBaseUrl('https://api.anthropic.com/v1')
+      } else {
+        setBaseUrl('https://api.openai.com/v1')
+      }
+    }
+  }
+
+  const handleValidate = async () => {
+    if (!baseUrl.trim()) return
+    setValidating(true)
+    setValidationResult(null)
+    try {
+      const res = await accountsApi.validateCustomNode({
+        baseUrl: baseUrl.trim(),
+        apiKey: checkKey.trim() || undefined,
+        type: nodeType,
+        modelId: checkModelId.trim() || undefined,
+      })
+      setValidationResult(res)
+      if (res.models && res.models.length > 0) {
+        setModels(prev => Array.from(new Set([...prev, ...res.models])))
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Validation request failed'
+      setValidationResult({
+        ok: false,
+        valid: false,
+        latencyMs: 0,
+        models: [],
+        message,
+        error: message,
+      })
+    } finally {
+      setValidating(false)
+    }
+  }
+
+  const handleAddModel = () => {
+    const trimmed = modelInput.trim()
+    if (!trimmed) return
+    if (!models.includes(trimmed)) {
+      setModels([...models, trimmed])
+    }
+    setModelInput('')
+  }
+
+  const handleRemoveModel = (modelToRemove: string) => {
+    setModels(models.filter(m => m !== modelToRemove))
+  }
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!node) return
+    if (!name.trim() || !prefix.trim() || !baseUrl.trim()) {
+      setError(copy.requiredFields)
+      return
+    }
+    setSubmitting(true)
+    setError(null)
+    try {
+      const payload = {
+        name: name.trim(),
+        prefix: prefix.toLowerCase().trim(),
+        type: nodeType,
+        ...(nodeType === 'openai-compatible' ? { apiType } : {}),
+        baseUrl: baseUrl.trim(),
+        models: models.length > 0 ? models : undefined,
+      }
+      await apiFetch<{ ok: boolean; node: CustomProviderNode }>(
+        `/api/x-accounts/nodes/${encodeURIComponent(node.id)}`,
+        {
+          method: 'PUT',
+          body: JSON.stringify(payload),
+        },
+      )
+      onUpdated()
+      onClose()
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to update Custom Provider Node.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (!isOpen || !node) return null
+
+  return (
+    <Dialog open onOpenChange={open => { if (!open && !submitting) onClose() }}>
+      <DialogPopup className="x-console x-dialog" style={{ maxWidth: '560px' }}>
+        <DialogTitle>{copy.editCustomNode}</DialogTitle>
+        <DialogDescription>
+          {copy.editCustomNodeDesc}
+        </DialogDescription>
+
+        <form onSubmit={handleSubmit} style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {error && <div className="x-error" role="alert">{error}</div>}
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, marginBottom: '6px' }}>{copy.nodeType}</label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem' }}>
+              <button
+                type="button"
+                className={`x-button ${nodeType === 'openai-compatible' ? 'x-primary' : ''}`}
+                onClick={() => handleTypeChange('openai-compatible')}
+              >
+                OpenAI
+              </button>
+              <button
+                type="button"
+                className={`x-button ${nodeType === 'anthropic-compatible' ? 'x-primary' : ''}`}
+                onClick={() => handleTypeChange('anthropic-compatible')}
+              >
+                Anthropic
+              </button>
+              <button
+                type="button"
+                className={`x-button ${nodeType === 'custom-embedding' ? 'x-primary' : ''}`}
+                onClick={() => handleTypeChange('custom-embedding')}
+              >
+                Embedding
+              </button>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, marginBottom: '4px' }}>{copy.nodeName}</label>
+              <input
+                type="text"
+                className="x-input"
+                style={{ width: '100%', padding: '7px 10px', borderRadius: 8, border: '1px solid var(--x-border)', background: 'var(--x-surface-subtle)', color: 'var(--x-text)' }}
+                value={name}
+                onChange={e => setName(e.target.value)}
+                required
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, marginBottom: '4px' }}>{copy.nodePrefix}</label>
+              <input
+                type="text"
+                className="x-input"
+                style={{ width: '100%', padding: '7px 10px', borderRadius: 8, border: '1px solid var(--x-border)', background: 'var(--x-surface-subtle)', color: 'var(--x-text)' }}
+                value={prefix}
+                onChange={e => setPrefix(e.target.value)}
+                required
+              />
+            </div>
+          </div>
+
+          {nodeType === 'openai-compatible' && (
+            <div>
+              <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, marginBottom: '4px' }}>{copy.apiType}</label>
+              <select
+                className="x-input"
+                style={{ width: '100%', padding: '7px 10px', borderRadius: 8, border: '1px solid var(--x-border)', background: 'var(--x-surface-subtle)', color: 'var(--x-text)' }}
+                value={apiType}
+                onChange={e => setApiType(e.target.value as 'chat' | 'responses')}
+              >
+                <option value="chat">{copy.apiTypeChat}</option>
+                <option value="responses">{copy.apiTypeResponses}</option>
+              </select>
+            </div>
+          )}
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, marginBottom: '4px' }}>{copy.baseUrl}</label>
+            <input
+              type="url"
+              className="x-input"
+              style={{ width: '100%', padding: '7px 10px', borderRadius: 8, border: '1px solid var(--x-border)', background: 'var(--x-surface-subtle)', color: 'var(--x-text)' }}
+              value={baseUrl}
+              onChange={e => setBaseUrl(e.target.value)}
+              required
+            />
+          </div>
+
+          <div style={{ borderTop: '1px solid var(--x-border)', paddingTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--x-muted)' }}>Connection &amp; Validation (Optional)</span>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+              <div>
+                <input
+                  type="password"
+                  className="x-input"
+                  style={{ width: '100%', padding: '6px 10px', fontSize: '0.8125rem', borderRadius: 8, border: '1px solid var(--x-border)', background: 'var(--x-surface-subtle)', color: 'var(--x-text)' }}
+                  placeholder="API Key (for check)"
+                  value={checkKey}
+                  onChange={e => setCheckKey(e.target.value)}
+                />
+              </div>
+              <div>
+                <input
+                  type="text"
+                  className="x-input"
+                  style={{ width: '100%', padding: '6px 10px', fontSize: '0.8125rem', borderRadius: 8, border: '1px solid var(--x-border)', background: 'var(--x-surface-subtle)', color: 'var(--x-text)' }}
+                  placeholder="Model ID (optional)"
+                  value={checkModelId}
+                  onChange={e => setCheckModelId(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '4px' }}>
+              <button
+                type="button"
+                className="x-button x-small"
+                disabled={validating || !baseUrl.trim()}
+                onClick={handleValidate}
+              >
+                {validating ? <LoaderCircle size={14} className="x-spin" /> : <ShieldCheck size={14} />}
+                {validating ? copy.validating : copy.validateEndpoint}
+              </button>
+              {validationResult && (
+                validationResult.ok || validationResult.valid ? (
+                  <span className="x-badge x-green" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <Check size={13} /> {copy.valid} ({validationResult.latencyMs}ms)
+                  </span>
+                ) : (
+                  <span className="x-badge x-danger" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }} title={validationResult.error || validationResult.message}>
+                    <AlertTriangle size={13} /> {validationResult.error || validationResult.message || copy.invalid}
+                  </span>
+                )
+              )}
+            </div>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, marginBottom: '4px' }}>{copy.models}</label>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input
+                type="text"
+                className="x-input"
+                style={{ flex: 1, padding: '6px 10px', borderRadius: 8, border: '1px solid var(--x-border)', background: 'var(--x-surface-subtle)', color: 'var(--x-text)' }}
+                placeholder={copy.addModelPlaceholder}
+                value={modelInput}
+                onChange={e => setModelInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddModel(); } }}
+              />
+              <button type="button" className="x-button x-small" onClick={handleAddModel} disabled={!modelInput.trim()}>
+                <Plus size={14} /> {copy.add}
+              </button>
+            </div>
+            {models.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' }}>
+                {models.map(m => (
+                  <span key={m} className="x-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                    <code>{m}</code>
+                    <button
+                      type="button"
+                      className="x-icon-button"
+                      style={{ padding: 0, height: 'auto', width: 'auto' }}
+                      onClick={() => handleRemoveModel(m)}
+                    >
+                      <X size={12} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '1rem' }}>
+            <button type="button" className="x-button" onClick={onClose} disabled={submitting}>
+              {copy.cancel}
+            </button>
+            <button type="submit" className="x-button x-primary" disabled={submitting || !name.trim() || !prefix.trim() || !baseUrl.trim()}>
+              {submitting ? copy.saving : copy.save}
+            </button>
+          </div>
+        </form>
+      </DialogPopup>
+    </Dialog>
+  )
+}
+
 export type ProviderStatusFilter = 'all' | 'connected' | 'unconnected'
 export type ProviderTypeFilter = 'all' | 'login' | 'apikey' | 'free' | 'cookie'
 
@@ -440,6 +799,7 @@ export default function Providers() {
   const [batchSummary, setBatchSummary] = useState<BatchTestResponse['summary'] | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
   const [nodeToDelete, setNodeToDelete] = useState<AccountProvider | null>(null)
+  const [nodeToEdit, setNodeToEdit] = useState<(AccountProvider & { isCustomNode?: boolean; customNodeType?: string; customNodeApiType?: string }) | null>(null)
 
   const deleteNodeMutation = useMutation({
     mutationFn: (nodeId: string) => accountsApi.deleteCustomNode(nodeId),
@@ -537,11 +897,11 @@ export default function Providers() {
         </div>
       </div>
     </div>
-    {login.length > 0 && <section className="x-provider-section"><div className="x-section-heading"><h2>{s.oauthProviders}<span>{login.length}</span></h2><p>{s.oauthHelp}</p></div><div className="x-provider-grid">{login.map(provider => <ProviderCard key={provider.id} provider={provider} onDeleteCustomNode={setNodeToDelete} canDelete={permissions?.delete} />)}</div></section>}
-    {free.length > 0 && <section className="x-provider-section"><div className="x-section-heading"><h2>{s.freeProviders}<span>{free.length}</span></h2></div><div className="x-provider-grid">{free.map(provider => <ProviderCard key={provider.id} provider={provider} onDeleteCustomNode={setNodeToDelete} canDelete={permissions?.delete} />)}</div></section>}
-    {freeTier.length > 0 && <section className="x-provider-section"><div className="x-section-heading"><h2>{s.freeTierProviders}<span>{freeTier.length}</span></h2></div><div className="x-provider-grid">{freeTier.map(provider => <ProviderCard key={provider.id} provider={provider} onDeleteCustomNode={setNodeToDelete} canDelete={permissions?.delete} />)}</div></section>}
-    {api.length > 0 && <section className="x-provider-section"><div className="x-section-heading"><h2>{s.apiProviders}<span>{api.length}</span></h2><p>{s.apiHelp}</p></div><div className="x-provider-grid">{api.map(provider => <ProviderCard key={provider.id} provider={provider} onDeleteCustomNode={setNodeToDelete} canDelete={permissions?.delete} />)}</div></section>}
-    {webCookie.length > 0 && <section className="x-provider-section"><div className="x-section-heading"><h2>{s.webCookieProviders}<span>{webCookie.length}</span></h2></div><div className="x-provider-grid">{webCookie.map(provider => <ProviderCard key={provider.id} provider={provider} onDeleteCustomNode={setNodeToDelete} canDelete={permissions?.delete} />)}</div></section>}
+    {login.length > 0 && <section className="x-provider-section"><div className="x-section-heading"><h2>{s.oauthProviders}<span>{login.length}</span></h2><p>{s.oauthHelp}</p></div><div className="x-provider-grid">{login.map(provider => <ProviderCard key={provider.id} provider={provider} onDeleteCustomNode={setNodeToDelete} onEditCustomNode={setNodeToEdit} canDelete={permissions?.delete} canEdit={permissions?.edit} />)}</div></section>}
+    {free.length > 0 && <section className="x-provider-section"><div className="x-section-heading"><h2>{s.freeProviders}<span>{free.length}</span></h2></div><div className="x-provider-grid">{free.map(provider => <ProviderCard key={provider.id} provider={provider} onDeleteCustomNode={setNodeToDelete} onEditCustomNode={setNodeToEdit} canDelete={permissions?.delete} canEdit={permissions?.edit} />)}</div></section>}
+    {freeTier.length > 0 && <section className="x-provider-section"><div className="x-section-heading"><h2>{s.freeTierProviders}<span>{freeTier.length}</span></h2></div><div className="x-provider-grid">{freeTier.map(provider => <ProviderCard key={provider.id} provider={provider} onDeleteCustomNode={setNodeToDelete} onEditCustomNode={setNodeToEdit} canDelete={permissions?.delete} canEdit={permissions?.edit} />)}</div></section>}
+    {api.length > 0 && <section className="x-provider-section"><div className="x-section-heading"><h2>{s.apiProviders}<span>{api.length}</span></h2><p>{s.apiHelp}</p></div><div className="x-provider-grid">{api.map(provider => <ProviderCard key={provider.id} provider={provider} onDeleteCustomNode={setNodeToDelete} onEditCustomNode={setNodeToEdit} canDelete={permissions?.delete} canEdit={permissions?.edit} />)}</div></section>}
+    {webCookie.length > 0 && <section className="x-provider-section"><div className="x-section-heading"><h2>{s.webCookieProviders}<span>{webCookie.length}</span></h2></div><div className="x-provider-grid">{webCookie.map(provider => <ProviderCard key={provider.id} provider={provider} onDeleteCustomNode={setNodeToDelete} onEditCustomNode={setNodeToEdit} canDelete={permissions?.delete} canEdit={permissions?.edit} />)}</div></section>}
     {filtered.length === 0 && <div className="x-empty"><Search size={32} /><h2>{s.noResults}</h2><p>{s.noResultsHelp}</p></div>}
     <p className="x-footnote">{s.sharedPool}</p>
 
@@ -573,6 +933,15 @@ export default function Providers() {
       isOpen={showAddModal}
       onClose={() => setShowAddModal(false)}
       onCreated={async () => {
+        await refreshAccounts(client)
+      }}
+    />
+
+    <EditCompatibleModal
+      isOpen={Boolean(nodeToEdit)}
+      node={nodeToEdit}
+      onClose={() => setNodeToEdit(null)}
+      onUpdated={async () => {
         await refreshAccounts(client)
       }}
     />

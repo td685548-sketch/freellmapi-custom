@@ -31,6 +31,7 @@ import { useSessionRevision } from '../../session-state'
 import { useUserSession } from '../../use-session'
 import { mgmtApi } from '../management-api'
 import { AccountLoadState } from './Providers'
+import ProviderTopology, { type TopologyNode } from '../components/ProviderTopology'
 
 type TimeRange = '24h' | '7d' | '30d' | 'all'
 
@@ -153,6 +154,7 @@ export default function AccountUsage() {
   // Filters State
   const [timeRange, setTimeRange] = useState<TimeRange>('7d')
   const [providerSearch, setProviderSearch] = useState('')
+  const [breakdownTab, setBreakdownTab] = useState<BreakdownTab>('provider')
   const [chartMetric, setChartMetric] = useState<'requests' | 'tokens'>('tokens')
 
   // Pricing Modal / Drawer State
@@ -186,6 +188,15 @@ export default function AccountUsage() {
     staleTime: 60_000,
     retry: false,
   })
+
+  const breakdownQuery = useQuery({
+    queryKey: ['x-usage-breakdown', timeRange, revision],
+    queryFn: ({ signal }) =>
+      apiFetch<UsageBreakdown>(`/api/x-gateway/usage/breakdown?range=${timeRange}`, { signal }),
+    refetchInterval: 30_000,
+    retry: false,
+  })
+  const breakdown = breakdownQuery.data
 
   const pricingMap = pricingDraft ?? pricingQuery.data?.pricing
 
@@ -429,6 +440,11 @@ export default function AccountUsage() {
           <span className="x-heading-icon"><BarChart3 size={28} /></span>
         </div>
       </div>
+
+      <ProviderTopology
+        nodes={(breakdown?.topology ?? []) as TopologyNode[]}
+        loading={breakdownQuery.isPending}
+      />
 
       {/* Pricing Settings Panel / Drawer */}
       {showPricingModal && (
@@ -886,7 +902,60 @@ export default function AccountUsage() {
         </section>
       </div>
 
+      {/* Breakdown tabs */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.75rem' }}>
+        <div role="tablist" style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+          {BREAKDOWN_TABS.map(tab => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={breakdownTab === tab.id}
+              onClick={() => setBreakdownTab(tab.id)}
+              style={{
+                padding: '0.35rem 0.85rem',
+                borderRadius: '6px',
+                fontSize: '0.8125rem',
+                fontWeight: 500,
+                cursor: 'pointer',
+                border: '1px solid var(--border)',
+                background: breakdownTab === tab.id ? 'var(--primary, #3b82f6)' : 'transparent',
+                color: breakdownTab === tab.id ? '#fff' : 'inherit',
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: '0.25rem', background: 'var(--bg-subtle, rgba(0,0,0,0.06))', padding: '0.2rem', borderRadius: '6px' }}>
+          {RANGE_OPTIONS.map(opt => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => setTimeRange(opt.id)}
+              style={{
+                padding: '0.25rem 0.65rem',
+                borderRadius: '4px',
+                fontSize: '0.75rem',
+                fontWeight: 500,
+                cursor: 'pointer',
+                border: 'none',
+                background: timeRange === opt.id ? 'var(--primary, #3b82f6)' : 'transparent',
+                color: timeRange === opt.id ? '#fff' : 'inherit',
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {breakdownTab !== 'provider' && (
+        <BreakdownPanel tab={breakdownTab} data={breakdown} loading={breakdownQuery.isPending} error={breakdownQuery.isError} />
+      )}
+
       {/* Account Usage Breakdown Table & Provider Search */}
+      {breakdownTab === 'provider' && (
       <section className="x-panel" style={{ padding: '1.25rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -980,6 +1049,152 @@ export default function AccountUsage() {
           )}
         </div>
       </section>
+      )}
     </>
+  )
+}
+
+type BreakdownTab = 'provider' | 'model' | 'client' | 'endpoint'
+
+const BREAKDOWN_TABS: Array<{ id: BreakdownTab; label: string }> = [
+  { id: 'provider', label: 'By Provider & Account' },
+  { id: 'model', label: 'By Model' },
+  { id: 'client', label: 'By Client API Key' },
+  { id: 'endpoint', label: 'By Endpoint' },
+]
+
+const RANGE_OPTIONS: Array<{ id: TimeRange; label: string }> = [
+  { id: '24h', label: '24H' },
+  { id: '7d', label: '7D' },
+  { id: '30d', label: '30D' },
+  { id: 'all', label: 'All / Current Month' },
+]
+
+interface BreakdownStats {
+  requests: number
+  errorCount: number
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  successRate: number
+  avgLatencyMs: number
+}
+
+interface UsageBreakdown {
+  range: TimeRange
+  topology: Array<TopologyNode & { cooldownAccounts: number }>
+  byModel: Array<BreakdownStats & { provider: string; model: string; estimatedCostUsd: number }>
+  byAccount: Array<{
+    id: number; provider: string; providerName: string; label: string; monthlyRequests: number
+    monthlyTokens: number; loggedRequests: number
+  }>
+  byClientKey: Array<BreakdownStats & {
+    id: number; name: string; keyPrefix: string; revoked: boolean; sharedOwner: boolean
+  }>
+  byEndpoint: Array<BreakdownStats & { endpoint: string }>
+}
+
+function BreakdownPanel({
+  tab,
+  data,
+  loading,
+  error,
+}: {
+  tab: Exclude<BreakdownTab, 'provider'>
+  data: UsageBreakdown | undefined
+  loading: boolean
+  error: boolean
+}) {
+  const statCells = (r: BreakdownStats) => (
+    <>
+      <td>{r.requests.toLocaleString()}</td>
+      <td>{fmtTokens(r.promptTokens)}</td>
+      <td>{fmtTokens(r.completionTokens)}</td>
+      <td>{r.successRate}%</td>
+      <td>{r.avgLatencyMs} ms</td>
+    </>
+  )
+  const statHeads = (
+    <>
+      <th>Requests</th>
+      <th>Prompt</th>
+      <th>Completion</th>
+      <th>Success</th>
+      <th>Avg latency</th>
+    </>
+  )
+
+  let body: React.ReactNode = null
+  let empty = true
+  if (data) {
+    if (tab === 'model') {
+      empty = data.byModel.length === 0
+      body = (
+        <table className="x-table">
+          <thead><tr><th>Model</th><th>Provider</th>{statHeads}<th>Errors</th><th>Est. cost</th></tr></thead>
+          <tbody>
+            {data.byModel.map(r => (
+              <tr key={`${r.provider}/${r.model}`}>
+                <th>{r.model}</th>
+                <td>{r.provider}</td>
+                {statCells(r)}
+                <td>{r.errorCount}</td>
+                <td><span style={{ color: '#f59e0b', fontWeight: 500 }}>{fmtDollars(r.estimatedCostUsd)}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )
+    } else if (tab === 'client') {
+      empty = data.byClientKey.length === 0
+      body = (
+        <table className="x-table">
+          <thead><tr><th>Client key</th><th>Prefix</th>{statHeads}<th>Errors</th></tr></thead>
+          <tbody>
+            {data.byClientKey.map(r => (
+              <tr key={r.id} style={r.revoked ? { opacity: 0.5 } : undefined}>
+                <th>
+                  {r.name}
+                  {r.revoked && <small> (revoked)</small>}
+                  {r.sharedOwner && <small title="Keys of the same owner share figures"> (shared owner)</small>}
+                </th>
+                <td><code>{r.keyPrefix}...</code></td>
+                {statCells(r)}
+                <td>{r.errorCount}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )
+    } else {
+      empty = false
+      body = (
+        <table className="x-table">
+          <thead><tr><th>Endpoint</th>{statHeads}<th>Errors</th></tr></thead>
+          <tbody>
+            {data.byEndpoint.map(r => (
+              <tr key={r.endpoint}>
+                <th><code>/x/v1/{r.endpoint}</code></th>
+                {statCells(r)}
+                <td>{r.errorCount}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )
+    }
+  }
+
+  return (
+    <section className="x-panel" style={{ padding: '1.25rem' }}>
+      <div className="x-table-wrap">
+        {body}
+        {(loading || error || empty) && (
+          <div className="x-empty">
+            <p>{loading ? 'Loading...' : error ? 'Could not load usage breakdown.' : 'No usage recorded for this range.'}</p>
+          </div>
+        )}
+      </div>
+    </section>
   )
 }

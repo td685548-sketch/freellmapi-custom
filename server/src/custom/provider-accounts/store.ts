@@ -1,12 +1,18 @@
 import type { Platform } from '@freellmapi/shared/types.js';
-import type { ProviderAccount, ProviderAccountAuthMethod, ProviderAccountsResponse } from '@freellmapi/shared/x-accounts.js';
+import type {
+  ProviderAccount,
+  ProviderAccountAuthMethod,
+  ProviderAccountsResponse,
+  ProviderRoutingStrategy,
+  ProviderThinkingMode,
+} from '@freellmapi/shared/x-accounts.js';
 import { getDb } from '../../db/index.js';
 import { decrypt, encrypt } from '../../lib/crypto.js';
 import { decryptProxyUrl, encryptProxyUrl, isValidKeyProxyUrl, KEY_PROXY_URL_ERROR, maskProxyUrl } from '../../lib/key-proxy.js';
 import { parseModelScope } from '../../lib/model-scope.js';
 import { clearCooldownsForKey } from '../../services/ratelimit.js';
 import { getOutboundProxyUrl } from '../x-gateway/config.js';
-import { pickAutoProxyPoolId, proxyPoolExists, resolvePoolProxyUrl } from '../x-gateway/proxy-pool.js';
+import { listProxyPool, pickAutoProxyPoolId, proxyPoolExists, resolvePoolProxyUrl } from '../x-gateway/proxy-pool.js';
 import { AccountError, COPILOT_BASE_URL } from './http.js';
 import { clearCopilotToken, type CopilotModel } from './copilot.js';
 import { normalizeImportedCredential } from './oauth-providers.js';
@@ -222,10 +228,46 @@ export function reconnectAccount(id: number, provider: OAuthProvider): AccountRo
   return row;
 }
 
+export const BLOCKED_CUSTOM_HEADERS = new Set([
+  'host',
+  'content-length',
+  'transfer-encoding',
+  'connection',
+  'upgrade',
+  'authorization',
+  'x-api-key',
+  'cookie',
+  'set-cookie',
+]);
+
+export function sanitizeCustomHeaders(
+  input: Record<string, string> | undefined,
+): Record<string, string> {
+  if (!input || typeof input !== 'object') return {};
+  const result: Record<string, string> = {};
+  for (const [rawKey, rawValue] of Object.entries(input)) {
+    const key = String(rawKey ?? '').trim();
+    const val = String(rawValue ?? '').trim();
+    if (!key || !val) continue;
+    if (key.length > 100 || val.length > 2000) continue;
+    if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(key)) continue;
+    if (/[\r\n]/.test(val)) continue;
+    if (BLOCKED_CUSTOM_HEADERS.has(key.toLowerCase())) continue;
+    result[key] = val;
+    if (Object.keys(result).length >= 25) break;
+  }
+  return result;
+}
+
 export interface ProviderModelConfig {
   disabledModels: string[];
   customModels: Array<{ id: string; name: string }>;
   modelAliases: Record<string, string>;
+  strategy?: ProviderRoutingStrategy;
+  stickyLimit?: number;
+  thinkingMode?: ProviderThinkingMode;
+  customHeaders?: Record<string, string>;
+  accountPriorities?: number[];
 }
 
 const PROVIDER_MODELS_CONFIG_KEY = 'provider_model_configs';
@@ -271,10 +313,23 @@ export function getProviderModelConfig(providerId: string): ProviderModelConfig 
   const normalized = normalizeXGatewayProviderId(providerId) ?? providerId;
   const all = loadAllProviderModelConfigs();
   const entry = all[normalized];
+  const strategy: ProviderRoutingStrategy = entry?.strategy === 'round-robin' ? 'round-robin' : 'fallback';
+  const stickyLimit = Number.isFinite(entry?.stickyLimit) ? Math.min(100, Math.max(1, Math.trunc(Number(entry?.stickyLimit)))) : 3;
+  const thinkingMode: ProviderThinkingMode =
+    entry?.thinkingMode && ['auto', 'low', 'medium', 'high', 'max'].includes(entry.thinkingMode)
+      ? entry.thinkingMode
+      : 'auto';
   return {
     disabledModels: Array.isArray(entry?.disabledModels) ? entry.disabledModels : [],
     customModels: Array.isArray(entry?.customModels) ? entry.customModels : [],
     modelAliases: entry?.modelAliases && typeof entry.modelAliases === 'object' ? entry.modelAliases : {},
+    strategy,
+    stickyLimit,
+    thinkingMode,
+    customHeaders: sanitizeCustomHeaders(entry?.customHeaders),
+    accountPriorities: Array.isArray(entry?.accountPriorities)
+      ? entry.accountPriorities.filter((n): n is number => Number.isSafeInteger(n) && n > 0)
+      : [],
   };
 }
 
@@ -304,6 +359,26 @@ export function setProviderModelConfig(
               .filter(([k, v]) => Boolean(k && v)),
           )
         : current.modelAliases,
+    strategy:
+      patch.strategy !== undefined
+        ? (patch.strategy === 'round-robin' ? 'round-robin' : 'fallback')
+        : current.strategy,
+    stickyLimit:
+      patch.stickyLimit !== undefined
+        ? Math.min(100, Math.max(1, Math.trunc(Number(patch.stickyLimit) || 3)))
+        : current.stickyLimit,
+    thinkingMode:
+      patch.thinkingMode !== undefined && ['auto', 'low', 'medium', 'high', 'max'].includes(patch.thinkingMode)
+        ? patch.thinkingMode
+        : current.thinkingMode,
+    customHeaders:
+      patch.customHeaders !== undefined
+        ? sanitizeCustomHeaders(patch.customHeaders)
+        : current.customHeaders,
+    accountPriorities:
+      patch.accountPriorities !== undefined
+        ? Array.from(new Set(patch.accountPriorities.filter((n): n is number => Number.isSafeInteger(n) && n > 0)))
+        : current.accountPriorities,
   };
   all[normalized] = next;
   saveAllProviderModelConfigs(all);
@@ -410,6 +485,17 @@ function getMainDbProviderIds(db: ReturnType<typeof getDb>): Set<string> {
   return result;
 }
 
+function sortAccountsByPriority<T extends { id: number }>(accounts: T[], priorityOrder: number[] | undefined): T[] {
+  if (!priorityOrder || priorityOrder.length === 0) return accounts;
+  const orderMap = new Map<number, number>();
+  priorityOrder.forEach((accountId, idx) => orderMap.set(accountId, idx));
+  return [...accounts].sort((a, b) => {
+    const rankA = orderMap.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+    const rankB = orderMap.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+    return rankA !== rankB ? rankA - rankB : a.id - b.id;
+  });
+}
+
 export function listAccounts(): ProviderAccountsResponse['providers'] {
   const db = getDb();
   const month = new Date().toISOString().slice(0, 7);
@@ -424,20 +510,28 @@ export function listAccounts(): ProviderAccountsResponse['providers'] {
 
   const mainDbProviderIds = getMainDbProviderIds(db);
 
-  const providers: ProviderAccountsResponse['providers'] = X_GATEWAY_PROVIDERS.map(p => ({
-    id: p.id,
-    alias: p.alias,
-    name: p.name,
-    category: p.category,
-    baseUrl: p.baseUrl || null,
-    ...(mainDbProviderIds.has(p.id) ? { hasMainDbKey: true } : {}),
-    authMethods: [...p.authMethods],
-    accounts: [],
-  }));
+  const providers: ProviderAccountsResponse['providers'] = X_GATEWAY_PROVIDERS.map(p => {
+    const cfg = getProviderModelConfig(p.id);
+    return {
+      id: p.id,
+      alias: p.alias,
+      name: p.name,
+      category: p.category,
+      baseUrl: p.baseUrl || null,
+      ...(mainDbProviderIds.has(p.id) ? { hasMainDbKey: true } : {}),
+      strategy: cfg.strategy ?? 'fallback',
+      stickyLimit: cfg.stickyLimit ?? 3,
+      thinkingMode: cfg.thinkingMode ?? 'auto',
+      customHeaders: cfg.customHeaders ?? {},
+      authMethods: [...p.authMethods],
+      accounts: [],
+    };
+  });
 
   const customNodes = listCustomProviderNodes();
   for (const node of customNodes) {
     if (!providers.some(p => p.id === node.id)) {
+      const cfg = getProviderModelConfig(node.id);
       providers.push({
         id: node.id,
         alias: node.prefix,
@@ -448,7 +542,12 @@ export function listAccounts(): ProviderAccountsResponse['providers'] {
         accounts: [],
         isCustomNode: true,
         customNodeType: node.type,
-      } as any);
+        ...(node.apiType ? { customNodeApiType: node.apiType } : {}),
+        strategy: cfg.strategy ?? 'fallback',
+        stickyLimit: cfg.stickyLimit ?? 3,
+        thinkingMode: cfg.thinkingMode ?? 'auto',
+        customHeaders: cfg.customHeaders ?? {},
+      });
     }
   }
 
@@ -474,6 +573,14 @@ export function listAccounts(): ProviderAccountsResponse['providers'] {
     });
   }
 
+  for (const provider of providers) {
+    if (provider.accounts.length > 0) {
+      const cfg = getProviderModelConfig(provider.id);
+      const sorted = sortAccountsByPriority(provider.accounts, cfg.accountPriorities);
+      provider.accounts = sorted.map((acc, idx) => ({ ...acc, priority: idx + 1 }));
+    }
+  }
+
   return providers;
 }
 
@@ -491,13 +598,35 @@ export function getUsableXGatewayKeys(): Array<AccountRow & { requests: number; 
     ORDER BY k.id
   `).all(month) as Array<RawXGatewayKeyRow & { requests: number; tokens: number }>;
 
-  cachedDb = db;
-  cachedMonth = month;
-  cachedUsableKeys = rows.map(raw => ({
+  const hydrated = rows.map(raw => ({
     ...hydrateAccountRow(raw),
     requests: Number(raw.requests),
     tokens: Number(raw.tokens),
   }));
+
+  // Respect per-provider priority order
+  const byProvider = new Map<string, Array<AccountRow & { requests: number; tokens: number }>>();
+  for (const acc of hydrated) {
+    const list = byProvider.get(acc.provider) ?? [];
+    list.push(acc);
+    byProvider.set(acc.provider, list);
+  }
+  for (const [providerId, list] of byProvider.entries()) {
+    const cfg = getProviderModelConfig(providerId);
+    byProvider.set(providerId, sortAccountsByPriority(list, cfg.accountPriorities));
+  }
+  const providerQueues = new Map<string, Array<AccountRow & { requests: number; tokens: number }>>();
+  for (const [providerId, list] of byProvider.entries()) {
+    providerQueues.set(providerId, [...list]);
+  }
+  const ordered = hydrated.map(acc => {
+    const q = providerQueues.get(acc.provider);
+    return q && q.length > 0 ? q.shift()! : acc;
+  });
+
+  cachedDb = db;
+  cachedMonth = month;
+  cachedUsableKeys = ordered;
   return cachedUsableKeys;
 }
 
@@ -816,4 +945,64 @@ export function listAccountRowsForBatchTest(filter: {
     if (idSet && !idSet.has(row.id)) return false;
     return true;
   });
+}
+
+export function reorderProviderAccounts(providerId: string, accountIds: number[]): number[] {
+  const normalized = normalizeXGatewayProviderId(providerId) ?? providerId;
+  const rows = listAccountRowsForBatchTest({ providerId: normalized });
+  const existingIds = rows.map(r => r.id);
+  const validOrdered = accountIds.filter(id => existingIds.includes(id));
+  for (const id of existingIds) {
+    if (!validOrdered.includes(id)) validOrdered.push(id);
+  }
+  const updated = setProviderModelConfig(normalized, { accountPriorities: validOrdered });
+  return updated.accountPriorities ?? validOrdered;
+}
+
+export function bulkDeleteAccounts(accountIds: number[]): number {
+  let deleted = 0;
+  for (const id of accountIds) {
+    try {
+      deleteAccount(id);
+      deleted += 1;
+    } catch {
+      // Ignore already-deleted or missing accounts
+    }
+  }
+  return deleted;
+}
+
+export function bulkAssignAccountProxy(input: {
+  accountIds: number[];
+  mode: 'none' | 'one-to-one' | 'pool';
+  proxyPoolId?: number | null;
+}): { updated: number } {
+  const { accountIds, mode, proxyPoolId } = input;
+  if (mode === 'pool') {
+    if (!proxyPoolId || !proxyPoolExists(proxyPoolId)) {
+      throw new AccountError(400, 'Proxy pool entry not found.');
+    }
+  }
+
+  const activePools = mode === 'one-to-one' ? listProxyPool().filter(p => p.enabled) : [];
+  if (mode === 'one-to-one' && activePools.length === 0) {
+    throw new AccountError(400, 'No enabled proxy pool entries available for 1-to-1 rotation.');
+  }
+
+  let updated = 0;
+  accountIds.forEach((accId, index) => {
+    try {
+      const targetPoolId =
+        mode === 'none'
+          ? null
+          : mode === 'pool'
+            ? (proxyPoolId ?? null)
+            : activePools[index % activePools.length]!.id;
+      updateAccount(accId, { proxyPoolId: targetPoolId, proxyUrl: '' });
+      updated += 1;
+    } catch {
+      // Ignore invalid account IDs
+    }
+  });
+  return { updated };
 }

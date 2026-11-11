@@ -13,6 +13,8 @@ import {
   type ComboPresetCandidate,
 } from './combos.js';
 import { createCombo, deleteCombo, getComboById, listCombos, updateCombo } from './config.js';
+import { getActiveCooldownsForKeys } from '../../services/ratelimit.js';
+import { calculateRequestCost } from './pricing.js';
 
 /** Combos CRUD, request log, hourly usage and an in-console playground.
  *
@@ -213,4 +215,246 @@ xGatewayManagementRouter.get('/usage/hourly', (req, res) => {
       GROUP BY hour ORDER BY hour ASC`,
   ).all(since);
   res.json({ hours, buckets: rows });
+});
+
+/* ----------------------------------------------------------------------------
+ * Usage breakdown: provider topology + per model / account / client key / endpoint.
+ * Source of truth is the shared `requests` log (rows tagged `caller = 'x-gateway'`)
+ * plus `x_gateway_key_monthly_usage` for per-account counters.
+ * -------------------------------------------------------------------------- */
+
+const BREAKDOWN_RANGES = ['24h', '7d', '30d', 'all'] as const;
+type BreakdownRange = (typeof BREAKDOWN_RANGES)[number];
+
+const BREAKDOWN_ENDPOINTS = [
+  'chat/completions', 'messages', 'responses', 'embeddings', 'images', 'audio', 'search', 'fetch',
+] as const;
+
+/** `requests.request_type` (plus a few aliases) -> public gateway endpoint. */
+function endpointForRequestType(type: string | null): string {
+  switch ((type ?? 'chat').toLowerCase()) {
+    case 'embedding': case 'embeddings': return 'embeddings';
+    case 'image': case 'images': case 'video': return 'images';
+    case 'audio': case 'transcription': case 'speech': case 'tts': case 'stt': return 'audio';
+    case 'search': return 'search';
+    case 'fetch': return 'fetch';
+    case 'messages': return 'messages';
+    case 'responses': return 'responses';
+    default: return 'chat/completions';
+  }
+}
+
+function breakdownSince(range: BreakdownRange): string | null {
+  const hours = range === '24h' ? 24 : range === '7d' ? 168 : range === '30d' ? 720 : 0;
+  if (!hours) return null;
+  return new Date(Date.now() - hours * 3_600_000).toISOString().slice(0, 19).replace('T', ' ');
+}
+
+const round1 = (n: number): number => Math.round(n * 10) / 10;
+const round6 = (n: number): number => Math.round(n * 1e6) / 1e6;
+
+interface BreakdownAgg {
+  requests: number; successCount: number; errorCount: number;
+  promptTokens: number; completionTokens: number; latencySum: number;
+}
+
+function emptyAgg(): BreakdownAgg {
+  return { requests: 0, successCount: 0, errorCount: 0, promptTokens: 0, completionTokens: 0, latencySum: 0 };
+}
+
+interface AggRow {
+  requests: number; success: number; errors: number;
+  promptTokens: number; completionTokens: number; latencySum: number;
+}
+
+function addAgg(a: BreakdownAgg, row: AggRow): void {
+  a.requests += row.requests;
+  a.successCount += row.success;
+  a.errorCount += row.errors;
+  a.promptTokens += row.promptTokens;
+  a.completionTokens += row.completionTokens;
+  a.latencySum += row.latencySum;
+}
+
+function aggView(a: BreakdownAgg) {
+  return {
+    requests: a.requests,
+    successCount: a.successCount,
+    errorCount: a.errorCount,
+    promptTokens: a.promptTokens,
+    completionTokens: a.completionTokens,
+    totalTokens: a.promptTokens + a.completionTokens,
+    successRate: a.requests ? round1((a.successCount / a.requests) * 100) : 100,
+    avgLatencyMs: a.requests ? Math.round(a.latencySum / a.requests) : 0,
+  };
+}
+
+const AGG_COLUMNS = `COUNT(*) AS requests,
+            COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0) AS success,
+            COALESCE(SUM(CASE WHEN status != 'success' THEN 1 ELSE 0 END), 0) AS errors,
+            COALESCE(SUM(input_tokens), 0) AS promptTokens,
+            COALESCE(SUM(output_tokens), 0) AS completionTokens,
+            COALESCE(SUM(latency_ms), 0) AS latencySum`;
+
+xGatewayManagementRouter.get('/usage/breakdown', (req, res) => {
+  const rawRange = String(req.query.range ?? '7d');
+  if (!(BREAKDOWN_RANGES as readonly string[]).includes(rawRange)) {
+    fail(res, 400, `range must be one of ${BREAKDOWN_RANGES.join(', ')}`);
+    return;
+  }
+  const range = rawRange as BreakdownRange;
+  const since = breakdownSince(range);
+  const db = getDb();
+  const month = new Date().toISOString().slice(0, 7);
+  const where = `caller = 'x-gateway'${since ? ' AND created_at >= ?' : ''}`;
+  const params: unknown[] = since ? [since] : [];
+
+  // Providers + accounts (accounts are the topology's source of nodes).
+  const accounts = db.prepare(
+    `SELECT k.id, k.provider, k.label, k.status, k.enabled, k.monthly_request_cap AS monthlyRequestCap,
+            k.monthly_token_cap AS monthlyTokenCap,
+            COALESCE(u.requests, 0) AS monthlyRequests, COALESCE(u.tokens, 0) AS monthlyTokens
+       FROM x_gateway_keys k
+       LEFT JOIN x_gateway_key_monthly_usage u ON u.key_id = k.id AND u.month = ?
+      ORDER BY k.provider, k.id`,
+  ).all(month) as Array<{
+    id: number; provider: string; label: string; status: string; enabled: number;
+    monthlyRequestCap: number; monthlyTokenCap: number; monthlyRequests: number; monthlyTokens: number;
+  }>;
+
+  let cooldowns = new Map<number, unknown[]>();
+  try {
+    cooldowns = getActiveCooldownsForKeys(accounts.map(a => a.id)) as Map<number, unknown[]>;
+  } catch {
+    cooldowns = new Map();
+  }
+
+  const providerRows = db.prepare(
+    `SELECT platform, ${AGG_COLUMNS} FROM requests WHERE ${where} GROUP BY platform`,
+  ).all(...params) as Array<AggRow & { platform: string }>;
+  const providerAgg = new Map(providerRows.map(r => [r.platform, r]));
+
+  const providerIds = [...new Set(accounts.map(a => a.provider))];
+  const topology = providerIds.map(id => {
+    const list = accounts.filter(a => a.provider === id);
+    const enabled = list.filter(a => a.enabled === 1);
+    const usable = enabled.filter(a => a.status !== 'invalid' && a.status !== 'disabled');
+    const cooling = usable.filter(a => (cooldowns.get(a.id)?.length ?? 0) > 0);
+    const erroring = usable.filter(a => a.status === 'error');
+    const agg = emptyAgg();
+    const row = providerAgg.get(id);
+    if (row) addAgg(agg, row);
+    const view = aggView(agg);
+
+    let status: 'healthy' | 'degraded' | 'cooldown' | 'paused';
+    if (enabled.length === 0) status = 'paused';
+    else if (usable.length > 0 && cooling.length === usable.length) status = 'cooldown';
+    else if (usable.length === 0 || cooling.length > 0 || erroring.length > 0 || (view.requests >= 5 && view.successRate < 80)) {
+      status = 'degraded';
+    } else status = 'healthy';
+
+    return {
+      provider: id,
+      name: getXGatewayProvider(id)?.name ?? id,
+      status,
+      totalAccounts: list.length,
+      activeAccounts: usable.length - cooling.length,
+      cooldownAccounts: cooling.length,
+      monthlyRequests: list.reduce((s, a) => s + a.monthlyRequests, 0),
+      monthlyTokens: list.reduce((s, a) => s + a.monthlyTokens, 0),
+      ...view,
+    };
+  });
+
+  // byModel
+  const modelRows = db.prepare(
+    `SELECT platform, model_id AS modelId, ${AGG_COLUMNS}
+       FROM requests WHERE ${where} GROUP BY platform, model_id ORDER BY requests DESC`,
+  ).all(...params) as Array<AggRow & { platform: string; modelId: string }>;
+  const byModel = modelRows.map(r => {
+    const agg = emptyAgg();
+    addAgg(agg, r);
+    return {
+      provider: r.platform,
+      model: r.modelId,
+      ...aggView(agg),
+      estimatedCostUsd: round6(calculateRequestCost(r.platform, r.modelId, r.promptTokens, r.completionTokens)),
+    };
+  });
+
+  // byAccount: monthly counters are the per-account source of truth (log rows carry
+  // no account id), plus any log rows that were attributed through `key_id`.
+  const keyed = db.prepare(
+    `SELECT key_id AS keyId, ${AGG_COLUMNS} FROM requests
+      WHERE ${where} AND key_id IS NOT NULL GROUP BY key_id`,
+  ).all(...params) as Array<AggRow & { keyId: number }>;
+  const keyedById = new Map(keyed.map(r => [r.keyId, r]));
+  const byAccount = accounts.map(a => {
+    const agg = emptyAgg();
+    const logged = keyedById.get(a.id);
+    if (logged) addAgg(agg, logged);
+    return {
+      id: a.id,
+      provider: a.provider,
+      providerName: getXGatewayProvider(a.provider)?.name ?? a.provider,
+      label: a.label,
+      status: a.status,
+      enabled: a.enabled === 1,
+      coolingDown: (cooldowns.get(a.id)?.length ?? 0) > 0,
+      month,
+      monthlyRequests: a.monthlyRequests,
+      monthlyTokens: a.monthlyTokens,
+      monthlyRequestCap: a.monthlyRequestCap,
+      monthlyTokenCap: a.monthlyTokenCap,
+      loggedRequests: agg.requests,
+      loggedTokens: agg.promptTokens + agg.completionTokens,
+    };
+  });
+
+  // byClientKey: request rows carry the key owner (`user_id`), not the key itself,
+  // so keys sharing an owner share that owner's figures (flagged via `sharedOwner`).
+  const userRows = db.prepare(
+    `SELECT user_id AS userId, ${AGG_COLUMNS} FROM requests
+      WHERE ${where} AND user_id IS NOT NULL GROUP BY user_id`,
+  ).all(...params) as Array<AggRow & { userId: number }>;
+  const userAgg = new Map(userRows.map(r => [r.userId, r]));
+  const clientKeys = db.prepare(
+    `SELECT id, user_id AS userId, name, key_prefix AS keyPrefix, revoked, rpm_limit AS rpmLimit,
+            created_at AS createdAt, last_used_at AS lastUsedAt
+       FROM x_gateway_client_keys ORDER BY id`,
+  ).all() as Array<{
+    id: number; userId: number; name: string; keyPrefix: string; revoked: number; rpmLimit: number;
+    createdAt: string; lastUsedAt: string | null;
+  }>;
+  const keysPerUser = new Map<number, number>();
+  for (const k of clientKeys) keysPerUser.set(k.userId, (keysPerUser.get(k.userId) ?? 0) + 1);
+  const byClientKey = clientKeys.map(k => {
+    const agg = emptyAgg();
+    const row = userAgg.get(k.userId);
+    if (row) addAgg(agg, row);
+    return {
+      id: k.id,
+      name: k.name,
+      keyPrefix: k.keyPrefix,
+      userId: k.userId,
+      revoked: k.revoked === 1,
+      rpmLimit: k.rpmLimit,
+      lastUsedAt: k.lastUsedAt,
+      sharedOwner: (keysPerUser.get(k.userId) ?? 0) > 1,
+      ...aggView(agg),
+    };
+  });
+
+  // byEndpoint
+  const typeRows = db.prepare(
+    `SELECT request_type AS requestType, ${AGG_COLUMNS} FROM requests WHERE ${where} GROUP BY request_type`,
+  ).all(...params) as Array<AggRow & { requestType: string | null }>;
+  const endpointAgg = new Map<string, BreakdownAgg>(BREAKDOWN_ENDPOINTS.map(e => [e, emptyAgg()]));
+  for (const r of typeRows) addAgg(endpointAgg.get(endpointForRequestType(r.requestType))!, r);
+  const byEndpoint = BREAKDOWN_ENDPOINTS.map(endpoint => ({
+    endpoint,
+    ...aggView(endpointAgg.get(endpoint)!),
+  }));
+
+  res.json({ range, since, month, topology, byModel, byAccount, byClientKey, byEndpoint });
 });

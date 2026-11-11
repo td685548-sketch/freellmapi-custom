@@ -625,12 +625,14 @@ export class AnthropicWireProvider extends BaseProvider {
   readonly name: string;
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
+  private readonly extraHeaders: Record<string, string>;
 
-  constructor(config: { name: string; baseUrl: string; timeoutMs?: number }) {
+  constructor(config: { name: string; baseUrl: string; timeoutMs?: number; extraHeaders?: Record<string, string> }) {
     super();
     this.name = config.name;
     this.baseUrl = config.baseUrl.trim().replace(/\/+$/, '');
     this.timeoutMs = config.timeoutMs ?? 120_000;
+    this.extraHeaders = config.extraHeaders ?? {};
   }
 
   private buildAnthropicBody(
@@ -716,10 +718,11 @@ export class AnthropicWireProvider extends BaseProvider {
     const credential = parseOAuthCredential(apiKey);
     if (credential) {
       if (credential.kind !== 'claude') throw new Error('Claude requires a matching OAuth credential.');
-      return { 'Content-Type': 'application/json', Authorization: `Bearer ${credential.accessToken}`, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14', 'User-Agent': 'claude-cli/2.1.280 (external, sdk-cli)', 'x-app': 'cli' };
+      return { ...this.extraHeaders, 'Content-Type': 'application/json', Authorization: `Bearer ${credential.accessToken}`, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14', 'User-Agent': 'claude-cli/2.1.280 (external, sdk-cli)', 'x-app': 'cli' };
     }
     const token = apiKey.trim().replace(/^Bearer\s+/i, '');
     return {
+      ...this.extraHeaders,
       'Content-Type': 'application/json',
       'x-api-key': token,
       'Authorization': `Bearer ${token}`,

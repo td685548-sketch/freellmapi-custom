@@ -1,7 +1,8 @@
 import { resolveAccountProvider } from '../provider-accounts/execution.js';
 import { Router } from 'express';
-import type { Request, Response } from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import { createHash } from 'node:crypto';
+import { getDb } from '../../db/index.js';
 import type { ChatMessage } from '@freellmapi/shared/types.js';
 import type { CompletionOptions } from '../../providers/base.js';
 import { decrypt } from '../../lib/crypto.js';
@@ -15,6 +16,7 @@ import { applyOutputSavers } from '../output-savers/apply.js';
 import { buildSaverBlock } from '../output-savers/prompts.js';
 import {
   getXGatewayProvider,
+  X_GATEWAY_PROVIDERS,
   normalizeXGatewayProviderId,
 } from '../provider-accounts/catalog.js';
 import {
@@ -26,7 +28,7 @@ import {
   resolveXGatewayAccountProxy,
   type AccountRow,
 } from '../provider-accounts/store.js';
-import { xGatewayAuth } from './auth.js';
+import { xGatewayAuth as authenticateXGateway } from './auth.js';
 import { isModelAllowedForKey, type ValidatedXGatewayClientKey } from './client-keys.js';
 import { augmentCandidatesWithCapacityAdapter, looksLikeVisionModel } from './capacity-adapter.js';
 import {
@@ -43,6 +45,75 @@ import { xGatewayProtocolsRouter } from './protocols.js';
 import { preprocessGatewayMessages } from './token-savers-pipeline.js';
 
 export const xGatewayRouter = Router();
+
+export type ThinkingEffort = 'low' | 'medium' | 'high' | 'max' | 'minimal' | 'none';
+
+export function parseModelThinkingSuffix(rawModel: string | undefined): {
+  cleanModel: string;
+  thinkingEffort?: ThinkingEffort;
+} {
+  const model = rawModel?.trim() || 'auto';
+  const match = /^(.*\S)\((low|medium|high|max|minimal|none)\)$/i.exec(model);
+  return match
+    ? { cleanModel: match[1].trim(), thinkingEffort: match[2].toLowerCase() as ThinkingEffort }
+    : { cleanModel: model };
+}
+
+/** Authorize the underlying model, so adding an effort suffix cannot change a
+ * key's allowlist decision. Keep the original spelling for the handler. */
+export function xGatewayAuth(req: Request, res: Response, next: NextFunction): void {
+  const body = req.body;
+  if (!body || typeof body.model !== 'string') { authenticateXGateway(req, res, next); return; }
+  const originalModel = body.model;
+  body.model = parseModelThinkingSuffix(originalModel).cleanModel;
+  try {
+    authenticateXGateway(req, res, () => { body.model = originalModel; next(); });
+  } finally { body.model = originalModel; }
+}
+
+// Provider policies live in x_gateway_config.provider_settings, keyed by provider
+// ID or alias. Keep cursors scoped to the current database and account set.
+const providerCursors = new Map<string, { signature: string; calls: number }>();
+let providerCursorDb: unknown;
+function rotateProviderAccounts<T extends AccountRow>(accounts: T[]): T[] {
+  const db = getDb();
+  if (providerCursorDb !== db) { providerCursors.clear(); providerCursorDb = db; }
+  let settings: Record<string, { strategy?: string; stickyLimit?: number }> = {};
+  try {
+    const row = db.prepare("SELECT value FROM x_gateway_config WHERE key = 'provider_settings'").get() as { value: string } | undefined;
+    settings = row ? JSON.parse(row.value) : {};
+  } catch { /* An absent or malformed policy retains fallback order. */ }
+  const groups = new Map<string, T[]>();
+  for (const account of accounts) groups.set(account.provider, [...(groups.get(account.provider) ?? []), account]);
+  for (const [provider, group] of groups) {
+    const alias = getXGatewayProvider(provider)?.alias ?? provider;
+    const modelCfg = getProviderModelConfig(provider);
+    const policy = settings?.[provider] ?? settings?.[alias] ?? {
+      strategy: modelCfg.strategy,
+      stickyLimit: modelCfg.stickyLimit,
+    };
+    if (policy?.strategy !== 'round-robin' || group.length < 2) { providerCursors.delete(provider); continue; }
+    const limit = Number.isFinite(policy.stickyLimit) ? Math.max(1, Math.floor(policy.stickyLimit!)) : 1;
+    const signature = `${limit}:${group.map(a => a.id).join(',')}`;
+    const previous = providerCursors.get(provider);
+    const calls = previous?.signature === signature ? previous.calls : 0;
+    const offset = Math.floor(calls / limit) % group.length;
+    groups.set(provider, [...group.slice(offset), ...group.slice(0, offset)]);
+    providerCursors.set(provider, { signature, calls: (calls + 1) % (limit * group.length) });
+  }
+  // Preserve provider priority and interleaving, rotating only its own slots.
+  return accounts.map(account => groups.get(account.provider)!.shift()!);
+}
+
+function rotateCandidateAccounts(candidates: CandidateRoute[]): CandidateRoute[] {
+  const unique = [...new Map(candidates.map(c => [c.account.id, c.account])).values()];
+  const rank = new Map(rotateProviderAccounts(unique).map((a, i) => [a.id, i]));
+  const groups = new Map<string, CandidateRoute[]>();
+  const key = (c: CandidateRoute) => `${c.step ?? ''}:${c.account.provider}`;
+  for (const candidate of candidates) groups.set(key(candidate), [...(groups.get(key(candidate)) ?? []), candidate]);
+  for (const group of groups.values()) group.sort((a, b) => rank.get(a.account.id)! - rank.get(b.account.id)!);
+  return candidates.map(c => groups.get(key(c))!.shift()!);
+}
 
 export interface CandidateRoute {
   account: AccountRow & { requests: number; tokens: number };
@@ -117,7 +188,7 @@ export function resolveCandidateRoutes(
   notFoundError?: string;
   combo?: ComboRouteInfo;
 } {
-  const rawModel = (requestedModel ?? 'auto').trim() || 'auto';
+  const rawModel = parseModelThinkingSuffix(requestedModel).cleanModel;
   const lower = rawModel.toLowerCase();
   const usable = applyQuotaRouting(getUsableXGatewayKeys().filter(isWithinAccountCaps), lower === 'auto' || lower.startsWith('auto:'));
 
@@ -134,7 +205,7 @@ export function resolveCandidateRoutes(
         return bVision - aVision;
       });
     }
-    return { candidates };
+    return { candidates: rotateCandidateAccounts(candidates) };
   }
 
   if (lower.startsWith('combo:')) {
@@ -161,7 +232,7 @@ export function resolveCandidateRoutes(
       }
     });
     return {
-      candidates: strategy === 'smart' ? sortCandidatesByHealth(candidates) : candidates,
+      candidates: strategy === 'smart' ? sortCandidatesByHealth(rotateCandidateAccounts(candidates)) : rotateCandidateAccounts(candidates),
       combo: { name: combo.name, strategy, ...resolveComboPolicy(combo) },
     };
   }
@@ -170,7 +241,7 @@ export function resolveCandidateRoutes(
   if (slashIdx > 0) {
     const prefix = rawModel.slice(0, slashIdx);
     const suffix = rawModel.slice(slashIdx + 1);
-    const matchedProvider = normalizeXGatewayProviderId(prefix);
+    const matchedProvider = normalizeXGatewayProviderId(prefix) ?? (usable.some(a => a.provider === prefix) ? prefix : null);
     if (matchedProvider && suffix) {
       const route = resolveRouteModel(matchedProvider, suffix);
       if (route.disabled) {
@@ -181,7 +252,7 @@ export function resolveCandidateRoutes(
       }
       const providerAccounts = usable.filter(a => a.provider === matchedProvider);
       return {
-        candidates: providerAccounts.map(account => ({ account, modelId: route.modelId })),
+        candidates: rotateProviderAccounts(providerAccounts).map(account => ({ account, modelId: route.modelId })),
       };
     }
   }
@@ -203,11 +274,11 @@ export function resolveCandidateRoutes(
     }
   }
   if (exactMatches.length > 0) {
-    return { candidates: exactMatches };
+    return { candidates: rotateCandidateAccounts(exactMatches) };
   }
 
   return {
-    candidates: usable.map(account => ({ account, modelId: rawModel })),
+    candidates: rotateProviderAccounts(usable).map(account => ({ account, modelId: rawModel })),
   };
 }
 
@@ -510,7 +581,7 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
     return;
   }
 
-  const requestedModel = typeof body.model === 'string' ? body.model : 'auto';
+  const { cleanModel: requestedModel, thinkingEffort } = parseModelThinkingSuffix(typeof body.model === 'string' ? body.model : 'auto');
   const authUser = (req as Request & { user?: ValidatedXGatewayClientKey }).user;
   if (authUser?.access?.restricted && !isModelAllowedForKey(authUser.access, requestedModel)) {
     res.status(403).json({
@@ -591,6 +662,7 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
     }
 
     const options: CompletionOptions = {
+      reasoning_effort: (thinkingEffort ?? body.reasoning_effort) as CompletionOptions['reasoning_effort'],
       signal: controller.signal,
       temperature: typeof body.temperature === 'number' ? body.temperature : undefined,
       max_tokens: typeof body.max_tokens === 'number' ? body.max_tokens : undefined,
@@ -1412,6 +1484,63 @@ export async function handleXGatewayFetch(req: Request, res: Response): Promise<
 xGatewayRouter.post('/chat/completions', xGatewayAuth, handleXGatewayChat);
 xGatewayRouter.post('/search', xGatewayAuth, handleXGatewaySearch);
 xGatewayRouter.post('/fetch', xGatewayAuth, handleXGatewayFetch);
+xGatewayRouter.post('/web/fetch', xGatewayAuth, handleXGatewayFetch);
+
+const MODEL_ENDPOINTS: Record<string, string> = {
+  llm: '/x/v1/chat/completions', imageToText: '/x/v1/chat/completions',
+  image: '/x/v1/images/generations', tts: '/x/v1/audio/speech',
+  stt: '/x/v1/audio/transcriptions', embedding: '/x/v1/embeddings',
+  video: '/x/v1/videos/generations', webSearch: '/x/v1/search', webFetch: '/x/v1/fetch',
+};
+
+function handleModelInfo(req: Request, res: Response): void {
+  const id = typeof req.query.id === 'string' ? req.query.id : req.params.model;
+  if (typeof id !== 'string' || !id) {
+    res.status(400).json({ error: { message: 'id is required', type: 'invalid_request_error' } });
+    return;
+  }
+  const slash = id.indexOf('/');
+  const prefix = slash > 0 ? id.slice(0, slash) : '';
+  const providerId = normalizeXGatewayProviderId(prefix) ?? prefix;
+  const provider = X_GATEWAY_PROVIDERS.find(p => p.id === providerId);
+  const modelId = slash > 0 ? id.slice(slash + 1) : id;
+  const requestedKind = typeof req.query.kind === 'string' ? req.query.kind : undefined;
+  const sources = getUsableXGatewayKeys().filter(a => !prefix || a.provider === providerId);
+  const model = sources.flatMap(a => accountModels(a)).find(m => m.id === modelId)
+    ?? provider?.models.find(m => m.id === modelId);
+  if (!model || (requestedKind && !MODEL_ENDPOINTS[requestedKind])) {
+    res.status(404).json({ error: { message: `Model not found: ${id}`, type: 'not_found' } });
+    return;
+  }
+  const inferred = /video|veo|sora|kling|wan[\d.-]|luma|grok-imagine-video/i.test(modelId) ? 'video'
+    : IMAGE_MODEL_RE.test(modelId) ? 'image'
+    : /tts|speech|voice|sonic|eleven_|aura-/i.test(modelId) || ['edge-tts', 'elevenlabs', 'cartesia', 'fish-audio'].includes(providerId) ? 'tts'
+    : /whisper|transcri|nova-.*general/i.test(modelId) || (providerId === 'deepgram' && /^nova-/i.test(modelId)) ? 'stt'
+    : /embed/i.test(modelId) ? 'embedding'
+    : /search|sonar/i.test(modelId) ? 'webSearch'
+    : /fetch|reader/i.test(modelId) ? 'webFetch' : 'llm';
+  // Some providers reuse a model for several media tasks (notably Gemini).
+  if (requestedKind && requestedKind !== inferred && !(providerId === 'gemini' && ['tts', 'stt', 'imageToText'].includes(requestedKind))) {
+    res.status(404).json({ error: { message: `Model not found for kind: ${requestedKind}`, type: 'not_found' } });
+    return;
+  }
+  const matchedAccount = sources.find(a => accountModels(a).some(m => m.id === modelId));
+  const owner = provider ?? getXGatewayProvider(matchedAccount?.provider ?? '');
+  const alias = owner?.alias ?? (prefix || matchedAccount?.provider || 'x-gateway');
+  const kind = requestedKind ?? inferred;
+  res.setHeader('X-Gateway', 'x');
+  res.json({ id: `${alias}/${modelId}`, name: model.name, kind, owned_by: alias,
+    endpoint: MODEL_ENDPOINTS[kind],
+    ...(kind === 'tts' ? { voicesUrl: `/x/v1/audio/voices?provider=${encodeURIComponent(owner?.id ?? prefix)}` } : {}),
+  });
+}
+
+xGatewayRouter.get('/models/info', xGatewayAuth, handleModelInfo);
+// Express 5 uses named wildcards; a regexp preserves slashes in model IDs.
+xGatewayRouter.get(/^\/models\/(.+)$/, xGatewayAuth, (req: Request, res: Response) => {
+  req.params.model = req.params[0];
+  handleModelInfo(req, res);
+});
 
 // GET /x/v1/models — list models from enabled X Gateway accounts and combos
 xGatewayRouter.get('/models', xGatewayAuth, (req: Request, res: Response) => {
