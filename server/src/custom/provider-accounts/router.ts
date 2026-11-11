@@ -8,12 +8,15 @@ import { hasPermission, requirePermission } from '../../middleware/requirePermis
 import { validateSession, type SessionUser } from '../../services/auth.js';
 import { decrypt } from '../../lib/crypto.js';
 import { KEY_PROXY_URL_MAX } from '../../lib/key-proxy.js';
-import { withKeyProxy } from '../../lib/proxy.js';
+import { proxyFetch, withKeyProxy } from '../../lib/proxy.js';
+import { assessProviderUrl } from '../../lib/url-guard.js';
 import { AccountError } from './http.js';
 import { getXGatewayProvider, normalizeXGatewayProviderId } from './catalog.js';
 import {
   accountModels,
   accountRow,
+  bulkAssignAccountProxy,
+  bulkDeleteAccounts,
   createApiKeyAccount,
   deleteAccount,
   deleteCustomProviderNode,
@@ -22,6 +25,7 @@ import {
   listAccountRowsForBatchTest,
   listAccounts,
   listCustomProviderNodes,
+  reorderProviderAccounts,
   resolveXGatewayAccountProxy,
   saveCustomProviderNode,
   setAccountStatus,
@@ -91,6 +95,22 @@ const providerModelsSchema = z.object({
     name: z.string().trim().max(200).optional(),
   })).max(200).optional(),
   modelAliases: z.record(z.string().trim().min(1).max(200), z.string().trim().min(1).max(200)).optional(),
+  strategy: z.enum(['fallback', 'round-robin']).optional(),
+  stickyLimit: z.number().int().min(1).max(100).safe().optional(),
+  thinkingMode: z.enum(['auto', 'low', 'medium', 'high', 'max']).optional(),
+  customHeaders: z.record(z.string().trim().min(1).max(100), z.string().trim().max(2000)).optional(),
+  accountPriorities: z.array(z.number().int().positive().safe()).max(200).optional(),
+}).strict();
+const reorderPrioritySchema = z.object({
+  accountIds: z.array(z.number().int().positive().safe()).min(1).max(200),
+}).strict();
+const bulkDeleteSchema = z.object({
+  accountIds: z.array(z.number().int().positive().safe()).min(1).max(200),
+}).strict();
+const bulkProxySchema = z.object({
+  accountIds: z.array(z.number().int().positive().safe()).min(1).max(200),
+  mode: z.enum(['none', 'one-to-one', 'pool']),
+  proxyPoolId: z.number().int().positive().safe().nullable().optional(),
 }).strict();
 const customNodeSchema = z.object({
   id: z.string().trim().min(1).max(100).optional(),
@@ -195,12 +215,32 @@ providerAccountsRouter.post('/bulk', requirePermission('add_keys'), (req: Sessio
   res.status(201).json({ ids, count: ids.length });
 });
 
+providerAccountsRouter.post('/bulk-delete', requirePermission('delete_keys'), (req: SessionRequest, res) => {
+  const body = parse(bulkDeleteSchema, req.body);
+  const deleted = bulkDeleteAccounts(body.accountIds);
+  res.json({ ok: true, deleted });
+});
+
+providerAccountsRouter.post('/bulk-proxy', requirePermission('edit_keys'), (req: SessionRequest, res) => {
+  const body = parse(bulkProxySchema, req.body);
+  const { updated } = bulkAssignAccountProxy({
+    accountIds: body.accountIds,
+    mode: body.mode,
+    proxyPoolId: body.proxyPoolId ?? null,
+  });
+  res.json({ ok: true, updated });
+});
+
 providerAccountsRouter.get('/nodes', requirePermission('view_keys'), (_req, res) => {
   res.json({ ok: true, nodes: listCustomProviderNodes() });
 });
 
-providerAccountsRouter.post('/nodes', requirePermission('add_keys'), (req: SessionRequest, res) => {
+providerAccountsRouter.post('/nodes', requirePermission('add_keys'), async (req: SessionRequest, res) => {
   const body = parse(customNodeSchema, req.body);
+  const verdict = await assessProviderUrl(body.baseUrl, { blockPrivate: true });
+  if (!verdict.allowed) {
+    throw new AccountError(400, verdict.reason || 'Base URL is blocked by security policy.');
+  }
   const id = body.id || `custom-${body.prefix.toLowerCase().replace(/[^a-z0-9_-]/g, '')}-${Date.now().toString(36)}`;
   const node: CustomProviderNode = {
     id,
@@ -213,6 +253,29 @@ providerAccountsRouter.post('/nodes', requirePermission('add_keys'), (req: Sessi
   };
   const saved = saveCustomProviderNode(node);
   res.status(201).json({ ok: true, node: saved });
+});
+
+providerAccountsRouter.put('/nodes/:nodeId', requirePermission('edit_keys'), async (req: SessionRequest, res) => {
+  const nodeId = String(req.params.nodeId ?? '').trim();
+  if (!nodeId) throw new AccountError(400, 'Node ID is required.');
+  const existing = listCustomProviderNodes().find(n => n.id === nodeId);
+  if (!existing) throw new AccountError(404, 'Custom provider node not found.');
+  const body = parse(customNodeSchema, req.body);
+  const verdict = await assessProviderUrl(body.baseUrl, { blockPrivate: true });
+  if (!verdict.allowed) {
+    throw new AccountError(400, verdict.reason || 'Base URL is blocked by security policy.');
+  }
+  const node: CustomProviderNode = {
+    id: nodeId,
+    name: body.name,
+    prefix: body.prefix.toLowerCase().trim(),
+    type: body.type || existing.type || 'openai-compatible',
+    ...(body.apiType ? { apiType: body.apiType } : {}),
+    baseUrl: body.baseUrl.trim().replace(/\/+$/, ''),
+    ...(body.models ? { models: body.models } : existing.models ? { models: existing.models } : {}),
+  };
+  const saved = saveCustomProviderNode(node);
+  res.json({ ok: true, node: saved });
 });
 
 providerAccountsRouter.delete('/nodes/:nodeId', requirePermission('delete_keys'), (req: SessionRequest, res) => {
@@ -231,6 +294,10 @@ providerAccountsRouter.post('/nodes/validate', requirePermission('view_keys'), a
     if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw new Error();
   } catch {
     return res.status(400).json({ ok: false, valid: false, error: 'Invalid URL format', latencyMs: 0, models: [] });
+  }
+  const verdict = await assessProviderUrl(body.baseUrl, { blockPrivate: true });
+  if (!verdict.allowed) {
+    return res.status(400).json({ ok: false, valid: false, error: verdict.reason || 'URL blocked by SSRF policy', latencyMs: 0, models: [] });
   }
 
   const headers: Record<string, string> = {};
@@ -451,6 +518,15 @@ providerAccountsRouter.post('/providers/:providerId/toggle', requirePermission('
   res.json({ ok: true, providerId, enabled: body.enabled, updated });
 });
 
+providerAccountsRouter.put('/providers/:providerId/priority', requirePermission('edit_keys'), (req, res) => {
+  const rawId = String(req.params.providerId ?? '').trim();
+  const normalized = normalizeXGatewayProviderId(rawId);
+  if (!normalized) throw new AccountError(404, 'Unknown provider.');
+  const body = parse(reorderPrioritySchema, req.body);
+  const accountPriorities = reorderProviderAccounts(normalized, body.accountIds);
+  res.json({ ok: true, providerId: normalized, accountPriorities });
+});
+
 providerAccountsRouter.get('/providers/:providerId/models', requirePermission('view_keys'), (req, res) => {
   const rawId = String(req.params.providerId ?? '').trim();
   const normalized = normalizeXGatewayProviderId(rawId);
@@ -463,6 +539,11 @@ providerAccountsRouter.get('/providers/:providerId/models', requirePermission('v
     disabledModels: config.disabledModels,
     customModels: config.customModels,
     modelAliases: config.modelAliases,
+    strategy: config.strategy ?? 'fallback',
+    stickyLimit: config.stickyLimit ?? 3,
+    thinkingMode: config.thinkingMode ?? 'auto',
+    customHeaders: config.customHeaders ?? {},
+    accountPriorities: config.accountPriorities ?? [],
   });
 });
 
@@ -475,13 +556,96 @@ providerAccountsRouter.put('/providers/:providerId/models', requirePermission('e
     disabledModels: body.disabledModels,
     customModels: body.customModels?.map(m => ({ id: m.id, name: m.name || m.id })),
     modelAliases: body.modelAliases,
+    strategy: body.strategy,
+    stickyLimit: body.stickyLimit,
+    thinkingMode: body.thinkingMode,
+    customHeaders: body.customHeaders,
+    accountPriorities: body.accountPriorities,
   });
   res.json({
     providerId: normalized,
     disabledModels: updated.disabledModels,
     customModels: updated.customModels,
     modelAliases: updated.modelAliases,
+    strategy: updated.strategy ?? 'fallback',
+    stickyLimit: updated.stickyLimit ?? 3,
+    thinkingMode: updated.thinkingMode ?? 'auto',
+    customHeaders: updated.customHeaders ?? {},
+    accountPriorities: updated.accountPriorities ?? [],
   });
+});
+
+providerAccountsRouter.post('/providers/:providerId/fetch-models', requirePermission('view_keys'), async (req, res) => {
+  const rawId = String(req.params.providerId ?? '').trim();
+  const normalized = normalizeXGatewayProviderId(rawId);
+  if (!normalized) throw new AccountError(404, 'Unknown provider.');
+  parse(emptySchema, req.body ?? {});
+
+  const usableKeys = getUsableXGatewayKeys();
+  const account = usableKeys.find(
+    k => k.provider.toLowerCase() === normalized.toLowerCase() || k.provider.toLowerCase() === rawId.toLowerCase(),
+  );
+  if (!account) {
+    throw new AccountError(400, `No enabled account found for provider "${rawId}".`);
+  }
+
+  const catalogEntry = getXGatewayProvider(normalized);
+  const baseUrl = (account.base_url?.trim() || catalogEntry?.baseUrl?.trim() || '').replace(/\/+$/, '');
+  if (!baseUrl) {
+    throw new AccountError(400, `Provider "${rawId}" has no base URL for model discovery.`);
+  }
+
+  const credential = decrypt(account.encrypted_key, account.iv, account.auth_tag);
+  const proxyUrl = resolveXGatewayAccountProxy(account);
+  const config = getProviderModelConfig(normalized);
+  const headers: Record<string, string> = {
+    ...(config.customHeaders ?? {}),
+    Accept: 'application/json',
+    Authorization: `Bearer ${credential}`,
+  };
+  if (normalized === 'claude' || baseUrl.includes('api.anthropic.com') || baseUrl.includes('/anthropic/v1')) {
+    headers['x-api-key'] = credential;
+    headers['anthropic-version'] = '2023-06-01';
+  }
+
+  try {
+    const upstreamRes = await withKeyProxy(proxyUrl, () =>
+      proxyFetch(`${baseUrl}/models`, { method: 'GET', headers }, account.platform, 'unknown', 15_000),
+    );
+    if (!upstreamRes.ok) {
+      throw new AccountError(502, `Upstream /models returned HTTP ${upstreamRes.status}.`);
+    }
+    const payload = (await upstreamRes.json()) as Record<string, unknown>;
+    const rawList = Array.isArray(payload?.data)
+      ? payload.data
+      : Array.isArray(payload?.models)
+        ? payload.models
+        : Array.isArray(payload)
+          ? payload
+          : [];
+    const seen = new Set<string>();
+    const models: Array<{ id: string; name: string }> = [];
+    for (const item of rawList) {
+      const idVal = typeof item === 'string'
+        ? item.trim()
+        : item && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string'
+          ? (item as { id: string }).id.trim()
+          : '';
+      if (!idVal || seen.has(idVal)) continue;
+      seen.add(idVal);
+      const nameVal =
+        item && typeof item === 'object' && typeof (item as { display_name?: unknown; name?: unknown }).display_name === 'string'
+          ? (item as { display_name: string }).display_name.trim()
+          : item && typeof item === 'object' && typeof (item as { name?: unknown }).name === 'string'
+            ? (item as { name: string }).name.trim()
+            : idVal;
+      models.push({ id: idVal, name: nameVal || idVal });
+    }
+    res.json({ ok: true, providerId: normalized, models });
+  } catch (err) {
+    if (err instanceof AccountError) throw err;
+    throw new AccountError(502, err instanceof Error ? err.message : 'Failed to fetch upstream models.');
+  }
 });
 
 providerAccountsRouter.post('/providers/:providerId/models/ping', requirePermission('test_keys'), async (req, res) => {

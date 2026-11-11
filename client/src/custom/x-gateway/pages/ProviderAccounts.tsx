@@ -1,34 +1,54 @@
-import { useState, useEffect, type FormEvent } from 'react'
+import { useState, useEffect, useRef, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Activity,
   AlertTriangle,
+  ArrowDown,
   ArrowLeft,
+  ArrowUp,
+  Check,
   CircleCheck,
   Clock,
+  Copy,
   Ellipsis,
   KeyRound,
   LoaderCircle,
   Pencil,
+  Play,
   Plus,
   RefreshCw,
   Send,
   ShieldCheck,
+  SlidersHorizontal,
+  Square,
   Trash2,
   Unplug,
   X,
 } from 'lucide-react'
 import { Dialog, DialogPopup, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { apiFetch } from '@/lib/api'
-import type { ProviderAccount } from '../../../../../shared/x-accounts'
+import type { ProviderAccount, ProviderRoutingStrategy, ProviderThinkingMode } from '../../../../../shared/x-accounts'
 import { accountsApi, refreshAccounts, useAccounts, type BatchTestResponse } from '../api'
 import { useSessionRevision } from '../../session-state'
 import { proxyPoolApi } from '../proxy-pool-api'
 import { usePoolStrings } from '../proxy-pool-strings'
 import { useXStrings } from '../strings'
+import { useXGatewayCopy } from '../copy'
 import { ConnectAccountDialog } from '../ConnectAccountDialog'
 import { AccountLoadState, ProviderMark } from './Providers'
+
+const BLOCKED_CUSTOM_HEADERS = new Set([
+  'host',
+  'content-length',
+  'transfer-encoding',
+  'connection',
+  'upgrade',
+  'authorization',
+  'x-api-key',
+  'cookie',
+  'set-cookie',
+])
 
 export interface AutoPingSchedule {
   enabled: boolean
@@ -105,6 +125,7 @@ export default function ProviderAccounts() {
   const { providerId } = useParams()
   const s = useXStrings()
   const p = usePoolStrings()
+  const copy = useXGatewayCopy()
   const revision = useSessionRevision()
   const query = useAccounts()
   const client = useQueryClient()
@@ -137,6 +158,36 @@ export default function ProviderAccounts() {
     Record<string, { loading?: boolean; latencyMs?: number; ok?: boolean; message?: string }>
   >({})
 
+  // Provider config states: Strategy & Sticky Limit
+  const [strategy, setStrategy] = useState<ProviderRoutingStrategy>('fallback')
+  const [stickyLimit, setStickyLimit] = useState(3)
+  const [strategySaved, setStrategySaved] = useState(false)
+
+  // Account Selection & Bulk Actions
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [showBulkDelete, setShowBulkDelete] = useState(false)
+  const [showBulkProxy, setShowBulkProxy] = useState(false)
+  const [bulkProxyMode, setBulkProxyMode] = useState<'none' | 'one-to-one' | 'pool'>('none')
+  const [bulkTargetPoolId, setBulkTargetPoolId] = useState<number | null>(null)
+  const [bulkActionSuccess, setBulkActionSuccess] = useState<string | null>(null)
+
+  // Test One-by-One sequential test
+  const [oneByOneRunning, setOneByOneRunning] = useState(false)
+  const [oneByOneProgress, setOneByOneProgress] = useState<{ current: number; total: number; passed: number; failed: number } | null>(null)
+  const [oneByOneStatus, setOneByOneStatus] = useState<Record<number, 'waiting' | 'testing' | 'healthy' | 'error'>>({})
+  const stopTestingRef = useRef(false)
+
+  // Provider Custom Configuration (Thinking Level & Outbound Headers)
+  const [thinkingMode, setThinkingMode] = useState<ProviderThinkingMode>('auto')
+  const [headersList, setHeadersList] = useState<Array<{ key: string; value: string }>>([])
+  const [newHeaderKey, setNewHeaderKey] = useState('')
+  const [newHeaderVal, setNewHeaderVal] = useState('')
+  const [configSaved, setConfigSaved] = useState(false)
+
+  // Tab Models: Fetch live models & Copy Model ID
+  const [fetchLiveStatus, setFetchLiveStatus] = useState<string | null>(null)
+  const [copiedModelId, setCopiedModelId] = useState<string | null>(null)
+
   const handlePingModel = async (modelId: string) => {
     if (!providerId) return
     setModelPingStates(prev => ({
@@ -161,7 +212,7 @@ export default function ProviderAccounts() {
   const modelConfigQuery = useQuery({
     queryKey: ['x-provider-models', providerId, revision],
     queryFn: ({ signal }) => accountsApi.getProviderModels(providerId!, signal),
-    enabled: Boolean(providerId && tab === 'models'),
+    enabled: Boolean(providerId),
     retry: false,
   })
 
@@ -261,12 +312,116 @@ export default function ProviderAccounts() {
       disabledModels?: string[]
       customModels?: Array<{ id: string; name?: string }>
       modelAliases?: Record<string, string>
-    }) => accountsApi.updateProviderModels(providerId!, body),
+      strategy?: ProviderRoutingStrategy
+      stickyLimit?: number
+      thinkingMode?: ProviderThinkingMode
+      customHeaders?: Record<string, string>
+    }) => apiFetch(`/api/x-accounts/providers/${encodeURIComponent(providerId!)}/models`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['x-provider-models', providerId] })
       await refreshAccounts(client)
     },
   })
+
+  // Priority reorder mutation
+  const reorderPriorityMutation = useMutation({
+    meta: { silenceToast: true },
+    mutationFn: async (accountIds: number[]) => {
+      return apiFetch<{ ok: boolean; accountPriorities: number[] }>(
+        `/api/x-accounts/providers/${encodeURIComponent(providerId!)}/priority`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({ accountIds }),
+        },
+      )
+    },
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: ['x-provider-models', providerId] })
+      await refreshAccounts(client)
+    },
+  })
+
+  // Bulk Delete mutation
+  const bulkDeleteMutation = useMutation({
+    meta: { silenceToast: true },
+    mutationFn: async (accountIds: number[]) => {
+      return apiFetch<{ ok: boolean; deleted: number }>('/api/x-accounts/bulk-delete', {
+        method: 'POST',
+        body: JSON.stringify({ accountIds }),
+      })
+    },
+    onSuccess: async () => {
+      setShowBulkDelete(false)
+      setSelectedIds(new Set())
+      setBulkActionSuccess(copy.bulkDeleteSuccess)
+      setTimeout(() => setBulkActionSuccess(null), 3500)
+      await refreshAccounts(client)
+    },
+  })
+
+  // Bulk Proxy mutation
+  const bulkProxyMutation = useMutation({
+    meta: { silenceToast: true },
+    mutationFn: async (vars: { accountIds: number[]; mode: 'none' | 'one-to-one' | 'pool'; proxyPoolId?: number | null }) => {
+      return apiFetch<{ ok: boolean; updated: number }>('/api/x-accounts/bulk-proxy', {
+        method: 'POST',
+        body: JSON.stringify(vars),
+      })
+    },
+    onSuccess: async () => {
+      setShowBulkProxy(false)
+      setSelectedIds(new Set())
+      setBulkActionSuccess(copy.bulkProxySuccess)
+      setTimeout(() => setBulkActionSuccess(null), 3500)
+      await refreshAccounts(client)
+    },
+  })
+
+  // Fetch Live Models mutation
+  const fetchLiveModelsMutation = useMutation({
+    meta: { silenceToast: true },
+    mutationFn: async () => {
+      return apiFetch<{ ok: boolean; providerId: string; models: Array<{ id: string; name?: string }> }>(
+        `/api/x-accounts/providers/${encodeURIComponent(providerId!)}/fetch-models`,
+        { method: 'POST', body: '{}' },
+      )
+    },
+    onSuccess: async (res) => {
+      const fetched = res.models ?? []
+      const existingCatalogIds = new Set(models.map(m => m.id))
+      const existingCustomMap = new Map(customModelsList.map(cm => [cm.id, cm]))
+      for (const m of fetched) {
+        if (!existingCatalogIds.has(m.id) && !existingCustomMap.has(m.id)) {
+          existingCustomMap.set(m.id, { id: m.id, name: m.name || m.id })
+        }
+      }
+      const mergedCustom = Array.from(existingCustomMap.values())
+      await updateProviderModels.mutateAsync({ customModels: mergedCustom })
+      setFetchLiveStatus(`${copy.fetchLiveModelsSuccess} (${fetched.length})`)
+      setTimeout(() => setFetchLiveStatus(null), 4000)
+    },
+    onError: (err: Error) => {
+      setFetchLiveStatus(`${copy.fetchLiveModelsError}: ${err.message}`)
+      setTimeout(() => setFetchLiveStatus(null), 5000)
+    },
+  })
+
+  // Sync Provider Config state from query/provider
+  useEffect(() => {
+    const data = modelConfigQuery.data as any
+    if (data) {
+      if (data.strategy) setStrategy(data.strategy as ProviderRoutingStrategy)
+      if (typeof data.stickyLimit === 'number') setStickyLimit(data.stickyLimit)
+      if (data.thinkingMode) setThinkingMode(data.thinkingMode as ProviderThinkingMode)
+      if (data.customHeaders && typeof data.customHeaders === 'object') {
+        const entries = Object.entries(data.customHeaders).map(([k, v]) => ({ key: k, value: String(v) }))
+        setHeadersList(entries)
+      }
+    }
+  }, [modelConfigQuery.data])
 
   if (query.isPending) return <AccountLoadState />
   if (query.isError) return <AccountLoadState error retry={() => void query.refetch()} />
@@ -277,6 +432,14 @@ export default function ProviderAccounts() {
   const models = Array.from(new Map(provider.accounts.flatMap(account => account.models).map(model => [model.id, model])).values())
   const count = (value: number) => value.toLocaleString()
 
+  // Sort accounts by priority
+  const sortedAccounts = [...provider.accounts].sort((a, b) => {
+    const prioA = a.priority ?? 999999
+    const prioB = b.priority ?? 999999
+    if (prioA !== prioB) return prioA - prioB
+    return a.id - b.id
+  })
+
   function editSubmit(event: FormEvent) {
     event.preventDefault()
     if (edit && label.trim()) {
@@ -286,6 +449,95 @@ export default function ProviderAccounts() {
       const poolPatch = nextPool !== (edit.proxyPoolId ?? null) ? { proxyPoolId: nextPool } : {}
       change.mutate({ type: 'edit', id: edit.id, label: label.trim(), ...proxyPatch, ...poolPatch })
     }
+  }
+
+  // Priority handlers
+  const handleMoveUp = (index: number) => {
+    if (index <= 0 || reorderPriorityMutation.isPending) return
+    const reordered = [...sortedAccounts]
+    const temp = reordered[index]
+    reordered[index] = reordered[index - 1]
+    reordered[index - 1] = temp
+    reorderPriorityMutation.mutate(reordered.map(a => a.id))
+  }
+
+  const handleMoveDown = (index: number) => {
+    if (index >= sortedAccounts.length - 1 || reorderPriorityMutation.isPending) return
+    const reordered = [...sortedAccounts]
+    const temp = reordered[index]
+    reordered[index] = reordered[index + 1]
+    reordered[index + 1] = temp
+    reorderPriorityMutation.mutate(reordered.map(a => a.id))
+  }
+
+  // Account Selection handlers
+  const handleToggleAccount = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const handleToggleSelectAll = () => {
+    if (selectedIds.size === sortedAccounts.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(sortedAccounts.map(a => a.id)))
+    }
+  }
+
+  // Test One-by-One sequential test
+  const startOneByOneTest = async () => {
+    if (!sortedAccounts.length || oneByOneRunning) return
+    stopTestingRef.current = false
+    setOneByOneRunning(true)
+
+    const initial: Record<number, 'waiting' | 'testing' | 'healthy' | 'error'> = {}
+    for (const a of sortedAccounts) initial[a.id] = 'waiting'
+    setOneByOneStatus(initial)
+    setOneByOneProgress({ current: 0, total: sortedAccounts.length, passed: 0, failed: 0 })
+
+    let passed = 0
+    let failed = 0
+
+    for (let i = 0; i < sortedAccounts.length; i++) {
+      if (stopTestingRef.current) break
+      const account = sortedAccounts[i]
+      setOneByOneStatus(prev => ({ ...prev, [account.id]: 'testing' }))
+      setOneByOneProgress({ current: i + 1, total: sortedAccounts.length, passed, failed })
+
+      try {
+        const res = await accountsApi.test(account.id)
+        if (res.ok) {
+          passed++
+          setOneByOneStatus(prev => ({ ...prev, [account.id]: 'healthy' }))
+        } else {
+          failed++
+          setOneByOneStatus(prev => ({ ...prev, [account.id]: 'error' }))
+        }
+      } catch {
+        failed++
+        setOneByOneStatus(prev => ({ ...prev, [account.id]: 'error' }))
+      }
+      setOneByOneProgress({ current: i + 1, total: sortedAccounts.length, passed, failed })
+    }
+
+    setOneByOneRunning(false)
+    await refreshAccounts(client)
+  }
+
+  const stopOneByOneTest = () => {
+    stopTestingRef.current = true
+    setOneByOneRunning(false)
+  }
+
+  // Copy Model ID handler
+  const handleCopyModelId = (fullModelId: string) => {
+    navigator.clipboard.writeText(fullModelId).catch(() => {})
+    setCopiedModelId(fullModelId)
+    setTimeout(() => setCopiedModelId(null), 2000)
   }
 
   const previewSlots = getScheduleSlots(pingAnchor, pingWindowHours, pingSlotsPerDay)
@@ -318,11 +570,22 @@ export default function ProviderAccounts() {
         </div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {permissions.test && provider.accounts.length > 0 && (
+          oneByOneRunning ? (
+            <button type="button" className="x-button x-destructive" onClick={stopOneByOneTest}>
+              <Square size={14} /> {copy.stopTest}
+            </button>
+          ) : (
+            <button type="button" className="x-button" onClick={startOneByOneTest}>
+              <Play size={14} /> {copy.testOneByOne}
+            </button>
+          )
+        )}
         {permissions.test && provider.accounts.length > 1 && (
           <button
             type="button"
             className="x-button"
-            disabled={batchTestProvider.isPending}
+            disabled={batchTestProvider.isPending || oneByOneRunning}
             onClick={() => {
               setBatchSummary(null)
               batchTestProvider.mutate(provider.id)
@@ -345,6 +608,42 @@ export default function ProviderAccounts() {
         {canConnect && <button className="x-button x-primary" onClick={() => { change.reset(); setConnect(true) }}><Plus size={16} />{s.addAccount}</button>}
       </div>
     </div>
+
+    {/* One-by-One sequential test progress banner */}
+    {oneByOneProgress && (
+      <div
+        className="x-panel"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '8px 14px',
+          margin: '8px 0',
+          borderRadius: 8,
+          background: 'var(--x-surface-subtle)',
+          border: '1px solid var(--x-border)',
+          fontSize: '0.875rem',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {oneByOneRunning ? <LoaderCircle size={16} className="x-spin" /> : <CircleCheck size={16} />}
+          <span>
+            {oneByOneRunning ? copy.testingOneByOne : copy.testCompleted}:{' '}
+            <strong>
+              {oneByOneProgress.current}/{oneByOneProgress.total}
+            </strong>{' '}
+            ({oneByOneProgress.passed} {copy.statusHealthy.toLowerCase()},{' '}
+            {oneByOneProgress.failed} {copy.statusError.toLowerCase()})
+          </span>
+        </div>
+        {oneByOneRunning && (
+          <button type="button" className="x-button x-small x-destructive" onClick={stopOneByOneTest}>
+            <Square size={13} /> {copy.stopTest}
+          </button>
+        )}
+      </div>
+    )}
+
     {batchSummary && (
       <p className="x-test-ok" role="status">
         <CircleCheck size={16} />
@@ -370,13 +669,231 @@ export default function ProviderAccounts() {
     </div>
 
     {tab === 'accounts' ? <section id="x-accounts-panel" role="tabpanel" aria-labelledby="x-accounts-tab">
-      {!provider.accounts.length && <div className="x-empty x-panel"><Unplug size={38} /><h2>{s.noAccounts}</h2><p>{s.noAccountsHelp}</p>{canConnect && <button className="x-button x-primary" onClick={() => setConnect(true)}><Plus size={16} />{s.addAccount}</button>}</div>}
+      {/* Routing Strategy bar */}
+      <div
+        className="x-panel"
+        style={{
+          padding: '12px 16px',
+          marginBottom: 16,
+          borderRadius: 10,
+          border: '1px solid var(--x-border)',
+          background: 'var(--x-surface-subtle)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <SlidersHorizontal size={18} />
+            <div>
+              <strong style={{ fontSize: '0.9375rem' }}>{copy.routingStrategy}</strong>
+              <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--x-muted, #888)' }}>
+                {strategy === 'round-robin' ? copy.roundRobinHelp : copy.fallbackHelp}
+              </p>
+            </div>
+          </div>
+          {permissions.edit && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ display: 'inline-flex', borderRadius: 8, padding: 2, background: 'var(--x-surface-hover, rgba(0,0,0,0.06))', border: '1px solid var(--x-border)' }}>
+                <button
+                  type="button"
+                  className={`x-button x-small ${strategy === 'fallback' ? 'x-primary' : ''}`}
+                  style={{ borderRadius: 6, padding: '4px 10px', fontSize: '0.8125rem', border: 'none' }}
+                  onClick={() => {
+                    setStrategy('fallback')
+                    updateProviderModels.mutate({ strategy: 'fallback', stickyLimit })
+                    setStrategySaved(true)
+                    setTimeout(() => setStrategySaved(false), 2500)
+                  }}
+                >
+                  {copy.fallback}
+                </button>
+                <button
+                  type="button"
+                  className={`x-button x-small ${strategy === 'round-robin' ? 'x-primary' : ''}`}
+                  style={{ borderRadius: 6, padding: '4px 10px', fontSize: '0.8125rem', border: 'none' }}
+                  onClick={() => {
+                    setStrategy('round-robin')
+                    updateProviderModels.mutate({ strategy: 'round-robin', stickyLimit })
+                    setStrategySaved(true)
+                    setTimeout(() => setStrategySaved(false), 2500)
+                  }}
+                >
+                  {copy.roundRobin}
+                </button>
+              </div>
+
+              {strategy === 'round-robin' && (
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.8125rem' }}>
+                  <span>{copy.stickyLimit}:</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={stickyLimit}
+                    onChange={e => {
+                      const val = Math.max(1, Math.min(100, Number(e.target.value) || 1))
+                      setStickyLimit(val)
+                    }}
+                    onBlur={() => {
+                      updateProviderModels.mutate({ strategy, stickyLimit })
+                      setStrategySaved(true)
+                      setTimeout(() => setStrategySaved(false), 2500)
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        updateProviderModels.mutate({ strategy, stickyLimit })
+                        setStrategySaved(true)
+                        setTimeout(() => setStrategySaved(false), 2500)
+                      }
+                    }}
+                    style={{
+                      width: '58px',
+                      padding: '3px 6px',
+                      borderRadius: 6,
+                      border: '1px solid var(--x-border)',
+                      background: 'var(--x-surface)',
+                      color: 'var(--x-ink)',
+                      textAlign: 'center',
+                    }}
+                    title={copy.stickyLimitHelp}
+                  />
+                  <span style={{ color: 'var(--x-muted, #888)' }}>{copy.requestsUnit}</span>
+                </div>
+              )}
+
+              {strategySaved && (
+                <span className="x-test-ok" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.8125rem' }}>
+                  <CircleCheck size={14} /> {copy.strategySaved}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Select All & Bulk Actions toolbar */}
+      {sortedAccounts.length > 0 && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 8,
+            marginBottom: 12,
+            padding: '6px 10px',
+            background: selectedIds.size > 0 ? 'rgba(99, 102, 241, 0.08)' : 'transparent',
+            borderRadius: 8,
+            border: selectedIds.size > 0 ? '1px solid rgba(99, 102, 241, 0.25)' : '1px solid transparent',
+            transition: 'all 0.15s ease',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button
+              type="button"
+              className="x-button x-small"
+              onClick={handleToggleSelectAll}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              {selectedIds.size === sortedAccounts.length ? <Square size={13} /> : <Check size={13} />}
+              {selectedIds.size === sortedAccounts.length ? copy.deselectAll : copy.selectAll}
+            </button>
+            {selectedIds.size > 0 && (
+              <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--x-ink)' }}>
+                {selectedIds.size} {copy.selectedAccounts}
+              </span>
+            )}
+          </div>
+
+          {selectedIds.size > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {permissions.edit && (
+                <button
+                  type="button"
+                  className="x-button x-small"
+                  onClick={() => setShowBulkProxy(true)}
+                >
+                  {copy.bulkProxy}
+                </button>
+              )}
+              {permissions.delete && (
+                <button
+                  type="button"
+                  className="x-button x-small x-destructive"
+                  onClick={() => setShowBulkDelete(true)}
+                >
+                  <Trash2 size={13} />
+                  {copy.bulkDelete}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {bulkActionSuccess && (
+        <p className="x-test-ok" role="status" style={{ marginBottom: 12 }}>
+          <CircleCheck size={16} /> {bulkActionSuccess}
+        </p>
+      )}
+
+      {!sortedAccounts.length && <div className="x-empty x-panel"><Unplug size={38} /><h2>{s.noAccounts}</h2><p>{s.noAccountsHelp}</p>{canConnect && <button className="x-button x-primary" onClick={() => setConnect(true)}><Plus size={16} />{s.addAccount}</button>}</div>}
       <div className="x-account-list">
-        {provider.accounts.map(account => {
+        {sortedAccounts.map((account, index) => {
           const cooldownUntil = cooldowns[account.id]
+          const isSelected = selectedIds.has(account.id)
+          const testStatus = oneByOneStatus[account.id]
           return (
             <article key={account.id} className={`x-account x-panel ${account.enabled ? '' : 'x-account-paused'}`}>
               <div className="x-account-top">
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={() => handleToggleAccount(account.id)}
+                  aria-label={`Select account ${account.label}`}
+                  style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#6366f1', marginRight: 4 }}
+                />
+
+                {/* Account priority badge */}
+                <span
+                  className="x-badge"
+                  title={`Priority #${account.priority ?? index + 1}`}
+                  style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: '0.8125rem' }}
+                >
+                  #{account.priority ?? index + 1}
+                </span>
+
+                {/* Priority Move Up / Move Down buttons */}
+                {permissions.edit && sortedAccounts.length > 1 && (
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                    <button
+                      type="button"
+                      className="x-icon-button"
+                      disabled={index === 0 || reorderPriorityMutation.isPending}
+                      title={copy.moveUp}
+                      aria-label={`${copy.moveUp} ${account.label}`}
+                      onClick={() => handleMoveUp(index)}
+                      style={{ padding: 4 }}
+                    >
+                      <ArrowUp size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      className="x-icon-button"
+                      disabled={index === sortedAccounts.length - 1 || reorderPriorityMutation.isPending}
+                      title={copy.moveDown}
+                      aria-label={`${copy.moveDown} ${account.label}`}
+                      onClick={() => handleMoveDown(index)}
+                      style={{ padding: 4 }}
+                    >
+                      <ArrowDown size={14} />
+                    </button>
+                  </div>
+                )}
+
                 <span className="x-account-icon"><KeyRound size={20} /></span>
                 <div className="x-account-identity">
                   <h3>{account.label || provider.name}</h3>
@@ -386,8 +903,30 @@ export default function ProviderAccounts() {
                     {account.proxyPoolName ? ` · ${p.poolBadge}: ${account.proxyPoolName}` : ''}
                   </p>
                 </div>
+
                 {/* Visual Cooldown timer badge if account hit HTTP 429 */}
                 {cooldownUntil && <CooldownTimer until={cooldownUntil} />}
+
+                {/* One-by-One sequential test status */}
+                {testStatus && (
+                  <span
+                    className={`x-badge ${testStatus === 'healthy' ? 'x-green' : testStatus === 'error' ? 'x-red' : ''}`}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                  >
+                    {testStatus === 'testing' && <LoaderCircle size={12} className="x-spin" />}
+                    {testStatus === 'healthy' && <CircleCheck size={12} />}
+                    {testStatus === 'error' && <AlertTriangle size={12} />}
+                    {testStatus === 'waiting' && <Clock size={12} />}
+                    {testStatus === 'testing'
+                      ? copy.statusTesting
+                      : testStatus === 'healthy'
+                        ? copy.statusHealthy
+                        : testStatus === 'error'
+                          ? copy.statusError
+                          : copy.statusWaiting}
+                  </span>
+                )}
+
                 <span className={`x-badge ${!account.enabled ? '' : account.status === 'healthy' ? 'x-green' : account.status === 'error' ? 'x-red' : ''}`}>
                   <span className="x-dot" />
                   {!account.enabled ? s.paused : account.status === 'healthy' ? s.healthy : account.status === 'error' ? s.needsLogin : s.unknown}
@@ -406,7 +945,7 @@ export default function ProviderAccounts() {
 
               <div className="x-account-actions">
                 {permissions.test && (
-                  <button className="x-button x-small" disabled={change.isPending} onClick={() => { setTestResult(null); change.mutate({ type: 'test', id: account.id }) }}>
+                  <button className="x-button x-small" disabled={change.isPending || oneByOneRunning} onClick={() => { setTestResult(null); change.mutate({ type: 'test', id: account.id }) }}>
                     <ShieldCheck size={14} />{change.isPending && change.variables?.type === 'test' && change.variables.id === account.id ? s.testing : s.test}
                   </button>
                 )}
@@ -456,64 +995,311 @@ export default function ProviderAccounts() {
           )
         })}
       </div>
-      <div className="x-info-row"><ShieldCheck size={20} /><div><h3>{s.routing}</h3><p>{s.routingHelp}</p><p>{s.sharedPool}</p></div></div>
+
+      {/* Provider Custom Configuration Card */}
+      {permissions.edit && (
+        <div
+          className="x-panel"
+          style={{
+            marginTop: 24,
+            padding: '16px 20px',
+            borderRadius: 10,
+            border: '1px solid var(--x-border)',
+            background: 'var(--x-surface-subtle)',
+          }}
+        >
+          <div style={{ marginBottom: 14 }}>
+            <h3 style={{ margin: '0 0 4px', fontSize: '1rem', fontWeight: 600 }}>{copy.providerConfig}</h3>
+            <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--x-muted, #888)' }}>{copy.providerConfigDesc}</p>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* Thinking Level */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <label style={{ fontSize: '0.875rem', fontWeight: 600 }}>{copy.thinkingLevel}</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {(['auto', 'low', 'medium', 'high', 'max'] as const).map(lvl => (
+                  <button
+                    key={lvl}
+                    type="button"
+                    className={`x-button x-small ${thinkingMode === lvl ? 'x-primary' : ''}`}
+                    onClick={() => setThinkingMode(lvl)}
+                  >
+                    {lvl === 'auto'
+                      ? copy.thinkingAuto
+                      : lvl === 'low'
+                        ? copy.thinkingLow
+                        : lvl === 'medium'
+                          ? copy.thinkingMedium
+                          : lvl === 'high'
+                            ? copy.thinkingHigh
+                            : copy.thinkingMax}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Custom Outbound Headers */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                <label style={{ fontSize: '0.875rem', fontWeight: 600 }}>{copy.customHeaders}</label>
+                <span style={{ fontSize: '0.75rem', color: 'var(--x-muted, #888)' }}>{copy.customHeadersHelp}</span>
+              </div>
+
+              {/* Add header row */}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <input
+                  type="text"
+                  placeholder={copy.headerName}
+                  value={newHeaderKey}
+                  onChange={e => setNewHeaderKey(e.target.value)}
+                  style={{
+                    flex: '1 1 180px',
+                    padding: '6px 10px',
+                    borderRadius: 6,
+                    border: '1px solid var(--x-border)',
+                    background: 'var(--x-surface)',
+                    color: 'var(--x-ink)',
+                    fontSize: '0.8125rem',
+                  }}
+                />
+                <input
+                  type="text"
+                  placeholder={copy.headerValue}
+                  value={newHeaderVal}
+                  onChange={e => setNewHeaderVal(e.target.value)}
+                  style={{
+                    flex: '1 1 200px',
+                    padding: '6px 10px',
+                    borderRadius: 6,
+                    border: '1px solid var(--x-border)',
+                    background: 'var(--x-surface)',
+                    color: 'var(--x-ink)',
+                    fontSize: '0.8125rem',
+                  }}
+                />
+                <button
+                  type="button"
+                  className="x-button x-small"
+                  disabled={!newHeaderKey.trim()}
+                  onClick={() => {
+                    const k = newHeaderKey.trim()
+                    if (!k) return
+                    setHeadersList(prev => [...prev.filter(h => h.key.toLowerCase() !== k.toLowerCase()), { key: k, value: newHeaderVal.trim() }])
+                    setNewHeaderKey('')
+                    setNewHeaderVal('')
+                  }}
+                >
+                  <Plus size={13} /> {copy.addHeader}
+                </button>
+              </div>
+
+              {newHeaderKey.trim() && BLOCKED_CUSTOM_HEADERS.has(newHeaderKey.trim().toLowerCase()) && (
+                <p className="x-error" role="alert" style={{ margin: 0, fontSize: '0.8125rem' }}>
+                  <AlertTriangle size={13} style={{ display: 'inline', marginRight: 4 }} />
+                  {copy.headerBlockedWarning}
+                </p>
+              )}
+
+              {/* Existing headers list */}
+              {headersList.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                  {headersList.map((h, i) => {
+                    const isBlocked = BLOCKED_CUSTOM_HEADERS.has(h.key.toLowerCase())
+                    return (
+                      <div
+                        key={i}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 8,
+                          padding: '6px 10px',
+                          borderRadius: 6,
+                          background: isBlocked ? 'rgba(239, 68, 68, 0.08)' : 'var(--x-surface)',
+                          border: isBlocked ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid var(--x-border)',
+                          fontSize: '0.8125rem',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden' }}>
+                          <strong style={{ fontFamily: 'monospace', color: isBlocked ? '#ef4444' : 'inherit' }}>{h.key}</strong>
+                          <span style={{ color: 'var(--x-muted, #888)' }}>:</span>
+                          <code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.value}</code>
+                          {isBlocked && (
+                            <span className="x-badge x-danger" style={{ fontSize: '0.7rem', padding: '1px 5px' }}>
+                              Blocked
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          className="x-icon-button"
+                          title="Remove header"
+                          onClick={() => setHeadersList(prev => prev.filter((_, idx) => idx !== i))}
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Save button and status */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 4 }}>
+              <button
+                type="button"
+                className="x-button x-primary x-small"
+                disabled={updateProviderModels.isPending}
+                onClick={async () => {
+                  const headersObj: Record<string, string> = {}
+                  for (const h of headersList) {
+                    const k = h.key.trim()
+                    if (k && !BLOCKED_CUSTOM_HEADERS.has(k.toLowerCase())) {
+                      headersObj[k] = h.value
+                    }
+                  }
+                  await updateProviderModels.mutateAsync({
+                    thinkingMode,
+                    customHeaders: headersObj,
+                  })
+                  setConfigSaved(true)
+                  setTimeout(() => setConfigSaved(false), 2500)
+                }}
+              >
+                {updateProviderModels.isPending ? copy.saving : copy.saveConfig}
+              </button>
+              {configSaved && (
+                <span className="x-test-ok" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.8125rem' }}>
+                  <CircleCheck size={14} /> {copy.configSaved}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="x-info-row" style={{ marginTop: 20 }}><ShieldCheck size={20} /><div><h3>{s.routing}</h3><p>{s.routingHelp}</p><p>{s.sharedPool}</p></div></div>
     </section> : (
       <section id="x-models-panel" role="tabpanel" aria-labelledby="x-models-tab" className="x-panel x-model-list">
+        {/* Enable All, Disable All & Fetch Live Models top toolbar */}
+        {permissions.edit && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="x-button x-small"
+                disabled={updateProviderModels.isPending}
+                onClick={() => updateProviderModels.mutate({ disabledModels: [] })}
+              >
+                <CircleCheck size={14} /> {copy.enableAllModels}
+              </button>
+              <button
+                type="button"
+                className="x-button x-small"
+                disabled={updateProviderModels.isPending}
+                onClick={() => updateProviderModels.mutate({ disabledModels: catalogAndCustomModels.map(m => m.id) })}
+              >
+                <X size={14} /> {copy.disableAllModels}
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button
+                type="button"
+                className="x-button x-small"
+                disabled={fetchLiveModelsMutation.isPending}
+                onClick={() => fetchLiveModelsMutation.mutate()}
+              >
+                <RefreshCw size={14} className={fetchLiveModelsMutation.isPending ? 'x-spin' : ''} />
+                {fetchLiveModelsMutation.isPending ? copy.fetchingLiveModels : copy.fetchLiveModels}
+              </button>
+              {fetchLiveStatus && (
+                <span style={{ fontSize: '0.8125rem', color: fetchLiveStatus.includes(copy.fetchLiveModelsError) ? '#ef4444' : '#10b981' }}>
+                  {fetchLiveStatus}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
         {!permissions.edit ? (
           models.length ? (
             <div style={{ display: 'grid', gap: 8 }}>
-              {models.map(model => (
-                <div key={model.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <strong>{model.name}</strong><code>{model.id}</code>
-                  </div>
-                  {permissions.test && (
+              {models.map(model => {
+                const providerPrefix = provider.alias || provider.id
+                const suffix = thinkingMode && thinkingMode !== 'auto' ? `(${thinkingMode})` : ''
+                const fullModelId = `${providerPrefix}/${model.id}${suffix}`
+                const isCopied = copiedModelId === fullModelId
+
+                return (
+                  <div key={model.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <strong>{model.name}</strong><code>{model.id}</code>
+                    </div>
                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                      {modelPingStates[model.id]?.loading ? (
-                        <span className="x-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                          <LoaderCircle size={12} className="x-spin" /> Ping...
-                        </span>
-                      ) : modelPingStates[model.id]?.ok !== undefined ? (
-                        modelPingStates[model.id]?.ok ? (
-                          <span
-                            className="x-badge"
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 4,
-                              color: '#10b981',
-                              background: 'rgba(16, 185, 129, 0.1)',
-                              borderColor: 'rgba(16, 185, 129, 0.3)',
-                            }}
-                            title={modelPingStates[model.id]?.message || 'Ping successful'}
-                          >
-                            <Activity size={12} /> {modelPingStates[model.id]?.latencyMs}ms
-                          </span>
-                        ) : (
-                          <span
-                            className="x-badge x-danger"
-                            style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                            title={modelPingStates[model.id]?.message}
-                          >
-                            <AlertTriangle size={12} /> {modelPingStates[model.id]?.message || 'Error'}
-                          </span>
-                        )
-                      ) : null}
                       <button
                         type="button"
                         className="x-button x-small"
                         style={{ padding: '3px 8px', fontSize: '0.75rem', height: '26px' }}
-                        disabled={modelPingStates[model.id]?.loading}
-                        onClick={() => handlePingModel(model.id)}
-                        aria-label={`Ping model ${model.id}`}
-                        title={`Ping ${model.id}`}
+                        title={`${copy.copyModelId}: ${fullModelId}`}
+                        aria-label={`${copy.copyModelId}: ${fullModelId}`}
+                        onClick={() => handleCopyModelId(fullModelId)}
                       >
-                        <Activity size={12} /> Ping
+                        {isCopied ? <Check size={12} style={{ color: '#10b981' }} /> : <Copy size={12} />}
+                        {isCopied ? copy.modelIdCopied : copy.copyModelId}
                       </button>
+
+                      {permissions.test && (
+                        <>
+                          {modelPingStates[model.id]?.loading ? (
+                            <span className="x-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                              <LoaderCircle size={12} className="x-spin" /> Ping...
+                            </span>
+                          ) : modelPingStates[model.id]?.ok !== undefined ? (
+                            modelPingStates[model.id]?.ok ? (
+                              <span
+                                className="x-badge"
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  color: '#10b981',
+                                  background: 'rgba(16, 185, 129, 0.1)',
+                                  borderColor: 'rgba(16, 185, 129, 0.3)',
+                                }}
+                                title={modelPingStates[model.id]?.message || 'Ping successful'}
+                              >
+                                <Activity size={12} /> {modelPingStates[model.id]?.latencyMs}ms
+                              </span>
+                            ) : (
+                              <span
+                                className="x-badge x-danger"
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                                title={modelPingStates[model.id]?.message}
+                              >
+                                <AlertTriangle size={12} /> {modelPingStates[model.id]?.message || 'Error'}
+                              </span>
+                            )
+                          ) : null}
+                          <button
+                            type="button"
+                            className="x-button x-small"
+                            style={{ padding: '3px 8px', fontSize: '0.75rem', height: '26px' }}
+                            disabled={modelPingStates[model.id]?.loading}
+                            onClick={() => handlePingModel(model.id)}
+                            aria-label={`Ping model ${model.id}`}
+                            title={`Ping ${model.id}`}
+                          >
+                            <Activity size={12} /> Ping
+                          </button>
+                        </>
+                      )}
                     </div>
-                  )}
-                </div>
-              ))}
+                  </div>
+                )
+              })}
             </div>
           ) : <p className="x-muted">{s.noModels}</p>
         ) : (
@@ -611,6 +1397,11 @@ export default function ProviderAccounts() {
               <div style={{ display: 'grid', gap: 8 }}>
                 {catalogAndCustomModels.map(model => {
                   const isDisabled = disabledSet.has(model.id)
+                  const providerPrefix = provider.alias || provider.id
+                  const suffix = thinkingMode && thinkingMode !== 'auto' ? `(${thinkingMode})` : ''
+                  const fullModelId = `${providerPrefix}/${model.id}${suffix}`
+                  const isCopied = copiedModelId === fullModelId
+
                   return (
                     <div key={model.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', opacity: isDisabled ? 0.55 : 1 }}>
@@ -619,6 +1410,19 @@ export default function ProviderAccounts() {
                         {model.isCustom && <span className="x-badge">Custom</span>}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {/* Copy Model ID button */}
+                        <button
+                          type="button"
+                          className="x-button x-small"
+                          style={{ padding: '3px 8px', fontSize: '0.75rem', height: '26px' }}
+                          title={`${copy.copyModelId}: ${fullModelId}`}
+                          aria-label={`${copy.copyModelId}: ${fullModelId}`}
+                          onClick={() => handleCopyModelId(fullModelId)}
+                        >
+                          {isCopied ? <Check size={12} style={{ color: '#10b981' }} /> : <Copy size={12} />}
+                          {isCopied ? copy.modelIdCopied : copy.copyModelId}
+                        </button>
+
                         {permissions.test && (
                           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                             {modelPingStates[model.id]?.loading ? (
@@ -810,6 +1614,112 @@ export default function ProviderAccounts() {
                 {saveAutoPingMutation.isPending ? s.saving : s.save}
               </button>
             </div>
+          </div>
+        </DialogPopup>
+      </Dialog>
+    )}
+
+    {/* Bulk Delete Confirmation Dialog */}
+    {showBulkDelete && (
+      <Dialog open onOpenChange={open => { if (!open && !bulkDeleteMutation.isPending) setShowBulkDelete(false) }}>
+        <DialogPopup className="x-console x-dialog">
+          <DialogTitle>{copy.bulkDelete}</DialogTitle>
+          <DialogDescription>{copy.bulkDeleteConfirm.replace('{count}', String(selectedIds.size))}</DialogDescription>
+          {bulkDeleteMutation.isError && <p className="x-error" role="alert">{bulkDeleteMutation.error.message}</p>}
+          <div className="x-dialog-actions">
+            <button type="button" className="x-button" disabled={bulkDeleteMutation.isPending} onClick={() => setShowBulkDelete(false)}>
+              <X size={14} /> {copy.cancel}
+            </button>
+            <button
+              type="button"
+              className="x-button x-destructive"
+              disabled={bulkDeleteMutation.isPending}
+              onClick={() => bulkDeleteMutation.mutate(Array.from(selectedIds))}
+            >
+              <Trash2 size={16} /> {bulkDeleteMutation.isPending ? copy.bulkDeleting : copy.bulkDelete}
+            </button>
+          </div>
+        </DialogPopup>
+      </Dialog>
+    )}
+
+    {/* Bulk Apply Proxy Dialog */}
+    {showBulkProxy && (
+      <Dialog open onOpenChange={open => { if (!open && !bulkProxyMutation.isPending) setShowBulkProxy(false) }}>
+        <DialogPopup className="x-console x-dialog" style={{ maxWidth: 500 }}>
+          <DialogTitle>{copy.bulkProxyModalTitle}</DialogTitle>
+          <DialogDescription>{copy.bulkProxyModalDesc}</DialogDescription>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.875rem' }}>
+              <input
+                type="radio"
+                name="bulkProxyMode"
+                value="none"
+                checked={bulkProxyMode === 'none'}
+                onChange={() => setBulkProxyMode('none')}
+              />
+              <span>{copy.proxyModeUnbind}</span>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.875rem' }}>
+              <input
+                type="radio"
+                name="bulkProxyMode"
+                value="one-to-one"
+                checked={bulkProxyMode === 'one-to-one'}
+                onChange={() => setBulkProxyMode('one-to-one')}
+              />
+              <span>{copy.proxyModeRotate}</span>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.875rem' }}>
+              <input
+                type="radio"
+                name="bulkProxyMode"
+                value="pool"
+                checked={bulkProxyMode === 'pool'}
+                onChange={() => setBulkProxyMode('pool')}
+              />
+              <span>{copy.proxyModePool}</span>
+            </label>
+
+            {bulkProxyMode === 'pool' && (
+              <div style={{ marginLeft: 24, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <label style={{ fontSize: '0.8125rem', fontWeight: 500 }}>{copy.selectPool}</label>
+                <select
+                  value={bulkTargetPoolId ?? ''}
+                  onChange={e => setBulkTargetPoolId(e.target.value ? Number(e.target.value) : null)}
+                  style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--x-border)', background: 'var(--x-surface)', color: 'var(--x-ink)' }}
+                >
+                  <option value="">{p.accountPoolNone}</option>
+                  {poolEntries.map(entry => (
+                    <option key={entry.id} value={entry.id}>
+                      {entry.name} {entry.enabled ? '' : ` (${p.disabled})`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          {bulkProxyMutation.isError && <p className="x-error" role="alert" style={{ marginTop: 12 }}>{bulkProxyMutation.error.message}</p>}
+
+          <div className="x-dialog-actions" style={{ marginTop: 20 }}>
+            <button type="button" className="x-button" disabled={bulkProxyMutation.isPending} onClick={() => setShowBulkProxy(false)}>
+              {copy.cancel}
+            </button>
+            <button
+              type="button"
+              className="x-button x-primary"
+              disabled={bulkProxyMutation.isPending || (bulkProxyMode === 'pool' && !bulkTargetPoolId)}
+              onClick={() =>
+                bulkProxyMutation.mutate({
+                  accountIds: Array.from(selectedIds),
+                  mode: bulkProxyMode,
+                  proxyPoolId: bulkProxyMode === 'pool' ? bulkTargetPoolId : null,
+                })
+              }
+            >
+              {bulkProxyMutation.isPending ? copy.applying : copy.apply}
+            </button>
           </div>
         </DialogPopup>
       </Dialog>

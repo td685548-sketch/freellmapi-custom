@@ -7552,9 +7552,14 @@ export function platformForXGatewayProvider(providerId: string): Platform {
 
 export const X_GATEWAY_OAUTH_EXECUTORS = new Set(['codex', 'claude', 'gemini-cli', 'kiro', 'github-copilot', 'openrouter', 'qoder', 'qoder-cn', 'glm']);
 
-export function resolveXGatewayProvider(providerId: string, baseUrl?: string | null): BaseProvider | undefined {
+export function resolveXGatewayProvider(
+  providerId: string,
+  baseUrl?: string | null,
+  extraHeaders?: Record<string, string>,
+): BaseProvider | undefined {
   const normalized = normalizeXGatewayProviderId(providerId) ?? providerId;
   const trimmedUrl = baseUrl?.trim() || null;
+  const hasExtraHeaders = Boolean(extraHeaders && Object.keys(extraHeaders).length > 0);
 
   if (normalized === 'codex') return new CodexProvider();
   if (normalized === 'gemini-cli') return new GeminiCliProvider();
@@ -7568,6 +7573,15 @@ export function resolveXGatewayProvider(providerId: string, baseUrl?: string | n
   }
   if (normalized === 'custom') {
     if (!trimmedUrl) return undefined;
+    if (hasExtraHeaders) {
+      return new OpenAICompatProvider({
+        platform: 'custom',
+        name: 'Custom Endpoint',
+        baseUrl: trimmedUrl,
+        extraHeaders,
+        timeoutMs: 120_000,
+      });
+    }
     return resolveProvider('custom', trimmedUrl);
   }
   if (normalized === 'qoder' || normalized === 'qoder-cn') {
@@ -7576,7 +7590,7 @@ export function resolveXGatewayProvider(providerId: string, baseUrl?: string | n
 
   const catalogEntry = getXGatewayProvider(normalized);
   if (catalogEntry?.category === 'oauth' && !X_GATEWAY_OAUTH_EXECUTORS.has(normalized)) return undefined;
-  if (normalized === 'claude') return new AnthropicWireProvider({ name: catalogEntry?.name ?? 'Claude', baseUrl: trimmedUrl ?? 'https://api.anthropic.com/v1', timeoutMs: 120_000 });
+  if (normalized === 'claude') return new AnthropicWireProvider({ name: catalogEntry?.name ?? 'Claude', baseUrl: trimmedUrl ?? 'https://api.anthropic.com/v1', timeoutMs: 120_000, extraHeaders });
   const effectiveUrl = trimmedUrl ?? catalogEntry?.baseUrl?.trim();
 
   if (customNodesGetter) {
@@ -7588,12 +7602,14 @@ export function resolveXGatewayProvider(providerId: string, baseUrl?: string | n
           name: customNode.name,
           baseUrl: effectiveUrl,
           timeoutMs: 120_000,
+          extraHeaders,
         });
       }
       return new OpenAICompatProvider({
         platform: 'custom',
         name: customNode.name,
         baseUrl: effectiveUrl,
+        extraHeaders,
         timeoutMs: 120_000,
       });
     }
@@ -7619,14 +7635,16 @@ export function resolveXGatewayProvider(providerId: string, baseUrl?: string | n
       name: catalogEntry?.name ?? normalized,
       baseUrl: effectiveUrl,
       timeoutMs: 120_000,
+      extraHeaders,
     });
   }
 
-  if (trimmedUrl && catalogEntry && trimmedUrl !== catalogEntry.baseUrl) {
+  if ((trimmedUrl && catalogEntry && trimmedUrl !== catalogEntry.baseUrl) || (hasExtraHeaders && effectiveUrl)) {
     return new OpenAICompatProvider({
       platform: 'custom',
-      name: catalogEntry.name,
-      baseUrl: trimmedUrl,
+      name: catalogEntry?.name ?? normalized,
+      baseUrl: effectiveUrl!,
+      extraHeaders,
       timeoutMs: 120_000,
     });
   }
@@ -7643,6 +7661,7 @@ export function resolveXGatewayProvider(providerId: string, baseUrl?: string | n
     platform: 'custom',
     name: catalogEntry?.name ?? normalized,
     baseUrl: effectiveUrl,
+    extraHeaders,
     timeoutMs: 120_000,
   });
 }

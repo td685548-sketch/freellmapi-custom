@@ -2,17 +2,28 @@ import type { QuotaObservationContext } from '../../services/provider-quota.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ChatMessage, Platform } from '@freellmapi/shared/types.js';
 import { BaseProvider, type CompletionOptions } from '../../providers/base.js';
+import { normalizeReasoningEffort } from '../../lib/sampling-params.js';
 import { withKeyProxy } from '../../lib/proxy.js';
 import { X_GATEWAY_OAUTH_EXECUTORS, resolveXGatewayProvider, getXGatewayProvider } from './catalog.js';
-import { accountModels, resolveXGatewayAccountProxy, type AccountRow } from './store.js';
+import { accountModels, getProviderModelConfig, resolveXGatewayAccountProxy, type AccountRow } from './store.js';
 import { withAccountCredential, resolveAccountCredential, isUnauthorizedError } from './oauth-lifecycle.js';
 import { parseOAuthCredential } from './oauth-credentials.js';
 
 export function resolveAccountProvider(account: AccountRow): BaseProvider | undefined {
   const catalog = getXGatewayProvider(account.provider);
   if (catalog?.category === 'oauth' && !X_GATEWAY_OAUTH_EXECUTORS.has(account.provider)) return undefined;
-  const delegate = resolveXGatewayProvider(account.provider, account.base_url);
+  const providerCfg = getProviderModelConfig(account.provider);
+  const delegate = resolveXGatewayProvider(account.provider, account.base_url, providerCfg.customHeaders);
   if (!delegate) return undefined;
+
+  const applyThinkingOptions = (options?: CompletionOptions): CompletionOptions | undefined => {
+    if (!providerCfg.thinkingMode || providerCfg.thinkingMode === 'auto') return options;
+    if (options?.reasoning_effort !== undefined) return options;
+    const effort = normalizeReasoningEffort(providerCfg.thinkingMode);
+    if (!effort) return options;
+    return { ...options, reasoning_effort: effort };
+  };
+
   class AccountProvider extends BaseProvider {
     readonly platform: Platform = delegate!.platform;
     readonly name = delegate!.name;
@@ -21,9 +32,10 @@ export function resolveAccountProvider(account: AccountRow): BaseProvider | unde
       return withKeyProxy(resolveXGatewayAccountProxy(account), () => withAccountCredential(account, fn));
     }
     override chatCompletion(_credential: string, messages: ChatMessage[], model: string, options?: CompletionOptions, quotaContext?: QuotaObservationContext) {
+      const effectiveOptions = applyThinkingOptions(options);
       return this.run(credential => {
-        options?.signal?.throwIfAborted();
-        return delegate!.chatCompletion(credential, messages, model, options, quotaContext);
+        effectiveOptions?.signal?.throwIfAborted();
+        return delegate!.chatCompletion(credential, messages, model, effectiveOptions, quotaContext);
       });
     }
     override streamChatCompletion(_credential: string, messages: ChatMessage[], model: string, options?: CompletionOptions, quotaContext?: QuotaObservationContext) {
@@ -31,25 +43,26 @@ export function resolveAccountProvider(account: AccountRow): BaseProvider | unde
       const context = AsyncLocalStorage.snapshot();
       const proxy = resolveXGatewayAccountProxy(account);
       const step = <T>(fn: () => T): T => context(() => withKeyProxy(proxy, fn));
+      const effectiveOptions = applyThinkingOptions(options);
       return (async function*() {
         let credential = await step(() => resolveAccountCredential(account));
-        options?.signal?.throwIfAborted();
-        let iterator = delegate!.streamChatCompletion(credential, messages, model, options, quotaContext);
+        effectiveOptions?.signal?.throwIfAborted();
+        let iterator = delegate!.streamChatCompletion(credential, messages, model, effectiveOptions, quotaContext);
         try {
           let first;
           try { first = await step(() => iterator.next()); }
           catch (error) {
             await iterator.return(undefined).catch(() => {});
-            if (!isUnauthorizedError(error) || !parseOAuthCredential(credential) || options?.signal?.aborted) throw error;
+            if (!isUnauthorizedError(error) || !parseOAuthCredential(credential) || effectiveOptions?.signal?.aborted) throw error;
             const next = await step(() => resolveAccountCredential(account, { forceRefresh: true }));
             if (next === credential) throw error;
             credential = next;
-            iterator = delegate!.streamChatCompletion(credential, messages, model, options, quotaContext);
+            iterator = delegate!.streamChatCompletion(credential, messages, model, effectiveOptions, quotaContext);
             first = await step(() => iterator.next());
           }
           if (!first.done) yield first.value;
           while (!first.done) {
-            options?.signal?.throwIfAborted();
+            effectiveOptions?.signal?.throwIfAborted();
             first = await step(() => iterator.next());
             if (!first.done) yield first.value;
           }

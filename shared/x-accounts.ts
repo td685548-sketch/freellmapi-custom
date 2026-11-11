@@ -1,5 +1,7 @@
 export type ProviderAccountAuthMethod = 'api_key' | 'oauth_pkce' | 'device_code' | 'cookie';
 export type ProviderCategory = 'oauth' | 'free' | 'freeTier' | 'apikey' | 'webCookie';
+export type ProviderRoutingStrategy = 'fallback' | 'round-robin';
+export type ProviderThinkingMode = 'auto' | 'low' | 'medium' | 'high' | 'max';
 
 export interface ProviderAccount {
   id: number;
@@ -9,6 +11,7 @@ export interface ProviderAccount {
   authMethod: ProviderAccountAuthMethod;
   enabled: boolean;
   status: string;
+  priority?: number;
   proxyUrl?: string;
   proxyPoolId?: number;
   proxyPoolName?: string;
@@ -25,6 +28,13 @@ export interface AccountProvider {
   category?: ProviderCategory;
   baseUrl?: string | null;
   hasMainDbKey?: boolean;
+  isCustomNode?: boolean;
+  customNodeType?: 'openai-compatible' | 'anthropic-compatible' | 'custom-embedding';
+  customNodeApiType?: 'chat' | 'responses';
+  strategy?: ProviderRoutingStrategy;
+  stickyLimit?: number;
+  thinkingMode?: ProviderThinkingMode;
+  customHeaders?: Record<string, string>;
   authMethods: ProviderAccountAuthMethod[];
   accounts: ProviderAccount[];
 }

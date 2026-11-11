@@ -22,8 +22,10 @@ import { useSessionRevision } from '../../session-state';
 import { ProviderMark } from './Providers';
 import {
   mediaApi,
-  type MediaKind,
-  type MediaDefaults,
+  type MediaKind as BaseMediaKind,
+  type MediaKindSpec,
+  type MediaConfigResponse,
+  type MediaDefaults as BaseMediaDefaults,
   type ImageTestResult,
   type TtsTestResult,
   type SttTestResult,
@@ -31,6 +33,10 @@ import {
   type WebTestResult,
 } from '../media-api';
 import { useMediaStrings } from '../media-strings';
+
+type MediaKind = BaseMediaKind | 'video';
+type MediaDefaults = BaseMediaDefaults & { video?: { defaultModel?: string; aspectRatio?: string } };
+type VideoResult = { id?: string; request_id?: string; name?: string; status?: string; url?: string; video?: { url?: string }; data?: Array<{ url?: string }>; output?: string | string[] };
 
 export default function MediaProviders() {
   const s = useMediaStrings();
@@ -82,10 +88,23 @@ export default function MediaProviders() {
   const [webResult, setWebResult] = useState<WebTestResult | null>(null);
   const [copiedWebResult, setCopiedWebResult] = useState(false);
 
+  const [videoPrompt, setVideoPrompt] = useState('A slow aerial shot of a mountain lake at sunrise');
+  const [videoModel, setVideoModel] = useState('auto');
+  const [videoAspect, setVideoAspect] = useState('16:9');
+  const [videoResult, setVideoResult] = useState<VideoResult | null>(null);
+  const [voiceProvider, setVoiceProvider] = useState('openai');
+  const [voiceLang, setVoiceLang] = useState('');
+  const videoPromptId = useId();
+  const videoModelId = useId();
+  const videoAspectId = useId();
+  const videoDefaultId = useId();
+  const voiceProviderId = useId();
+  const voiceLangId = useId();
+
   // Queries
   const configQuery = useQuery({
     queryKey: ['x-media-config', revision],
-    queryFn: ({ signal }) => mediaApi.getConfig(signal),
+    queryFn: ({ signal }) => apiFetch<MediaConfigResponse & { defaults: MediaDefaults; kinds: Record<MediaKind, MediaKindSpec> }>('/api/x-gateway/media/config', { signal }),
     staleTime: 30_000,
   });
 
@@ -96,6 +115,22 @@ export default function MediaProviders() {
   });
 
   const activeApiKey = keysQuery.data?.keys?.[0]?.key || 'sk-xgw-your-key-here';
+
+  const voicesQuery = useQuery({
+    queryKey: ['x-media-voices', revision, voiceProvider, voiceLang],
+    queryFn: ({ signal }) => apiFetch<{ data: Array<{ id: string; name: string; lang: string; gender: string; model: string }> }>(
+      `/api/x-gateway/media/voices?provider=${encodeURIComponent(voiceProvider)}&lang=${encodeURIComponent(voiceLang)}`, { signal }),
+    enabled: activeKind === 'tts',
+    staleTime: 60_000,
+  });
+  const videoMutation = useMutation({
+    mutationFn: () => apiFetch<VideoResult>('/api/x-gateway/media/test/video', {
+      method: 'POST', body: JSON.stringify({ prompt: videoPrompt, model: videoModel, aspect_ratio: videoAspect }),
+    }),
+    onMutate: () => setVideoResult(null),
+    onSuccess: setVideoResult,
+  });
+  const videoUrl = videoResult?.url ?? videoResult?.video?.url ?? videoResult?.data?.[0]?.url ?? (typeof videoResult?.output === 'string' ? videoResult.output : videoResult?.output?.[0]);
 
   // Mutation for saving defaults
   const saveDefaultsMutation = useMutation({
@@ -184,6 +219,12 @@ export default function MediaProviders() {
     const endpointPath = currentKindSpec?.endpoint || `/x/v1/${activeKind}`;
     const url = `${origin}${endpointPath}`;
 
+    if (activeKind === 'video') {
+      const payload = JSON.stringify({ model: videoModel === 'auto' ? currentDefaults.video?.defaultModel || 'auto' : videoModel, prompt: videoPrompt, aspect_ratio: videoAspect });
+      if (snippetTab === 'python') return `import requests\nresponse = requests.post("${url}", headers={"Authorization": "Bearer ${activeApiKey}"}, json=${JSON.stringify(JSON.parse(payload), null, 2)})\nprint(response.json())`;
+      if (snippetTab === 'node') return `const response = await fetch("${url}", { method: "POST", headers: { Authorization: "Bearer ${activeApiKey}", "Content-Type": "application/json" }, body: JSON.stringify(${payload}) });\nconsole.log(await response.json());`;
+      return `curl "${url}" -H "Authorization: Bearer ${activeApiKey}" -H "Content-Type: application/json" -d '${payload.replace(/'/g, "'\\''")}'`;
+    }
     if (activeKind === 'image') {
       if (snippetTab === 'curl') {
         return `curl -X POST "${url}" \\
@@ -457,6 +498,10 @@ console.log(response.choices[0].message.content);`;
           <Globe size={18} />
           <span>{s.tabWeb}</span>
         </button>
+        <button type="button" role="tab" aria-selected={activeKind === 'video'}
+          className={`x-media-tab ${activeKind === 'video' ? 'active' : ''}`} onClick={() => setActiveKind('video')}>
+          <Film size={18} /> Video
+        </button>
       </div>
 
       {/* Kind Header & Endpoint Badge */}
@@ -493,6 +538,17 @@ console.log(response.choices[0].message.content);`;
         )}
 
         <div className="x-media-config-grid">
+          {activeKind === 'video' && (
+            <div className="x-media-field">
+              <label htmlFor={videoDefaultId}>{s.model}</label>
+              <input id={videoDefaultId} value={currentDefaults.video?.defaultModel ?? 'auto'} disabled={!canEdit}
+                onChange={e => updateDraft({ video: { ...currentDefaults.video, defaultModel: e.target.value } })} />
+              <div className="x-media-suggestions">{currentKindSpec?.suggestedModels.map(model => (
+                <button key={model} type="button" className="x-badge-button" disabled={!canEdit}
+                  onClick={() => updateDraft({ video: { ...currentDefaults.video, defaultModel: model } })}>{model}</button>
+              ))}</div>
+            </div>
+          )}
           {activeKind === 'image' && (
             <div className="x-media-field">
               <label htmlFor={defImgModelId}>{s.defaultModel}</label>
@@ -691,6 +747,29 @@ console.log(response.choices[0].message.content);`;
           </div>
         </div>
 
+        {activeKind === 'video' && (
+          <div className="x-playground-grid">
+            <div className="x-playground-controls">
+              <div className="x-media-field"><label htmlFor={videoPromptId}>Prompt</label>
+                <textarea id={videoPromptId} rows={4} value={videoPrompt} onChange={e => setVideoPrompt(e.target.value)} /></div>
+              <div className="x-media-field"><label htmlFor={videoModelId}>{s.model}</label>
+                <input id={videoModelId} list={`${videoModelId}-models`} value={videoModel} onChange={e => setVideoModel(e.target.value)} />
+                <datalist id={`${videoModelId}-models`}>{currentKindSpec?.suggestedModels.map(model => <option key={model} value={model} />)}</datalist></div>
+              <div className="x-media-field"><label htmlFor={videoAspectId}>Aspect ratio</label>
+                <select id={videoAspectId} value={videoAspect} onChange={e => setVideoAspect(e.target.value)}>
+                  {['16:9', '9:16', '1:1'].map(ratio => <option key={ratio}>{ratio}</option>)}
+                </select></div>
+              <button className="btn btn-primary" type="button" disabled={!canEdit || videoMutation.isPending || !videoPrompt.trim()}
+                onClick={() => videoMutation.mutate()}>{videoMutation.isPending ? 'Generating…' : 'Generate video'}</button>
+              {videoMutation.isError && <p role="alert">{videoMutation.error.message}</p>}
+            </div>
+            <div className="x-playground-preview">
+              {videoUrl && /^https?:\/\//i.test(videoUrl) && <video controls src={videoUrl} style={{ width: '100%' }} />}
+              {videoResult && <div role="status"><p>Job: {videoResult.id ?? videoResult.request_id ?? videoResult.name ?? '—'}</p>
+                <p>Status: {videoResult.status ?? (videoUrl ? 'completed' : 'queued')}</p></div>}
+            </div>
+          </div>
+        )}
         {/* --- Image Playground --- */}
         {activeKind === 'image' && (
           <div className="x-playground-grid">
@@ -809,6 +888,16 @@ console.log(response.choices[0].message.content);`;
               </div>
 
               <div className="x-media-row">
+                <div className="x-media-field"><label htmlFor={voiceProviderId}>Voice provider</label>
+                  <select id={voiceProviderId} value={voiceProvider} onChange={e => { setVoiceProvider(e.target.value); setTtsVoice(''); }}>
+                    {['openai', 'elevenlabs', 'deepgram', 'edge-tts', 'gemini', 'cartesia', 'fish-audio'].map(provider => <option key={provider}>{provider}</option>)}
+                  </select></div>
+                <div className="x-media-field"><label htmlFor={voiceLangId}>Voice language</label>
+                  <input id={voiceLangId} placeholder="en, vi, …" value={voiceLang} onChange={e => setVoiceLang(e.target.value)} /></div>
+              </div>
+              {voicesQuery.isFetching && <p role="status">Loading voices…</p>}
+              {voicesQuery.isError && <p role="alert">{voicesQuery.error.message}</p>}
+              <div className="x-media-row">
                 <div className="x-media-field">
                   <label htmlFor={ttsModelId}>{s.model}</label>
                   <input
@@ -823,11 +912,10 @@ console.log(response.choices[0].message.content);`;
                   <select
                     id={ttsVoiceId}
                     value={ttsVoice}
-                    onChange={(e) => setTtsVoice(e.target.value)}
+                    onChange={(e) => { setTtsVoice(e.target.value); const voice = voicesQuery.data?.data.find(v => v.id === e.target.value); if (voice && voiceProvider !== 'openai' && voiceProvider !== 'gemini') setTtsModel(voice.model); else if (voice) setTtsModel(`${voiceProvider}/${voiceProvider === 'openai' ? 'tts-1' : 'gemini-3.1-flash-tts-preview'}`); }}
                   >
-                    {['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'].map((v) => (
-                      <option key={v} value={v}>{v}</option>
-                    ))}
+                    <option value="">Select a voice</option>
+                    {voicesQuery.data?.data.map(v => <option key={v.id} value={v.id}>{v.name} · {v.lang} {v.gender}</option>)}
                   </select>
                 </div>
               </div>

@@ -18,7 +18,7 @@ import {
   setMediaDefaults,
   type XGatewayMediaDefaults,
 } from './config.js';
-import { accountBaseUrl } from './protocols.js';
+import { accountBaseUrl, handleVideoRequest, handleAudioVoices } from './protocols.js';
 import { withQuotaTracking } from './quota/tracking.js';
 import { resolveCandidateRoutes } from './router.js';
 import {
@@ -37,9 +37,10 @@ const upload = multer({
   limits: { fileSize: 25 * 1024 * 1024, files: 1 },
 });
 
-export type MediaProviderKind = 'image' | 'tts' | 'stt' | 'embedding' | 'web';
+export type MediaProviderKind = 'image' | 'tts' | 'stt' | 'embedding' | 'web' | 'video';
 
 const mediaConfigSchema = z.object({
+  video: z.object({ defaultModel: z.string().trim().max(200).optional(), aspectRatio: z.enum(['16:9', '9:16', '1:1']).optional() }).optional(),
   image: z.object({ defaultModel: z.string().trim().max(100).optional() }).optional(),
   tts: z.object({
     defaultModel: z.string().trim().max(100).optional(),
@@ -93,6 +94,13 @@ const KNOWN_KINDS: Record<MediaProviderKind, {
   matcher: RegExp;
   suggestedModels: string[];
 }> = {
+  video: {
+    label: 'Text to Video',
+    endpoint: '/x/v1/videos/generations',
+    defaultProviders: ['xai', 'openai', 'gemini', 'replicate', 'fal-ai', 'together', 'siliconflow', 'minimax', 'kling', 'luma'],
+    matcher: /video|veo|sora|kling|wan[\d.-]|luma|hunyuan|seedance/i,
+    suggestedModels: ['xai/grok-imagine-video', 'openai/sora-2', 'gemini/veo-3.0-generate-preview'],
+  },
   image: {
     label: 'Text to Image',
     endpoint: '/x/v1/images/generations',
@@ -133,7 +141,7 @@ const KNOWN_KINDS: Record<MediaProviderKind, {
 function getProvidersForKind(kindKey: MediaProviderKind) {
   const spec = KNOWN_KINDS[kindKey];
   const defaults = new Set(spec.defaultProviders);
-  const matched = new Set<string>();
+  const matched = new Set<string>(kindKey === 'video' ? spec.defaultProviders : []);
 
   for (const p of X_GATEWAY_PROVIDERS) {
     if (defaults.has(p.id) || defaults.has(p.alias || '')) {
@@ -168,16 +176,17 @@ function getProvidersForKind(kindKey: MediaProviderKind) {
   }).sort((a, b) => (b.connectedAccounts - a.connectedAccounts) || a.name.localeCompare(b.name));
 }
 
-function getExtendedMediaDefaults(): XGatewayMediaDefaults & { web?: { defaultModel?: string } } {
+function getExtendedMediaDefaults(): XGatewayMediaDefaults & { web?: { defaultModel?: string }; video?: { defaultModel?: string; aspectRatio?: string } } {
   const baseDefaults = getMediaDefaults();
   try {
     const db = getDb();
     const mediaRow = db.prepare("SELECT value FROM x_gateway_config WHERE key = 'media_defaults'").get() as { value: string } | undefined;
     if (mediaRow?.value) {
       const parsed = JSON.parse(mediaRow.value);
-      if (parsed.web) {
+      if (parsed.web || parsed.video) {
         return {
           ...baseDefaults,
+          video: { defaultModel: typeof parsed.video?.defaultModel === 'string' ? parsed.video.defaultModel : 'auto', aspectRatio: parsed.video?.aspectRatio ?? '16:9' },
           web: {
             defaultModel: typeof parsed.web?.defaultModel === 'string' ? parsed.web.defaultModel : 'auto',
           },
@@ -187,12 +196,15 @@ function getExtendedMediaDefaults(): XGatewayMediaDefaults & { web?: { defaultMo
   } catch {
     // fallback
   }
-  return { ...baseDefaults, web: { defaultModel: 'auto' } };
+  return { ...baseDefaults, web: { defaultModel: 'auto' }, video: { defaultModel: 'auto', aspectRatio: '16:9' } };
 }
+
+xGatewayMediaRouter.get('/media/voices', handleAudioVoices);
 
 xGatewayMediaRouter.get('/media/config', (_req: Request, res: Response) => {
   const defaults = getExtendedMediaDefaults();
   const kinds = {
+    video: { ...KNOWN_KINDS.video, providers: getProvidersForKind('video'), aspectRatios: ['16:9', '9:16', '1:1'] },
     image: {
       ...KNOWN_KINDS.image,
       providers: getProvidersForKind('image'),
@@ -233,6 +245,7 @@ xGatewayMediaRouter.put('/media/config', (req: Request, res: Response) => {
 
   const current = getExtendedMediaDefaults();
   const next = {
+    video: { ...current.video, ...parsed.data.video },
     image: { ...current.image, ...parsed.data.image },
     tts: { ...current.tts, ...parsed.data.tts },
     stt: { ...current.stt, ...parsed.data.stt },
@@ -243,6 +256,18 @@ xGatewayMediaRouter.put('/media/config', (req: Request, res: Response) => {
   const userId = (req as Request & { user?: { userId?: number } }).user?.userId;
   setMediaDefaults(next as any, userId);
   res.json({ ok: true, defaults: next });
+});
+
+xGatewayMediaRouter.post('/media/test/video', async (req: Request, res: Response) => {
+  const parsed = z.object({
+    prompt: z.string().trim().min(1).max(4000),
+    model: z.string().trim().min(1).max(200).optional(),
+    aspect_ratio: z.enum(['16:9', '9:16', '1:1']).optional(),
+  }).strict().safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: { message: 'Invalid video request', details: parsed.error.issues } }); return; }
+  const defaults = getExtendedMediaDefaults().video;
+  req.body = { ...parsed.data, model: parsed.data.model && parsed.data.model !== 'auto' ? parsed.data.model : defaults?.defaultModel ?? 'auto', aspect_ratio: parsed.data.aspect_ratio ?? defaults?.aspectRatio ?? '16:9' };
+  await handleVideoRequest(req, res);
 });
 
 xGatewayMediaRouter.post('/media/test/image', async (req: Request, res: Response) => {
@@ -411,7 +436,7 @@ xGatewayMediaRouter.post('/media/test/tts', async (req: Request, res: Response) 
             },
             body: JSON.stringify({
               input: parsed.data.input,
-              model: requestedModel === 'auto' ? modelId : requestedModel,
+              model: modelId,
               voice,
               speed: parsed.data.speed || 1.0,
               response_format: format,
