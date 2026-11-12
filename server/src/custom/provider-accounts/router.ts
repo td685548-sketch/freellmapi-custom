@@ -19,7 +19,12 @@ import {
   bulkDeleteAccounts,
   createApiKeyAccount,
   deleteAccount,
+  deleteCustomModelCaps,
   deleteCustomProviderNode,
+  deleteModelAlias,
+  getCatalogSyncState,
+  getCustomModelCaps,
+  getModelAliases,
   getProviderModelConfig,
   getUsableXGatewayKeys,
   listAccountRowsForBatchTest,
@@ -29,7 +34,10 @@ import {
   resolveXGatewayAccountProxy,
   saveCustomProviderNode,
   setAccountStatus,
+  setCustomModelCaps,
+  setModelAlias,
   setProviderModelConfig,
+  syncXGatewayCatalog,
   toggleProviderAccounts,
   updateAccount,
   type CustomProviderNode,
@@ -710,6 +718,67 @@ providerAccountsRouter.post('/providers/:providerId/models/ping', requirePermiss
       message: err?.message || 'Ping request failed.',
     });
   }
+});
+
+// Model aliases, custom model capabilities and catalog sync. Registered before
+// the `/:id` routes so these static paths are never read as account ids.
+const aliasSchema = z.object({
+  alias: z.string().trim().min(1).max(64).regex(/^[a-zA-Z0-9_.-]+$/),
+  model: z.string().trim().min(1).max(200),
+}).strict();
+const aliasDeleteSchema = z.object({ alias: z.string().trim().min(1).max(64) });
+const capsSchema = z.object({
+  vision: z.boolean().optional(),
+  audioInput: z.boolean().optional(),
+  toolCall: z.boolean().optional(),
+  reasoning: z.boolean().optional(),
+}).strict();
+const capsPutSchema = z.object({
+  provider: z.string().trim().min(1).max(100),
+  modelId: z.string().trim().min(1).max(200),
+  caps: capsSchema,
+}).strict();
+const capsKeySchema = z.object({
+  provider: z.string().trim().min(1).max(100),
+  modelId: z.string().trim().min(1).max(200),
+});
+function requireModelCatalogEdit(req: Request, res: Response, next: NextFunction): void {
+  const user = (req as SessionRequest).user;
+  if (hasPermission(user, 'edit_x_combos') || hasPermission(user, 'manage_key_models')) { next(); return; }
+  res.status(403).json({ error: { type: 'forbidden', message: "Permission denied: 'edit_x_combos' or 'manage_key_models' access required." } });
+}
+
+providerAccountsRouter.get('/model-aliases', (_req, res) => {
+  res.json({ aliases: getModelAliases() });
+});
+providerAccountsRouter.put('/model-aliases', requireModelCatalogEdit, (req, res) => {
+  const body = parse(aliasSchema, req.body);
+  const aliases = setModelAlias(body.alias, body.model);
+  res.json({ ok: true, alias: body.alias, model: body.model, aliases });
+});
+providerAccountsRouter.delete('/model-aliases', requireModelCatalogEdit, (req, res) => {
+  const body = parse(aliasDeleteSchema, { alias: typeof req.query.alias === 'string' ? req.query.alias : req.body?.alias });
+  res.json({ ok: true, aliases: deleteModelAlias(body.alias) });
+});
+
+providerAccountsRouter.get('/custom-models/caps', (_req, res) => {
+  res.json({ caps: getCustomModelCaps() });
+});
+providerAccountsRouter.put('/custom-models/caps', requireModelCatalogEdit, (req, res) => {
+  const body = parse(capsPutSchema, req.body);
+  const saved = setCustomModelCaps(body.provider, body.modelId, body.caps);
+  res.json({ ok: true, key: saved.key, caps: saved.caps, allCaps: getCustomModelCaps() });
+});
+providerAccountsRouter.delete('/custom-models/caps', requireModelCatalogEdit, (req, res) => {
+  const body = parse(capsKeySchema, { provider: req.query.provider, modelId: req.query.modelId });
+  res.json({ ok: true, caps: deleteCustomModelCaps(body.provider, body.modelId) });
+});
+
+providerAccountsRouter.get('/catalog-sync', (_req, res) => {
+  res.json(getCatalogSyncState());
+});
+providerAccountsRouter.post('/catalog-sync', requireModelCatalogEdit, (_req, res) => {
+  res.json(syncXGatewayCatalog());
 });
 
 providerAccountsRouter.post('/auth/:provider/start', async (req: SessionRequest, res) => {

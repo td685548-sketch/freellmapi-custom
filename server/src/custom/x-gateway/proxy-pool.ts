@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { sanitizeProviderErrorMessage } from '../../lib/error-redaction.js';
 import { getDb, getSetting, setSetting } from '../../db/index.js';
 import { decryptProxyUrl, encryptProxyUrl, isValidKeyProxyUrl, KEY_PROXY_URL_ERROR, maskProxyUrl } from '../../lib/key-proxy.js';
 
@@ -581,20 +582,226 @@ export default async function handler(request) {
   }
 }`;
 
+export const DENO_RELAY_CODE = `Deno.serve(async (request) => {
+  const target = request.headers.get('fetch-relay-target');
+  if (!target) return Response.json({ status: 'ok', service: 'freellmapi-deno-relay' });
+  let url;
+  try { url = new URL(target); } catch { return Response.json({ error: 'Invalid relay target' }, { status: 400 }); }
+  if (!['http:', 'https:'].includes(url.protocol)) return Response.json({ error: 'Unsupported target protocol' }, { status: 400 });
+  const headers = new Headers(request.headers);
+  for (const name of ['fetch-relay-target', 'fetch-relay-authorization', 'host', 'connection', 'content-length']) headers.delete(name);
+  try {
+    return await fetch(url, {
+      method: request.method, headers,
+      body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,
+      redirect: 'manual', signal: request.signal,
+    });
+  } catch {
+    return Response.json({ error: 'Relay upstream request failed' }, { status: 502 });
+  }
+});`;
+
+// Digest-deployed Netlify Functions use the Lambda handler contract. Binary
+// bodies round-trip as base64; SSE remains valid but is buffered by this runtime.
+export const NETLIFY_RELAY_CODE = `exports.handler = async (event) => {
+  const headers = {};
+  for (const [key, value] of Object.entries(event.headers || {})) {
+    if (value != null) headers[key.toLowerCase()] = value;
+  }
+  const reply = (statusCode, data) => ({ statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
+  const target = headers['fetch-relay-target'];
+  if (!target) return reply(200, { status: 'ok', service: 'freellmapi-netlify-relay' });
+  let url;
+  try { url = new URL(target); } catch { return reply(400, { error: 'Invalid relay target' }); }
+  if (!['http:', 'https:'].includes(url.protocol)) return reply(400, { error: 'Unsupported target protocol' });
+  for (const name of ['fetch-relay-target', 'fetch-relay-authorization', 'host', 'connection', 'content-length']) delete headers[name];
+  const method = (event.httpMethod || 'GET').toUpperCase();
+  try {
+    const upstream = await fetch(url, {
+      method, headers, redirect: 'manual',
+      body: ['GET', 'HEAD'].includes(method) || event.body == null ? undefined
+        : event.isBase64Encoded ? Buffer.from(event.body, 'base64') : event.body,
+    });
+    const responseHeaders = Object.fromEntries(upstream.headers);
+    for (const name of ['content-encoding', 'content-length', 'transfer-encoding', 'connection']) delete responseHeaders[name];
+    return { statusCode: upstream.status, headers: responseHeaders,
+      body: Buffer.from(await upstream.arrayBuffer()).toString('base64'), isBase64Encoded: true };
+  } catch {
+    return reply(502, { error: 'Relay upstream request failed' });
+  }
+};`;
+
+export type RelayProvider = 'cloudflare' | 'vercel' | 'deno' | 'netlify';
+
 export interface DeployWorkerParams {
-  provider: 'cloudflare' | 'vercel';
+  provider: RelayProvider;
   apiToken: string;
   accountId?: string;
+  orgDomain?: string;
   workerName: string;
   createdBy?: number;
 }
 
+export type DeployRelayOptions = DeployWorkerParams;
+
 export interface DeployWorkerResult {
   ok: true;
-  provider: 'cloudflare' | 'vercel';
+  provider: RelayProvider;
   workerName: string;
   url: string;
   entry: ProxyPoolEntry;
+}
+
+/** Single-file ZIP (stored method), built in memory without a CLI or dependency. */
+function netlifyRelayZip(): Buffer {
+  const name = Buffer.from('relay.js');
+  const content = Buffer.from(NETLIFY_RELAY_CODE);
+  let crc = 0xffffffff;
+  for (const byte of content) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+  }
+  crc = (crc ^ 0xffffffff) >>> 0;
+  const local = Buffer.alloc(30);
+  local.writeUInt32LE(0x04034b50, 0);
+  local.writeUInt16LE(20, 4);
+  local.writeUInt16LE(0x21, 12); // DOS date: 1980-01-01
+  local.writeUInt32LE(crc, 14);
+  local.writeUInt32LE(content.length, 18);
+  local.writeUInt32LE(content.length, 22);
+  local.writeUInt16LE(name.length, 26);
+  const central = Buffer.alloc(46);
+  central.writeUInt32LE(0x02014b50, 0);
+  central.writeUInt16LE(20, 4);
+  central.writeUInt16LE(20, 6);
+  local.copy(central, 8, 6, 28);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(1, 8);
+  end.writeUInt16LE(1, 10);
+  end.writeUInt32LE(central.length + name.length, 12);
+  end.writeUInt32LE(local.length + name.length + content.length, 16);
+  return Buffer.concat([local, name, content, central, name, end]);
+}
+
+interface RelayApiData {
+  id?: string;
+  slug?: string;
+  status?: string;
+  state?: string;
+  ssl_url?: string;
+  url?: string;
+  required?: string[];
+  required_functions?: string[];
+  error_message?: string;
+  failure_detail?: { message?: string } | null;
+  timelines?: Array<{ context?: string; name?: string; hostnames?: string[] }>;
+}
+
+async function relayApiRequest(base: string, path: string, token: string, provider: string, init: RequestInit = {}, signal?: AbortSignal): Promise<RelayApiData> {
+  const headers = new Headers(init.headers);
+  headers.set('Authorization', `Bearer ${token}`);
+  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  headers.set('User-Agent', 'FreeLLMAPI');
+  let response: Response;
+  try {
+    response = await fetch(`${base}${path}`, { ...init, headers, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000), redirect: 'error' });
+  } catch {
+    throw new ProxyPoolError(502, `${provider} API request failed or timed out.`);
+  }
+  if (!response.ok) {
+    const raw = await response.text().catch(() => '');
+    const detail = sanitizeProviderErrorMessage(raw.split(token).join('[redacted]') || response.statusText);
+    const status = response.status >= 400 && response.status < 500 ? response.status : 502;
+    throw new ProxyPoolError(provider === 'Netlify' && status === 422 ? 409 : status, `${provider} API ${init.method ?? 'GET'} ${path.split('?')[0]} failed (${response.status}): ${detail}`);
+  }
+  if (response.status === 204 || init.method === 'PUT' || init.method === 'DELETE') return {};
+  try {
+    const data: unknown = await response.json();
+    if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Expected an object');
+    return data as RelayApiData;
+  }
+  catch { throw new ProxyPoolError(502, `${provider} API returned an invalid JSON response.`); }
+}
+
+function saveDeployedRelay(params: DeployWorkerParams, name: string, url: string): DeployWorkerResult {
+  const baseName = `${params.provider}-${name}`.slice(0, POOL_NAME_MAX);
+  let entryName = baseName;
+  for (let suffix = 2; getDb().prepare('SELECT 1 FROM x_gateway_proxy_pool WHERE name = ?').get(entryName); suffix++) {
+    entryName = `${baseName.slice(0, POOL_NAME_MAX - String(suffix).length - 1)}-${suffix}`;
+  }
+  return { ok: true, provider: params.provider, workerName: name, url, entry: createProxyPoolEntry(entryName, url, params.createdBy) };
+}
+
+async function deployDenoRelay(params: DeployWorkerParams, name: string, token: string): Promise<DeployWorkerResult> {
+  const base = 'https://api.deno.com/v2';
+  const org = params.orgDomain?.trim().toLowerCase();
+  if (org && !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.deno\.(?:net|dev))?$/.test(org)) throw new ProxyPoolError(400, 'Invalid Deno organization / subdomain.');
+  if (name.length < 3 || name.length > 32) throw new ProxyPoolError(400, 'Deno project names must contain 3–32 characters.');
+  const signal = AbortSignal.timeout(90_000);
+  const app = await relayApiRequest(base, '/apps', token, 'Deno', {
+    method: 'POST', body: JSON.stringify({ slug: name, config: { runtime: { type: 'dynamic', entrypoint: 'main.ts' } } }),
+  }, signal);
+  if (!app.id) throw new ProxyPoolError(502, 'Deno app creation returned no app ID.');
+  const path = `/apps/${encodeURIComponent(app.id)}`;
+  try {
+    let revision = await relayApiRequest(base, `${path}/deploy`, token, 'Deno', {
+      method: 'POST', body: JSON.stringify({ assets: { 'main.ts': { kind: 'file', content: DENO_RELAY_CODE, encoding: 'utf-8' } }, production: true }),
+    }, signal);
+    if (!revision.id) throw new ProxyPoolError(502, 'Deno deployment returned no revision ID.');
+    const revisionId = revision.id;
+    for (let attempt = 0; ['queued', 'building'].includes(revision.status ?? '') && attempt < 30; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      revision = await relayApiRequest(base, `/revisions/${encodeURIComponent(revisionId)}`, token, 'Deno', {}, signal);
+    }
+    if (revision.status !== 'succeeded') throw new ProxyPoolError(502, `Deno deployment did not succeed (${revision.status ?? 'unknown'}): ${sanitizeProviderErrorMessage((revision.failure_detail?.message ?? 'Check the Deno build logs.').split(token).join('[redacted]'))}`);
+    const host = revision.timelines?.find(t => t.context?.toLowerCase() === 'production' || t.name?.toLowerCase() === 'production')?.hostnames?.[0];
+    // v2 returns its real production hostname; do not fabricate a legacy .deno.dev URL.
+    const hostname = host ?? (org ? `${app.slug ?? name}.${org.includes('.') ? org : `${org}.deno.net`}` : undefined);
+    if (!hostname || !/^[a-z0-9.-]+\.(?:deno\.net|deno\.dev)$/.test(hostname)) throw new ProxyPoolError(502, 'Deno deployment returned no valid production hostname. Enter the organization subdomain.');
+    return saveDeployedRelay(params, name, `https://${hostname}`);
+  } catch (err) {
+    await relayApiRequest(base, path, token, 'Deno', { method: 'DELETE' }).catch(() => {});
+    throw err;
+  }
+}
+
+async function deployNetlifyRelay(params: DeployWorkerParams, name: string, token: string): Promise<DeployWorkerResult> {
+  const base = 'https://api.netlify.com/api/v1';
+  const signal = AbortSignal.timeout(90_000);
+  const site = await relayApiRequest(base, '/sites', token, 'Netlify', { method: 'POST', body: JSON.stringify({ name }) }, signal);
+  if (!site.id) throw new ProxyPoolError(502, 'Netlify site creation returned no site ID.');
+  try {
+    const siteUrl = site.ssl_url ?? site.url ?? `https://${name}.netlify.app`;
+    let origin: URL;
+    try { origin = new URL(siteUrl); }
+    catch { throw new ProxyPoolError(502, 'Netlify returned an invalid site URL.'); }
+    if (origin.protocol !== 'https:' || !origin.hostname.endsWith('.netlify.app') || origin.username || origin.password) throw new ProxyPoolError(502, 'Netlify returned an invalid site URL.');
+    const zip = netlifyRelayZip();
+    const digest = crypto.createHash('sha256').update(zip).digest('hex');
+    const index = '<!doctype html><title>FreeLLMAPI Relay</title><p>Relay: /.netlify/functions/relay</p>';
+    const sha1 = crypto.createHash('sha1').update(index).digest('hex');
+    let deployment = await relayApiRequest(base, `/sites/${encodeURIComponent(site.id)}/deploys`, token, 'Netlify', {
+      method: 'POST', body: JSON.stringify({ files: { '/index.html': sha1 }, functions: { relay: digest } }),
+    }, signal);
+    if (!deployment.id) throw new ProxyPoolError(502, 'Netlify deployment returned no deploy ID.');
+    const deployPath = `/deploys/${encodeURIComponent(deployment.id)}`;
+    if (deployment.required?.includes(sha1)) await relayApiRequest(base, `${deployPath}/files/index.html`, token, 'Netlify', {
+      method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: index,
+    }, signal);
+    if (deployment.required_functions?.includes(digest)) await relayApiRequest(base, `${deployPath}/functions/relay?runtime=js`, token, 'Netlify', {
+      method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: new Uint8Array(zip),
+    }, signal);
+    for (let attempt = 0; deployment.state !== 'ready' && deployment.state !== 'error' && attempt < 30; attempt++) {
+      if (attempt > 0) await new Promise(resolve => setTimeout(resolve, 1000));
+      deployment = await relayApiRequest(base, deployPath, token, 'Netlify', {}, signal);
+    }
+    if (deployment.state !== 'ready') throw new ProxyPoolError(502, `Netlify deployment did not become ready (${deployment.state ?? 'unknown'}): ${sanitizeProviderErrorMessage((deployment.error_message ?? 'Check the Netlify deploy logs.').split(token).join('[redacted]'))}`);
+    return saveDeployedRelay(params, name, `${origin.origin}/.netlify/functions/relay`);
+  } catch (err) {
+    await relayApiRequest(base, `/sites/${encodeURIComponent(site.id)}`, token, 'Netlify', { method: 'DELETE' }).catch(() => {});
+    throw err;
+  }
 }
 
 export async function deployServerlessRelay(params: DeployWorkerParams): Promise<DeployWorkerResult> {
@@ -604,6 +811,14 @@ export async function deployServerlessRelay(params: DeployWorkerParams): Promise
   const rawName = params.workerName?.trim() || '';
   const cleanName = rawName.toLowerCase().replace(/[^a-z0-9-_]/g, '-').replace(/-+/g, '-').slice(0, 60);
   if (!cleanName) throw new ProxyPoolError(400, 'Invalid workerName.');
+
+  if (params.provider === 'deno' || params.provider === 'netlify') {
+    const name = rawName.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, params.provider === 'deno' ? 32 : 60).replace(/-$/, '');
+    if (!name) throw new ProxyPoolError(400, 'Invalid project name.');
+    const count = getDb().prepare('SELECT COUNT(*) AS n FROM x_gateway_proxy_pool').get() as { n: number };
+    if (Number(count.n) >= MAX_POOL_ENTRIES) throw new ProxyPoolError(400, `Maximum limit of ${MAX_POOL_ENTRIES} proxy pool entries reached.`);
+    return params.provider === 'deno' ? deployDenoRelay(params, name, token) : deployNetlifyRelay(params, name, token);
+  }
 
   if (params.provider === 'cloudflare') {
     let accountId = params.accountId?.trim();
@@ -726,5 +941,5 @@ export async function deployServerlessRelay(params: DeployWorkerParams): Promise
     return { ok: true, provider: 'vercel', workerName: cleanName, url: relayUrl, entry };
   }
 
-  throw new ProxyPoolError(400, 'Unsupported provider. Must be cloudflare or vercel.');
+  throw new ProxyPoolError(400, 'Unsupported provider. Must be cloudflare, vercel, deno or netlify.');
 }

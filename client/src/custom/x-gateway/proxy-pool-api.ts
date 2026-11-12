@@ -49,16 +49,20 @@ export interface XProxyPoolBatchImportResult {
   failedCount: number
 }
 
+export type XProxyPoolRelayProvider = 'cloudflare' | 'vercel' | 'deno' | 'netlify'
+
 export interface XProxyPoolDeployParams {
-  provider: 'cloudflare' | 'vercel'
+  provider: XProxyPoolRelayProvider
   apiToken: string
   accountId?: string
+  orgDomain?: string
   workerName: string
 }
 
 export interface XProxyPoolDeployResult {
   ok: boolean
-  provider: 'cloudflare' | 'vercel'
+  provider: XProxyPoolRelayProvider
+  orgDomain?: string
   workerName: string
   url: string
   entry: XProxyPoolEntry
@@ -99,5 +103,5 @@ export const proxyPoolApi = {
   deployWorker: (body: XProxyPoolDeployParams) =>
     apiFetch<XProxyPoolDeployResult>(`${base}/deploy-worker`, { method: 'POST', body: JSON.stringify(body) }),
   getRelayTemplate: (signal?: AbortSignal) =>
-    apiFetch<{ cloudflare: string; vercel: string }>(`${base}/relay-template`, { signal }),
+    apiFetch<Record<XProxyPoolRelayProvider, string>>(`${base}/relay-template`, { signal }),
 }

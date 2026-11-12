@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowUp, Check, Eye, Layers, Mic, Pencil, Plus, Search, Sparkles, Trash2, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, Copy, Eye, Layers, Mic, Pencil, Plus, RefreshCw, Search, Sparkles, Trash2, X } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { useI18n } from '@/i18n'
 import { useUserSession } from '../../use-session'
@@ -87,6 +87,14 @@ export interface CapacityAdapterSettings {
   audioInput: CapacityPool
 }
 
+interface CatalogSyncStatus {
+  syncedAt: string | null
+  totalProviders: number
+  totalModels: number
+  customModelsCount: number
+  aliasesCount: number
+}
+
 export default function Combos() {
   const s = useMgmtStrings()
   const { locale } = useI18n()
@@ -110,6 +118,61 @@ export default function Combos() {
   })
   const [newVisionModel, setNewVisionModel] = useState('')
   const [newAudioModel, setNewAudioModel] = useState('')
+
+  // Model aliases & catalog sync
+  const canEditAliases = canEdit || session.hasPermission('manage_key_models')
+  const aliasesQuery = useQuery({
+    queryKey: ['x-model-aliases', revision],
+    queryFn: ({ signal }) => apiFetch<{ aliases: Record<string, string> }>('/api/x-accounts/model-aliases', { signal }),
+    retry: false,
+  })
+  const syncQuery = useQuery({
+    queryKey: ['x-catalog-sync', revision],
+    queryFn: ({ signal }) => apiFetch<CatalogSyncStatus>('/api/x-accounts/catalog-sync', { signal }),
+    retry: false,
+  })
+  const [aliasName, setAliasName] = useState('')
+  const [aliasProvider, setAliasProvider] = useState('')
+  const [aliasModel, setAliasModel] = useState('')
+  const [copiedAlias, setCopiedAlias] = useState<string | null>(null)
+  const aliases = aliasesQuery.data?.aliases ?? {}
+  const aliasProviderModels = useMemo(() => {
+    const provider = providers.find(p => p.id === aliasProvider)
+    const ids = new Set<string>()
+    for (const account of provider?.accounts ?? []) for (const m of account.models) ids.add(m.id)
+    return [...ids]
+  }, [providers, aliasProvider])
+  const aliasNameValid = /^[a-zA-Z0-9_.-]{1,64}$/.test(aliasName.trim())
+  const saveAlias = useMutation({
+    meta: { silenceToast: true },
+    mutationFn: (body: { alias: string; model: string }) =>
+      apiFetch<{ ok: true }>('/api/x-accounts/model-aliases', { method: 'PUT', body: JSON.stringify(body) }),
+    onSuccess: () => {
+      setAliasName('')
+      setAliasModel('')
+      return client.invalidateQueries({ queryKey: ['x-model-aliases'] })
+    },
+  })
+  const removeAlias = useMutation({
+    meta: { silenceToast: true },
+    mutationFn: (alias: string) =>
+      apiFetch<{ ok: true }>(`/api/x-accounts/model-aliases?alias=${encodeURIComponent(alias)}`, { method: 'DELETE' }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['x-model-aliases'] }),
+  })
+  const syncCatalog = useMutation({
+    meta: { silenceToast: true },
+    mutationFn: () => apiFetch<CatalogSyncStatus>('/api/x-accounts/catalog-sync', { method: 'POST' }),
+    onSuccess: () => Promise.all([
+      client.invalidateQueries({ queryKey: ['x-catalog-sync'] }),
+      client.invalidateQueries({ queryKey: ['x-model-aliases'] }),
+    ]),
+  })
+  const copyAlias = (alias: string) => {
+    void navigator.clipboard?.writeText(alias).then(() => {
+      setCopiedAlias(alias)
+      window.setTimeout(() => setCopiedAlias(current => (current === alias ? null : current)), 1500)
+    }).catch(() => undefined)
+  }
 
   const strategyLabels: Record<ComboStrategy, string> = {
     fallback: s.strategyFallback,
@@ -610,6 +673,103 @@ export default function Combos() {
         </div>
       </div>
       {saveCapacity.isSuccess && <p className="x-test-ok" role="status" style={{ fontSize: '0.82rem' }}><Check size={14} />{s.poolSaved}</p>}
+    </section>
+
+    {/* Model Aliases & Catalog Sync Section */}
+    <section className="x-panel" style={{ marginTop: 24, display: 'grid', gap: 14 }} aria-label="Model Aliases and Catalog Sync">
+      <div>
+        <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Sparkles size={18} />
+          Model Aliases &amp; Catalog Sync
+        </h2>
+        <p className="x-muted" style={{ fontSize: '0.85rem' }}>
+          Give a short name to a <code>provider/model</code> target, then call it by that alias.
+        </p>
+      </div>
+
+      <div style={{ display: 'grid', gap: 8 }}>
+        {Object.keys(aliases).length === 0 ? (
+          <p className="x-muted" style={{ fontSize: '0.82rem' }}>No aliases yet.</p>
+        ) : Object.entries(aliases).map(([alias, target]) => (
+          <div key={alias} className="x-panel" style={{ background: 'var(--x-surface-subtle)', padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'space-between' }}>
+            <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}><code>{alias}</code> → <code>{target}</code></span>
+            <span style={{ display: 'inline-flex', gap: 6 }}>
+              <button type="button" className="x-button" aria-label={`Copy alias ${alias}`} onClick={() => copyAlias(alias)}>
+                {copiedAlias === alias ? <Check size={14} /> : <Copy size={14} />} {copiedAlias === alias ? 'Copied' : 'Copy'}
+              </button>
+              {canEditAliases && (
+                <button type="button" className="x-button" aria-label={`Delete alias ${alias}`} disabled={removeAlias.isPending} onClick={() => removeAlias.mutate(alias)}>
+                  <Trash2 size={14} /> Delete
+                </button>
+              )}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {canEditAliases && (
+        <form
+          onSubmit={(e: FormEvent) => {
+            e.preventDefault()
+            if (!aliasNameValid || !aliasProvider || !aliasModel.trim()) return
+            saveAlias.mutate({ alias: aliasName.trim(), model: `${aliasProvider}/${aliasModel.trim()}` })
+          }}
+          style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}
+        >
+          <input
+            type="text"
+            aria-label="Alias Name"
+            placeholder="Alias Name (e.g. fast-coder)"
+            value={aliasName}
+            maxLength={64}
+            onChange={e => setAliasName(e.target.value)}
+            style={{ padding: '4px 8px', fontSize: '0.85rem', borderRadius: 6, border: '1px solid var(--x-border)' }}
+          />
+          <select
+            aria-label="Provider"
+            value={aliasProvider}
+            onChange={e => { setAliasProvider(e.target.value); setAliasModel('') }}
+            style={{ padding: '4px 8px', fontSize: '0.85rem', borderRadius: 6, border: '1px solid var(--x-border)' }}
+          >
+            <option value="">Provider…</option>
+            {providers.filter(p => p.accounts.length > 0).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <input
+            type="text"
+            aria-label="Model ID"
+            placeholder="Model ID"
+            list="x-alias-model-options"
+            value={aliasModel}
+            onChange={e => setAliasModel(e.target.value)}
+            style={{ padding: '4px 8px', fontSize: '0.85rem', borderRadius: 6, border: '1px solid var(--x-border)' }}
+          />
+          <datalist id="x-alias-model-options">
+            {aliasProviderModels.map(id => <option key={id} value={id} />)}
+          </datalist>
+          <button type="submit" className="x-button" disabled={!aliasNameValid || !aliasProvider || !aliasModel.trim() || saveAlias.isPending}>
+            <Plus size={14} /> Save Alias
+          </button>
+        </form>
+      )}
+      {aliasName.trim() !== '' && !aliasNameValid && (
+        <p className="x-muted" role="alert" style={{ fontSize: '0.8rem' }}>Use 1-64 letters, digits, "_", "." or "-".</p>
+      )}
+      {(saveAlias.isError || removeAlias.isError) && <p role="alert" style={{ fontSize: '0.82rem', color: 'var(--x-danger, #dc2626)' }}>Could not update aliases.</p>}
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', borderTop: '1px solid var(--x-border)', paddingTop: 12 }}>
+        <div style={{ fontSize: '0.85rem' }}>
+          <strong>Catalog Sync</strong>:{' '}
+          {syncQuery.data?.syncedAt
+            ? <>last synced {new Date(syncQuery.data.syncedAt).toLocaleString()} · {syncQuery.data.totalModels} models · {syncQuery.data.totalProviders} providers</>
+            : <span className="x-muted">never synced</span>}
+        </div>
+        {canEditAliases && (
+          <button type="button" className="x-button" disabled={syncCatalog.isPending} onClick={() => syncCatalog.mutate()}>
+            <RefreshCw size={14} /> {syncCatalog.isPending ? 'Syncing…' : 'Sync Catalog Now'}
+          </button>
+        )}
+        {syncCatalog.isError && <span role="alert" style={{ fontSize: '0.82rem', color: 'var(--x-danger, #dc2626)' }}>Sync failed.</span>}
+      </div>
     </section>
   </>
 }
