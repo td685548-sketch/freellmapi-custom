@@ -104,6 +104,68 @@ describe('webhook executor', () => {
     const [url] = fetchMock.mock.calls[0] as unknown as [string];
     expect(new URL(url).searchParams.get('userId')).toBe('cust_101');
   });
+
+  it('requires a non-empty signing secret', async () => {
+    await expect(
+      executeSupportWebhookTool({
+        tool,
+        context: ctx('customer'),
+        args: {},
+        signingSecret: '',
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('includes stable Idempotency-Key header when supplied', async () => {
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await executeSupportWebhookTool({
+      tool,
+      context: ctx('customer'),
+      args: {},
+      signingSecret: 'sec_123',
+      idempotencyKey: 'act_idempotent_123',
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Idempotency-Key']).toBe('act_idempotent_123');
+  });
+
+  it('blocks SSRF private target URL unless server-owned trusted origin is configured', async () => {
+    const privateTool: SupportWebhookTool = {
+      ...tool,
+      endpointUrl: 'http://192.168.1.50:8080/hook',
+    };
+
+    // By default, private URL is rejected
+    await expect(
+      executeSupportWebhookTool({
+        tool: privateTool,
+        context: ctx('customer'),
+        args: {},
+        signingSecret: 'sec_123',
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+
+    // With server-owned exact origin allowlist, it is permitted
+    process.env.SUPPORT_TRUSTED_PARTNER_ORIGINS = 'http://192.168.1.50:8080';
+    try {
+      const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const res = await executeSupportWebhookTool({
+        tool: privateTool,
+        context: ctx('customer'),
+        args: {},
+        signingSecret: 'sec_123',
+      });
+      expect(res.ok).toBe(true);
+    } finally {
+      delete process.env.SUPPORT_TRUSTED_PARTNER_ORIGINS;
+    }
+  });
 });
 
 describe('SQL validation', () => {

@@ -557,11 +557,24 @@ describe('Customer CRM Memory, CSAT Ratings & Outbound Partner Webhooks', () => 
         TENANT_A,
         'action.approved',
         { actionId: 'act_1' },
+        { signingSecret: 'sec_test_fail' },
       );
 
       expect(deliveries).toHaveLength(1);
       expect(deliveries[0].status).toBe('failed');
       expect(deliveries[0].error).toContain('Connection refused');
+    });
+
+    it('dispatchSupportPartnerEvent: rejects when no valid signing secret is provided', async () => {
+      upsertSupportWebhookSubscription(TENANT_A, {
+        name: 'Sec Target',
+        targetUrl: 'https://partner.com/api',
+        events: ['ticket.created'],
+      });
+
+      await expect(
+        dispatchSupportPartnerEvent(TENANT_A, 'ticket.created', { id: 1 }, {}),
+      ).rejects.toThrow(SupportCrmWebhookError);
     });
 
     it('dispatchSupportPartnerEvent: filters by event type and supports webhook.test', async () => {
@@ -572,12 +585,12 @@ describe('Customer CRM Memory, CSAT Ratings & Outbound Partner Webhooks', () => 
       });
 
       // Event is ticket.created -> should not trigger Action Only subscription
-      const nonMatching = await dispatchSupportPartnerEvent(TENANT_A, 'ticket.created', {});
+      const nonMatching = await dispatchSupportPartnerEvent(TENANT_A, 'ticket.created', {}, { signingSecret: 'sec_test' });
       expect(nonMatching).toHaveLength(0);
 
       // Event is webhook.test -> triggers all subscriptions
       vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('OK', { status: 200 }));
-      const testDeliveries = await dispatchSupportPartnerEvent(TENANT_A, 'webhook.test', {});
+      const testDeliveries = await dispatchSupportPartnerEvent(TENANT_A, 'webhook.test', {}, { signingSecret: 'sec_test' });
       expect(testDeliveries).toHaveLength(1);
     });
 
@@ -591,7 +604,7 @@ describe('Customer CRM Memory, CSAT Ratings & Outbound Partner Webhooks', () => 
       });
 
       for (let i = 0; i < 205; i++) {
-        await dispatchSupportPartnerEvent(TENANT_A, 'csat.submitted', { index: i });
+        await dispatchSupportPartnerEvent(TENANT_A, 'csat.submitted', { index: i }, { signingSecret: 'sec_test' });
       }
 
       const deliveries = listSupportWebhookDeliveries(TENANT_A);

@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto';
 import { createRequire } from 'node:module';
+import { safeFetch, SafeHttpError } from './support-safe-http.js';
 
 const runtimeRequire = createRequire(import.meta.url);
 
@@ -206,8 +207,12 @@ export async function executeSupportWebhookTool(options: {
   args: Record<string, unknown>;
   signingSecret: string;
   timeoutMs?: number;
+  idempotencyKey?: string;
 }): Promise<{ ok: boolean; status: number; effectiveArgs: Record<string, unknown>; data: unknown }> {
   const { tool, context, signingSecret } = options;
+  if (!signingSecret) {
+    throw new SupportConnectorError(400, 'Signing secret is required to invoke webhook tool');
+  }
   if (!isRoleAllowed(tool.allowedRoles, context.role)) {
     throw new SupportConnectorError(403, `Role "${context.role}" is not allowed to call tool "${tool.name}"`);
   }
@@ -232,7 +237,7 @@ export async function executeSupportWebhookTool(options: {
     init.body = bodyJson;
   }
   const signature = createHmac('sha256', signingSecret).update(`${timestamp}.${bodyJson}`).digest('hex');
-  init.headers = {
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(tool.headers ?? {}),
     'X-Support-Signature': `sha256=${signature}`,
@@ -240,12 +245,19 @@ export async function executeSupportWebhookTool(options: {
     'X-Support-User-Id': context.userId,
     'X-Support-User-Role': context.role,
   };
+  if (options.idempotencyKey) {
+    headers['Idempotency-Key'] = options.idempotencyKey;
+  }
+  init.headers = headers;
   init.signal = AbortSignal.timeout(options.timeoutMs ?? 10_000);
 
   let res: Response;
   try {
-    res = await fetch(url, init);
+    res = await safeFetch(url, init);
   } catch (err) {
+    if (err instanceof SafeHttpError) {
+      throw new SupportConnectorError(err.status, `Webhook SSRF or transport check failed: ${err.message}`);
+    }
     throw new SupportConnectorError(502, `Webhook request failed: ${(err as Error).message}`);
   }
   const text = await res.text();
@@ -419,7 +431,7 @@ export async function executeSupportDbQuery(options: {
   } else if (source.driver === 'sql-http') {
     let res: Response;
     try {
-      res = await fetch(source.connectionUrl, {
+      res = await safeFetch(source.connectionUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -429,6 +441,9 @@ export async function executeSupportDbQuery(options: {
         signal: AbortSignal.timeout(10_000),
       });
     } catch (err) {
+      if (err instanceof SafeHttpError) {
+        throw new SupportConnectorError(err.status, `SQL HTTP SSRF check failed: ${err.message}`);
+      }
       throw new SupportConnectorError(502, `SQL HTTP request failed: ${(err as Error).message}`);
     }
     if (!res.ok) throw new SupportConnectorError(502, `SQL HTTP endpoint returned ${res.status}`);

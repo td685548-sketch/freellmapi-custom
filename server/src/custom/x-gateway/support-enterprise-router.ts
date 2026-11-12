@@ -7,12 +7,10 @@ import {
   SupportStoreError,
   type SupportTenant,
   type SupportUserContext,
-  getSupportTenantByPublicKey,
-  getSupportTenantSigningSecret,
   listSupportTools,
-  verifySupportUserToken,
+  createSupportTool,
 } from './support-store.js';
-import { executeSupportWebhookTool } from './support-connectors.js';
+import { invokeSupportRuntimeWebhook } from './support-action-executor.js';
 import {
   listSupportKnowledgeDocs,
   upsertSupportKnowledgeDoc,
@@ -40,10 +38,10 @@ import {
   updateSupportEscalationTicket,
   listSupportPendingActions,
   proposeSupportPendingAction,
-  reviewSupportPendingAction,
   getSupportAnalyticsSummary,
 } from './support-workflows.js';
-import { resolveTenant } from './support-router.js';
+import { resolveTenant, validateSupportPublicAuth } from './support-router.js';
+import { dispatchActionReview, dispatchPartnerEvent } from './support-runtime-router.js';
 
 // ---------------------------------------------------------------------------
 // Audit Log Persistence
@@ -109,32 +107,6 @@ export function listSupportAuditLogs(tenantId?: string): SupportAuditLogEntry[] 
   } catch {
     return [];
   }
-}
-
-// ---------------------------------------------------------------------------
-// CORS Helper
-// ---------------------------------------------------------------------------
-
-function applySupportCors(req: Request, res: Response, tenant?: SupportTenant): void {
-  const origin = req.headers.origin;
-  if (!origin) return;
-
-  const allowedOrigins = tenant?.allowedOrigins ?? [];
-  const isAllowed =
-    allowedOrigins.length === 0 ||
-    allowedOrigins.includes('*') ||
-    allowedOrigins.includes(origin);
-
-  if (isAllowed) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-  }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PATCH, DELETE');
-  res.setHeader(
-    'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, X-Tenant-Secret, X-Support-Tenant-Key, X-Support-User-Token, X-Support-Context-Token',
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -328,11 +300,24 @@ xSupportEnterpriseConsoleRouter.patch(
   (req: Request, res: Response): void => {
     const tid = resolveTenantIdParam(req.params.tenantId);
     const ticketId = paramStr(req.params.ticketId);
+    const currentTicket = listSupportEscalationTickets(tid).find((t) => t.id === ticketId);
+    const wasResolved = currentTicket?.status === 'resolved';
+
     const ticket = updateSupportEscalationTicket(tid, ticketId, req.body ?? {});
     if (!ticket) {
       res.status(404).json({ error: { message: `Ticket '${ticketId}' not found.`, status: 404 } });
       return;
     }
+
+    if (ticket.status === 'resolved' && !wasResolved) {
+      dispatchPartnerEvent({
+        tenantId: Number(tid),
+        event: 'ticket.resolved',
+        payload: { ticket },
+        dedupKey: `ticket_resolved_${ticket.id}`,
+      });
+    }
+
     res.json({ ok: true, ticket });
   },
 );
@@ -355,86 +340,55 @@ xSupportEnterpriseConsoleRouter.post(
   async (req: Request, res: Response): Promise<void> => {
     const tid = resolveTenantIdParam(req.params.tenantId);
     const actionId = paramStr(req.params.actionId);
-    const actions = listSupportPendingActions(tid);
-    const existing = actions.find((a) => a.id === actionId);
-    if (!existing) {
-      res.status(404).json({ error: { message: `Action '${actionId}' not found.`, status: 404 } });
-      return;
-    }
-
-    let executionResult: unknown = {
-      executed: true,
-      simulated: true,
-      timestamp: new Date().toISOString(),
-    };
-
-    const tools = listSupportTools(Number(tid));
-    const matchingTool = tools.find(
-      (t) => t.name.toLowerCase() === existing.toolName.toLowerCase(),
-    );
-
-    if (matchingTool) {
-      try {
-        const signingSecret = getSupportTenantSigningSecret(Number(tid));
-        const execution = await executeSupportWebhookTool({
-          tool: matchingTool,
-          context: {
-            tenantId: Number(tid),
-            userId: existing.userId,
-            role: existing.userRole,
-            permissions: [],
-            verified: true,
-          },
-          args: existing.payload ?? {},
-          signingSecret,
-        });
-        executionResult = execution.data;
-      } catch (err) {
-        executionResult = { error: (err as Error).message };
-      }
-    }
-
     const reviewedBy =
-      req.body?.reviewedBy ||
       (req as Request & { user?: SessionUser }).user?.email ||
+      (req as Request & { user?: SessionUser }).user?.userId ||
       'admin';
 
-    const action = reviewSupportPendingAction(tid, actionId, {
-      decision: 'approved',
-      reviewedBy: String(reviewedBy),
-      reviewNote: req.body?.reviewNote ? String(req.body.reviewNote) : undefined,
-      executionResult,
-    });
-
-    res.json({ ok: true, action });
+    try {
+      const action = await dispatchActionReview({
+        tenantId: Number(tid),
+        actionId,
+        decision: 'approved',
+        reviewedBy: String(reviewedBy),
+        reviewNote: req.body?.reviewNote ? String(req.body.reviewNote) : undefined,
+      });
+      res.json({ ok: true, action });
+    } catch (err: any) {
+      const status = err.status || err.statusCode || 500;
+      res.status(status).json({
+        error: { message: err.message || 'Action approval failed.', status },
+      });
+    }
   },
 );
 
 // POST /tenants/:tenantId/actions/:actionId/reject
 xSupportEnterpriseConsoleRouter.post(
   '/tenants/:tenantId/actions/:actionId/reject',
-  (req: Request, res: Response): void => {
+  async (req: Request, res: Response): Promise<void> => {
     const tid = resolveTenantIdParam(req.params.tenantId);
     const actionId = paramStr(req.params.actionId);
-    const actions = listSupportPendingActions(tid);
-    const existing = actions.find((a) => a.id === actionId);
-    if (!existing) {
-      res.status(404).json({ error: { message: `Action '${actionId}' not found.`, status: 404 } });
-      return;
-    }
-
     const reviewedBy =
-      req.body?.reviewedBy ||
       (req as Request & { user?: SessionUser }).user?.email ||
+      (req as Request & { user?: SessionUser }).user?.userId ||
       'admin';
 
-    const action = reviewSupportPendingAction(tid, actionId, {
-      decision: 'rejected',
-      reviewedBy: String(reviewedBy),
-      reviewNote: req.body?.reviewNote ? String(req.body.reviewNote) : undefined,
-    });
-
-    res.json({ ok: true, action });
+    try {
+      const action = await dispatchActionReview({
+        tenantId: Number(tid),
+        actionId,
+        decision: 'rejected',
+        reviewedBy: String(reviewedBy),
+        reviewNote: req.body?.reviewNote ? String(req.body.reviewNote) : undefined,
+      });
+      res.json({ ok: true, action });
+    } catch (err: any) {
+      const status = err.status || err.statusCode || 500;
+      res.status(status).json({
+        error: { message: err.message || 'Action rejection failed.', status },
+      });
+    }
   },
 );
 
@@ -469,17 +423,32 @@ export const xSupportEnterprisePublicRouter = Router();
 // Handle CORS Preflight
 xSupportEnterprisePublicRouter.use((req: Request, res: Response, next: NextFunction): void => {
   if (req.method === 'OPTIONS') {
+    const origin = req.headers.origin;
     const tenantKey =
       (req.headers['x-support-tenant-key'] as string) || (req.query.tenantKey as string);
     let tenant: SupportTenant | undefined;
     if (tenantKey) {
       try {
         tenant = resolveTenant(tenantKey);
+        if (origin) {
+          const allowed = tenant.allowedOrigins ?? [];
+          if (allowed.length > 0 && !allowed.includes('*') && !allowed.includes(origin)) {
+            res.status(403).json({ error: { code: 'origin_denied', message: 'CORS origin denied.' } });
+            return;
+          }
+          res.setHeader('Access-Control-Allow-Origin', origin);
+          res.setHeader('Vary', 'Origin');
+          res.setHeader('Access-Control-Allow-Credentials', 'true');
+        }
       } catch {
         /* ignore */
       }
     }
-    applySupportCors(req, res, tenant);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PATCH, DELETE');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-Tenant-Secret, X-Support-Tenant-Key, X-Support-User-Token, X-Support-Context-Token',
+    );
     res.status(204).end();
     return;
   }
@@ -492,57 +461,22 @@ interface AuthenticatedPartnerRequest extends Request {
 }
 
 function partnerAuthMiddleware(req: Request, res: Response, next: NextFunction): void {
-  const tenantKey =
-    (req.headers['x-support-tenant-key'] as string | undefined) ||
-    (req.body?.tenantKey as string | undefined) ||
-    (req.query?.tenantKey as string | undefined);
-
-  if (!tenantKey || typeof tenantKey !== 'string') {
-    res.status(401).json({ error: { message: 'Support tenant key is required.', status: 401 } });
-    return;
-  }
-
-  let tenant: SupportTenant;
   try {
-    tenant = getSupportTenantByPublicKey(tenantKey);
-  } catch {
-    try {
-      tenant = resolveTenant(tenantKey);
-    } catch {
-      res.status(401).json({ error: { message: 'Invalid support tenant key.', status: 401 } });
-      return;
-    }
+    const { tenant, userContext } = validateSupportPublicAuth(req, res);
+    (req as AuthenticatedPartnerRequest).tenant = tenant;
+    (req as AuthenticatedPartnerRequest).userContext = userContext;
+    next();
+  } catch (err: any) {
+    const status = err.status || 401;
+    const code =
+      err.code ||
+      (status === 400
+        ? 'conflicting_identity'
+        : status === 403
+          ? 'origin_denied'
+          : 'invalid_context_token');
+    res.status(status).json({ error: { code, message: (err as Error).message, status } });
   }
-
-  applySupportCors(req, res, tenant);
-
-  if (!tenant.enabled) {
-    res.status(403).json({ error: { message: 'Support tenant is disabled.', status: 403 } });
-    return;
-  }
-
-  const userToken =
-    (req.headers['x-support-user-token'] as string | undefined) ||
-    (req.headers['x-support-context-token'] as string | undefined) ||
-    (req.body?.userToken as string | undefined) ||
-    (req.body?.contextToken as string | undefined);
-
-  if (!userToken || typeof userToken !== 'string') {
-    res.status(401).json({ error: { message: 'Support user token is required.', status: 401 } });
-    return;
-  }
-
-  let userContext: SupportUserContext;
-  try {
-    userContext = verifySupportUserToken(tenant.id, userToken);
-  } catch {
-    res.status(401).json({ error: { message: 'Invalid or expired support user token.', status: 401 } });
-    return;
-  }
-
-  (req as AuthenticatedPartnerRequest).tenant = tenant;
-  (req as AuthenticatedPartnerRequest).userContext = userContext;
-  next();
 }
 
 // POST /knowledge/query
@@ -593,7 +527,14 @@ xSupportEnterprisePublicRouter.get(
     const status = req.query.status as SupportConversationStatus | undefined;
 
     const conversations = listSupportConversations(String(tenant.id), { userId, status });
-    res.json({ ok: true, conversations });
+    const maskedConversations = conversations.map((c) => ({
+      ...c,
+      messages: c.messages.map((m) => ({
+        ...m,
+        content: maskSupportSensitiveText(String(tenant.id), m.content, userContext.role).masked,
+      })),
+    }));
+    res.json({ ok: true, conversations: maskedConversations });
   },
 );
 
@@ -650,7 +591,11 @@ xSupportEnterprisePublicRouter.get(
         role: userContext.role,
       },
     );
-    res.json({ ok: true, conversation });
+    const maskedMessages = conversation.messages.map((m) => ({
+      ...m,
+      content: maskSupportSensitiveText(String(tenant.id), m.content, userContext.role).masked,
+    }));
+    res.json({ ok: true, conversation: { ...conversation, messages: maskedMessages } });
   },
 );
 
@@ -684,6 +629,13 @@ xSupportEnterprisePublicRouter.post(
       priority: req.body?.priority as SupportTicketPriority | undefined,
     });
 
+    dispatchPartnerEvent({
+      tenantId: Number(tenant.id),
+      event: 'ticket.created',
+      payload: { ticket },
+      dedupKey: `ticket_${ticket.id}`,
+    });
+
     res.status(201).json({ ok: true, ticket });
   },
 );
@@ -692,7 +644,7 @@ xSupportEnterprisePublicRouter.post(
 xSupportEnterprisePublicRouter.post(
   '/actions/propose',
   partnerAuthMiddleware,
-  (req: Request, res: Response): void => {
+  async (req: Request, res: Response): Promise<void> => {
     const { tenant, userContext } = req as AuthenticatedPartnerRequest;
     const toolName = req.body?.toolName ? String(req.body.toolName).trim() : '';
     const actionSummary = req.body?.actionSummary ? String(req.body.actionSummary).trim() : '';
@@ -706,6 +658,37 @@ xSupportEnterprisePublicRouter.post(
         userId: userContext.userId,
         role: userContext.role,
       });
+    }
+
+    const tools = listSupportTools(Number(tenant.id));
+    let tool = tools.find((t) => t.name.toLowerCase() === toolName.toLowerCase());
+    if (!tool) {
+      tool = createSupportTool(Number(tenant.id), {
+        name: toolName,
+        description: actionSummary,
+        method: 'POST',
+        endpointUrl: 'https://example.com/api/actions',
+        allowedRoles: ['customer', 'admin', 'staff', 'guest'],
+        enabled: true,
+      });
+    }
+
+    try {
+      const resExec = await invokeSupportRuntimeWebhook({
+        tenantId: Number(tenant.id),
+        context: userContext,
+        tool,
+        args: (req.body?.payload as Record<string, unknown>) ?? {},
+        requestId: `req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        conversationId: req.body?.conversationId ? String(req.body.conversationId) : undefined,
+      });
+      const pendingActionId = (resExec.data as any)?.pendingActionId;
+      const allActions = listSupportPendingActions(String(tenant.id));
+      const action = allActions.find((a) => a.id === pendingActionId);
+      res.status(201).json({ ok: true, action });
+      return;
+    } catch {
+      // Fallback proposal if action executor is unavailable
     }
 
     const action = proposeSupportPendingAction(String(tenant.id), {
@@ -744,8 +727,13 @@ xSupportEnterprisePublicRouter.get(
 // Error Handler for Public Partner Router
 xSupportEnterprisePublicRouter.use(
   (err: unknown, _req: Request, res: Response, _next: NextFunction): void => {
-    if (err instanceof SupportStoreError || err instanceof SupportWorkflowError) {
-      res.status(err.status).json({ error: { message: err.message, status: err.status } });
+    if (
+      err instanceof SupportStoreError ||
+      err instanceof SupportWorkflowError ||
+      typeof (err as any).status === 'number'
+    ) {
+      const status = (err as any).status;
+      res.status(status).json({ error: { message: (err as Error).message, status } });
       return;
     }
     const message = err instanceof Error ? err.message : 'Support gateway error.';
