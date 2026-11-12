@@ -42,6 +42,7 @@ import { xOperationsRouter as xCliToolsRouter } from './operations-router.js';
 import { xTranslatorRouter } from './translator-router.js';
 import { xSkillsRouter } from './skills-router.js';
 import { xSupportConsoleRouter } from './support-router.js';
+import { xSupportEnterpriseConsoleRouter } from './support-enterprise-router.js';
 
 /** Console API for the gateway switch, outbound proxy, dedicated API keys, and default savers.
  *
@@ -410,6 +411,7 @@ xGatewayConsoleRouter.use('/tools', xCliToolsRouter);
 xGatewayConsoleRouter.use('/translator', xTranslatorRouter);
 xGatewayConsoleRouter.use('/skills', xSkillsRouter);
 xGatewayConsoleRouter.use('/support', xSupportConsoleRouter);
+xGatewayConsoleRouter.use('/support', xSupportEnterpriseConsoleRouter);
 
 xGatewayConsoleRouter.use((_req, res) => {
   res.status(404).json({ error: { type: 'not_found', message: 'Not found' } });
