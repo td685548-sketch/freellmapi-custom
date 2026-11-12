@@ -1,6 +1,6 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
-import { ArrowLeft, ArrowLeftRight, BarChart3, ChevronRight, Film, Headset, KeyRound, Layers, Menu, MessageSquare, Moon, Network, Scissors, ScrollText, Server, ShieldCheck, Sparkles, Sun, Terminal, X } from 'lucide-react'
+import { ArrowLeft, ChevronRight, Lock, Menu, Moon, PanelLeftClose, PanelLeftOpen, Search, ShieldCheck, Sun, X } from 'lucide-react'
 import { useI18n } from '@/i18n'
 import { useTheme } from '@/theme-context'
 import { Toaster } from '@/components/toaster'
@@ -28,72 +28,70 @@ import SupportGateway from './pages/SupportGateway'
 import SupportEnterprise from './pages/SupportEnterprise'
 import SupportGovernance from './pages/SupportGovernance'
 import ModelAvailabilityBadge from './components/ModelAvailabilityBadge'
-import { useMgmtStrings } from './management-strings'
-import { usePoolStrings } from './proxy-pool-strings'
-import { useMediaStrings } from './media-strings'
-import { useToolsStrings } from './tools-strings'
-import { useTranslatorStrings } from './translator-strings'
-import { useSkillsStrings } from './skills-strings'
-import { useSupportStrings } from './support-strings'
-import { useSupportEnterpriseStrings } from './support-enterprise-strings'
-import { useSupportGovernanceStrings } from './support-governance-strings'
+import { useShellStrings } from './shell-strings'
+import { matchNav, useNavGroups } from './shell/nav'
+import { QuickJump } from './shell/QuickJump'
+import Overview from './pages/Overview'
 import './x-gateway.css'
+import './x-theme.css'
+
+const RAIL_KEY = 'x-gateway.sidebar-collapsed'
+function readRail() {
+  try { return window.localStorage.getItem(RAIL_KEY) === '1' } catch { return false }
+}
 
 function XGatewayShell() {
   const s = useXStrings()
-  const m = useMgmtStrings()
-  const p = usePoolStrings()
-  const med = useMediaStrings()
-  const t = useToolsStrings()
-  const tr = useTranslatorStrings()
-  const sk = useSkillsStrings()
-  const sup = useSupportStrings()
-  const ops = useSupportEnterpriseStrings()
-  const gov = useSupportGovernanceStrings()
+  const sh = useShellStrings()
+  const groups = useNavGroups()
   const session = useUserSession()
   const { locale, setLocale } = useI18n()
   const { resolvedDark, setTheme } = useTheme()
   const location = useLocation()
   const [menuOpen, setMenuOpen] = useState(false)
+  const [rail, setRail] = useState(readRail)
+  const [jumpOpen, setJumpOpen] = useState(false)
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setJumpOpen(open => !open) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
   if (session.isPending) return <div className="x-console"><AccountLoadState /></div>
   if (session.isError) return <div className="x-console"><AccountLoadState error retry={() => void session.refetch()} /></div>
   if (!session.hasPermission('use_x_gateway')) return <NotFoundPage />
   const canView = session.hasPermission('view_keys')
   const protectedPage = (page: ReactNode) => canView ? page : <div className="x-empty" role="alert"><ShieldCheck size={32} /><p>{s.permission}</p></div>
-  const items = [
-    { to: '/x/endpoint', label: s.endpoint, icon: KeyRound },
-    { to: '/x/playground', label: m.playground, icon: MessageSquare },
-    { to: '/x/support-guardrails', label: gov.nav, icon: ShieldCheck },
-    { to: '/x/support-ops', label: ops.nav, icon: Headset },
-    { to: '/x/support', label: sup.supportNav, icon: Headset },
-    { to: '/x/tools', label: t.cliToolsNav, icon: Terminal },
-    { to: '/x/skills', label: sk.skillsNav, icon: Sparkles },
-    { to: '/x/translator', label: tr.translatorNav, icon: ArrowLeftRight },
-    ...(canView ? [{ to: '/x/providers', label: s.providers, icon: Server }] : []),
-    ...(canView ? [{ to: '/x/combos', label: m.combos, icon: Layers }] : []),
-    ...(canView ? [{ to: '/x/media', label: med.mediaTitle, icon: Film }] : []),
-    { to: '/x/savers', label: s.savers, icon: Scissors },
-    { to: '/x/proxies', label: p.proxies, icon: Network },
-    ...(session.hasPermission('view_x_usage') ? [{ to: '/x/quota', label: 'Quota', icon: BarChart3 }] : []),
-    ...(canView ? [{ to: '/x/usage', label: s.usage, icon: BarChart3 }, { to: '/x/logs', label: m.logs, icon: ScrollText }] : []),
-  ]
-  const current = items.find(item => location.pathname.startsWith(item.to))?.label ?? s.workspace
+  const toggleRail = () => setRail(value => {
+    try { window.localStorage.setItem(RAIL_KEY, value ? '0' : '1') } catch { /* preference is optional */ }
+    return !value
+  })
+  // Provider detail pages live under /x/providers/:id and stay under that entry.
+  const current = matchNav(groups, location.pathname)
   const isPlayground = location.pathname.startsWith('/x/playground')
-  return <div className="x-console x-layout">
+  const shortcut = /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘K' : 'Ctrl K'
+  return <div className={`x-console x-layout ${rail ? 'x-layout-rail' : ''}`}>
     {menuOpen && <button className="x-nav-scrim" aria-label={s.close} onClick={() => setMenuOpen(false)} />}
     <aside className={`x-sidebar ${menuOpen ? 'x-sidebar-open' : ''}`}>
-      <Link to={canView ? '/x/providers' : '/x/endpoint'} className="x-brand" onClick={() => setMenuOpen(false)}><span className="x-brand-mark">X</span><span>X Gateway<small>FreeLLMAPI</small></span></Link>
-      <button className="x-icon-button x-mobile-close" aria-label={s.close} onClick={() => setMenuOpen(false)}><X size={20} /></button>
-      <div className="x-nav-heading">{s.workspace}</div>
-      <nav aria-label="X Gateway">{items.map(item => <NavLink key={item.to} to={item.to} onClick={() => setMenuOpen(false)} className={({ isActive }) => `x-nav-item ${isActive ? 'active' : ''}`}><item.icon size={17} /><span>{item.label}</span></NavLink>)}</nav>
+      <div className="x-sidebar-top">
+        <Link to="/x/home" className="x-brand" onClick={() => setMenuOpen(false)}><span className="x-brand-mark">X</span><span className="x-brand-text">X Gateway<small>FreeLLMAPI</small></span></Link>
+        <button className="x-icon-button x-rail-toggle" aria-label={rail ? sh.expand : sh.collapse} title={rail ? sh.expand : sh.collapse} aria-pressed={rail} onClick={toggleRail}>{rail ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button>
+        <button className="x-icon-button x-mobile-close" aria-label={s.close} onClick={() => setMenuOpen(false)}><X size={20} /></button>
+      </div>
+      <nav aria-label="X Gateway">{groups.map(group => <div className="x-nav-group" key={group.id} role="group" aria-labelledby={`x-nav-${group.id}`}>
+        <div className="x-nav-heading" id={`x-nav-${group.id}`}>{group.label}</div>
+        {group.items.map(item => <NavLink key={item.to} to={item.to} end={item.to === '/x/support'} title={rail ? item.label : undefined} onClick={() => setMenuOpen(false)} className={({ isActive }) => `x-nav-item ${isActive ? 'active' : ''}`}><item.icon size={17} /><span>{item.label}</span></NavLink>)}
+      </div>)}</nav>
       <div className="x-sidebar-bottom">
-        <div className="x-sidebar-note"><ShieldCheck size={16} /><span>{s.encrypted}</span></div>
-        <Link to="/models/chat" className="x-nav-item x-back-link-nav"><ArrowLeft size={16} /><span>{s.back}</span></Link>
+        <div className="x-sidebar-note" title={s.encrypted}><Lock size={14} /><span>{s.encrypted}</span></div>
+        <Link to="/models/chat" className="x-nav-item x-back-link-nav" title={rail ? s.back : undefined}><ArrowLeft size={16} /><span>{s.back}</span></Link>
       </div>
     </aside>
-    <div className={`x-main ${isPlayground ? 'x-main-playground' : ''}`}><header className="x-header"><button className="x-icon-button x-mobile-menu" aria-label={s.menu} onClick={() => setMenuOpen(true)}><Menu size={21} /></button><div className="x-breadcrumb"><span>{s.workspace}</span><ChevronRight size={14} /><strong>{current}</strong></div><div className="x-header-actions">{canView && <ModelAvailabilityBadge />}<label className="x-language"><span className="x-sr-only">{s.language}</span><select value={locale === 'vi' ? 'vi' : 'en'} onChange={event => setLocale(event.target.value as 'vi' | 'en')}><option value="en">English</option><option value="vi">Tiếng Việt</option></select></label><button className="x-icon-button" aria-label={s.theme} onClick={() => setTheme(resolvedDark ? 'light' : 'dark')}>{resolvedDark ? <Sun size={18} /> : <Moon size={18} />}</button><span className="x-avatar" title={session.session?.email}>{session.session?.email?.slice(0, 1).toUpperCase() ?? 'X'}</span></div></header>
+    <div className={`x-main ${isPlayground ? 'x-main-playground' : ''}`}><header className="x-header"><button className="x-icon-button x-mobile-menu" aria-label={s.menu} onClick={() => setMenuOpen(true)}><Menu size={21} /></button><div className="x-breadcrumb">{current && <><span>{current.group.label}</span><ChevronRight size={14} /></>}<strong>{current?.item.label ?? 'X Gateway'}</strong></div><div className="x-header-actions"><button type="button" className="x-jump-trigger" onClick={() => setJumpOpen(true)} aria-label={sh.jump}><Search size={15} /><span>{sh.jump}</span><kbd>{shortcut}</kbd></button>{canView && <ModelAvailabilityBadge />}<label className="x-language"><span className="x-sr-only">{s.language}</span><select value={locale === 'vi' ? 'vi' : 'en'} onChange={event => setLocale(event.target.value as 'vi' | 'en')}><option value="en">English</option><option value="vi">Tiếng Việt</option></select></label><button className="x-icon-button" aria-label={s.theme} onClick={() => setTheme(resolvedDark ? 'light' : 'dark')}>{resolvedDark ? <Sun size={18} /> : <Moon size={18} />}</button><span className="x-avatar" title={session.session?.email}>{session.session?.email?.slice(0, 1).toUpperCase() ?? 'X'}</span></div></header>
       <main className={`x-content ${isPlayground ? 'x-content-playground' : ''}`}><ErrorBoundary><Routes>
-        <Route index element={<Navigate to={canView ? '/x/providers' : '/x/endpoint'} replace />} />
+        <Route index element={<Navigate to="/x/home" replace />} />
+        <Route path="home" element={<Overview />} />
         <Route path="providers" element={protectedPage(<Providers />)} />
         <Route path="providers/:providerId" element={protectedPage(<ProviderAccounts />)} />
         <Route path="accounts/callback" element={<AccountCallback />} />
@@ -114,7 +112,7 @@ function XGatewayShell() {
         <Route path="quota" element={<Quota />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes></ErrorBoundary></main>
-    </div><Toaster />
+    </div><QuickJump groups={groups} open={jumpOpen} onClose={() => setJumpOpen(false)} /><Toaster />
   </div>
 }
 

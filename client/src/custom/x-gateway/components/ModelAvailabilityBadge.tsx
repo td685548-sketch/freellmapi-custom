@@ -82,11 +82,8 @@ export default function ModelAvailabilityBadge() {
   const healthy = !query.isError && count === 0;
 
   const label = query.isError ? 'Availability unknown' : healthy ? 'All models available' : `${count} on cooldown`;
-  const tone = query.isError
-    ? 'border-border bg-muted text-muted-foreground'
-    : healthy
-      ? 'border-green-500/40 bg-green-500/10 text-green-600 dark:text-green-400'
-      : 'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400';
+  // Quiet while everything works; colour is reserved for when something needs attention.
+  const tone = query.isError || healthy ? 'x-availability' : 'x-availability x-availability-warn';
 
   return (
     <div ref={root} className="relative inline-block" data-testid="model-availability-badge">
@@ -95,9 +92,9 @@ export default function ModelAvailabilityBadge() {
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen(v => !v)}
-        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${tone}`}
+        className={tone}
       >
-        <span aria-hidden className={`h-2 w-2 rounded-full ${healthy ? 'bg-green-500' : query.isError ? 'bg-muted-foreground' : 'bg-amber-500'}`} />
+        <span aria-hidden className={`x-availability-dot ${healthy ? 'ok' : query.isError ? '' : 'warn'}`} />
         {label}
       </button>
 
