@@ -33,6 +33,7 @@ import { THRULINE_ICON, ThrulineLogo } from './ThrulineLogo'
 import { useShellStrings } from './shell-strings'
 import { matchNav, useNavGroups } from './shell/nav'
 import { QuickJump } from './shell/QuickJump'
+import { ConfirmHost } from './shell/confirm'
 import Overview from './pages/Overview'
 import './transition/install'
 import './x-gateway.css'
@@ -125,7 +126,7 @@ function XGatewayShell() {
         <Route path="quota" element={<Quota />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes></ErrorBoundary></main>
-    </div><QuickJump groups={groups} open={jumpOpen} onClose={() => setJumpOpen(false)} /><Toaster />
+    </div><QuickJump groups={groups} open={jumpOpen} onClose={() => setJumpOpen(false)} /><ConfirmHost /><Toaster />
   </div>
 }
 

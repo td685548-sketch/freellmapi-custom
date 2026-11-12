@@ -231,6 +231,22 @@ section.x-panel[style]:not([style*="padding"]) { padding: 20px; }
 .x-jump-list li.x-jump-empty { color: var(--x-muted); cursor: default; justify-content: center; padding: 22px 10px; }
 .x-jump-hint { margin: 0; padding: 8px 14px; border-top: 1px solid var(--x-border); font-size: 11.5px; color: var(--x-muted); background: var(--x-alt); }
 
+/* ---------- Confirm dialog ---------- */
+.x-confirm-scrim { position: fixed; inset: 0; z-index: 70; background: rgb(10 14 22 / 45%); display: grid; place-items: center; padding: 16px; animation: x-fade .12s ease-out; }
+.x-confirm { width: min(420px, 100%); background: var(--x-panel); border: 1px solid var(--x-border); border-radius: 12px; box-shadow: 0 24px 64px rgb(10 14 22 / 28%); padding: 20px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 14px; animation: x-rise .14s ease-out; }
+.x-confirm-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--x-red-bg); color: var(--x-red); }
+.x-dialog-root { display: contents; }
+.x-confirm-icon-neutral { background: var(--x-tint); color: var(--x-primary); }
+.x-confirm-input { width: 100%; margin-top: 12px; padding: 8px 10px; border: 1px solid var(--x-border); border-radius: 7px; background: var(--x-panel); color: var(--x-text); font: inherit; font-size: 14px; }
+.x-confirm-input:focus { border-color: var(--x-primary); outline: none; }
+.x-confirm-body h2 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+.x-confirm-body p { margin: 0; font-size: 13.5px; color: var(--x-muted); line-height: 1.55; overflow-wrap: anywhere; white-space: pre-line; }
+.x-confirm-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+@keyframes x-fade { from { opacity: 0; } }
+@keyframes x-rise { from { opacity: 0; transform: translateY(6px) scale(.985); } }
+@media (max-width: 420px) { .x-confirm-actions { flex-direction: column-reverse; } .x-confirm-actions .x-button { width: 100%; } }
+@media (prefers-reduced-motion: reduce) { .x-confirm-scrim, .x-confirm { animation: none; } }
+
 /* ---------- Overview page ---------- */
 .x-overview { display: flex; flex-direction: column; gap: 28px; }
 .x-overview .x-page-heading { margin-bottom: 0; }
@@ -281,3 +297,4 @@ section.x-panel[style]:not([style*="padding"]) { padding: 20px; }
 @media (max-height: 1000px) { .x-sidebar-note { display: none; } }
 .x-content.x-content-playground { padding: 12px 16px; }
 @media (max-width: 850px) { .x-content.x-content-playground { padding: 6px 8px 8px; } }
+.x-console .x-confirm-input:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--x-primary) 22%, transparent); }

@@ -56,6 +56,11 @@ const en = {
   taskLogsHelp: 'See what was sent, where it went and why it failed.',
   taskSavers: 'Cut token use',
   taskSaversHelp: 'Trim long outputs before they reach the model.',
+  confirmTitle: 'Please confirm',
+  confirmOk: 'Yes, continue',
+  confirmCancel: 'Cancel',
+  promptTitle: 'Enter a value',
+  promptOk: 'Save',
 }
 
 const vi: typeof en = {
@@ -114,6 +119,11 @@ const vi: typeof en = {
   taskLogsHelp: 'Xem đã gửi gì, đi đâu và vì sao lỗi.',
   taskSavers: 'Giảm lượng token',
   taskSaversHelp: 'Cắt gọn kết quả dài trước khi gửi tới model.',
+  confirmTitle: 'Xác nhận thao tác',
+  confirmOk: 'Đồng ý',
+  confirmCancel: 'Hủy',
+  promptTitle: 'Nhập giá trị',
+  promptOk: 'Lưu',
 }
 
 export function useShellStrings() {

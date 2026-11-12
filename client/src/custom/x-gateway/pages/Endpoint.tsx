@@ -25,6 +25,7 @@ import { apiFetch } from '@/lib/api'
 import { useUserSession } from '../../use-session'
 import { useSessionRevision } from '../../session-state'
 import { useXStrings } from '../strings'
+import { askConfirm } from '../shell/confirm'
 
 type GatewayStatus = {
   enabled: boolean
@@ -704,8 +705,8 @@ export default function Endpoint() {
               type="button"
               className="x-button x-destructive x-small"
               disabled={resetPricingMutation.isPending || (totalOverrides === 0 && pendingEditsCount === 0)}
-              onClick={() => {
-                if (window.confirm('Reset all custom model pricing to default rates? This cannot be undone.')) {
+              onClick={async () => {
+                if (await askConfirm('Reset all custom model pricing to default rates? This cannot be undone.')) {
                   resetPricingMutation.mutate({})
                 }
               }}
