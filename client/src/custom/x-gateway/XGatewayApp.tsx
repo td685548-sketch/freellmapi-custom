@@ -25,6 +25,7 @@ import TranslatorInspector from './pages/TranslatorInspector'
 import Playground from './pages/Playground'
 import SkillsHub from './pages/SkillsHub'
 import SupportGateway from './pages/SupportGateway'
+import SupportEnterprise from './pages/SupportEnterprise'
 import ModelAvailabilityBadge from './components/ModelAvailabilityBadge'
 import { useMgmtStrings } from './management-strings'
 import { usePoolStrings } from './proxy-pool-strings'
@@ -33,6 +34,7 @@ import { useToolsStrings } from './tools-strings'
 import { useTranslatorStrings } from './translator-strings'
 import { useSkillsStrings } from './skills-strings'
 import { useSupportStrings } from './support-strings'
+import { useSupportEnterpriseStrings } from './support-enterprise-strings'
 import './x-gateway.css'
 
 function XGatewayShell() {
@@ -44,6 +46,7 @@ function XGatewayShell() {
   const tr = useTranslatorStrings()
   const sk = useSkillsStrings()
   const sup = useSupportStrings()
+  const ops = useSupportEnterpriseStrings()
   const session = useUserSession()
   const { locale, setLocale } = useI18n()
   const { resolvedDark, setTheme } = useTheme()
@@ -57,6 +60,7 @@ function XGatewayShell() {
   const items = [
     { to: '/x/endpoint', label: s.endpoint, icon: KeyRound },
     { to: '/x/playground', label: m.playground, icon: MessageSquare },
+    { to: '/x/support-ops', label: ops.nav, icon: Headset },
     { to: '/x/support', label: sup.supportNav, icon: Headset },
     { to: '/x/tools', label: t.cliToolsNav, icon: Terminal },
     { to: '/x/skills', label: sk.skillsNav, icon: Sparkles },
@@ -92,6 +96,7 @@ function XGatewayShell() {
         <Route path="endpoint" element={<Endpoint />} />
         <Route path="playground" element={<Playground />} />
         <Route path="support" element={<SupportGateway />} />
+        <Route path="support-ops" element={<SupportEnterprise />} />
         <Route path="tools" element={<CLITools />} />
         <Route path="skills" element={<SkillsHub />} />
         <Route path="translator" element={<TranslatorInspector />} />
