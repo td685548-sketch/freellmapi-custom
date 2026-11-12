@@ -46,6 +46,7 @@ import { xGatewayProtocolsRouter } from './protocols.js';
 import { preprocessGatewayMessages } from './token-savers-pipeline.js';
 import { xSupportPublicRouter } from './support-router.js';
 import { xSupportEnterprisePublicRouter } from './support-enterprise-router.js';
+import { xSupportGovernancePublicRouter } from './support-governance-router.js';
 
 export const xGatewayRouter = Router();
 
@@ -1609,6 +1610,7 @@ xGatewayRouter.use(xGatewayProtocolsRouter);
 // AI Support Partner Gateway (/x/v1/support/*)
 xGatewayRouter.use('/support', xSupportPublicRouter);
 xGatewayRouter.use('/support', xSupportEnterprisePublicRouter);
+xGatewayRouter.use('/support', xSupportGovernancePublicRouter);
 
 // Catch-all: any other path under /x/v1 returns JSON 404
 xGatewayRouter.use((_req: Request, res: Response) => {
