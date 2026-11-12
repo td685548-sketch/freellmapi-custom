@@ -38,3 +38,17 @@ scripts/backup.mjs
 .codegraph/
 
 
+
+# --- GitHub compliance (see docs/LOCAL_TOOLS_AND_COMPLIANCE.md) ---
+# Local-only tunnel helper scripts: never tracked, never run on CI.
+/start-tunnel.*
+/scripts/local/
+*.tunnel.bat
+*.tunnel.sh
+# Executable binaries are distributed through GitHub Releases only.
+*.apk
+*.so
+*.exe
+*.dll
+*.ipa
+*.idsig
