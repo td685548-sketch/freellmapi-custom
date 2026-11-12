@@ -23,6 +23,7 @@ import { SettingsDialog } from '@/components/settings-dialog'
 import { UpdatesDialog } from '@/components/updates-dialog'
 import { OPEN_UPDATES_EVENT } from '@/lib/updates'
 import { Toaster } from '@/components/toaster'
+import { ConfirmHost } from '@/custom/x-gateway/shell/confirm'
 import { UpdateReminder } from '@/components/update-reminder'
 import { NewBuildPrompt } from '@/components/new-build-prompt'
 import { usePremium } from '@/hooks/use-premium'
@@ -570,6 +571,7 @@ function App() {
                   </PageBoundary>
                 </PageContainer>
                 <Toaster />
+                <ConfirmHost />
                 <CommandPalette />
                 <UpdateReminder />
                 <NewBuildPrompt />

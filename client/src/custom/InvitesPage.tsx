@@ -11,6 +11,7 @@ import { toast } from '@/lib/toast'
 
 import type { InviteCode } from '../../../shared/user-access'
 import { useCustomT } from './i18n/use-custom-t'
+import { askConfirm } from '@/custom/x-gateway/shell/confirm'
 export type { InviteCode } from '../../../shared/user-access'
 
 export function InvitesPage({ capabilities }: { capabilities?: { view: boolean; create: boolean; revoke: boolean } } = {}) {
@@ -79,8 +80,8 @@ export function InvitesPage({ capabilities }: { capabilities?: { view: boolean; 
     })
   }
 
-  const handleRevoke = (id: number, codeName: string) => {
-    if (window.confirm(tc('Revoke invite code "{codeName}"? It will no longer allow any new registrations.', { codeName }))) {
+  const handleRevoke = async (id: number, codeName: string) => {
+    if (await askConfirm(tc('Revoke invite code "{codeName}"? It will no longer allow any new registrations.', { codeName }))) {
       revokeInviteMutation.mutate(id)
     }
   }

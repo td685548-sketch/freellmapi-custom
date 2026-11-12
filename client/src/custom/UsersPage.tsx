@@ -13,6 +13,7 @@ import { GuestAccessCard } from './GuestAccessCard'
 
 import type { AdminUser, RegistrationRequest } from '../../../shared/user-access'
 import { useCustomT } from './i18n/use-custom-t'
+import { askPrompt } from '@/custom/x-gateway/shell/confirm'
 export type { AdminUser, RegistrationRequest } from '../../../shared/user-access'
 
 export interface UserPageCapabilities { viewUsers: boolean; viewRequests: boolean; roles: boolean; permissions: boolean; quotas: boolean; sessions: boolean; keys: boolean; approve: boolean; reject: boolean }
@@ -291,9 +292,9 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
                         {!u.isSelf && !u.isPrimary && can('quotas') && (
                           <button
                             type="button"
-                            onClick={() => {
+                            onClick={async () => {
                               const current = usageMap.get(u.id)?.rpmLimit ?? 60
-                              const input = window.prompt(`Set RPM limit for ${u.email} (1-1000 requests/minute):`, String(current))
+                              const input = await askPrompt(`Set RPM limit for ${u.email} (1-1000 requests/minute):`, String(current))
                               if (input !== null) {
                                 const val = parseInt(input.trim(), 10)
                                 if (!isNaN(val) && val >= 1 && val <= 1000) {

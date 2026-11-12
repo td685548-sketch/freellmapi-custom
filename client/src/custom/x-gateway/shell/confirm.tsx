@@ -1,13 +1,15 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react'
-import { TriangleAlert } from 'lucide-react'
+import { PencilLine, TriangleAlert } from 'lucide-react'
 import { useShellStrings } from '../shell-strings'
 
 /**
- * In-app replacement for window.confirm. Call `askConfirm(message)` anywhere
- * and await the answer; <ConfirmHost /> (mounted once in the console shell)
- * renders the dialog.
+ * In-app replacements for window.confirm and window.prompt. Call
+ * `askConfirm(message)` or `askPrompt(message, initial)` anywhere and await the
+ * answer; <ConfirmHost /> (mounted once per app shell) renders the dialog.
  */
-interface Request { message: string; resolve: (ok: boolean) => void }
+type Request =
+  | { kind: 'confirm'; message: string; resolve: (ok: boolean) => void }
+  | { kind: 'prompt'; message: string; initial: string; resolve: (value: string | null) => void }
 
 let current: Request | null = null
 let hosts = 0
@@ -15,55 +17,86 @@ const listeners = new Set<() => void>()
 const emit = () => listeners.forEach(listener => listener())
 const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } }
 
+function dismiss(request: Request | null) {
+  if (request?.kind === 'confirm') request.resolve(false)
+  else request?.resolve(null)
+}
+
+/** Resolves true when the person agrees, false when they cancel. */
 export function askConfirm(message: string): Promise<boolean> {
   // Without a mounted host (a page rendered on its own) fall back to the browser's dialog.
   if (hosts === 0) return Promise.resolve(window.confirm(message))
-  current?.resolve(false)
-  return new Promise(resolve => { current = { message, resolve }; emit() })
+  dismiss(current)
+  return new Promise(resolve => { current = { kind: 'confirm', message, resolve }; emit() })
 }
 
-function settle(ok: boolean) {
+/** Resolves the entered text, or null when the person cancels. */
+export function askPrompt(message: string, initial = ''): Promise<string | null> {
+  if (hosts === 0) return Promise.resolve(window.prompt(message, initial))
+  dismiss(current)
+  return new Promise(resolve => { current = { kind: 'prompt', message, initial, resolve }; emit() })
+}
+
+function close() {
   const request = current
   current = null
   emit()
-  request?.resolve(ok)
+  return request
 }
 
 export function ConfirmHost() {
   const sh = useShellStrings()
   const request = useSyncExternalStore(subscribe, () => current)
   const cancel = useRef<HTMLButtonElement>(null)
+  const field = useRef<HTMLInputElement>(null)
   const opener = useRef<Element | null>(null)
-  useEffect(() => { hosts += 1; return () => { hosts -= 1; settle(false) } }, [])
+  useEffect(() => { hosts += 1; return () => { hosts -= 1; dismiss(close()) } }, [])
   useEffect(() => {
     if (!request) return
     opener.current = document.activeElement
-    cancel.current?.focus() // the safe choice is the default
+    if (request.kind === 'prompt') {
+      field.current?.focus()
+      field.current?.select()
+    } else {
+      cancel.current?.focus() // the safe choice is the default
+    }
     return () => { if (opener.current instanceof HTMLElement) opener.current.focus() }
   }, [request])
   if (!request) return null
-  return <div className="x-confirm-scrim" onMouseDown={event => { if (event.target === event.currentTarget) settle(false) }}>
-    <div className="x-confirm" role="alertdialog" aria-modal="true" aria-labelledby="x-confirm-title" aria-describedby="x-confirm-message"
-      onKeyDown={event => {
-        if (event.key === 'Escape') { event.stopPropagation(); settle(false) }
-        if (event.key === 'Tab') {
-          // Two buttons: keep focus inside the dialog.
-          const buttons = event.currentTarget.querySelectorAll('button')
-          const first = buttons[0]
-          const last = buttons[buttons.length - 1]
-          if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
-          else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
-        }
-      }}>
-      <span className="x-confirm-icon" aria-hidden="true"><TriangleAlert size={18} /></span>
-      <div className="x-confirm-body">
-        <h2 id="x-confirm-title">{sh.confirmTitle}</h2>
-        <p id="x-confirm-message">{request.message}</p>
-      </div>
-      <div className="x-confirm-actions">
-        <button ref={cancel} type="button" className="x-button" onClick={() => settle(false)}>{sh.confirmCancel}</button>
-        <button type="button" className="x-button x-destructive" onClick={() => settle(true)}>{sh.confirmOk}</button>
-      </div>
+  const reject = () => dismiss(close())
+  const accept = () => {
+    const done = close()
+    if (done?.kind === 'confirm') done.resolve(true)
+    else done?.resolve(field.current?.value ?? '')
+  }
+  const isPrompt = request.kind === 'prompt'
+  // `x-console` supplies the theme tokens when the host sits outside the gateway console.
+  return <div className="x-console x-dialog-root">
+    <div className="x-confirm-scrim" onMouseDown={event => { if (event.target === event.currentTarget) reject() }}>
+      <form className="x-confirm" role={isPrompt ? 'dialog' : 'alertdialog'} aria-modal="true" aria-labelledby="x-confirm-title" aria-describedby="x-confirm-message"
+        onSubmit={event => { event.preventDefault(); accept() }}
+        onKeyDown={event => {
+          if (event.key === 'Escape') { event.stopPropagation(); reject() }
+          if (event.key === 'Tab') {
+            // Keep focus inside the dialog.
+            const stops = event.currentTarget.querySelectorAll<HTMLElement>('input, button')
+            const first = stops[0]
+            const last = stops[stops.length - 1]
+            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+          }
+        }}>
+        <span className={`x-confirm-icon ${isPrompt ? 'x-confirm-icon-neutral' : ''}`} aria-hidden="true">{isPrompt ? <PencilLine size={18} /> : <TriangleAlert size={18} />}</span>
+        <div className="x-confirm-body">
+          <h2 id="x-confirm-title">{isPrompt ? sh.promptTitle : sh.confirmTitle}</h2>
+          <p id="x-confirm-message">{request.message}</p>
+          {isPrompt && <input ref={field} className="x-confirm-input" defaultValue={request.initial} aria-labelledby="x-confirm-message" />}
+        </div>
+        <div className="x-confirm-actions">
+          <button ref={cancel} type="button" className="x-button" onClick={reject}>{sh.confirmCancel}</button>
+          <button type="submit" className={`x-button ${isPrompt ? 'x-primary' : 'x-destructive'}`}>{isPrompt ? sh.promptOk : sh.confirmOk}</button>
+        </div>
+      </form>
     </div>
   </div>
 }

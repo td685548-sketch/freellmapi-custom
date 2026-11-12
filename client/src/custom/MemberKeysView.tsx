@@ -14,6 +14,7 @@ import { RecentRequestsCard } from './RecentRequestsCard'
 
 import type { UserApiKey } from '../../../shared/user-access'
 import { useCustomT } from './i18n/use-custom-t'
+import { askConfirm } from '@/custom/x-gateway/shell/confirm'
 export type { UserApiKey } from '../../../shared/user-access'
 
 export function MemberKeysView() {
@@ -76,8 +77,8 @@ export function MemberKeysView() {
     createKeyMutation.mutate(keyName.trim())
   }
 
-  const handleRevoke = (id: number, name: string) => {
-    if (window.confirm(tc('Are you sure you want to revoke key "{name}"? Any clients using it will immediately lose access.', { name }))) {
+  const handleRevoke = async (id: number, name: string) => {
+    if (await askConfirm(tc('Are you sure you want to revoke key "{name}"? Any clients using it will immediately lose access.', { name }))) {
       revokeKeyMutation.mutate(id)
     }
   }
