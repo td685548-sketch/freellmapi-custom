@@ -1,13 +1,25 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Dialog, DialogDescription, DialogPopup, DialogTitle } from '@/components/ui/dialog'
 import type { AccountProvider, ProviderAccount } from '../../../../shared/x-accounts'
 import { refreshAccounts } from './api'
 import { subscriptionApi, type SubscriptionAttempt } from './subscription-api'
+import { useSessionRevision } from '../session-state'
+import { proxyPoolApi } from './proxy-pool-api'
+import { usePoolStrings } from './proxy-pool-strings'
+import { useXStrings } from './strings'
 
 export function SubscriptionConnectDialog({ provider, account, onClose }: { provider: AccountProvider; account?: ProviderAccount; onClose: () => void }) {
   const client = useQueryClient()
+  const s = useXStrings()
+  const p = usePoolStrings()
+  const revision = useSessionRevision()
+  const poolQuery = useQuery({ queryKey: ['x-proxy-pool', revision], queryFn: ({ signal }) => proxyPoolApi.list(signal), retry: false, staleTime: 15_000 })
+  const poolEntries = poolQuery.data?.entries ?? []
+
   const [label, setLabel] = useState(account?.label ?? '')
+  const [proxyUrl, setProxyUrl] = useState(account?.proxyUrl ?? '')
+  const [poolChoice, setPoolChoice] = useState(account?.proxyPoolId != null ? String(account.proxyPoolId) : '')
   const [credential, setCredential] = useState('')
   const [code, setCode] = useState('')
   const [attempt, setAttempt] = useState<SubscriptionAttempt | null>(null)
@@ -46,7 +58,12 @@ export function SubscriptionConnectDialog({ provider, account, onClose }: { prov
     try { await action() } catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : 'Connection failed.') }
     finally { if (mounted.current) setBusy(false) }
   }
-  const body = { provider: provider.id, label: label.trim(), ...(account ? { reconnectId: account.id } : {}) }
+  const resolvedPoolId = poolChoice === '' ? undefined : poolChoice === 'none' ? null : Number(poolChoice)
+  const proxyBody = {
+    ...(proxyUrl.trim() ? { proxyUrl: proxyUrl.trim() } : {}),
+    ...(resolvedPoolId !== undefined ? { proxyPoolId: resolvedPoolId } : {}),
+  }
+  const body = { provider: provider.id, label: label.trim(), ...(account ? { reconnectId: account.id } : {}), ...proxyBody }
   async function start() {
     await run(async () => {
       const value = await subscriptionApi.start(body)
@@ -61,6 +78,8 @@ export function SubscriptionConnectDialog({ provider, account, onClose }: { prov
     {error && <p className="x-error" role="alert">{error}</p>}
     {!attempt ? <form className="x-form" onSubmit={importJson}>
       <label>Account name<input required maxLength={200} value={label} onChange={e => setLabel(e.target.value)} disabled={busy} /></label>
+      <label>{s.accountProxy}<input id="x-account-proxy" name="proxyUrl" value={proxyUrl} onChange={event => setProxyUrl(event.target.value)} placeholder={s.accountProxyPlaceholder} disabled={busy} /></label>
+      <label>{p.accountPool}<select id="x-account-pool" name="proxyPoolId" value={poolChoice} onChange={event => setPoolChoice(event.target.value)} disabled={busy}><option value="">{p.accountPoolAuto}</option><option value="none">{p.accountPoolNone}</option>{poolEntries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}{entry.enabled ? '' : ` (${p.disabled})`}</option>)}</select><span className="x-caption">{p.accountPoolHint}</span></label>
       <button type="button" className="x-button x-primary" disabled={busy || !label.trim()} onClick={() => void start()}>Sign in with browser</button>
       {provider.id === 'gemini-cli' && <p className="x-caption">Browser login requires a configured Google OAuth client and public callback. Import is available for an existing CLI session.</p>}
       <label>Import credential JSON from your computer<input type="file" accept=".json,application/json" disabled={busy} onChange={e => {
