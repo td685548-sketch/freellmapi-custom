@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { ThrulineLogo } from '../ThrulineLogo'
 
 export type TopologyStatus = 'healthy' | 'degraded' | 'cooldown' | 'paused'
 
@@ -158,10 +159,11 @@ export default function ProviderTopology({
                 x={CORE_X} y={layout.centerY - 40} width={CORE_W} height={80} rx={16}
                 fill="rgba(16,185,129,0.14)" stroke="#10b981" strokeWidth={2}
               />
-              <text x={CORE_X + CORE_W / 2} y={layout.centerY - 4} textAnchor="middle" fontSize={15} fontWeight={700} fill="currentColor">
+              <ThrulineLogo size={22} x={CORE_X + CORE_W / 2 - 11} y={layout.centerY - 33} />
+              <text x={CORE_X + CORE_W / 2} y={layout.centerY + 8} textAnchor="middle" fontSize={15} fontWeight={700} fill="currentColor">
                 Thruline
               </text>
-              <text x={CORE_X + CORE_W / 2} y={layout.centerY + 16} textAnchor="middle" fontSize={10.5} fill="currentColor" opacity={0.65}>
+              <text x={CORE_X + CORE_W / 2} y={layout.centerY + 26} textAnchor="middle" fontSize={10.5} fill="currentColor" opacity={0.65}>
                 {nodes.length} provider{nodes.length === 1 ? '' : 's'}
               </text>
             </g>
