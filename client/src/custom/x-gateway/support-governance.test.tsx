@@ -185,8 +185,10 @@ describe('Support Governance & CRM Studio', () => {
   })
 
   it('edits role quotas, preserves custom roles and rejects invalid window values', async () => {
+    const policyReads = () => vi.mocked(apiFetch).mock.calls.filter(([path, options]) => path.endsWith('/guardrails') && (options?.method ?? 'GET') === 'GET').length
     await mount(); await tab('quotas')
     await waitFor(() => expect(byId<HTMLInputElement>('quota-guest-maxRequestsPerWindow').value).toBe('5'))
+    const readsBeforeSave = policyReads()
     await change('quota-guest-maxRequestsPerWindow', '8')
     await change('quota-guest-maxTokensPerWindow', '5000')
     await change('quota-guest-windowSeconds', '60')
@@ -196,6 +198,10 @@ describe('Support Governance & CRM Studio', () => {
     expect(body('/guardrails', 'PUT').roleQuotas.manager).toEqual({ maxRequestsPerWindow: 0, maxTokensPerWindow: 0, windowSeconds: 3600 })
     expect(Object.keys(body('/guardrails', 'PUT'))).toEqual(['roleQuotas'])
     await waitFor(() => expect(byId<HTMLButtonElement>('save-quotas').closest('fieldset')?.disabled).toBe(false))
+    // The save invalidates the policy query; the editor remounts (keyed by updatedAt) when the refetch lands,
+    // so wait for it to settle before editing again to avoid racing the draft reset.
+    await waitFor(() => expect(policyReads()).toBeGreaterThan(readsBeforeSave))
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)) })
     await change('quota-guest-windowSeconds', '0')
     expect(byId<HTMLButtonElement>('save-quotas').disabled).toBe(true)
     await click(byId('save-quotas'))
