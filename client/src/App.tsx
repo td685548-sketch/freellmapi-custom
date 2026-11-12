@@ -297,7 +297,7 @@ function Navbar() {
     // tabs only when the Analytics tab itself is hidden for this account.
     ...(!analyticsFolded && canViewUsage ? [{ to: '/usage', labelKey: 'nav.usage', customLabel: 'Usage' }] : []),
     ...(!analyticsFolded && hasPermission('view_audit_log') ? [{ to: '/audit', labelKey: 'nav.audit', customLabel: 'History' }] : []),
-    ...(hasPermission('use_x_gateway') ? [{ to: '/x/providers', labelKey: 'nav.xGateway', customLabel: 'X Gateway' }] : []),
+    ...(hasPermission('use_x_gateway') ? [{ to: '/x/providers', labelKey: 'nav.xGateway', customLabel: 'Thruline' }] : []),
   ]
 
   return (

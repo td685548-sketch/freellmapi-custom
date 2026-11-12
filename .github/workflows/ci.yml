@@ -65,7 +65,7 @@ jobs:
         run: node --input-type=module -e "await import('./server/dist/app.js')"
 
   test-server:
-    name: Test server (Node ${{ matrix.node-version }})
+    name: Test server (Node ${{ matrix.node-version }}, shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -76,6 +76,10 @@ jobs:
         # baseline that has historically caught crashes newer local Node
         # versions hid, 24 is what the Docker image ships.
         node-version: ${{ fromJSON(github.event_name == 'pull_request' && '["22"]' || '["20","22","24"]') }}
+        # The server suite runs its files one at a time (shared SQLite state),
+        # so it is split across four runners instead. Each shard is a separate
+        # machine with its own database, so isolation is unchanged.
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -87,20 +91,24 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Run once per Node version (shard 1) rather than in every shard.
       - name: Repo scripts and hooks
+        if: matrix.shard == 1
         run: npm run test:bootstrap && npm run test:hooks
 
       - name: Check migration round trip
+        if: matrix.shard == 1
         run: npm run test:migrations
 
       # COVERAGE makes the server suite collect coverage inside this run rather
       # than running the whole suite a second time. Only the Node 22 leg sets
-      # it, so the other legs keep uninstrumented timings. Reporting only,
-      # there are no thresholds and coverage never fails the build.
-      - name: Run server tests
+      # it. Each shard reports the coverage of its own slice of the suite.
+      # Reporting only, there are no thresholds and coverage never fails the
+      # build.
+      - name: Run server tests (shard ${{ matrix.shard }}/4)
         env:
           COVERAGE: ${{ matrix.node-version == '22' && '1' || '' }}
-        run: npm run test -w server
+        run: npm run test -w server -- --shard=${{ matrix.shard }}/4
 
   test-cli:
     name: Test CLI (Node ${{ matrix.node-version }})

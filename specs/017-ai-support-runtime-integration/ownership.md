@@ -1,6 +1,6 @@
 # Exclusive Four-Agent Ownership
 
-**Reviewer remediation authorization (2026-11-12)**: After all four agents completed and round 1 review identified defects, the user explicitly instructed the reviewer to fix the failing parts. Corrections across the owned modules, a new additive fencing migration and regression tests are authorized. Existing unrelated spec016 work remains excluded. The original ownership below describes the implementation handoff.
+**Reviewer remediation authorization (2026-11-12)**: After all four agents completed and round 1 review identified defects, the user explicitly instructed the reviewer to fix the failing parts. Corrections across the owned modules, a new additive fencing migration and regression tests are authorized. Existing unrelated spec016 work remains excluded. Necessary final merge touchpoints also include the static migration registry/default roundtrip test and, after main moved navigation into the new Thruline shell, client/src/custom/x-gateway/shell/nav.ts. The original ownership below describes the implementation handoff.
 
 All agents reuse `feat/9router-integration` in the existing checkout. Do not switch/reset branches, stash others' work, update the global Spec Kit pointer, edit another agent's files or create PRs. Do not stage/commit/push while sharing this checkout. Reviewer owns final review, staging, commit and PR creation after validation. No agent is asked to merge.
 

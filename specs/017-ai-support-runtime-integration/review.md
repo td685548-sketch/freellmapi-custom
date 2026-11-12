@@ -38,7 +38,7 @@ Reviewer waits for all four, then reads actual current code and branch history. 
 | Existing013–015 regression tests | PASS as part of complete server/client file coverage and final real HTTP runtime checks. |
 | Full test coverage / npm run test | Monolithic root command FAILS with Windows Tinypool ERR_IPC_CHANNEL_CLOSED after 318 completed server files, with no assertion failures. Ran the remaining 206 files in six fresh-process batches, all exit0. Coverage inventory confirms all 524 server files: 6376 tests passed, 10 skipped. CLI 181/181; client 747/747; i18n 60 locales/1320 keys; bootstrap 2 passed/2 platform skips; hooks 9/9. No command failure is relabeled as a pass. |
 | npm run lint + targeted client lint | PASS: root server/CLI lint and targeted new client files. Reran root lint after worker heartbeat and migration registry fixes. |
-| npm run build | PASS: full workspace build; final server/shared build after worker heartbeat correction also exit0. Compiled app loads with plain Node. |
+| npm run build | PASS: full workspace build; final server/shared build after worker heartbeat correction also exit0. Compiled app loads with plain Node. Full workspace build and client 747/747/i18n checks also pass after merging main 3741662a and preserving its Thruline navigation. |
 | npm run test:migrations | PASS: 3/3 against the registered migration list, including full up/down/up. |
 | git diff --cached --check | PASS after checking all newly staged files. |
 

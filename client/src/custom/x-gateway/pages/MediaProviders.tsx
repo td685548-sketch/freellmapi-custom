@@ -60,7 +60,7 @@ export default function MediaProviders() {
   const [imageResult, setImageResult] = useState<ImageTestResult | null>(null);
 
   // 2. TTS
-  const [ttsInput, setTtsInput] = useState('Hello! FreeLLMAPI X Gateway text-to-speech is working properly.');
+  const [ttsInput, setTtsInput] = useState('Hello! FreeLLMAPI Thruline text-to-speech is working properly.');
   const [ttsModel, setTtsModel] = useState('auto');
   const [ttsVoice, setTtsVoice] = useState('alloy');
   const [ttsSpeed, setTtsSpeed] = useState(1.0);
@@ -76,7 +76,7 @@ export default function MediaProviders() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 4. Embedding
-  const [embInput, setEmbInput] = useState('Semantic vector search with FreeLLMAPI X Gateway.');
+  const [embInput, setEmbInput] = useState('Semantic vector search with FreeLLMAPI Thruline.');
   const [embModel, setEmbModel] = useState('auto');
   const [embDim, setEmbDim] = useState<string>('');
   const [embResult, setEmbResult] = useState<EmbeddingTestResult | null>(null);
@@ -275,7 +275,7 @@ console.log(response.data[0].url);`;
   -H "Content-Type: application/json" \\
   -d '{
     "model": "${ttsModel === 'auto' ? (currentDefaults.tts?.defaultModel || 'auto') : ttsModel}",
-    "input": "Hello world from FreeLLMAPI X Gateway!",
+    "input": "Hello world from FreeLLMAPI Thruline!",
     "voice": "${ttsVoice}",
     "response_format": "${ttsFormat}"
   }' --output speech.${ttsFormat}`;
@@ -291,7 +291,7 @@ client = OpenAI(
 response = client.audio.speech.create(
     model="${ttsModel === 'auto' ? (currentDefaults.tts?.defaultModel || 'auto') : ttsModel}",
     voice="${ttsVoice}",
-    input="Hello world from FreeLLMAPI X Gateway!"
+    input="Hello world from FreeLLMAPI Thruline!"
 )
 response.stream_to_file("output.mp3")`;
       }
@@ -306,7 +306,7 @@ const client = new OpenAI({
 const mp3 = await client.audio.speech.create({
   model: "${ttsModel === 'auto' ? (currentDefaults.tts?.defaultModel || 'auto') : ttsModel}",
   voice: "${ttsVoice}",
-  input: "Hello world from FreeLLMAPI X Gateway!",
+  input: "Hello world from FreeLLMAPI Thruline!",
 });
 const buffer = Buffer.from(await mp3.arrayBuffer());
 await fs.promises.writeFile("output.mp3", buffer);`;

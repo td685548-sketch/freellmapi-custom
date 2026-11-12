@@ -843,7 +843,7 @@ export default function Providers() {
 
   return <>
     <div className="x-page-heading">
-      <div><div className="x-eyebrow">FreeLLMAPI / X Gateway</div><h1>{s.providers}</h1><p>{s.providerHelp}</p></div>
+      <div><div className="x-eyebrow">FreeLLMAPI / Thruline</div><h1>{s.providers}</h1><p>{s.providerHelp}</p></div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         {permissions?.add && (
           <button

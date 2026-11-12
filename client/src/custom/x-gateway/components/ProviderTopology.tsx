@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { ThrulineLogo } from '../ThrulineLogo'
 
 export type TopologyStatus = 'healthy' | 'degraded' | 'cooldown' | 'paused'
 
@@ -47,7 +48,7 @@ const CORE_X = 330
 const CORE_W = 150
 const PROVIDER_X = WIDTH - NODE_W - 20
 
-/** Hub-and-spoke view: AI clients -> X Gateway core -> active providers. */
+/** Hub-and-spoke view: AI clients -> Thruline core -> active providers. */
 export default function ProviderTopology({
   nodes,
   loading,
@@ -105,7 +106,7 @@ export default function ProviderTopology({
         <div style={{ overflowX: 'auto' }}>
           <svg
             role="img"
-            aria-label="Provider topology: AI clients to X Gateway core to active providers"
+            aria-label="Provider topology: AI clients to Thruline core to active providers"
             viewBox={`0 0 ${WIDTH} ${layout.height}`}
             style={{ width: '100%', minWidth: 640, height: 'auto', display: 'block' }}
           >
@@ -152,16 +153,17 @@ export default function ProviderTopology({
               </text>
             </g>
 
-            {/* X Gateway core */}
+            {/* Thruline core */}
             <g>
               <rect
                 x={CORE_X} y={layout.centerY - 40} width={CORE_W} height={80} rx={16}
                 fill="rgba(16,185,129,0.14)" stroke="#10b981" strokeWidth={2}
               />
-              <text x={CORE_X + CORE_W / 2} y={layout.centerY - 4} textAnchor="middle" fontSize={15} fontWeight={700} fill="currentColor">
-                X Gateway
+              <ThrulineLogo size={22} x={CORE_X + CORE_W / 2 - 11} y={layout.centerY - 33} />
+              <text x={CORE_X + CORE_W / 2} y={layout.centerY + 8} textAnchor="middle" fontSize={15} fontWeight={700} fill="currentColor">
+                Thruline
               </text>
-              <text x={CORE_X + CORE_W / 2} y={layout.centerY + 16} textAnchor="middle" fontSize={10.5} fill="currentColor" opacity={0.65}>
+              <text x={CORE_X + CORE_W / 2} y={layout.centerY + 26} textAnchor="middle" fontSize={10.5} fill="currentColor" opacity={0.65}>
                 {nodes.length} provider{nodes.length === 1 ? '' : 's'}
               </text>
             </g>

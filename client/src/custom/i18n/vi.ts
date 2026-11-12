@@ -547,7 +547,7 @@ export const VI: Record<string, string> = {
   "With a list, \"auto\" requests are routed only to these models, and naming any other model is refused. Endpoints that do not route automatically (embeddings, images, audio, Gemini) must name one of them.": "Khi có danh sách, request \"auto\" chỉ được chuyển tới các model này, và gọi đích danh model khác sẽ bị từ chối. Các endpoint không tự định tuyến (embeddings, ảnh, âm thanh, Gemini) phải ghi rõ một trong các model này.",
   "Working": "Hoạt động tốt",
   "Written to the Logs page": "Đã ghi vào trang Logs",
-  "X Gateway": "X Gateway",
+  "X Gateway": "Thruline",
   "X Gateway (9Router)": "X Gateway (9Router)",
   "X-Conversation-Id": "X-Conversation-Id",
   "X-End-User": "X-End-User",
