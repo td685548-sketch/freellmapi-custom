@@ -14,7 +14,7 @@ describe('MiProxy Webhook & Proxy Auto-Update', () => {
     mockEntries = [
       {
         id: 1,
-        name: 'Residential-US-1',
+        name: 'Pool-US-1',
         proxyUrl: 'http://198.51.100.1:8080',
         enabled: true,
         boundAccounts: 2,
@@ -74,7 +74,7 @@ describe('MiProxy Webhook & Proxy Auto-Update', () => {
     });
 
     vi.spyOn(proxyLib, 'probeProxyUrl').mockImplementation(async (url, _options) => {
-      // Mock probe test without downloading or executing any external binaries (ngrok/pinggy)
+      // Mock probe test without downloading or executing any external binaries
       if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
         return { ok: true, latencyMs: 65, error: undefined, status: 204 };
       }
@@ -143,8 +143,8 @@ describe('MiProxy Webhook & Proxy Auto-Update', () => {
   describe('Authentication Gates', () => {
     it('returns 401 when token query param is missing', async () => {
       const res = await callWebhook('/api/proxy-webhook', {
-        url: 'http://qnkwc-118-70-12-223.run.pinggy-free.link:41561',
-        type: 'pinggy',
+        url: 'http://relay-a.example.test:41561',
+        type: 'tunnel',
       });
       expect(res.status).toBe(401);
       expect(res.body.error.code).toBe('unauthorized');
@@ -153,8 +153,8 @@ describe('MiProxy Webhook & Proxy Auto-Update', () => {
 
     it('returns 401 when token is invalid', async () => {
       const res = await callWebhook('/api/proxy-webhook?token=invalid_wrong_token', {
-        url: 'http://qnkwc-118-70-12-223.run.pinggy-free.link:41561',
-        type: 'pinggy',
+        url: 'http://relay-a.example.test:41561',
+        type: 'tunnel',
       });
       expect(res.status).toBe(401);
       expect(res.body.error.code).toBe('unauthorized');
@@ -164,8 +164,8 @@ describe('MiProxy Webhook & Proxy Auto-Update', () => {
     it('returns 404 when global token is valid but target proxy cannot be found', async () => {
       process.env.PROXY_WEBHOOK_TOKEN = 'global_super_secret_token';
       const res = await callWebhook('/api/proxy-webhook?token=global_super_secret_token&id=9999', {
-        url: 'http://qnkwc-118-70-12-223.run.pinggy-free.link:41561',
-        type: 'pinggy',
+        url: 'http://relay-a.example.test:41561',
+        type: 'tunnel',
       });
       expect(res.status).toBe(404);
       expect(res.body.error.code).toBe('not_found');
@@ -199,7 +199,7 @@ describe('MiProxy Webhook & Proxy Auto-Update', () => {
 
     it('returns 400 when timestamp is non-numeric', async () => {
       const res = await callWebhook('/api/proxy-webhook?token=token_entry_1_abcdef1234567890', {
-        url: 'http://qnkwc-118-70-12-223.run.pinggy-free.link:41561',
+        url: 'http://relay-a.example.test:41561',
         timestamp: 'invalid-time',
       });
       expect(res.status).toBe(400);
@@ -212,8 +212,8 @@ describe('MiProxy Webhook & Proxy Auto-Update', () => {
       // Entry 1 has lastWebhookAt = 1762800000000
       const oldTimestamp = 1762800000000 - 50000;
       const res = await callWebhook('/api/proxy-webhook?token=token_entry_1_abcdef1234567890', {
-        url: 'http://old-tunnel.run.pinggy-free.link:41561',
-        type: 'pinggy',
+        url: 'http://relay-old.example.test:41561',
+        type: 'tunnel',
         timestamp: oldTimestamp,
       });
 
@@ -229,19 +229,19 @@ describe('MiProxy Webhook & Proxy Auto-Update', () => {
   describe('Successful Webhook Updates & Probing', () => {
     it('updates proxy via per-proxy token, runs forward proxy probe and records test status', async () => {
       const newTimestamp = 1762800000000 + 100000;
-      const newUrl = 'http://qnkwc-118-70-12-223.run.pinggy-free.link:41561';
+      const newUrl = 'http://relay-a.example.test:41561';
 
       const res = await callWebhook('/api/proxy-webhook?token=token_entry_1_abcdef1234567890', {
         url: newUrl,
-        type: 'pinggy',
+        type: 'tunnel',
         timestamp: newTimestamp,
       });
 
       expect(res.status).toBe(200);
       expect(res.body.ok).toBe(true);
       expect(res.body.id).toBe(1);
-      expect(res.body.name).toBe('Residential-US-1');
-      expect(res.body.type).toBe('pinggy');
+      expect(res.body.name).toBe('Pool-US-1');
+      expect(res.body.type).toBe('tunnel');
       expect(res.body.test.ok).toBe(true);
       expect(res.body.test.latencyMs).toBe(65);
 
@@ -256,7 +256,7 @@ describe('MiProxy Webhook & Proxy Auto-Update', () => {
 
     it('updates proxy via global token targeting by name', async () => {
       process.env.PROXY_WEBHOOK_TOKEN = 'global_auth_secret_999';
-      const newUrl = 'http://mobile-proxy.run.pinggy-free.link:38888';
+      const newUrl = 'http://relay-b.example.test:38888';
       const newTimestamp = Date.now();
 
       const res = await callWebhook('/api/proxy-webhook?token=global_auth_secret_999&target=Mobile-Vietnam', {
@@ -273,7 +273,7 @@ describe('MiProxy Webhook & Proxy Auto-Update', () => {
     });
 
     it('is idempotent when sending identical proxy url multiple times', async () => {
-      const url = 'http://same-tunnel.run.pinggy-free.link:41561';
+      const url = 'http://relay-same.example.test:41561';
       const ts1 = 1762800000000 + 200000;
       const ts2 = 1762800000000 + 200001;
 
