@@ -44,6 +44,7 @@ import { getConfigSnapshot } from './config.js';
 import { runInGatewayScope } from './context.js';
 import { xGatewayProtocolsRouter } from './protocols.js';
 import { preprocessGatewayMessages } from './token-savers-pipeline.js';
+import { xSupportPublicRouter } from './support-router.js';
 
 export const xGatewayRouter = Router();
 
@@ -1603,6 +1604,9 @@ xGatewayRouter.get('/models', xGatewayAuth, (req: Request, res: Response) => {
 
 // Mount Anthropic Messages, OpenAI Responses, Legacy Completions, Embeddings, Image & Audio routes
 xGatewayRouter.use(xGatewayProtocolsRouter);
+
+// AI Support Partner Gateway (/x/v1/support/*)
+xGatewayRouter.use('/support', xSupportPublicRouter);
 
 // Catch-all: any other path under /x/v1 returns JSON 404
 xGatewayRouter.use((_req: Request, res: Response) => {

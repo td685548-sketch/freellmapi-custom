@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
-import { ArrowLeft, ArrowLeftRight, BarChart3, ChevronRight, Film, KeyRound, Layers, Menu, MessageSquare, Moon, Network, Scissors, ScrollText, Server, ShieldCheck, Sparkles, Sun, Terminal, X } from 'lucide-react'
+import { ArrowLeft, ArrowLeftRight, BarChart3, ChevronRight, Film, Headset, KeyRound, Layers, Menu, MessageSquare, Moon, Network, Scissors, ScrollText, Server, ShieldCheck, Sparkles, Sun, Terminal, X } from 'lucide-react'
 import { useI18n } from '@/i18n'
 import { useTheme } from '@/theme-context'
 import { Toaster } from '@/components/toaster'
@@ -24,6 +24,7 @@ import CLITools from './pages/CLIOperations'
 import TranslatorInspector from './pages/TranslatorInspector'
 import Playground from './pages/Playground'
 import SkillsHub from './pages/SkillsHub'
+import SupportGateway from './pages/SupportGateway'
 import ModelAvailabilityBadge from './components/ModelAvailabilityBadge'
 import { useMgmtStrings } from './management-strings'
 import { usePoolStrings } from './proxy-pool-strings'
@@ -31,6 +32,7 @@ import { useMediaStrings } from './media-strings'
 import { useToolsStrings } from './tools-strings'
 import { useTranslatorStrings } from './translator-strings'
 import { useSkillsStrings } from './skills-strings'
+import { useSupportStrings } from './support-strings'
 import './x-gateway.css'
 
 function XGatewayShell() {
@@ -41,6 +43,7 @@ function XGatewayShell() {
   const t = useToolsStrings()
   const tr = useTranslatorStrings()
   const sk = useSkillsStrings()
+  const sup = useSupportStrings()
   const session = useUserSession()
   const { locale, setLocale } = useI18n()
   const { resolvedDark, setTheme } = useTheme()
@@ -54,6 +57,7 @@ function XGatewayShell() {
   const items = [
     { to: '/x/endpoint', label: s.endpoint, icon: KeyRound },
     { to: '/x/playground', label: m.playground, icon: MessageSquare },
+    { to: '/x/support', label: sup.supportNav, icon: Headset },
     { to: '/x/tools', label: t.cliToolsNav, icon: Terminal },
     { to: '/x/skills', label: sk.skillsNav, icon: Sparkles },
     { to: '/x/translator', label: tr.translatorNav, icon: ArrowLeftRight },
@@ -87,6 +91,7 @@ function XGatewayShell() {
         <Route path="accounts/callback" element={<AccountCallback />} />
         <Route path="endpoint" element={<Endpoint />} />
         <Route path="playground" element={<Playground />} />
+        <Route path="support" element={<SupportGateway />} />
         <Route path="tools" element={<CLITools />} />
         <Route path="skills" element={<SkillsHub />} />
         <Route path="translator" element={<TranslatorInspector />} />
