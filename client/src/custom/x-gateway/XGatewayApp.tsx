@@ -32,6 +32,7 @@ import { useShellStrings } from './shell-strings'
 import { matchNav, useNavGroups } from './shell/nav'
 import { QuickJump } from './shell/QuickJump'
 import Overview from './pages/Overview'
+import './transition/install'
 import './x-gateway.css'
 import './x-theme.css'
 
