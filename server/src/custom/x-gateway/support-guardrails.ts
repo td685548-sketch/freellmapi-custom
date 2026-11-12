@@ -402,3 +402,73 @@ export function resetSupportUserQuota(tenantId: string, userId?: string): void {
   else delete store[tid][userId];
   writeStore(QUOTAS_KEY, store);
 }
+
+export function applySupportQuotaDelta(
+  tenantId: string,
+  input: {
+    userId: string;
+    userRole: string;
+    requestsDelta: number;
+    tokensDelta: number;
+    enforceLimits: boolean;
+    targetWindowStart?: number;
+  },
+): SupportQuotaStatus {
+  const tid = String(tenantId);
+  const userId = String(input.userId ?? '');
+  const userRole = String(input.userRole ?? '');
+
+  if (!Number.isFinite(input.requestsDelta) || !Number.isInteger(input.requestsDelta)) {
+    throw new TypeError('requestsDelta must be a finite integer');
+  }
+  if (!Number.isFinite(input.tokensDelta) || !Number.isInteger(input.tokensDelta)) {
+    throw new TypeError('tokensDelta must be a finite integer');
+  }
+
+  const policy = getSupportGuardrailPolicy(tid);
+  const rule = ruleFor(policy, userRole);
+  const now = Date.now();
+
+  const db = getDb();
+  const applyTx = db.transaction(() => {
+    const store = readStore<QuotaTenantStore>(QUOTAS_KEY);
+    const tenantStore = store[tid] ?? {};
+    const existing = activeCounter(tenantStore, userId, rule, now);
+
+    if (isUnlimited(policy, userRole, rule)) {
+      return buildStatus(userId, userRole, rule, existing, true);
+    }
+
+    if (input.targetWindowStart !== undefined && existing && existing.windowStart !== input.targetWindowStart) {
+      return buildStatus(userId, userRole, rule, existing, true);
+    }
+
+    const counter: QuotaCounter = existing ?? {
+      userId,
+      userRole,
+      windowStart: input.targetWindowStart ?? now,
+      requestsUsed: 0,
+      tokensUsed: 0,
+    };
+
+    if (input.enforceLimits) {
+      if (input.requestsDelta > 0 && rule.maxRequestsPerWindow > 0 && counter.requestsUsed + input.requestsDelta > rule.maxRequestsPerWindow) {
+        return buildStatus(userId, userRole, rule, counter, false, 'quota_exceeded_requests');
+      }
+      if (input.tokensDelta > 0 && rule.maxTokensPerWindow > 0 && counter.tokensUsed + input.tokensDelta > rule.maxTokensPerWindow) {
+        return buildStatus(userId, userRole, rule, counter, false, 'quota_exceeded_tokens');
+      }
+    }
+
+    counter.userRole = userRole;
+    counter.requestsUsed = Math.max(0, counter.requestsUsed + input.requestsDelta);
+    counter.tokensUsed = Math.max(0, counter.tokensUsed + input.tokensDelta);
+
+    tenantStore[userId] = counter;
+    store[tid] = tenantStore;
+    writeStore(QUOTAS_KEY, store);
+    return buildStatus(userId, userRole, rule, counter, true);
+  });
+
+  return applyTx();
+}

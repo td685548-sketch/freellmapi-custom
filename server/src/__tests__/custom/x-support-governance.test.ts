@@ -23,6 +23,8 @@ import {
   type SupportGuardrailEvaluation,
   type SupportQuotaStatus,
 } from '../../custom/x-gateway/support-guardrails.js';
+import { createOrAppendSupportConversation } from '../../custom/x-gateway/support-workflows.js';
+import { drainSupportEventOutbox } from '../../custom/x-gateway/support-event-outbox.js';
 
 describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x-gateway/support/* & /x/v1/support/*)', () => {
   let server: Server;
@@ -460,6 +462,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
     });
 
     it('13. POST /webhooks/test tests event dispatch with allowLocalhost: true', async () => {
+      process.env.SUPPORT_ALLOW_LOCAL_WEBHOOK_TESTS = '1';
       upsertSupportWebhookSubscription(String(tenant.id), {
         name: 'Local Test Hook',
         targetUrl: 'http://127.0.0.1:9999/hook',
@@ -496,6 +499,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
         expect(data.deliveries.length).toBeGreaterThanOrEqual(1);
         expect(data.deliveries[0].status).toBe('delivered');
       } finally {
+        delete process.env.SUPPORT_ALLOW_LOCAL_WEBHOOK_TESTS;
         fetchSpy.mockRestore();
       }
     });
@@ -580,6 +584,8 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
         expect(data.evaluation.allowed).toBe(false);
         expect(data.evaluation.blockedReason).toBe('prompt_injection');
         expect(data.evaluation.triggeredRules).toContain('ignore_instructions');
+        // Spec 017: Event is durably enqueued into outbox; drain worker delivers it
+        await drainSupportEventOutbox();
         expect(blockedEventDispatched).toBe(true);
       } finally {
         fetchSpy.mockRestore();
@@ -769,6 +775,19 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
         });
         expect(badRes.status).toBe(400);
 
+        // Spec 017: Create verified customer conversation for ownership validation
+        const createdConv = createOrAppendSupportConversation(String(tenant.id), {
+          userId: 'cust_alice',
+          userName: 'Alice',
+          userRole: 'customer',
+          subject: 'Help request',
+          message: {
+            senderType: 'customer',
+            senderId: 'cust_alice',
+            content: 'Hello, need help with my account',
+          },
+        });
+
         // Valid score 5 -> 201
         const res = await apiCall('/x/v1/support/csat', {
           method: 'POST',
@@ -778,7 +797,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
           },
           body: {
             score: 5,
-            conversationId: 'conv_123',
+            conversationId: createdConv.id,
             category: 'support_speed',
             comment: 'Super fast and helpful response!',
           },
@@ -794,6 +813,9 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
         expect(data.rating.userId).toBe('cust_alice');
         expect(data.rating.category).toBe('support_speed');
         expect(data.summary.totalRatings).toBeGreaterThanOrEqual(1);
+
+        // Spec 017: Event is durably enqueued into outbox; drain worker delivers it
+        await drainSupportEventOutbox();
         expect(csatEventDispatched).toBe(true);
       } finally {
         fetchSpy.mockRestore();

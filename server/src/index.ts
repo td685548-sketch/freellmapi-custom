@@ -25,6 +25,7 @@ import { installLogRedaction } from './lib/log-redaction.js';
 import { cleanupExpiredCooldowns } from './services/ratelimit.js';
 import { loadCacheFromDb } from './services/cache.js';
 import { installGracefulShutdown } from './lib/graceful-shutdown.js';
+import { startWorkerLifecycle } from './custom/x-gateway/support-runtime-router.js';
 
 // Before any other statement runs, so no provider key can reach stdout — users
 // paste server output into bug reports. Module scope, not inside main(), so it
@@ -48,6 +49,7 @@ async function main() {
     await restoreDbBackupIfNeeded();
   }
   measureStartup('database_init', () => initDb(config.dbPath ?? undefined));
+  const stopSupportWorker = startWorkerLifecycle();
   applyDeclarativeConfigFromEnv();
   // After initDb: the unknown-model half of this check reads the catalog.
   warnOnRoutingOverrideDrift();
@@ -142,7 +144,7 @@ async function main() {
   const server = app.listen(Number(PORT), HOST, onReady(HOST));
   tuneKeepAlive(server);
   const servers = [server];
-  installGracefulShutdown({ servers: () => servers.filter(s => s.listening), closeDb: () => { stopPerformanceMetrics(); getDb().close?.(); } });
+  installGracefulShutdown({ servers: () => servers.filter(s => s.listening), closeDb: () => { stopSupportWorker(); stopPerformanceMetrics(); getDb().close?.(); } });
   server.on('error', (err: NodeJS.ErrnoException) => {
     // The default '::' bind fails where IPv6 is disabled (kernel
     // ipv6.disable=1 and the like) — retry IPv4-only rather than dying.

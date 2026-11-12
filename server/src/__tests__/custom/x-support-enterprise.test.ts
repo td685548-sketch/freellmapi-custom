@@ -422,19 +422,36 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /x/v1/support/
       const actions = (actionsRes.body as { actions: any[] }).actions;
       expect(actions.some((a) => a.id === createdActionId)).toBe(true);
 
-      // Approve action 1
-      const appRes = await apiCall(
-        `/api/x-gateway/support/tenants/${tenant.id}/actions/${createdActionId}/approve`,
-        {
-          method: 'POST',
-          token: editorToken,
-          body: { reviewedBy: 'Manager Dave', reviewNote: 'Approved under $50 goodwill policy' },
-        },
-      );
+      // Approve action 1 (mocking outbound webhook network boundary)
+      const originalFetch = globalThis.fetch;
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+        if (String(url).startsWith('http://127.0.0.1')) {
+          return originalFetch(url, init);
+        }
+        return new Response(JSON.stringify({ ok: true, refunded: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      });
+
+      let appRes: any;
+      try {
+        appRes = await apiCall(
+          `/api/x-gateway/support/tenants/${tenant.id}/actions/${createdActionId}/approve`,
+          {
+            method: 'POST',
+            token: editorToken,
+            body: { reviewedBy: 'Manager Dave', reviewNote: 'Approved under $50 goodwill policy' },
+          },
+        );
+      } finally {
+        fetchSpy.mockRestore();
+      }
       expect(appRes.status).toBe(200);
       const approvedAction = (appRes.body as { action: any }).action;
       expect(approvedAction.status).toBe('approved');
-      expect(approvedAction.reviewedBy).toBe('Manager Dave');
+      // Spec 017: Reviewer taken from authenticated session, ignoring reviewedBy body claim
+      expect(approvedAction.reviewedBy).toBe('editor@enterprise.test');
       expect(approvedAction.executionResult).toBeDefined();
 
       // Reject action 2
@@ -449,7 +466,8 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /x/v1/support/
       expect(rejRes.status).toBe(200);
       const rejectedAction = (rejRes.body as { action: any }).action;
       expect(rejectedAction.status).toBe('rejected');
-      expect(rejectedAction.reviewedBy).toBe('Manager Dave');
+      // Spec 017: Reviewer taken from authenticated session, ignoring reviewedBy body claim
+      expect(rejectedAction.reviewedBy).toBe('editor@enterprise.test');
     });
 
     it('11. GET /tenants/:id/analytics returns deflection rate and SLA metrics', async () => {

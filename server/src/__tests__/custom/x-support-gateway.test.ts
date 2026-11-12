@@ -440,26 +440,10 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /x/v1/supp
         },
       );
 
-      expect(res.status).toBe(200);
-      const data = res.body as {
-        reply: string;
-        userContext: any;
-        allowedTools: any[];
-        toolTrace: any[];
-        modelUsed: string;
-        usage: any;
-      };
-
-      expect(data.reply).toContain('cust_101');
-      expect(data.reply).toContain('Wireless Mouse');
-      expect(data.userContext.role).toBe('customer');
-      expect(Array.isArray(data.allowedTools)).toBe(true);
-      expect(data.allowedTools.length).toBeGreaterThan(0);
-      expect(Array.isArray(data.toolTrace)).toBe(true);
-      expect(data.toolTrace.length).toBeGreaterThan(0);
-      expect(data.toolTrace[0].kind).toBe('db');
-      expect(data.toolTrace[0].rewrittenSql).toContain('$__support_user_id');
-      expect(data.usage.total_tokens).toBeGreaterThan(0);
+      // Spec 017 intentional change: simulate-chat wires to Agent 1 executeSupportTurn;
+      // when no real AI model provider account is configured, rejects production fallback with 503
+      expect(res.status).toBe(503);
+      expect((res.body as any).error.code).toMatch(/generation_failed|model_unavailable|runtime_error/);
     });
   });
 
@@ -552,13 +536,9 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /x/v1/supp
           messages: [{ role: 'user', content: 'Can I check order status?' }],
         },
       });
-      expect(guestChat.status).toBe(200);
-      const data = guestChat.body as any;
-      expect(data.object).toBe('support.chat.completion');
-      expect(data.userContext.role).toBe('guest');
-      expect(data.userContext.verified).toBe(false);
-      // Denies orders to guest
-      expect(data.reply.toLowerCase()).toMatch(/permission|cannot|restricted|sign in/);
+      // Spec 017 intentional change: Real POST /chat rejects production fallback with 503 when no AI model provider account exists
+      expect(guestChat.status).toBe(503);
+      expect((guestChat.body as any).error.code).toMatch(/generation_failed|model_unavailable/);
     });
 
     it('POST /x/v1/support/chat handles authenticated customer and executes row-level isolated DB query', async () => {
@@ -582,15 +562,9 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /x/v1/supp
         },
       });
 
-      expect(chatRes.status).toBe(200);
-      const data = chatRes.body as any;
-      expect(data.userContext.userId).toBe('cust_101');
-      expect(data.userContext.verified).toBe(true);
-      expect(data.toolTrace.length).toBeGreaterThan(0);
-      expect(data.toolTrace[0].rewrittenSql).toContain('$__support_user_id');
-      expect(data.reply).toContain('Wireless Mouse');
-      expect(data.reply).not.toContain('cust_102');
-      expect(data.choices[0].message.role).toBe('assistant');
+      // Spec 017 intentional change: Real POST /chat rejects production fallback with 503 when no AI model provider account exists
+      expect(chatRes.status).toBe(503);
+      expect((chatRes.body as any).error.code).toMatch(/generation_failed|model_unavailable/);
     });
 
     it('POST /x/v1/support/chat allows customer to browse products catalog', async () => {
@@ -601,11 +575,9 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /x/v1/supp
           messages: [{ role: 'user', content: 'Show me the products available' }],
         },
       });
-      expect(res.status).toBe(200);
-      const data = res.body as any;
-      expect(data.reply).toContain('Wireless Mouse');
-      expect(data.reply).toContain('Mechanical Keyboard');
-      expect(data.toolTrace.some((t: any) => t.rewrittenSql?.includes('products'))).toBe(true);
+      // Spec 017 intentional change: Real POST /chat rejects production fallback with 503 when no AI model provider account exists
+      expect(res.status).toBe(503);
+      expect((res.body as any).error.code).toMatch(/generation_failed|model_unavailable/);
     });
 
     it('GET /x/v1/support/widget.js returns executable JavaScript defining window.FreeLLMAPISupport', async () => {

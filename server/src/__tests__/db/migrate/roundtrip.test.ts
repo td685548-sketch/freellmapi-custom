@@ -210,6 +210,9 @@ describe('migration round trip', () => {
         CUSTOM_X_GATEWAY_PROXY_POOL_FILENAME,
         CUSTOM_X_GATEWAY_KEY_ACCESS_FILENAME,
         CUSTOM_PROXY_WEBHOOK_FILENAME,
+        '20261112_170001_support_runtime_state.ts',
+        '20261112_170002_support_execution_outbox.ts',
+        '20261112_180001_support_runtime_fencing.ts',
       ]);
     } finally {
       db.close();

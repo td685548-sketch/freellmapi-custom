@@ -1,5 +1,12 @@
 import { createHmac, randomUUID } from 'node:crypto';
 import { getDb } from '../../db/index.js';
+import {
+  safeFetch,
+  parseIpAddress,
+  isPrivateIp,
+  isMetadataIp,
+} from './support-safe-http.js';
+import { getSupportTenantSigningSecret } from './support-store.js';
 
 const CRM_KEY = 'x_gateway_support_crm_v1';
 const CSAT_KEY = 'x_gateway_support_csat_v1';
@@ -529,18 +536,23 @@ export function isSsrfSafeUrl(
     if (allowLocalhost) {
       return { safe: true };
     }
+    if (u.username || u.password) {
+      return { safe: false, reason: 'URL credentials are not allowed' };
+    }
     const host = u.hostname.toLowerCase();
+    if (isMetadataIp(host, host)) {
+      return { safe: false, reason: 'SSRF protection: cloud metadata destinations are forbidden' };
+    }
+    const ip = parseIpAddress(host);
+    if (ip && isPrivateIp(ip)) {
+      return { safe: false, reason: 'SSRF protection: private or localhost URLs are not allowed' };
+    }
     if (
       host === 'localhost' ||
-      host === '127.0.0.1' ||
       host === '0.0.0.0' ||
-      host.startsWith('127.') ||
-      host.startsWith('169.254.') ||
-      host.startsWith('10.') ||
-      host.startsWith('192.168.') ||
-      /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
-      host === '[::1]' ||
-      host === '::1'
+      host.endsWith('.localhost') ||
+      host.endsWith('.local') ||
+      host.endsWith('.internal')
     ) {
       return { safe: false, reason: 'SSRF protection: private or localhost URLs are not allowed' };
     }
@@ -671,7 +683,10 @@ export async function dispatchSupportPartnerEvent(
   for (const sub of subs) {
     const deliveryId = `dlv_${randomUUID()}`;
     const now = new Date().toISOString();
-    const ssrf = isSsrfSafeUrl(sub.targetUrl, options?.allowLocalhost);
+    const effectiveAllowLocalhost = Boolean(
+      options?.allowLocalhost && process.env.SUPPORT_ALLOW_LOCAL_WEBHOOK_TESTS === '1',
+    );
+    const ssrf = isSsrfSafeUrl(sub.targetUrl, effectiveAllowLocalhost);
 
     if (!ssrf.safe) {
       const delivery: SupportWebhookDelivery = {
@@ -690,6 +705,22 @@ export async function dispatchSupportPartnerEvent(
       continue;
     }
 
+    const secret =
+      options?.signingSecret ??
+      (Number.isFinite(Number(tenantId))
+        ? (() => {
+            try {
+              return getSupportTenantSigningSecret(Number(tenantId));
+            } catch {
+              return undefined;
+            }
+          })()
+        : undefined);
+
+    if (!secret) {
+      throw new SupportCrmWebhookError(400, 'A signing secret is required to dispatch partner events');
+    }
+
     const bodyJson = JSON.stringify({
       id: deliveryId,
       event,
@@ -698,23 +729,26 @@ export async function dispatchSupportPartnerEvent(
       payload,
     });
 
-    const secret = options?.signingSecret || 'default_secret';
     const signature = createHmac('sha256', secret).update(bodyJson).digest('hex');
     const headerName = sub.secretHeader || 'X-Support-Signature';
 
     const startTime = Date.now();
     try {
-      const res = await fetch(sub.targetUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Support-Event': event,
-          'X-Support-Delivery-Id': deliveryId,
-          [headerName]: `sha256=${signature}`,
+      const res = await safeFetch(
+        sub.targetUrl,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Support-Event': event,
+            'X-Support-Delivery-Id': deliveryId,
+            [headerName]: `sha256=${signature}`,
+          },
+          body: bodyJson,
+          signal: AbortSignal.timeout(5000),
         },
-        body: bodyJson,
-        signal: AbortSignal.timeout(5000),
-      });
+        { allowLocalhost: effectiveAllowLocalhost },
+      );
 
       const durationMs = Date.now() - startTime;
       const delivery: SupportWebhookDelivery = {

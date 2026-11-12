@@ -11,6 +11,7 @@ import { useSkillsStrings } from '../skills-strings'
 import { useSupportStrings } from '../support-strings'
 import { useSupportEnterpriseStrings } from '../support-enterprise-strings'
 import { useSupportGovernanceStrings } from '../support-governance-strings'
+import { useSupportIntegrationStrings } from '../support-integration-strings'
 import { useShellStrings } from '../shell-strings'
 
 export interface NavItem { to: string; label: string; icon: LucideIcon }
@@ -28,6 +29,7 @@ export function useNavGroups(): NavGroup[] {
   const sup = useSupportStrings()
   const ops = useSupportEnterpriseStrings()
   const gov = useSupportGovernanceStrings()
+  const integration = useSupportIntegrationStrings()
   const sh = useShellStrings()
   const session = useUserSession()
   const canView = session.hasPermission('view_keys')
@@ -53,6 +55,7 @@ export function useNavGroups(): NavGroup[] {
       { to: '/x/skills', label: sk.skillsNav, icon: Sparkles },
     ] },
     { id: 'support', label: sh.groupSupport, items: [
+      { to: '/x/support-integration', label: integration.nav, icon: Sparkles },
       { to: '/x/support', label: sup.supportNav, icon: Headset },
       { to: '/x/support-ops', label: ops.nav, icon: LifeBuoy },
       { to: '/x/support-guardrails', label: gov.nav, icon: ShieldCheck },
