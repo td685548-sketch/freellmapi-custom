@@ -1016,7 +1016,7 @@ export const MODEL_ALIASES_SETTINGS_KEY = 'x_gateway_model_aliases';
 export const CUSTOM_MODEL_CAPS_SETTINGS_KEY = 'x_gateway_custom_model_caps';
 export const CATALOG_SYNC_SETTINGS_KEY = 'x_gateway_catalog_sync_state';
 
-const MODEL_ALIAS_PATTERN = /^[a-zA-Z0-9_.\-]+$/;
+const MODEL_ALIAS_PATTERN = /^[a-zA-Z0-9_.-]+$/;
 const RESERVED_ALIAS_NAMES = new Set(['__proto__', 'constructor', 'prototype']);
 
 function readJsonSetting(key: string): unknown {

@@ -16,8 +16,6 @@ import {
   setCapacityAdapterSettings,
 } from '../../custom/x-gateway/capacity-adapter.js';
 import {
-  getDefaultPricing,
-  getMergedPricing,
   getPricingOverrides,
   resetPricingOverrides,
 } from '../../custom/x-gateway/pricing.js';

@@ -723,7 +723,7 @@ providerAccountsRouter.post('/providers/:providerId/models/ping', requirePermiss
 // Model aliases, custom model capabilities and catalog sync. Registered before
 // the `/:id` routes so these static paths are never read as account ids.
 const aliasSchema = z.object({
-  alias: z.string().trim().min(1).max(64).regex(/^[a-zA-Z0-9_.\-]+$/),
+  alias: z.string().trim().min(1).max(64).regex(/^[a-zA-Z0-9_.-]+$/),
   model: z.string().trim().min(1).max(200),
 }).strict();
 const aliasDeleteSchema = z.object({ alias: z.string().trim().min(1).max(64) });
