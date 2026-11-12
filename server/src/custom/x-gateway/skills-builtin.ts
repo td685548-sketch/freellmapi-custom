@@ -22,10 +22,10 @@ export const BUILTIN_SKILLS: BuiltinSkillDefinition[] = [
     githubPath: '9router/SKILL.md',
     content: `---
 name: 9router
-description: Entry point for 9Router & FreeLLMAPI X Gateway — local/remote AI gateway with OpenAI-compatible REST for chat, image, TTS, STT, embeddings, web search, web fetch. Use when the user mentions 9Router, NINEROUTER_URL, GATEWAY_URL, or wants AI without writing provider boilerplate.
+description: Entry point for 9Router & FreeLLMAPI Thruline — local/remote AI gateway with OpenAI-compatible REST for chat, image, TTS, STT, embeddings, web search, web fetch. Use when the user mentions 9Router, NINEROUTER_URL, GATEWAY_URL, or wants AI without writing provider boilerplate.
 ---
 
-# 9Router & FreeLLMAPI X Gateway
+# 9Router & FreeLLMAPI Thruline
 
 Local/remote unified AI routing gateway exposing OpenAI, Anthropic, and Gemini compatible REST endpoints. One key, many providers, automatic fallback.
 
@@ -271,7 +271,7 @@ description: Text-to-speech via 9Router /v1/audio/speech using OpenAI / ElevenLa
 curl -X POST "\${GATEWAY_URL}/v1/audio/speech" \\
   -H "Authorization: Bearer \${GATEWAY_KEY}" \\
   -H "Content-Type: application/json" \\
-  -d '{"model":"openai/tts-1","voice":"alloy","input":"Hello! Welcome to FreeLLMAPI X Gateway."}' \\
+  -d '{"model":"openai/tts-1","voice":"alloy","input":"Hello! Welcome to FreeLLMAPI Thruline."}' \\
   --output audio.mp3
 \`\`\`
 `,

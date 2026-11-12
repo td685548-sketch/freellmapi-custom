@@ -657,7 +657,7 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
     if (candidates.length === 0) {
       res.status(503).json({
         error: {
-          message: 'No enabled X Gateway provider accounts available.',
+          message: 'No enabled Thruline provider accounts available.',
           type: 'service_unavailable',
           code: 'no_available_keys',
         },
@@ -858,7 +858,7 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
       }
     }
 
-    const message = sanitizeProviderErrorMessage(lastError instanceof Error ? lastError.message : 'All X Gateway provider accounts failed.');
+    const message = sanitizeProviderErrorMessage(lastError instanceof Error ? lastError.message : 'All Thruline provider accounts failed.');
     const firstCandidate = candidates[0];
     if (firstCandidate) {
       logRequest(
@@ -1147,7 +1147,7 @@ export async function handleXGatewaySearch(req: Request, res: Response): Promise
   if (searchCandidates.length === 0) {
     res.status(503).json({
       error: {
-        message: 'No enabled X Gateway provider accounts available for search.',
+        message: 'No enabled Thruline provider accounts available for search.',
         type: 'service_unavailable',
         code: 'no_available_keys',
       },
@@ -1581,10 +1581,10 @@ xGatewayRouter.get('/models', xGatewayAuth, (req: Request, res: Response) => {
   if (req.headers['anthropic-version']) {
     const createdAt = '2026-01-01T00:00:00Z';
     const anthropicModels = [
-      { type: 'model' as const, id: 'auto', display_name: 'X Gateway Auto', created_at: createdAt },
-      { type: 'model' as const, id: 'claude-sonnet-4-5-20250929', display_name: 'Claude Sonnet 4.5 (X Gateway)', created_at: createdAt },
-      { type: 'model' as const, id: 'claude-opus-4-6', display_name: 'Claude Opus 4.6 (X Gateway)', created_at: createdAt },
-      { type: 'model' as const, id: 'claude-haiku-4-5-20251001', display_name: 'Claude Haiku 4.5 (X Gateway)', created_at: createdAt },
+      { type: 'model' as const, id: 'auto', display_name: 'Thruline Auto', created_at: createdAt },
+      { type: 'model' as const, id: 'claude-sonnet-4-5-20250929', display_name: 'Claude Sonnet 4.5 (Thruline)', created_at: createdAt },
+      { type: 'model' as const, id: 'claude-opus-4-6', display_name: 'Claude Opus 4.6 (Thruline)', created_at: createdAt },
+      { type: 'model' as const, id: 'claude-haiku-4-5-20251001', display_name: 'Claude Haiku 4.5 (Thruline)', created_at: createdAt },
       ...data.map(m => ({
         type: 'model' as const,
         id: m.id,

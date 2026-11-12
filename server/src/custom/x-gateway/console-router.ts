@@ -158,7 +158,7 @@ xGatewayConsoleRouter.get('/keys', (req, res) => {
 xGatewayConsoleRouter.post('/keys', (req, res) => {
   const uid = requireUserId(req);
   const body = parse(createKeySchema, req.body ?? {});
-  const created = mintXGatewayClientKey(uid, body.name || 'X Gateway Key');
+  const created = mintXGatewayClientKey(uid, body.name || 'Thruline Key');
   res.status(201).json(created);
 });
 

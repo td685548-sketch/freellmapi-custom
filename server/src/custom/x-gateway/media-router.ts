@@ -287,7 +287,7 @@ xGatewayMediaRouter.post('/media/test/image', async (req: Request, res: Response
     return;
   }
   if (candidates.length === 0) {
-    res.status(503).json({ error: { message: 'No enabled X Gateway provider accounts available.' } });
+    res.status(503).json({ error: { message: 'No enabled Thruline provider accounts available.' } });
     return;
   }
 
@@ -384,7 +384,7 @@ xGatewayMediaRouter.post('/media/test/image', async (req: Request, res: Response
     }
   }
 
-  const message = lastError instanceof Error ? lastError.message : 'All X Gateway image generation accounts failed.';
+  const message = lastError instanceof Error ? lastError.message : 'All Thruline image generation accounts failed.';
   res.status(chatGptWebImageErrorStatus(lastError) ?? 502).json({ error: { message } });
 });
 
@@ -407,7 +407,7 @@ xGatewayMediaRouter.post('/media/test/tts', async (req: Request, res: Response) 
     return;
   }
   if (candidates.length === 0) {
-    res.status(503).json({ error: { message: 'No enabled X Gateway provider accounts available.' } });
+    res.status(503).json({ error: { message: 'No enabled Thruline provider accounts available.' } });
     return;
   }
 
@@ -477,7 +477,7 @@ xGatewayMediaRouter.post('/media/test/tts', async (req: Request, res: Response) 
     }
   }
 
-  const message = lastError instanceof Error ? lastError.message : 'All X Gateway speech accounts failed.';
+  const message = lastError instanceof Error ? lastError.message : 'All Thruline speech accounts failed.';
   res.status(502).json({ error: { message } });
 });
 
@@ -503,7 +503,7 @@ xGatewayMediaRouter.post(
       return;
     }
     if (candidates.length === 0) {
-      res.status(503).json({ error: { message: 'No enabled X Gateway provider accounts available.' } });
+      res.status(503).json({ error: { message: 'No enabled Thruline provider accounts available.' } });
       return;
     }
 
@@ -583,7 +583,7 @@ xGatewayMediaRouter.post(
       }
     }
 
-    const message = lastError instanceof Error ? lastError.message : 'All X Gateway transcription accounts failed.';
+    const message = lastError instanceof Error ? lastError.message : 'All Thruline transcription accounts failed.';
     res.status(502).json({ error: { message } });
   },
 );
@@ -605,7 +605,7 @@ xGatewayMediaRouter.post('/media/test/embedding', async (req: Request, res: Resp
     return;
   }
   if (candidates.length === 0) {
-    res.status(503).json({ error: { message: 'No enabled X Gateway provider accounts available.' } });
+    res.status(503).json({ error: { message: 'No enabled Thruline provider accounts available.' } });
     return;
   }
 
@@ -678,7 +678,7 @@ xGatewayMediaRouter.post('/media/test/embedding', async (req: Request, res: Resp
     }
   }
 
-  const message = lastError instanceof Error ? lastError.message : 'All X Gateway embedding accounts failed.';
+  const message = lastError instanceof Error ? lastError.message : 'All Thruline embedding accounts failed.';
   res.status(502).json({ error: { message } });
 });
 
@@ -700,7 +700,7 @@ xGatewayMediaRouter.post('/media/test/web', async (req: Request, res: Response) 
     return;
   }
   if (candidates.length === 0) {
-    res.status(503).json({ error: { message: 'No enabled X Gateway provider accounts available.' } });
+    res.status(503).json({ error: { message: 'No enabled Thruline provider accounts available.' } });
     return;
   }
 
@@ -805,7 +805,7 @@ xGatewayMediaRouter.post('/media/test/web', async (req: Request, res: Response) 
     }
   }
 
-  const message = lastError instanceof Error ? lastError.message : 'All X Gateway web search accounts failed.';
+  const message = lastError instanceof Error ? lastError.message : 'All Thruline web search accounts failed.';
   res.status(502).json({ error: { message } });
 });
 

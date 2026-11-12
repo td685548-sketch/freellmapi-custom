@@ -162,7 +162,7 @@ geminiRouter.get('/models', (req: Request, res: Response, next: NextFunction) =>
     name: `models/${id}`,
     version: '1.0',
     displayName: id,
-    description: `X Gateway routed model ${id}`,
+    description: `Thruline routed model ${id}`,
     supportedGenerationMethods: ['generateContent', 'streamGenerateContent', 'countTokens'],
   }));
 
@@ -247,7 +247,7 @@ geminiRouter.post(/^\/models\/(.+)$/, async (req: Request, res: Response, next: 
       const candidates = augmentCandidatesWithCapacityAdapter(rawCandidates, messages);
       if (candidates.length === 0) {
         res.status(503).json({
-          error: { message: 'No enabled X Gateway provider accounts available.', code: 503, status: 'UNAVAILABLE' },
+          error: { message: 'No enabled Thruline provider accounts available.', code: 503, status: 'UNAVAILABLE' },
         });
         return;
       }
