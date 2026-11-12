@@ -287,7 +287,7 @@ xGatewayProtocolsRouter.post('/messages', xGatewayAuth, async (req: Request, res
     if (candidates.length === 0) {
       res.status(503).json({
         type: 'error',
-        error: { type: 'overloaded_error', message: 'No enabled X Gateway provider accounts available.' },
+        error: { type: 'overloaded_error', message: 'No enabled Thruline provider accounts available.' },
       });
       return;
     }
@@ -502,7 +502,7 @@ xGatewayProtocolsRouter.post('/messages', xGatewayAuth, async (req: Request, res
       }
     }
 
-    const message = lastError instanceof Error ? lastError.message : 'All X Gateway provider accounts failed.';
+    const message = lastError instanceof Error ? lastError.message : 'All Thruline provider accounts failed.';
     res.status(502).json({
       type: 'error',
       error: { type: 'api_error', message },
@@ -689,7 +689,7 @@ async function handleResponses(req: Request, res: Response): Promise<void> {
     if (candidates.length === 0) {
       res.status(503).json({
         error: {
-          message: 'No enabled X Gateway provider accounts available.',
+          message: 'No enabled Thruline provider accounts available.',
           type: 'service_unavailable',
           code: 'no_available_keys',
         },
@@ -912,7 +912,7 @@ async function handleResponses(req: Request, res: Response): Promise<void> {
       }
     }
 
-    const message = lastError instanceof Error ? lastError.message : 'All X Gateway provider accounts failed.';
+    const message = lastError instanceof Error ? lastError.message : 'All Thruline provider accounts failed.';
     res.status(502).json({
       error: { message, type: 'upstream_error' },
     });
@@ -978,7 +978,7 @@ xGatewayProtocolsRouter.post('/completions', xGatewayAuth, async (req: Request, 
   }
   if (candidates.length === 0) {
     res.status(503).json({
-      error: { message: 'No enabled X Gateway provider accounts available.', type: 'service_unavailable' },
+      error: { message: 'No enabled Thruline provider accounts available.', type: 'service_unavailable' },
     });
     return;
   }
@@ -1093,7 +1093,7 @@ xGatewayProtocolsRouter.post('/completions', xGatewayAuth, async (req: Request, 
     }
   }
 
-  const message = lastError instanceof Error ? lastError.message : 'All X Gateway provider accounts failed.';
+  const message = lastError instanceof Error ? lastError.message : 'All Thruline provider accounts failed.';
   res.status(502).json({ error: { message, type: 'upstream_error' } });
 });
 
@@ -1294,7 +1294,7 @@ xGatewayProtocolsRouter.post('/embeddings', xGatewayAuth, async (req: Request, r
     return;
   }
   if (candidates.length === 0) {
-    res.status(503).json({ error: { message: 'No enabled X Gateway provider accounts available.', type: 'service_unavailable' } });
+    res.status(503).json({ error: { message: 'No enabled Thruline provider accounts available.', type: 'service_unavailable' } });
     return;
   }
 
@@ -1347,7 +1347,7 @@ xGatewayProtocolsRouter.post('/embeddings', xGatewayAuth, async (req: Request, r
     }
   }
 
-  const message = lastError instanceof Error ? lastError.message : 'All X Gateway embedding accounts failed.';
+  const message = lastError instanceof Error ? lastError.message : 'All Thruline embedding accounts failed.';
   res.status(502).json({ error: { message, type: 'upstream_error' } });
 });
 
@@ -1367,7 +1367,7 @@ xGatewayProtocolsRouter.post('/images/generations', xGatewayAuth, async (req: Re
     return;
   }
   if (candidates.length === 0) {
-    res.status(503).json({ error: { message: 'No enabled X Gateway provider accounts available.', type: 'service_unavailable' } });
+    res.status(503).json({ error: { message: 'No enabled Thruline provider accounts available.', type: 'service_unavailable' } });
     return;
   }
 
@@ -1438,7 +1438,7 @@ xGatewayProtocolsRouter.post('/images/generations', xGatewayAuth, async (req: Re
     }
   }
 
-  const message = lastError instanceof Error ? lastError.message : 'All X Gateway image generation accounts failed.';
+  const message = lastError instanceof Error ? lastError.message : 'All Thruline image generation accounts failed.';
   res.status(chatGptWebImageErrorStatus(lastError) ?? 502).json({ error: { message, type: 'upstream_error' } });
 });
 
@@ -1458,7 +1458,7 @@ xGatewayProtocolsRouter.post('/audio/speech', xGatewayAuth, async (req: Request,
     return;
   }
   if (candidates.length === 0) {
-    res.status(503).json({ error: { message: 'No enabled X Gateway provider accounts available.', type: 'service_unavailable' } });
+    res.status(503).json({ error: { message: 'No enabled Thruline provider accounts available.', type: 'service_unavailable' } });
     return;
   }
 
@@ -1511,7 +1511,7 @@ xGatewayProtocolsRouter.post('/audio/speech', xGatewayAuth, async (req: Request,
     }
   }
 
-  const message = lastError instanceof Error ? lastError.message : 'All X Gateway speech accounts failed.';
+  const message = lastError instanceof Error ? lastError.message : 'All Thruline speech accounts failed.';
   res.status(502).json({ error: { message, type: 'upstream_error' } });
 });
 
@@ -1544,7 +1544,7 @@ xGatewayProtocolsRouter.post(
       return;
     }
     if (candidates.length === 0) {
-      res.status(503).json({ error: { message: 'No enabled X Gateway provider accounts available.', type: 'service_unavailable' } });
+      res.status(503).json({ error: { message: 'No enabled Thruline provider accounts available.', type: 'service_unavailable' } });
       return;
     }
 
@@ -1608,7 +1608,7 @@ xGatewayProtocolsRouter.post(
       }
     }
 
-    const message = lastError instanceof Error ? lastError.message : 'All X Gateway transcription accounts failed.';
+    const message = lastError instanceof Error ? lastError.message : 'All Thruline transcription accounts failed.';
     res.status(502).json({ error: { message, type: 'upstream_error' } });
   },
 );
@@ -1677,7 +1677,7 @@ xGatewayProtocolsRouter.post('/systemone', xGatewayAuth, async (req: Request, re
     return;
   }
   if (candidates.length === 0) {
-    res.status(503).json({ error: { message: 'No enabled X Gateway provider accounts available.', type: 'service_unavailable' } });
+    res.status(503).json({ error: { message: 'No enabled Thruline provider accounts available.', type: 'service_unavailable' } });
     return;
   }
 
@@ -1754,6 +1754,6 @@ xGatewayProtocolsRouter.post('/systemone', xGatewayAuth, async (req: Request, re
     }
   }
 
-  const message = lastError instanceof Error ? sanitizeProviderErrorMessage(lastError.message) : 'All X Gateway provider accounts failed.';
+  const message = lastError instanceof Error ? sanitizeProviderErrorMessage(lastError.message) : 'All Thruline provider accounts failed.';
   res.status(502).json({ error: { message, type: 'upstream_error' } });
 });

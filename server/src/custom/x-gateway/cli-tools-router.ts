@@ -51,7 +51,7 @@ xCliToolsRouter.post('/test', (req: Request, res: Response) => {
       ok: false,
       toolId,
       latencyMs,
-      error: 'No active provider accounts connected in X Gateway. Please connect at least one provider in Providers page.',
+      error: 'No active provider accounts connected in Thruline. Please connect at least one provider in Providers page.',
     });
     return;
   }
@@ -64,6 +64,6 @@ xCliToolsRouter.post('/test', (req: Request, res: Response) => {
     latencyMs,
     usableAccountsCount: usable.length,
     availableModelsCount,
-    message: `X Gateway is ready for ${toolId} (${usable.length} active account${usable.length === 1 ? '' : 's'}).`,
+    message: `Thruline is ready for ${toolId} (${usable.length} active account${usable.length === 1 ? '' : 's'}).`,
   });
 });

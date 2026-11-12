@@ -210,7 +210,7 @@ xTranslatorRouter.post('/dispatch', async (req: Request, res: Response) => {
       success: false,
       error: {
         type: 'no_available_keys',
-        message: 'No active X Gateway accounts configured to execute dispatch.',
+        message: 'No active Thruline accounts configured to execute dispatch.',
       },
       latencyMs: Date.now() - startMs,
     });

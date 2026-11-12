@@ -75,7 +75,7 @@ describe('Granular permissions UI', () => {
     expect(document.body.textContent).not.toContain('Save Permissions')
     expect(apiFetch).not.toHaveBeenCalled()
   })
-  it('separates FreeLLMAPI and X Gateway permissions into tabs and toggles between them', async () => {
+  it('separates FreeLLMAPI and Thruline permissions into tabs and toggles between them', async () => {
     const user: AdminUser = { id: 3, email: 'member@example.com', role: 'member', isPrimary: false, isSelf: false, permissions: [], activeKeys: 0, sessions: 1, createdAt: '' }
     vi.mocked(apiFetch).mockResolvedValue({ success: true })
     await render(<PermissionsDialog user={user} open onOpenChange={() => {}} onSuccess={() => {}} />)
@@ -83,7 +83,7 @@ describe('Granular permissions UI', () => {
     const tabs = [...container.ownerDocument.querySelectorAll<HTMLButtonElement>('button[role="tab"]')]
     expect(tabs.length).toBe(2)
     const freellmTab = tabs.find(t => t.textContent?.includes('FreeLLMAPI'))!
-    const xGatewayTab = tabs.find(t => t.textContent?.includes('X Gateway'))!
+    const xGatewayTab = tabs.find(t => t.textContent?.includes('Thruline'))!
     expect(freellmTab).toBeDefined()
     expect(xGatewayTab).toBeDefined()
 
@@ -94,7 +94,7 @@ describe('Granular permissions UI', () => {
     expect(freellmTab.getAttribute('aria-selected')).toBe('false')
     expect(xGatewayTab.getAttribute('aria-selected')).toBe('true')
 
-    const useXLabel = [...container.ownerDocument.querySelectorAll('label')].find(l => l.textContent?.includes('Use X gateway'))!
+    const useXLabel = [...container.ownerDocument.querySelectorAll('label')].find(l => l.textContent?.includes('Use Thruline'))!
     expect(useXLabel).toBeDefined()
     await act(async () => { (useXLabel.querySelector('input') as HTMLInputElement).click() })
 
@@ -105,7 +105,7 @@ describe('Granular permissions UI', () => {
     const permissions = JSON.parse(String(call[1]?.body)).permissions as string[]
     expect(permissions).toContain('use_x_gateway')
   })
-  it('separates FreeLLMAPI and X Gateway permissions into tabs and toggles between them', async () => {
+  it('separates FreeLLMAPI and Thruline permissions into tabs and toggles between them', async () => {
     const user: AdminUser = { id: 3, email: 'member@example.com', role: 'member', isPrimary: false, isSelf: false, permissions: [], activeKeys: 0, sessions: 1, createdAt: '' }
     vi.mocked(apiFetch).mockResolvedValue({ success: true })
     await render(<PermissionsDialog user={user} open onOpenChange={() => {}} onSuccess={() => {}} />)
@@ -113,7 +113,7 @@ describe('Granular permissions UI', () => {
     const tabs = [...container.ownerDocument.querySelectorAll<HTMLButtonElement>('button[role="tab"]')]
     expect(tabs.length).toBe(2)
     const freellmTab = tabs.find(t => t.textContent?.includes('FreeLLMAPI'))!
-    const xGatewayTab = tabs.find(t => t.textContent?.includes('X Gateway'))!
+    const xGatewayTab = tabs.find(t => t.textContent?.includes('Thruline'))!
     expect(freellmTab).toBeDefined()
     expect(xGatewayTab).toBeDefined()
 
@@ -124,7 +124,7 @@ describe('Granular permissions UI', () => {
     expect(freellmTab.getAttribute('aria-selected')).toBe('false')
     expect(xGatewayTab.getAttribute('aria-selected')).toBe('true')
 
-    const useXLabel = [...container.ownerDocument.querySelectorAll('label')].find(l => l.textContent?.includes('Use X gateway'))!
+    const useXLabel = [...container.ownerDocument.querySelectorAll('label')].find(l => l.textContent?.includes('Use Thruline'))!
     expect(useXLabel).toBeDefined()
     await act(async () => { (useXLabel.querySelector('input') as HTMLInputElement).click() })
 

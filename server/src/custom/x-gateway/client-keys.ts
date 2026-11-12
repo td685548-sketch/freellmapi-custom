@@ -37,7 +37,7 @@ export function isXGatewayClientKey(token: string | undefined): boolean {
 
 export function mintXGatewayClientKey(
   userId: number,
-  name: string = 'X Gateway Key',
+  name: string = 'Thruline Key',
 ): { id: number; key: string; keyPrefix: string; name: string; createdAt: string } {
   const db = getDb();
   const rawSecret = crypto.randomBytes(24).toString('hex');
@@ -48,7 +48,7 @@ export function mintXGatewayClientKey(
   const result = db.prepare(`
     INSERT INTO x_gateway_client_keys (user_id, name, key_hash, key_prefix)
     VALUES (?, ?, ?, ?)
-  `).run(userId, name.trim() || 'X Gateway Key', keyHash, keyPrefix);
+  `).run(userId, name.trim() || 'Thruline Key', keyHash, keyPrefix);
 
   const row = db.prepare(`
     SELECT id, name, key_prefix, created_at
