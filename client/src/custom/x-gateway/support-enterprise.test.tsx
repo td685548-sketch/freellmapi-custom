@@ -1,11 +1,182 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { act } from 'react'
+import { act, type ReactElement } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiFetch } from '@/lib/api'
 import SupportEnterprise from './pages/SupportEnterprise'
 import { SUPPORT_ENTERPRISE_STRINGS } from './support-enterprise-strings'
+
+const mountedRoots: Array<{ root: Root; container: HTMLDivElement }> = []
+
+function render(ui: ReactElement) {
+  ;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root = createRoot(container)
+  act(() => {
+    root.render(ui)
+  })
+  mountedRoots.push({ root, container })
+  return { container }
+}
+
+function cleanup() {
+  while (mountedRoots.length > 0) {
+    const item = mountedRoots.pop()!
+    act(() => {
+      item.root.unmount()
+    })
+    item.container.remove()
+  }
+}
+
+async function waitFor<T>(cb: () => T | Promise<T>, timeout = 2500): Promise<T> {
+  const start = Date.now()
+  let lastErr: unknown
+  while (Date.now() - start < timeout) {
+    try {
+      let res!: T
+      await act(async () => {
+        res = await cb()
+      })
+      return res
+    } catch (err) {
+      lastErr = err
+      await new Promise(r => setTimeout(r, 15))
+    }
+  }
+  throw lastErr ?? new Error('waitFor timed out')
+}
+
+function matchesText(el: Element, matcher: string | RegExp): boolean {
+  const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim()
+  if (typeof matcher === 'string') {
+    return text === matcher || text.includes(matcher)
+  }
+  return matcher.test(el.textContent ?? '')
+}
+
+function within(root: ParentNode) {
+  const queryByText = (matcher: string | RegExp): HTMLElement | null => {
+    const all = Array.from(root.querySelectorAll<HTMLElement>('*'))
+    const exact = all.find(el => {
+      const ownText = Array.from(el.childNodes)
+        .filter(n => n.nodeType === Node.TEXT_NODE)
+        .map(n => n.textContent ?? '')
+        .join('')
+        .trim()
+      if (typeof matcher === 'string') {
+        return ownText === matcher || (el.children.length === 0 && (el.textContent ?? '').trim() === matcher)
+      }
+      return matcher.test(ownText) || (el.children.length === 0 && matcher.test(el.textContent ?? ''))
+    })
+    if (exact) return exact
+    return all.find(el => matchesText(el, matcher)) ?? null
+  }
+  const getByText = (matcher: string | RegExp): HTMLElement => {
+    const el = queryByText(matcher)
+    if (!el) throw new Error(`Unable to find text: ${String(matcher)}`)
+    return el
+  }
+  const findByText = (matcher: string | RegExp) => waitFor(() => getByText(matcher))
+
+  const getByTestId = (id: string): HTMLElement => {
+    const el = root.querySelector<HTMLElement>(`[data-testid="${id}"]`)
+    if (!el) throw new Error(`Unable to find testid: ${id}`)
+    return el
+  }
+  const findByTestId = (id: string) => waitFor(() => getByTestId(id))
+
+  const getByLabelText = (label: string): HTMLElement => {
+    const labels = Array.from(root.querySelectorAll<HTMLLabelElement>('label'))
+    for (const lbl of labels) {
+      const text = (lbl.textContent ?? '').replace(/\s+/g, ' ').trim()
+      if (text === label || text.startsWith(label) || text.includes(label)) {
+        if (lbl.htmlFor) {
+          const target = root.querySelector<HTMLElement>(`#${CSS.escape(lbl.htmlFor)}`)
+          if (target) return target
+        }
+        const nested = lbl.querySelector<HTMLElement>('input, textarea, select')
+        if (nested) return nested
+      }
+    }
+    const aria = root.querySelector<HTMLElement>(`[aria-label="${label}"]`)
+    if (aria) return aria
+    throw new Error(`Unable to find label: ${label}`)
+  }
+  const findByLabelText = (label: string) => waitFor(() => getByLabelText(label))
+
+  const queryByRole = (role: string, opts?: { name?: string }): HTMLElement | null => {
+    const selectorMap: Record<string, string> = {
+      button: 'button, [role="button"]',
+      option: 'option, [role="option"]',
+      heading: 'h1, h2, h3, h4, h5, h6, [role="heading"]',
+      table: 'table, [role="table"]',
+      tablist: '[role="tablist"]',
+      tabpanel: '[role="tabpanel"]',
+      alert: '[role="alert"]',
+    }
+    const sel = selectorMap[role] ?? `[role="${role}"]`
+    const candidates = Array.from(root.querySelectorAll<HTMLElement>(sel))
+    if (!opts?.name) return candidates[0] ?? null
+    return (
+      candidates.find(el => {
+        const ariaLabel = el.getAttribute('aria-label')?.trim()
+        const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim()
+        return ariaLabel === opts.name || text === opts.name || text.includes(opts.name!)
+      }) ?? null
+    )
+  }
+  const getByRole = (role: string, opts?: { name?: string }): HTMLElement => {
+    const el = queryByRole(role, opts)
+    if (!el) throw new Error(`Unable to find role="${role}" name="${opts?.name ?? ''}"`)
+    return el
+  }
+  const findByRole = (role: string, opts?: { name?: string }) => waitFor(() => getByRole(role, opts))
+
+  return {
+    queryByText,
+    getByText,
+    findByText,
+    getByTestId,
+    findByTestId,
+    getByLabelText,
+    findByLabelText,
+    queryByRole,
+    getByRole,
+    findByRole,
+  }
+}
+
+const screen = within(document.body)
+
+const fireEvent = {
+  click(el: Element) {
+    act(() => {
+      ;(el as HTMLElement).click()
+    })
+  },
+  change(el: Element, init: { target: { value: string } }) {
+    act(() => {
+      const value = init.target.value
+      const proto =
+        el instanceof HTMLSelectElement
+          ? HTMLSelectElement.prototype
+          : el instanceof HTMLTextAreaElement
+            ? HTMLTextAreaElement.prototype
+            : HTMLInputElement.prototype
+      const desc = Object.getOwnPropertyDescriptor(proto, 'value')
+      if (desc?.set) {
+        desc.set.call(el, value)
+      } else {
+        ;(el as HTMLInputElement).value = value
+      }
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+      el.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+  },
+}
 
 const session = vi.hoisted(() => ({ locale: 'en', canEdit: true }))
 vi.mock('@/lib/api', () => ({ apiFetch: vi.fn() }))
