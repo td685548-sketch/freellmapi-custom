@@ -89,7 +89,7 @@ export const CLI_TOOLS_CATALOG: CliTool[] = [
       },
       {
         title: 'Configure environment or settings file',
-        desc: 'Set the base URL and your X Gateway API key, then run claude:',
+        desc: 'Set the base URL and your Thruline API key, then run claude:',
         codeSnippet: 'claude',
       },
     ],
@@ -118,7 +118,7 @@ export const CLI_TOOLS_CATALOG: CliTool[] = [
       pathDesc: '~/.codex/config.toml',
       format: 'toml',
       generate: ({ baseUrl, apiKey }) =>
-        `# OpenAI Codex CLI configuration for FreeLLMAPI X Gateway\n[model]\ndefault = "gpt-4o"\nprovider = "custom"\n\n[providers.custom]\nbase_url = "${baseUrl}"\napi_key = "${apiKey}"\n`,
+        `# OpenAI Codex CLI configuration for FreeLLMAPI Thruline\n[model]\ndefault = "gpt-4o"\nprovider = "custom"\n\n[providers.custom]\nbase_url = "${baseUrl}"\napi_key = "${apiKey}"\n`,
     },
     steps: [
       {
@@ -162,7 +162,7 @@ export const CLI_TOOLS_CATALOG: CliTool[] = [
       },
       {
         title: 'Paste API Key',
-        desc: 'Paste your X Gateway API key (sk-xgw-...) into the OpenAI API Key field and click Verify.',
+        desc: 'Paste your Thruline API key (sk-xgw-...) into the OpenAI API Key field and click Verify.',
       },
     ],
   },
@@ -250,7 +250,7 @@ export const CLI_TOOLS_CATALOG: CliTool[] = [
       },
       {
         title: 'Start OpenClaw',
-        desc: 'Run openclaw start to connect all messaging channels to X Gateway.',
+        desc: 'Run openclaw start to connect all messaging channels to Thruline.',
         codeSnippet: 'openclaw start',
       },
     ],
@@ -277,7 +277,7 @@ export const CLI_TOOLS_CATALOG: CliTool[] = [
           {
             models: [
               {
-                title: 'FreeLLMAPI X Gateway',
+                title: 'FreeLLMAPI Thruline',
                 provider: 'openai',
                 model: 'auto',
                 apiBase: baseUrl,

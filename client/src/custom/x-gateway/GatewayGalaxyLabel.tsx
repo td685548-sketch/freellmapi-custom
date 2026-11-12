@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react'
+import { ThrulineLogo } from './ThrulineLogo'
 import './gateway-galaxy-label.css'
 
 // Deterministic, tiled textures keep over a thousand stars in three paint layers,
@@ -38,7 +39,7 @@ export function GatewayGalaxyLabel({ children }: { children: ReactNode }) {
         ))}
         <span className="gateway-galaxy__meteor" />
       </span>
-      <span className="gateway-galaxy__label">{children}</span>
+      <span className="gateway-galaxy__label"><ThrulineLogo size={16} />{children}</span>
     </span>
   )
 }
