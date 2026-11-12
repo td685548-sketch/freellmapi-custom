@@ -30,7 +30,7 @@ const en = {
   ready: 'Ready',
   
   testTitle: 'Live Tester & Playground',
-  testSubtitle: 'Run a live request through X Gateway routing with your connected provider accounts.',
+  testSubtitle: 'Run a live request through Xwitch routing with your connected provider accounts.',
   prompt: 'Prompt',
   imagePromptPlaceholder: 'A futuristic city with neon lights and flying vehicles at dusk, hyperrealistic…',
   size: 'Resolution',
@@ -41,7 +41,7 @@ const en = {
   imageResult: 'Generated Image',
   
   textToSpeak: 'Text to Speak',
-  ttsPromptPlaceholder: 'Hello! This is a test of the text to speech service through FreeLLMAPI X Gateway.',
+  ttsPromptPlaceholder: 'Hello! This is a test of the text to speech service through FreeLLMAPI Xwitch.',
   speed: 'Speed',
   synthesizeSpeech: 'Generate Speech',
   synthesizing: 'Synthesizing…',
@@ -119,7 +119,7 @@ const vi: Record<keyof typeof en, string> = {
   ready: 'Sẵn sàng',
   
   testTitle: 'Trình thử nghiệm trực tiếp',
-  testSubtitle: 'Gửi request thử nghiệm thực tế qua định tuyến của X Gateway bằng tài khoản của bạn.',
+  testSubtitle: 'Gửi request thử nghiệm thực tế qua định tuyến của Xwitch bằng tài khoản của bạn.',
   prompt: 'Mô tả hình ảnh (Prompt)',
   imagePromptPlaceholder: 'Thành phố tương lai với ánh đèn neon và xe bay lúc hoàng hôn, siêu thực…',
   size: 'Độ phân giải',
@@ -130,7 +130,7 @@ const vi: Record<keyof typeof en, string> = {
   imageResult: 'Ảnh đã tạo',
   
   textToSpeak: 'Văn bản cần đọc',
-  ttsPromptPlaceholder: 'Xin chào! Đây là bản thử nghiệm giọng nói qua FreeLLMAPI X Gateway.',
+  ttsPromptPlaceholder: 'Xin chào! Đây là bản thử nghiệm giọng nói qua FreeLLMAPI Xwitch.',
   speed: 'Tốc độ',
   synthesizeSpeech: 'Đọc văn bản',
   synthesizing: 'Đang tạo âm thanh…',

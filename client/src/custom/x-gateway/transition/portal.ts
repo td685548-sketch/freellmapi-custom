@@ -1,8 +1,8 @@
 import { shader } from './shader'
 
 /** Total running time, and the point at which the wall fully hides the page. */
-export const DURATION_MS = 1500
-export const COVERED_AT = 0.52
+export const DURATION_MS = 1700
+export const COVERED_AT = 0.5
 
 const SAMPLES = 4
 const FOV = (40 * Math.PI) / 180
@@ -30,7 +30,7 @@ export interface PortalOptions {
   /** Click position in CSS pixels; the ripple starts here. */
   x: number
   y: number
-  /** true: FreeLLMAPI → X Gateway. false: the way back. */
+  /** true: FreeLLMAPI → Xwitch. false: the way back. */
   entering: boolean
   dark: boolean
   /** Called once, when the wall hides the page. Swap the route here. */
@@ -142,11 +142,20 @@ export async function playPortal(options: PortalOptions): Promise<void> {
   const depthTarget = device.createTexture({ size, format: 'depth24plus', sampleCount: SAMPLES, usage: TEXTURE_RENDER_ATTACHMENT })
   document.body.appendChild(canvas)
 
+  // The wordmark sits under the tile mark while the switch is thrown.
+  const wordmark = document.createElement('div')
+  wordmark.textContent = 'Xwitch'
+  wordmark.setAttribute('aria-hidden', 'true')
+  wordmark.style.cssText = `position:fixed;left:0;right:0;top:calc(50% + ${Math.round(cssHeight * 0.34) + 26}px);z-index:2147483001;`
+    + 'text-align:center;font:650 clamp(20px,2.4vw,30px)/1 var(--font-sans,system-ui),sans-serif;letter-spacing:.01em;'
+    + 'color:#f4f7ff;opacity:0;pointer-events:none;will-change:opacity,transform;'
+  if (options.entering) document.body.appendChild(wordmark)
+
   // The wall sits at z = 0 and exactly fills the camera's view.
   const aspect = cssWidth / cssHeight
   const wallHeight = 2 * CAMERA_DISTANCE * Math.tan(FOV / 2)
   const wallWidth = wallHeight * aspect
-  const cols = Math.min(40, Math.max(10, Math.round(cssWidth / 58)))
+  const cols = Math.min(44, Math.max(12, Math.round(cssWidth / 46)))
   const cell = wallWidth / cols
   const rows = Math.ceil(wallHeight / cell)
   const originX = (options.x / cssWidth - 0.5) * wallWidth
@@ -174,6 +183,7 @@ export async function playPortal(options: PortalOptions): Promise<void> {
     const finish = () => {
       if (!covered) { covered = true; options.onCovered() }
       canvas.remove()
+      wordmark.remove()
       colorTarget.destroy()
       depthTarget.destroy()
       resolve()
@@ -182,6 +192,9 @@ export async function playPortal(options: PortalOptions): Promise<void> {
       const t = Math.min((now - start) / DURATION_MS, 1)
       if (!covered && t >= COVERED_AT) { covered = true; options.onCovered() }
       data[22] = t
+      const shown = Math.min(Math.max((t - 0.56) / 0.1, 0), 1) * (1 - Math.min(Math.max((t - 0.72) / 0.07, 0), 1))
+      wordmark.style.opacity = String(shown)
+      wordmark.style.transform = `translateY(${(1 - shown) * 8}px)`
       try {
         device.queue.writeBuffer(gpu.uniforms, 0, data)
         const encoder = device.createCommandEncoder()

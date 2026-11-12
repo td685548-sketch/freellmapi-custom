@@ -91,7 +91,7 @@ export const CLI_TOOLS_CATALOG: CliTool[] = [
       },
       {
         title: 'Configure environment or settings file',
-        desc: 'Set the base URL and your X Gateway API key, then run claude:',
+        desc: 'Set the base URL and your Xwitch API key, then run claude:',
         codeSnippet: 'claude',
       },
     ],
@@ -120,7 +120,7 @@ export const CLI_TOOLS_CATALOG: CliTool[] = [
       pathDesc: '~/.codex/config.toml',
       format: 'toml',
       generate: ({ baseUrl, model = 'auto' }) =>
-        `# Merge carefully or use the backup-aware local setup download.\n# Export OPENAI_API_KEY in your shell before starting Codex.\nmodel = ${JSON.stringify(model)}\nmodel_provider = "x_gateway"\n\n[model_providers.x_gateway]\nname = "X Gateway"\nbase_url = ${JSON.stringify(baseUrl)}\nenv_key = "OPENAI_API_KEY"\nwire_api = "responses"\nrequires_openai_auth = false\n`,
+        `# Merge carefully or use the backup-aware local setup download.\n# Export OPENAI_API_KEY in your shell before starting Codex.\nmodel = ${JSON.stringify(model)}\nmodel_provider = "x_gateway"\n\n[model_providers.x_gateway]\nname = "Xwitch"\nbase_url = ${JSON.stringify(baseUrl)}\nenv_key = "OPENAI_API_KEY"\nwire_api = "responses"\nrequires_openai_auth = false\n`,
     },
     steps: [
       {
@@ -137,7 +137,7 @@ export const CLI_TOOLS_CATALOG: CliTool[] = [
   {
     id: 'gemini',
     name: 'Gemini CLI', category: 'cli', image: '/providers/gemini.png', badge: 'Gemini CLI',
-    tagline: 'Gemini native protocol through X Gateway', docsUrl: 'https://geminicli.com/docs/reference/configuration/',
+    tagline: 'Gemini native protocol through Xwitch', docsUrl: 'https://geminicli.com/docs/reference/configuration/',
     protocol: 'Gemini (/x/v1beta/models)',
     envVars: { baseUrlKey: 'GOOGLE_GEMINI_BASE_URL', apiKeyKey: 'GEMINI_API_KEY', modelKey: 'GEMINI_MODEL', extra: { GOOGLE_GENAI_API_VERSION: 'v1beta' } },
     steps: [{ title: 'Use local setup', desc: 'Download and run local setup, then launch its Gemini script with API-key authentication.' }],
@@ -172,7 +172,7 @@ export const CLI_TOOLS_CATALOG: CliTool[] = [
       },
       {
         title: 'Paste API Key',
-        desc: 'Paste your X Gateway API key (sk-xgw-...) into the OpenAI API Key field and click Verify.',
+        desc: 'Paste your Xwitch API key (sk-xgw-...) into the OpenAI API Key field and click Verify.',
       },
     ],
   },
@@ -260,7 +260,7 @@ export const CLI_TOOLS_CATALOG: CliTool[] = [
       },
       {
         title: 'Start OpenClaw',
-        desc: 'Run openclaw start to connect all messaging channels to X Gateway.',
+        desc: 'Run openclaw start to connect all messaging channels to Xwitch.',
         codeSnippet: 'openclaw start',
       },
     ],
@@ -287,7 +287,7 @@ export const CLI_TOOLS_CATALOG: CliTool[] = [
           {
             models: [
               {
-                title: 'FreeLLMAPI X Gateway',
+                title: 'FreeLLMAPI Xwitch',
                 provider: 'openai',
                 model: 'auto',
                 apiBase: baseUrl,

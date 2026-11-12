@@ -113,7 +113,7 @@ const STRINGS: Record<'en' | 'vi', SkillsStrings> = {
     skillsSubtitle: 'Định dạng SKILL.md chuẩn hóa cho Claude Code, Cursor, Codex, OpenCode, Cline và Antigravity.',
     skillsNav: 'Agent Skills',
     heroPromptLabel: 'Dán trực tiếp câu lệnh này vào prompt của AI agent:',
-    heroHelp: 'Agent sẽ tự động nạp đặc tả SKILL.md và biết cách gọi mọi endpoint của X Gateway.',
+    heroHelp: 'Agent sẽ tự động nạp đặc tả SKILL.md và biết cách gọi mọi endpoint của Xwitch.',
     copyPrompt: 'Sao chép lệnh AI',
     copied: 'Đã sao chép!',
     copyLink: 'Chép link',

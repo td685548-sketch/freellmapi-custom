@@ -91,6 +91,13 @@
 .x-back-link-nav:hover { background: var(--x-alt); border: 0; color: var(--x-text) !important; }
 .x-main { margin-left: var(--x-sidebar-w); transition: margin-left .16s ease; }
 
+/* Xwitch mark */
+.x-logo { flex-shrink: 0; display: block; }
+.x-logo-tile { fill: var(--x-primary); }
+.x-logo-standby { stroke: var(--x-on-primary); opacity: .45; }
+.x-logo-live { stroke: var(--x-on-primary); }
+.x-logo-node { fill: var(--x-on-primary); }
+
 /* Icon rail (desktop only) */
 @media (min-width: 851px) {
   .x-layout-rail { --x-sidebar-w: 60px; }
