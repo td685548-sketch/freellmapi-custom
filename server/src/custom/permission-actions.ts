@@ -67,6 +67,12 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
     if (/^\/api\/usage\/(?:daily\/(?:profiles|end-users)|export\/(?:profiles|end-users)\.csv)$/.test(path)) return 'view_usage_profiles';
   }
   if (parent === 'manage_x_gateway') {
+    if (path.startsWith('/api/x-gateway/support')) {
+      if (read || path.endsWith('/simulate-chat') || path.endsWith('/mint-token') || path.endsWith('/test') || path.endsWith('/query-test')) {
+        return 'use_x_gateway';
+      }
+      return 'edit_x_settings';
+    }
     if (/^\/api\/x-gateway\/quota(?:\/|$)/.test(path)) {
       return /^\/api\/x-gateway\/quota\/\d+\/tier$/.test(path) && !read ? 'edit_x_settings' : 'view_x_usage';
     }
