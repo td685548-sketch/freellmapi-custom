@@ -1,4 +1,4 @@
-import { withProxyResponseObserver } from '../../lib/proxy.js';
+import { withKeyProxy, withProxyResponseObserver } from '../../lib/proxy.js';
 /**
  * Credential lifecycle for X Gateway subscription (OAuth) accounts.
  *
@@ -26,6 +26,7 @@ import {
 import {
   setAccountStatus,
   accountRow,
+  resolveXGatewayAccountProxy,
   updateAccountCredential,
   type AccountRow,
 } from './store.js';
@@ -109,7 +110,10 @@ async function performRefresh(
   entry: RefreshEntry,
 ): Promise<OAuthCredential> {
   try {
-    const next = await withProxyResponseObserver(() => {}, () => refreshOAuthCredential(descriptor, current));
+    const proxyUrl = resolveXGatewayAccountProxy(row);
+    const next = await withKeyProxy(proxyUrl, () =>
+      withProxyResponseObserver(() => {}, () => refreshOAuthCredential(descriptor, current))
+    );
     // Persist before returning: a rotated refresh token that only lives in
     // memory is lost on restart and revokes the grant on the next use.
     if (!updateAccountCredential(row.id, next, row.encrypted_key)) {

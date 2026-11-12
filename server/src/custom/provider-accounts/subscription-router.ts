@@ -5,6 +5,8 @@ import { z } from 'zod';
 import { validateSession } from '../../services/auth.js';
 import { hasPermission, requirePermission } from '../../middleware/requirePermission.js';
 import { withKeyProxy } from '../../lib/proxy.js';
+import { isValidKeyProxyUrl, KEY_PROXY_URL_ERROR } from '../../lib/key-proxy.js';
+import { proxyPoolExists } from '../x-gateway/proxy-pool.js';
 import { AccountError } from './http.js';
 import { accountRow, resolveXGatewayAccountProxy } from './store.js';
 import { X_GATEWAY_OAUTH_EXECUTORS, X_GATEWAY_PROVIDERS } from './catalog.js';
@@ -14,12 +16,52 @@ import { pollKiroDevice, startKiroDevice } from './kiro-auth.js';
 import { saveSubscription } from './subscription-store.js';
 
 const kinds = z.enum(['codex', 'claude', 'gemini-cli', 'kiro']);
-const input = z.object({ provider: kinds, label: z.string().trim().min(1).max(200), reconnectId: z.number().int().positive().optional() });
+const input = z.object({
+  provider: kinds,
+  label: z.string().trim().min(1).max(200),
+  reconnectId: z.number().int().positive().optional(),
+  proxyUrl: z.string().trim().max(2048).optional(),
+  proxyPoolId: z.number().int().positive().nullable().optional(),
+});
 const attempts = new Map<string, Attempt>();
 type Device = Awaited<ReturnType<typeof startKiroDevice>>;
-interface Attempt { id: string; provider: OAuthKind; label: string; reconnectId?: number; session: string; userId: number; expiresAt: number; verifier: string; descriptor: OAuthProviderDescriptor; device?: Device; nextPollAt: number; busy: boolean }
+interface Attempt {
+  id: string;
+  provider: OAuthKind;
+  label: string;
+  reconnectId?: number;
+  session: string;
+  userId: number;
+  expiresAt: number;
+  verifier: string;
+  descriptor: OAuthProviderDescriptor;
+  device?: Device;
+  nextPollAt: number;
+  busy: boolean;
+  proxyUrl?: string;
+  proxyPoolId?: number | null;
+}
 type SessionRequest = Request & { sessionToken?: string };
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+
+function validateProxyInput(data: { proxyUrl?: string; proxyPoolId?: number | null }) {
+  if (data.proxyUrl && !isValidKeyProxyUrl(data.proxyUrl)) {
+    throw new AccountError(400, KEY_PROXY_URL_ERROR);
+  }
+  if (data.proxyPoolId != null && !proxyPoolExists(data.proxyPoolId)) {
+    throw new AccountError(400, 'Proxy pool entry not found.');
+  }
+}
+
+function resolveAttemptProxy(a?: { proxyUrl?: string; proxyPoolId?: number | null } | null): string | undefined {
+  if (a?.proxyUrl) return a.proxyUrl;
+  return resolveXGatewayAccountProxy(
+    a?.proxyPoolId !== undefined
+      ? { proxy_encrypted: null, proxy_iv: null, proxy_auth_tag: null, proxy_pool_id: a.proxyPoolId }
+      : null,
+  );
+}
+
 function authorize(req: SessionRequest, reconnectId?: number) {
   const user = req.sessionToken && validateSession(req.sessionToken);
   if (!user) throw new AccountError(401, 'Authentication required.');
@@ -62,6 +104,7 @@ subscriptionRouter.get('/capabilities', requirePermission('view_keys'), (_req, r
 subscriptionRouter.post('/import', (req: SessionRequest, res) => {
   const parsed = input.extend({ credential: z.string().min(1).max(65536) }).strict().safeParse(req.body);
   if (!parsed.success) throw new AccountError(400, 'Invalid credential import.');
+  validateProxyInput(parsed.data);
   const user = authorize(req, parsed.data.reconnectId);
   const id = saveSubscription({ ...parsed.data, userId: user.userId });
   res.json({ id, status: 'unknown', message: 'Credential saved encrypted; upstream inference has not been verified.' });
@@ -69,6 +112,7 @@ subscriptionRouter.post('/import', (req: SessionRequest, res) => {
 subscriptionRouter.post('/start', async (req: SessionRequest, res) => {
   const parsed = input.strict().safeParse(req.body);
   if (!parsed.success) throw new AccountError(400, 'Invalid connection request.');
+  validateProxyInput(parsed.data);
   const user = authorize(req, parsed.data.reconnectId);
   if (parsed.data.reconnectId !== undefined && accountRow(parsed.data.reconnectId).provider !== parsed.data.provider) throw new AccountError(400, 'Reconnect provider mismatch.');
   for (const [id, a] of attempts) if (a.expiresAt <= Date.now()) attempts.delete(id);
@@ -78,7 +122,7 @@ subscriptionRouter.post('/start', async (req: SessionRequest, res) => {
   attempts.set(a.id, a);
   try {
     if (a.provider === 'kiro') {
-      a.device = await withKeyProxy(resolveXGatewayAccountProxy(null), () => startKiroDevice());
+      a.device = await withKeyProxy(resolveAttemptProxy(a), () => startKiroDevice());
       active(a, req); a.expiresAt = Date.now() + a.device.expiresIn * 1000; a.nextPollAt = Date.now() + a.device.interval * 1000; a.busy = false;
       res.json({ attemptId: a.id, flow: 'device_code', verificationUri: a.device.verificationUri, userCode: a.device.userCode, interval: a.device.interval, expiresAt: a.expiresAt } satisfies SubscriptionAttempt);
     } else {
@@ -103,7 +147,7 @@ subscriptionRouter.post('/:attemptId/complete', async (req: SessionRequest, res)
   if (!code || state !== a.id) throw new AccountError(400, 'OAuth state does not match this session.');
   a.busy = true;
   try {
-    const credential = await withKeyProxy(resolveXGatewayAccountProxy(null), async () => {
+    const credential = await withKeyProxy(resolveAttemptProxy(a), async () => {
       const tokens = await exchangeAuthorizationCode(a.descriptor, `${code}#${state}`, a.verifier);
       const metadata = await resolveCredentialMetadata(a.descriptor, tokens);
       return applyTokenResponse({ v: 1, kind: a.provider, accessToken: '', refreshToken: '', expiresAt: 1, ...metadata }, tokens);
@@ -119,7 +163,7 @@ subscriptionRouter.post('/:attemptId/poll', async (req: SessionRequest, res) => 
   if (a.busy || Date.now() < a.nextPollAt) { res.json({ status: 'pending', interval: a.device.interval }); return; }
   a.busy = true; a.nextPollAt = Date.now() + a.device.interval * 1000;
   try {
-    const result = await withKeyProxy(resolveXGatewayAccountProxy(null), () => pollKiroDevice(a.device!)); active(a, req);
+    const result = await withKeyProxy(resolveAttemptProxy(a), () => pollKiroDevice(a.device!)); active(a, req);
     if (result.pending) { if (result.slow) a.device.interval = Math.min(30, a.device.interval + 5); res.json({ status: 'pending', interval: a.device.interval }); }
     else { const id = saveSubscription({ ...a, credential: result.credential }); attempts.delete(a.id); res.json({ id, status: 'saved', verified: false }); }
   } finally { a.busy = false; }

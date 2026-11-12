@@ -495,6 +495,29 @@ describe('connect dialog', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
+  it('passes proxyUrl and proxyPoolId when connecting or importing subscription credentials', async () => {
+    const codexProvider = { id: 'codex', name: 'OpenAI Codex', category: 'oauth' as const, authMethods: ['api_key' as const], accounts: [] }
+    mount(<ConnectAccountDialog provider={codexProvider} onClose={onClose} />)
+    await flush()
+    enter(body().querySelector<HTMLInputElement>('.x-dialog input[maxlength="200"]')!, 'Codex Account')
+    enter(body().querySelector<HTMLInputElement>('#x-account-proxy')!, 'http://127.0.0.1:8080')
+    const credential = JSON.stringify({ accessToken: 'cx-fixture', refreshToken: 'cx-refresh', expiresAt: 2000000000000 })
+    const textarea = body().querySelector<HTMLTextAreaElement>('.x-dialog textarea')!
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, credential)
+      textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    submit(body().querySelector<HTMLFormElement>('.x-dialog form')!)
+    await flush()
+    const call = vi.mocked(apiFetch).mock.calls.find(([p, i]) => p === '/api/x-accounts/subscriptions/import' && i?.method === 'POST')!
+    expect(JSON.parse(String(call[1]!.body))).toEqual({
+      provider: 'codex',
+      credential,
+      label: 'Codex Account',
+      proxyUrl: 'http://127.0.0.1:8080',
+    })
+  })
+
   it('shows expiry and stops polling when the attempt expires', async () => {
     startExpires = 40
     pollResults = [{ status: 'pending', interval: 1 }]
