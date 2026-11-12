@@ -224,7 +224,9 @@ xGatewayConsoleRouter.patch('/pricing', (req, res) => {
   }
   const pricing = updatePricingOverrides(validation.patch);
   res.json({
+    ok: true,
     pricing,
+    defaults: getDefaultPricing(),
     overrides: getPricingOverrides(),
   });
 });
@@ -234,7 +236,9 @@ xGatewayConsoleRouter.delete('/pricing', (req, res) => {
   const model = typeof req.query.model === 'string' && req.query.model.trim() ? req.query.model.trim() : undefined;
   const pricing = resetPricingOverrides(provider, model);
   res.json({
+    ok: true,
     pricing,
+    defaults: getDefaultPricing(),
     overrides: getPricingOverrides(),
   });
 });
