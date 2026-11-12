@@ -28,7 +28,7 @@ import SupportGateway from './pages/SupportGateway'
 import SupportEnterprise from './pages/SupportEnterprise'
 import SupportGovernance from './pages/SupportGovernance'
 import ModelAvailabilityBadge from './components/ModelAvailabilityBadge'
-import { ThrulineLogo } from './ThrulineLogo'
+import { THRULINE_ICON, ThrulineLogo } from './ThrulineLogo'
 import { useShellStrings } from './shell-strings'
 import { matchNav, useNavGroups } from './shell/nav'
 import { QuickJump } from './shell/QuickJump'
@@ -59,6 +59,15 @@ function XGatewayShell() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+  }, [])
+  // Thruline shows its own tab icon; FreeLLMAPI's comes back on the way out.
+  useEffect(() => {
+    const icon = document.querySelector<HTMLLinkElement>('link[rel~="icon"]')
+    if (!icon) return
+    const previous = { href: icon.href, type: icon.type }
+    icon.type = 'image/svg+xml'
+    icon.href = THRULINE_ICON
+    return () => { icon.type = previous.type; icon.href = previous.href }
   }, [])
   if (session.isPending) return <div className="x-console"><AccountLoadState /></div>
   if (session.isError) return <div className="x-console"><AccountLoadState error retry={() => void session.refetch()} /></div>

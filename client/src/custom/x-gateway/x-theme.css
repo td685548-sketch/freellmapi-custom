@@ -72,7 +72,6 @@
 .x-sidebar-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; height: var(--x-header-h); flex-shrink: 0; padding: 0 4px 0 6px; }
 .x-brand { margin: 0; gap: 10px; font-size: 15px; font-weight: 650; letter-spacing: -.2px; min-width: 0; }
 .x-brand small { font-size: 11px; letter-spacing: 0; line-height: 1.2; }
-.x-brand-mark { width: 28px; height: 28px; border-radius: 7px; font-size: 15px; background: var(--x-text); color: var(--x-panel); }
 .x-rail-toggle { width: 28px; height: 28px; }
 .x-sidebar nav { gap: 12px; padding: 6px 3px 10px 0; }
 .x-nav-group { display: flex; flex-direction: column; gap: 1px; flex-shrink: 0; }
