@@ -18,8 +18,11 @@ struct Uniforms {
   liveColor: vec4f,  // lit track and node
   backdrop: vec4f,
   wall: vec4f,       // wall width, wall height, camera distance, max ripple distance
+  label: vec4f,      // wordmark rectangle on the wall: centre.xy, half size.xy
 };
 @group(0) @binding(0) var<uniform> u: Uniforms;
+@group(0) @binding(1) var labelTexture: texture_2d<f32>;
+@group(0) @binding(2) var labelSampler: sampler;
 
 const PI = 3.14159265;
 
@@ -35,6 +38,8 @@ struct TileOut {
   @location(1) color: vec3f,
   @location(2) world: vec3f,
   @location(3) glow: f32,
+  @location(4) wallPos: vec2f, // where this point sits on the flat wall
+  @location(5) brandFace: f32, // 1 on the Thruline face of the tile
 };
 
 @vertex
@@ -57,12 +62,14 @@ fn tileVertex(@location(0) position: vec3f, @location(1) normal: vec3f, @builtin
 
   // The mark, in a centred square with q in -1..1 (y up): two standby routes
   // bend in from the left and join the live line, which ends at its node.
-  let q = center / (u.wall.y * 0.34);
+  // Centre the mark on the seam between the two middle rows, so bands cover whole tiles.
+  let seam = u.wall.y * 0.5 - floor(u.wall.y * 0.5 / cell) * cell;
+  let q = (center - vec2f(0.0, seam)) / (u.wall.y * 0.34);
   let halfTile = cell / (u.wall.y * 0.34) * 0.5;
-  let onLive = step(abs(q.y - halfTile * 0.5), halfTile * 2.0) * step(-0.92, q.x) * step(q.x, 0.5);
-  let node = step(distance(q, vec2f(0.74, halfTile * 0.5)), max(0.24, halfTile * 2.2));
+  let onLive = step(abs(q.y), halfTile * 1.5) * step(-0.92, q.x) * step(q.x, 0.5);
+  let node = step(distance(q, vec2f(0.74, 0.0)), max(0.26, halfTile * 3.1));
   let feederY = clamp(0.1 - q.x, 0.0, 0.62);
-  let onStandby = step(abs(abs(q.y - halfTile * 0.5) - feederY), halfTile * 1.15) * step(-0.92, q.x) * step(q.x, 0.1) * step(halfTile * 2.1, abs(q.y - halfTile * 0.5));
+  let onStandby = step(abs(abs(q.y) - feederY), halfTile * 1.15) * step(-0.92, q.x) * step(q.x, 0.1) * step(halfTile * 1.6, abs(q.y));
 
   // Traffic runs through: light travels along the live line, then the node lands.
   let sweep = mix(-1.0, 0.6, clamp((t - 0.50) / 0.15, 0.0, 1.0));
@@ -96,17 +103,30 @@ fn tileVertex(@location(0) position: vec3f, @location(1) normal: vec3f, @builtin
   out.color = color;
   out.world = world;
   out.glow = pulse;
+  // Flipping over the X axis mirrors the back face vertically.
+  out.wallPos = center + vec2f(local.x, mix(local.y, -local.y, entering));
+  out.brandFace = mix(step(0.5, normal.z), step(normal.z, -0.5), entering);
   return out;
 }
 
 @fragment
 fn tileFragment(in: TileOut) -> @location(0) vec4f {
+  // The wordmark is printed on the wall itself, so it shares the tiles' gaps,
+  // lighting and motion. It wipes in left to right once the node has landed.
+  let t = u.anim.z;
+  let p = (in.wallPos - u.label.xy) / u.label.zw;
+  let ink = textureSample(labelTexture, labelSampler, vec2f(p.x * 0.5 + 0.5, 0.5 - p.y * 0.5)).a;
+  let inside = step(abs(p.x), 1.0) * step(abs(p.y), 1.0);
+  let wipe = mix(-1.3, 1.3, clamp((t - 0.60) / 0.09, 0.0, 1.0));
+  let shown = max(1.0 - smoothstep(wipe - 0.3, wipe, p.x), 1.0 - u.anim.w);
+  let base = mix(in.color, u.liveColor.rgb, ink * inside * shown * in.brandFace * 0.92);
+
   let n = normalize(in.normal);
   let light = normalize(vec3f(-0.35, 0.55, 0.8));
   let view = normalize(vec3f(0.0, 0.0, u.wall.z) - in.world);
   let diffuse = max(dot(n, light), 0.0);
   let specular = pow(max(dot(n, normalize(light + view)), 0.0), 48.0) * 0.22;
-  let lit = in.color * (0.5 + 0.6 * diffuse) + vec3f(specular) + vec3f(in.glow * 0.25);
+  let lit = base * (0.5 + 0.6 * diffuse) + vec3f(specular) + vec3f(in.glow * 0.25);
   return vec4f(lit, 1.0);
 }
 
