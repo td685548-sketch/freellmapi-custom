@@ -91,7 +91,7 @@
 .x-back-link-nav:hover { background: var(--x-alt); border: 0; color: var(--x-text) !important; }
 .x-main { margin-left: var(--x-sidebar-w); transition: margin-left .16s ease; }
 
-/* Xwitch mark */
+/* Thruline mark */
 .x-logo { flex-shrink: 0; display: block; }
 .x-logo-tile { fill: var(--x-primary); }
 .x-logo-standby { stroke: var(--x-on-primary); opacity: .45; }

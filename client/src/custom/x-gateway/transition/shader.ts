@@ -1,10 +1,9 @@
 /**
- * WGSL for the Xwitch transition. A wall of thin 3D tiles fills the view and
- * draws the Xwitch mark out of whole tiles:
+ * WGSL for the Thruline transition. A wall of thin 3D tiles fills the view and
+ * draws the Thruline mark out of whole tiles:
  *   1. tiles swing in from behind, rippling outward from the click point,
  *   2. each tile flips over its X axis, showing its other face,
- *   3. the live track of the mark lights up tile by tile and reaches its node
- *      (the "switch" being thrown),
+ *   3. the live line of the mark lights up tile by tile and reaches its node,
  *   4. tiles tumble toward the camera and past it, uncovering the new page.
  * Tile placement, timing and colour are computed per instance in the vertex
  * stage, so the only vertex data is one unit cube.
@@ -15,7 +14,7 @@ struct Uniforms {
   grid: vec4f,       // cols, rows, cell size, tile thickness
   anim: vec4f,       // origin.xy (world), progress 0..1, entering (1) or leaving (0)
   hostColor: vec4f,  // FreeLLMAPI face
-  brandColor: vec4f, // Xwitch face
+  brandColor: vec4f, // Thruline face
   liveColor: vec4f,  // lit track and node
   backdrop: vec4f,
   wall: vec4f,       // wall width, wall height, camera distance, max ripple distance
@@ -56,21 +55,18 @@ fn tileVertex(@location(0) position: vec3f, @location(1) normal: vec3f, @builtin
   let leaveLinear = clamp((t - 0.71 - fromCenter * 0.13 - r1 * 0.03) / 0.13, 0.0, 1.0);
   let leave = leaveLinear * leaveLinear;
 
-  // The mark, in a centred square with q in -1..1 (y up).
+  // The mark, in a centred square with q in -1..1 (y up): two standby routes
+  // bend in from the left and join the live line, which ends at its node.
   let q = center / (u.wall.y * 0.34);
   let halfTile = cell / (u.wall.y * 0.34) * 0.5;
-  // Bands are two tiles wide: offset by half a tile so they snap to whole tiles.
-  let width = halfTile * 0.98;
-  let along = (q.x + q.y) * 0.5;   // position on the live track, bottom-left to top-right
-  let across = (q.x - q.y) * 0.5;
-  let onLive = step(abs(across - halfTile * 0.5), width) * step(-0.86, along) * step(along, 0.56);
-  let node = step(distance(q, vec2f(0.72, 0.72)), max(0.24, halfTile * 1.7));
-  let alongStandby = (q.x - q.y) * 0.5;
-  let onStandby = step(abs(along - halfTile * 0.5), width) * step(abs(alongStandby), 0.86) * step(0.3, abs(alongStandby));
+  let onLive = step(abs(q.y - halfTile * 0.5), halfTile * 2.0) * step(-0.92, q.x) * step(q.x, 0.5);
+  let node = step(distance(q, vec2f(0.74, halfTile * 0.5)), max(0.24, halfTile * 2.2));
+  let feederY = clamp(0.1 - q.x, 0.0, 0.62);
+  let onStandby = step(abs(abs(q.y - halfTile * 0.5) - feederY), halfTile * 1.15) * step(-0.92, q.x) * step(q.x, 0.1) * step(halfTile * 2.1, abs(q.y - halfTile * 0.5));
 
-  // The switch is thrown: light travels up the live track, then the node lands.
-  let sweep = mix(-0.95, 0.7, clamp((t - 0.50) / 0.15, 0.0, 1.0));
-  let lit = max(step(along, sweep), 1.0 - entering);
+  // Traffic runs through: light travels along the live line, then the node lands.
+  let sweep = mix(-1.0, 0.6, clamp((t - 0.50) / 0.15, 0.0, 1.0));
+  let lit = max(step(q.x, sweep), 1.0 - entering);
   let nodeLit = max(step(0.655, t), 1.0 - entering);
   let liveAmount = max(onLive * lit, node * nodeLit);
   let pulse = node * nodeLit * (1.0 - smoothstep(0.655, 0.80, t)) * entering;

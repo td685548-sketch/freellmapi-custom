@@ -2,7 +2,7 @@ import { playPortal, portalSupported, warmPortal } from './portal'
 
 /**
  * Plays the WebGPU transition when a link crosses between the FreeLLMAPI
- * dashboard and Xwitch (/x). Installed once as a document-level listener so
+ * dashboard and Thruline (/x). Installed once as a document-level listener so
  * no upstream component has to know about it. Browsers without WebGPU, and
  * people who prefer reduced motion, get the normal instant navigation.
  */

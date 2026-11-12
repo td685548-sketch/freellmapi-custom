@@ -28,7 +28,7 @@ import SupportGateway from './pages/SupportGateway'
 import SupportEnterprise from './pages/SupportEnterprise'
 import SupportGovernance from './pages/SupportGovernance'
 import ModelAvailabilityBadge from './components/ModelAvailabilityBadge'
-import { XwitchLogo } from './XwitchLogo'
+import { ThrulineLogo } from './ThrulineLogo'
 import { useShellStrings } from './shell-strings'
 import { matchNav, useNavGroups } from './shell/nav'
 import { QuickJump } from './shell/QuickJump'
@@ -77,11 +77,11 @@ function XGatewayShell() {
     {menuOpen && <button className="x-nav-scrim" aria-label={s.close} onClick={() => setMenuOpen(false)} />}
     <aside className={`x-sidebar ${menuOpen ? 'x-sidebar-open' : ''}`}>
       <div className="x-sidebar-top">
-        <Link to="/x/home" className="x-brand" onClick={() => setMenuOpen(false)}><XwitchLogo size={28} /><span className="x-brand-text">Xwitch<small>FreeLLMAPI</small></span></Link>
+        <Link to="/x/home" className="x-brand" onClick={() => setMenuOpen(false)}><ThrulineLogo size={28} /><span className="x-brand-text">Thruline<small>FreeLLMAPI</small></span></Link>
         <button className="x-icon-button x-rail-toggle" aria-label={rail ? sh.expand : sh.collapse} title={rail ? sh.expand : sh.collapse} aria-pressed={rail} onClick={toggleRail}>{rail ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button>
         <button className="x-icon-button x-mobile-close" aria-label={s.close} onClick={() => setMenuOpen(false)}><X size={20} /></button>
       </div>
-      <nav aria-label="Xwitch">{groups.map(group => <div className="x-nav-group" key={group.id} role="group" aria-labelledby={`x-nav-${group.id}`}>
+      <nav aria-label="Thruline">{groups.map(group => <div className="x-nav-group" key={group.id} role="group" aria-labelledby={`x-nav-${group.id}`}>
         <div className="x-nav-heading" id={`x-nav-${group.id}`}>{group.label}</div>
         {group.items.map(item => <NavLink key={item.to} to={item.to} end={item.to === '/x/support'} title={rail ? item.label : undefined} onClick={() => setMenuOpen(false)} className={({ isActive }) => `x-nav-item ${isActive ? 'active' : ''}`}><item.icon size={17} /><span>{item.label}</span></NavLink>)}
       </div>)}</nav>
@@ -90,7 +90,7 @@ function XGatewayShell() {
         <Link to="/models/chat" className="x-nav-item x-back-link-nav" title={rail ? s.back : undefined}><ArrowLeft size={16} /><span>{s.back}</span></Link>
       </div>
     </aside>
-    <div className={`x-main ${isPlayground ? 'x-main-playground' : ''}`}><header className="x-header"><button className="x-icon-button x-mobile-menu" aria-label={s.menu} onClick={() => setMenuOpen(true)}><Menu size={21} /></button><div className="x-breadcrumb">{current && <><span>{current.group.label}</span><ChevronRight size={14} /></>}<strong>{current?.item.label ?? 'Xwitch'}</strong></div><div className="x-header-actions"><button type="button" className="x-jump-trigger" onClick={() => setJumpOpen(true)} aria-label={sh.jump}><Search size={15} /><span>{sh.jump}</span><kbd>{shortcut}</kbd></button>{canView && <ModelAvailabilityBadge />}<label className="x-language"><span className="x-sr-only">{s.language}</span><select value={locale === 'vi' ? 'vi' : 'en'} onChange={event => setLocale(event.target.value as 'vi' | 'en')}><option value="en">English</option><option value="vi">Tiếng Việt</option></select></label><button className="x-icon-button" aria-label={s.theme} onClick={() => setTheme(resolvedDark ? 'light' : 'dark')}>{resolvedDark ? <Sun size={18} /> : <Moon size={18} />}</button><span className="x-avatar" title={session.session?.email}>{session.session?.email?.slice(0, 1).toUpperCase() ?? 'X'}</span></div></header>
+    <div className={`x-main ${isPlayground ? 'x-main-playground' : ''}`}><header className="x-header"><button className="x-icon-button x-mobile-menu" aria-label={s.menu} onClick={() => setMenuOpen(true)}><Menu size={21} /></button><div className="x-breadcrumb">{current && <><span>{current.group.label}</span><ChevronRight size={14} /></>}<strong>{current?.item.label ?? 'Thruline'}</strong></div><div className="x-header-actions"><button type="button" className="x-jump-trigger" onClick={() => setJumpOpen(true)} aria-label={sh.jump}><Search size={15} /><span>{sh.jump}</span><kbd>{shortcut}</kbd></button>{canView && <ModelAvailabilityBadge />}<label className="x-language"><span className="x-sr-only">{s.language}</span><select value={locale === 'vi' ? 'vi' : 'en'} onChange={event => setLocale(event.target.value as 'vi' | 'en')}><option value="en">English</option><option value="vi">Tiếng Việt</option></select></label><button className="x-icon-button" aria-label={s.theme} onClick={() => setTheme(resolvedDark ? 'light' : 'dark')}>{resolvedDark ? <Sun size={18} /> : <Moon size={18} />}</button><span className="x-avatar" title={session.session?.email}>{session.session?.email?.slice(0, 1).toUpperCase() ?? 'X'}</span></div></header>
       <main className={`x-content ${isPlayground ? 'x-content-playground' : ''}`}><ErrorBoundary><Routes>
         <Route index element={<Navigate to="/x/home" replace />} />
         <Route path="home" element={<Overview />} />

@@ -503,7 +503,7 @@ export default function TranslatorInspector() {
                   {s.sendToGateway}
                 </h3>
                 <p style={{ margin: '0 0 14px', fontSize: '12px', color: 'var(--x-muted)' }}>
-                  Simulate dispatching this request against local Xwitch routing tables without consuming external provider quotas.
+                  Simulate dispatching this request against local Thruline routing tables without consuming external provider quotas.
                 </p>
                 <button
                   type="button"

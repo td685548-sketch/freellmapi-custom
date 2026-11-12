@@ -30,7 +30,7 @@ export interface PortalOptions {
   /** Click position in CSS pixels; the ripple starts here. */
   x: number
   y: number
-  /** true: FreeLLMAPI → Xwitch. false: the way back. */
+  /** true: FreeLLMAPI → Thruline. false: the way back. */
   entering: boolean
   dark: boolean
   /** Called once, when the wall hides the page. Swap the route here. */
@@ -142,9 +142,9 @@ export async function playPortal(options: PortalOptions): Promise<void> {
   const depthTarget = device.createTexture({ size, format: 'depth24plus', sampleCount: SAMPLES, usage: TEXTURE_RENDER_ATTACHMENT })
   document.body.appendChild(canvas)
 
-  // The wordmark sits under the tile mark while the switch is thrown.
+  // The wordmark sits under the tile mark while the live line lights up.
   const wordmark = document.createElement('div')
-  wordmark.textContent = 'Xwitch'
+  wordmark.textContent = 'Thruline'
   wordmark.setAttribute('aria-hidden', 'true')
   wordmark.style.cssText = `position:fixed;left:0;right:0;top:calc(50% + ${Math.round(cssHeight * 0.34) + 26}px);z-index:2147483001;`
     + 'text-align:center;font:650 clamp(20px,2.4vw,30px)/1 var(--font-sans,system-ui),sans-serif;letter-spacing:.01em;'
