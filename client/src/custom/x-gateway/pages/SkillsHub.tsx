@@ -33,6 +33,7 @@ import {
 } from '../skills-api';
 import type { SkillCategory, SkillSummary } from '../skills-types';
 import { useUserSession } from '../../use-session';
+import { askConfirm } from '../shell/confirm'
 
 function getSkillIcon(category: string, iconName?: string) {
   switch (iconName || category) {
@@ -202,7 +203,7 @@ export default function SkillsHub() {
   };
 
   const handleDelete = async (skill: SkillSummary) => {
-    if (!window.confirm(s.confirmDelete)) return;
+    if (!await askConfirm(s.confirmDelete)) return;
     try {
       await deleteMutation.mutateAsync(skill.id);
       if (previewSkill?.id === skill.id) {

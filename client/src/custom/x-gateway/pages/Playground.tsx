@@ -42,6 +42,7 @@ import {
 import { useUserSession } from '../../use-session';
 import { useSessionRevision } from '../../session-state';
 import '../playground.css';
+import { askConfirm } from '../shell/confirm'
 
 async function optimizeImageFile(file: File): Promise<{ id: string; name: string; url: string }> {
   // If file is GIF or already small (<= 800KB), keep as-is to avoid re-encoding
@@ -206,9 +207,9 @@ export default function Playground() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // Clear current conversation messages
-  const handleClearCurrentChat = useCallback(() => {
+  const handleClearCurrentChat = useCallback(async () => {
     if (activeChat.messages.length === 0) return;
-    if (!window.confirm(s.clearConfirm)) return;
+    if (!await askConfirm(s.clearConfirm)) return;
     setChats((prev) =>
       prev.map((c) => (c.id === activeChat.id ? { ...c, messages: [] } : c))
     );
@@ -325,9 +326,9 @@ export default function Playground() {
     setTimeout(() => scrollToBottom(true), 0);
   };
 
-  const handleDeleteChat = (id: string, e: React.MouseEvent) => {
+  const handleDeleteChat = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!window.confirm(s.deleteConfirm)) return;
+    if (!await askConfirm(s.deleteConfirm)) return;
     if (isStreaming && activeChatId === id) handleStopStream();
 
     const remaining = chats.filter((c) => c.id !== id);
