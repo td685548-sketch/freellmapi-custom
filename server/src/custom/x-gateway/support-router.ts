@@ -71,17 +71,23 @@ export interface SupportChatCompletionResult {
   userContext: SupportUserContext;
   allowedTools: SupportAvailableToolDescriptor[];
   toolTrace: SupportToolTraceEntry[];
-  modelUsed: string;
+  modelUsed: string | null;
   usage: {
     prompt_tokens: number;
     completion_tokens: number;
     total_tokens: number;
   };
+  choices?: Array<{
+    index: number;
+    message: { role: 'assistant'; content: string };
+    finish_reason: string;
+  }>;
   usedFallback?: boolean;
 }
 
 export interface SupportPipelineHooks {
   trustedContext?: string;
+  disableTools?: boolean;
   maxCompletionTokens?: number;
   maxModelCalls?: number;
   maxToolCalls?: number;
@@ -275,7 +281,7 @@ export async function executeSupportChatPipeline(options: {
   const { tenant, userContext, messages, hooks } = options;
   const tools = listSupportTools(tenant.id);
   const dbSources = listSupportDbSources(tenant.id);
-  const allowedTools = buildAllowedToolsForContext(userContext, tools, dbSources);
+  const allowedTools = hooks?.disableTools ? [] : buildAllowedToolsForContext(userContext, tools, dbSources);
 
   const toolTrace: SupportToolTraceEntry[] = [];
   const modelUsed = options.model?.trim() || tenant.defaultModel || 'auto';
@@ -287,6 +293,9 @@ export async function executeSupportChatPipeline(options: {
     args: Record<string, unknown>,
   ): Promise<{ output: unknown; rewrittenSql?: string; error?: string; kind: 'webhook' | 'db' }> => {
     hooks?.signal?.throwIfAborted();
+    if (hooks?.disableTools) {
+      return { output: null, error: 'Business tools are disabled in knowledge-only required mode.', kind: 'webhook' };
+    }
     if (hooks && !userContext.verified) throw Object.assign(new Error('A signed session is required for tools.'), { status: 403, code: 'ownership_denied' });
     const started = Date.now();
     const descriptor = allowedTools.find(
@@ -447,9 +456,11 @@ export async function executeSupportChatPipeline(options: {
     `Permissions: ${userContext.permissions.join(', ') || 'none'}`,
     trustedContextSection,
     '--- AVAILABLE TOOLS ---',
-    allowedTools.length > 0
-      ? `You have access to the following tools matching the customer's role:\n${toolDescriptions}\n\nTo execute a tool call, output inside your response:\n<support_tool_call>{"name": "FUNCTION_NAME", "arguments": {...}}</support_tool_call>`
-      : 'No tools or database access are available for the customer role. Answer politely based on general information.',
+    hooks?.disableTools
+      ? 'No tools, CRM memory, or database access are available in knowledge-only mode. Answer strictly from the reference context and include 1 to 5 distinct [cite:<citationId>] markers from the provided candidates.'
+      : allowedTools.length > 0
+        ? `You have access to the following tools matching the customer's role:\n${toolDescriptions}\n\nTo execute a tool call, output inside your response:\n<support_tool_call>{"name": "FUNCTION_NAME", "arguments": {...}}</support_tool_call>`
+        : 'No tools or database access are available for the customer role. Answer politely based on general information.',
   ].join('\n');
   const systemPrompt = hooks?.maskToolData ? String(hooks.maskToolData(rawSystemPrompt)) : rawSystemPrompt;
 
@@ -537,6 +548,12 @@ export async function executeSupportChatPipeline(options: {
         }
 
         if (!matched) break;
+
+        if (hooks?.disableTools) {
+          reply = completionText.trim();
+          executedViaLlm = true;
+          break;
+        }
 
         // Check if completion contains tool call tags
         const toolCallRegex = /<support_tool_call>\s*({[\s\S]*?})\s*<\/support_tool_call>/gi;
@@ -916,6 +933,7 @@ xSupportConsoleRouter.post('/tenants/:id/simulate-chat', async (req: Request, re
           model: genCtx.model,
           hooks: {
             trustedContext: genCtx.trustedContext,
+            disableTools: genCtx.disableTools,
             maxCompletionTokens: genCtx.policy?.maxCompletionTokens,
             maxModelCalls: genCtx.policy?.maxModelCalls,
             maxToolCalls: genCtx.policy?.maxToolCalls,
@@ -1173,6 +1191,31 @@ xSupportPublicRouter.post('/chat', async (req: Request, res: Response): Promise<
 
   const { tenant, userContext, token } = authResult;
 
+  // Reject client-supplied evidence, citations, or policy overrides
+  const forbiddenBodyKeys = [
+    'evidence',
+    'citations',
+    'evidencePolicy',
+    'policy',
+    'candidates',
+    'snapshotId',
+    'responseNotice',
+    'replySource',
+  ];
+  if (req.body && typeof req.body === 'object') {
+    for (const key of forbiddenBodyKeys) {
+      if (Object.prototype.hasOwnProperty.call(req.body, key) && req.body[key] !== undefined) {
+        res.status(400).json({
+          error: {
+            code: 'invalid_input',
+            message: `Field "${key}" is server-managed and cannot be supplied by the client.`,
+          },
+        });
+        return;
+      }
+    }
+  }
+
   // Validate messages
   const rawMessages = req.body?.messages;
   if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
@@ -1277,6 +1320,7 @@ xSupportPublicRouter.post('/chat', async (req: Request, res: Response): Promise<
           model: genCtx.model,
           hooks: {
             trustedContext: genCtx.trustedContext,
+            disableTools: genCtx.disableTools,
             maxCompletionTokens: genCtx.policy?.maxCompletionTokens,
             maxModelCalls: genCtx.policy?.maxModelCalls,
             maxToolCalls: genCtx.policy?.maxToolCalls,
@@ -1300,7 +1344,7 @@ xSupportPublicRouter.post('/chat', async (req: Request, res: Response): Promise<
       allowedTools: result.allowedTools,
       toolTrace: result.toolTrace,
       reply: result.reply,
-      choices: [
+      choices: result.choices ?? [
         {
           index: 0,
           message: { role: 'assistant', content: result.reply },

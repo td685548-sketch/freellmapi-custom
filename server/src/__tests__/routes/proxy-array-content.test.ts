@@ -42,6 +42,19 @@ describe('OpenAI multimodal array content', () => {
   });
 
   beforeEach(async () => {
+    // These are HTTP/schema regressions, not live-provider integration tests.
+    const realFetch = globalThis.fetch;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.startsWith('https://api.groq.com/openai/v1/chat/completions')) {
+        return new Response(JSON.stringify({
+          id: 'chatcmpl-array-fixture', object: 'chat.completion', created: 1, model: 'openai/gpt-oss-120b',
+          choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 4, completion_tokens: 2, total_tokens: 6 },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return realFetch(input, init);
+    });
     const db = getDb();
     db.prepare('DELETE FROM api_keys').run();
     db.prepare('DELETE FROM requests').run();
@@ -59,8 +72,8 @@ describe('OpenAI multimodal array content', () => {
   });
 
   it('accepts content as a string (the legacy shape)', async () => {
-    // Provider call will fail (no real key), but schema validation must pass —
-    // we assert it isn't rejected with a 400 zod error.
+    // The external provider is stubbed; schema validation must still pass
+    // through the real HTTP endpoint without a 400 zod error.
     const { status, body } = await request(app, 'POST', '/v1/chat/completions', {
       messages: [{ role: 'user', content: 'hello' }],
     }, authHeaders());

@@ -3,6 +3,8 @@
  * Belongs to shared/support-runtime.ts (Agent 1 ownership).
  */
 
+import type { SupportAnswerEvidence } from './support-evidence.js';
+
 export interface SupportRuntimePolicy {
   allowedModels: string[]; // extra requested model selectors; default [] permits tenant.defaultModel only
   toolPolicies: Array<{ toolId: number; mode: 'read' | 'approval_required' }>;
@@ -29,11 +31,12 @@ export interface SupportRuntimeMetadata {
   requestId: string;
   conversationId?: string; // absent only for compatible stateless unsigned guest requests
   replayed: boolean;
-  replySource: 'model';
+  replySource: 'model' | 'knowledge_abstention';
   knowledgeDocIds: string[]; // only role-visible docs, no full snippets/raw CRM
   redactionCount: number;
   quota: { requestsUsed: number; tokensUsed: number; resetAt: string; accounting: 'actual' | 'estimated' };
   pendingActions: Array<{ id: string; toolName: string; executionStatus: SupportActionExecutionStatus }>;
+  evidence?: SupportAnswerEvidence;
 }
 
 export interface SupportIntegrationCheck {

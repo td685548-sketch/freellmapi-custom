@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../../db/index.js';
+import type { SupportAnswerEvidence } from '@freellmapi/shared/support-evidence.js';
+import { sanitizeSupportEvidenceConversation } from './support-evidence-runtime.js';
 
 const CONVERSATIONS_KEY = 'x_gateway_support_conversations_v1';
 const TICKETS_KEY = 'x_gateway_support_tickets_v1';
@@ -35,6 +37,11 @@ export interface SupportConversationMessage {
     status: string;
     durationMs?: number;
   }>;
+  evidence?: SupportAnswerEvidence;
+  responseNotice?: {
+    requestId: string;
+    reason: 'no_matches' | 'invalid_citations' | 'sources_changed';
+  };
   createdAt: string;
 }
 
@@ -156,12 +163,23 @@ export function listSupportConversations(
   const tid = String(tenantId);
   const store = readStore<SupportConversation[]>(CONVERSATIONS_KEY);
   const list = Array.isArray(store[tid]) ? store[tid] : [];
+  const numericTenantId = Number(tid);
 
-  return list.filter((conv) => {
-    if (filter?.userId && conv.userId !== filter.userId) return false;
-    if (filter?.status && conv.status !== filter.status) return false;
-    return true;
-  });
+  return list
+    .filter((conv) => {
+      if (filter?.userId && conv.userId !== filter.userId) return false;
+      if (filter?.status && conv.status !== filter.status) return false;
+      return true;
+    })
+    .map((conv) =>
+      Number.isInteger(numericTenantId) && numericTenantId > 0
+        ? sanitizeSupportEvidenceConversation({
+            tenantId: numericTenantId,
+            conversation: conv,
+            viewerRole: conv.userRole,
+          })
+        : conv,
+    );
 }
 
 export function getSupportConversationForUser(
@@ -188,6 +206,15 @@ export function getSupportConversationForUser(
     );
   }
 
+  const numericTenantId = Number(tid);
+  if (Number.isInteger(numericTenantId) && numericTenantId > 0) {
+    return sanitizeSupportEvidenceConversation({
+      tenantId: numericTenantId,
+      conversation: found,
+      viewerRole: requester.role,
+    });
+  }
+
   return found;
 }
 
@@ -200,7 +227,11 @@ export function createOrAppendSupportConversation(
     userEmail?: string;
     userRole: string;
     subject?: string;
-    message: Omit<SupportConversationMessage, 'id' | 'createdAt'>;
+    message: Omit<SupportConversationMessage, 'id' | 'createdAt' | 'evidence' | 'responseNotice'>;
+    internalEvidence?: {
+      evidence?: SupportAnswerEvidence;
+      responseNotice?: SupportConversationMessage['responseNotice'];
+    };
   },
 ): SupportConversation {
   const tid = String(tenantId);
@@ -216,6 +247,8 @@ export function createOrAppendSupportConversation(
     senderRole: input.message.senderRole,
     content: input.message.content,
     toolTrace: input.message.toolTrace,
+    ...(input.internalEvidence?.evidence ? { evidence: input.internalEvidence.evidence } : {}),
+    ...(input.internalEvidence?.responseNotice ? { responseNotice: input.internalEvidence.responseNotice } : {}),
     createdAt: now,
   };
 

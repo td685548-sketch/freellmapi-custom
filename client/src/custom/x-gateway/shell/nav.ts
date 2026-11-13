@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { ArrowLeftRight, BarChart3, Film, Gauge, Headset, Home, KeyRound, Layers, LifeBuoy, MessageSquare, Network, Scissors, ScrollText, Server, ShieldCheck, Sparkles, Terminal } from 'lucide-react'
+import { ArrowLeftRight, BarChart3, BookOpen, Film, Gauge, Headset, Home, KeyRound, Layers, LifeBuoy, MessageSquare, Network, Scissors, ScrollText, Server, ShieldCheck, Sparkles, Terminal } from 'lucide-react'
 import { useUserSession } from '../../use-session'
 import { useXStrings } from '../strings'
 import { useMgmtStrings } from '../management-strings'
@@ -12,6 +12,7 @@ import { useSupportStrings } from '../support-strings'
 import { useSupportEnterpriseStrings } from '../support-enterprise-strings'
 import { useSupportGovernanceStrings } from '../support-governance-strings'
 import { useSupportIntegrationStrings } from '../support-integration-strings'
+import { useSupportEvidenceStrings } from '../support-evidence-strings'
 import { useShellStrings } from '../shell-strings'
 
 export interface NavItem { to: string; label: string; icon: LucideIcon }
@@ -30,6 +31,7 @@ export function useNavGroups(): NavGroup[] {
   const ops = useSupportEnterpriseStrings()
   const gov = useSupportGovernanceStrings()
   const integration = useSupportIntegrationStrings()
+  const evidence = useSupportEvidenceStrings()
   const sh = useShellStrings()
   const session = useUserSession()
   const canView = session.hasPermission('view_keys')
@@ -57,6 +59,7 @@ export function useNavGroups(): NavGroup[] {
     { id: 'support', label: sh.groupSupport, items: [
       { to: '/thruline/support-integration', label: integration.nav, icon: Sparkles },
       { to: '/thruline/support', label: sup.supportNav, icon: Headset },
+      { to: '/thruline/support-knowledge', label: evidence.nav, icon: BookOpen },
       { to: '/thruline/support-ops', label: ops.nav, icon: LifeBuoy },
       { to: '/thruline/support-guardrails', label: gov.nav, icon: ShieldCheck },
     ] },

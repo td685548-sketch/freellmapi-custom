@@ -54,7 +54,8 @@ import { AuditLogPage } from '@/custom/AuditLogPage'
 import PremiumPage from '@/pages/PremiumPage'
 import NotFoundPage from '@/pages/NotFoundPage'
 import AgentsPage from '@/pages/AgentsPage'
-import XGatewayApp, { legacyGatewayTarget } from '@/custom/x-gateway/XGatewayApp'
+import XGatewayApp from '@/custom/x-gateway/XGatewayApp'
+import { legacyGatewayTarget } from '@/custom/x-gateway/legacy-gateway-target'
 
 // Every failed mutation surfaces as an error toast, so no action fails
 // silently. A page that already shows the failure inline can opt out with
