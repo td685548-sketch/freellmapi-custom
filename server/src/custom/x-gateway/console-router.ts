@@ -9,13 +9,17 @@ import { probeProxyUrl } from '../../lib/proxy.js';
 import {
   createCombo,
   getConfigSnapshot,
+  getRouteHealthTtlMinutes,
   listCombos,
+  MAX_ROUTE_HEALTH_TTL_MINUTES,
   setDefaultSavers,
   setEnabled,
   setOutboundProxyUrl,
+  setRouteHealthTtlMinutes,
   updateCombo,
   type XGatewaySaverDefaults,
 } from './config.js';
+import { resetRouteHealth } from './router.js';
 import {
   listXGatewayClientKeys,
   mintXGatewayClientKey,
@@ -223,6 +227,27 @@ xGatewayConsoleRouter.put('/capacity-adapter', (req, res) => {
   };
   setCapacityAdapterSettings(next, uid);
   res.json(next);
+});
+
+const routingHealthSchema = z.object({
+  penaltyTtlMinutes: z.number().int().min(0).max(MAX_ROUTE_HEALTH_TTL_MINUTES).optional(),
+  reset: z.boolean().optional(),
+}).strict();
+
+xGatewayConsoleRouter.get('/routing-health', (_req, res) => {
+  res.json({ penaltyTtlMinutes: getRouteHealthTtlMinutes() });
+});
+
+xGatewayConsoleRouter.put('/routing-health', (req, res) => {
+  const uid = requireUserId(req);
+  const body = parse(routingHealthSchema, req.body);
+  if (body.penaltyTtlMinutes !== undefined) {
+    setRouteHealthTtlMinutes(body.penaltyTtlMinutes, uid);
+  }
+  if (body.reset) {
+    resetRouteHealth();
+  }
+  res.json({ penaltyTtlMinutes: getRouteHealthTtlMinutes() });
 });
 
 xGatewayConsoleRouter.get('/pricing', (_req, res) => {

@@ -60,7 +60,11 @@ export interface XGatewayConfigSnapshot {
   mediaDefaults: XGatewayMediaDefaults;
   outboundProxyUrl: string;
   maskedOutboundProxyUrl: string;
+  routeHealthTtlMinutes: number;
 }
+
+export const DEFAULT_ROUTE_HEALTH_TTL_MINUTES = 5;
+export const MAX_ROUTE_HEALTH_TTL_MINUTES = 1440;
 
 export const DEFAULT_MEDIA_DEFAULTS: XGatewayMediaDefaults = {
   image: { defaultModel: 'auto' },
@@ -236,6 +240,13 @@ function parseOutboundProxy(raw: string | undefined): string {
   return '';
 }
 
+function parseRouteHealthTtlMinutes(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === '') return DEFAULT_ROUTE_HEALTH_TTL_MINUTES;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) return DEFAULT_ROUTE_HEALTH_TTL_MINUTES;
+  return Math.max(0, Math.min(MAX_ROUTE_HEALTH_TTL_MINUTES, parsed));
+}
+
 export function getConfigSnapshot(): XGatewayConfigSnapshot {
   const now = Date.now();
   if (cachedSnapshot && now < cacheExpiry) return cachedSnapshot;
@@ -246,6 +257,7 @@ export function getConfigSnapshot(): XGatewayConfigSnapshot {
     const saversRow = db.prepare("SELECT value FROM x_gateway_config WHERE key = 'default_savers'").get() as { value: string } | undefined;
     const mediaRow = db.prepare("SELECT value FROM x_gateway_config WHERE key = 'media_defaults'").get() as { value: string } | undefined;
     const proxyRow = db.prepare("SELECT value FROM x_gateway_config WHERE key = 'outbound_proxy'").get() as { value: string } | undefined;
+    const ttlRow = db.prepare("SELECT value FROM x_gateway_config WHERE key = 'route_health_ttl_minutes'").get() as { value: string } | undefined;
     const combos = loadCombosFromDb(db);
     const outboundProxyUrl = parseOutboundProxy(proxyRow?.value);
 
@@ -256,6 +268,7 @@ export function getConfigSnapshot(): XGatewayConfigSnapshot {
       mediaDefaults: parseMediaDefaults(mediaRow?.value),
       outboundProxyUrl,
       maskedOutboundProxyUrl: maskProxyUrl(outboundProxyUrl),
+      routeHealthTtlMinutes: parseRouteHealthTtlMinutes(ttlRow?.value),
     };
   } catch {
     cachedSnapshot = {
@@ -265,6 +278,7 @@ export function getConfigSnapshot(): XGatewayConfigSnapshot {
       mediaDefaults: { ...DEFAULT_MEDIA_DEFAULTS },
       outboundProxyUrl: '',
       maskedOutboundProxyUrl: '',
+      routeHealthTtlMinutes: DEFAULT_ROUTE_HEALTH_TTL_MINUTES,
     };
   }
 
@@ -296,6 +310,16 @@ export function getMediaDefaults(): XGatewayMediaDefaults {
 
 export function setMediaDefaults(defaults: XGatewayMediaDefaults, updatedBy?: number): void {
   setConfigValue('media_defaults', JSON.stringify(defaults), updatedBy);
+}
+
+export function getRouteHealthTtlMinutes(): number {
+  return getConfigSnapshot().routeHealthTtlMinutes;
+}
+
+export function setRouteHealthTtlMinutes(minutes: number, updatedBy?: number): number {
+  const clamped = Math.max(0, Math.min(MAX_ROUTE_HEALTH_TTL_MINUTES, Math.round(minutes)));
+  setConfigValue('route_health_ttl_minutes', String(clamped), updatedBy);
+  return clamped;
 }
 
 export function getOutboundProxyUrl(): string {

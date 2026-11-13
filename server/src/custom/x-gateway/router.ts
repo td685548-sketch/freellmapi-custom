@@ -40,7 +40,7 @@ import {
   type ComboSmartPolicy,
   type ComboStrategy,
 } from './combos.js';
-import { getConfigSnapshot } from './config.js';
+import { getConfigSnapshot, getRouteHealthTtlMinutes } from './config.js';
 import { runInGatewayScope } from './context.js';
 import { xGatewayProtocolsRouter } from './protocols.js';
 import { preprocessGatewayMessages } from './token-savers-pipeline.js';
@@ -144,6 +144,24 @@ const IMAGE_MODEL_RE =
  * forwarded to `/images/generations` and rejected upstream.
  * Vision routes need a model that can process image inputs.
  */
+function orderModelsForModality<T extends { id: string; name?: string }>(
+  models: T[],
+  modality: CandidateModality,
+): T[] {
+  const isImage = (m: T) => IMAGE_MODEL_RE.test(m.id) || IMAGE_MODEL_RE.test(m.name ?? '');
+  if (modality === 'image') {
+    return [...models.filter(isImage), ...models.filter(m => !isImage(m))];
+  }
+  if (modality === 'vision') {
+    return [
+      ...models.filter(m => looksLikeVisionModel(m.id) && !isImage(m)),
+      ...models.filter(m => !looksLikeVisionModel(m.id) && !isImage(m)),
+      ...models.filter(isImage),
+    ];
+  }
+  return [...models.filter(m => !isImage(m)), ...models.filter(isImage)];
+}
+
 function pickCandidateModel(models: { id: string; name?: string }[], modality: CandidateModality): string {
   if (modality === 'image') {
     const image = models.find(m => IMAGE_MODEL_RE.test(m.id) || IMAGE_MODEL_RE.test(m.name ?? ''));
@@ -248,6 +266,34 @@ export function resolveCandidateRoutes(
     const suffix = rawModel.slice(slashIdx + 1);
     const matchedProvider = normalizeXGatewayProviderId(prefix) ?? (usable.some(a => a.provider === prefix) ? prefix : null);
     if (matchedProvider && suffix) {
+      const suffixLower = suffix.toLowerCase();
+      if (suffixLower === 'auto' || suffixLower.startsWith('auto:')) {
+        const providerAccounts = rotateProviderAccounts(usable.filter(a => a.provider === matchedProvider));
+        const perAccountModels = providerAccounts.map(account => {
+          const rawModels = accountModels(account);
+          const enabled = rawModels.filter(m => !resolveRouteModel(matchedProvider, m.id).disabled);
+          const ordered = orderModelsForModality(enabled, modality);
+          return {
+            account,
+            models: ordered.length > 0 ? ordered : (rawModels.length === 0 ? [{ id: 'default' }] : []),
+          };
+        });
+        const maxModels = perAccountModels.reduce((max, entry) => Math.max(max, entry.models.length), 0);
+        if (providerAccounts.length > 0 && maxModels === 0) {
+          return {
+            candidates: [],
+            notFoundError: `All models are disabled for provider '${matchedProvider}'`,
+          };
+        }
+        const candidates: CandidateRoute[] = [];
+        for (let i = 0; i < maxModels; i++) {
+          for (const entry of perAccountModels) {
+            const model = entry.models[i];
+            if (model) candidates.push({ account: entry.account, modelId: model.id });
+          }
+        }
+        return { candidates: sortCandidatesByHealth(candidates) };
+      }
       const route = resolveRouteModel(matchedProvider, suffix);
       if (route.disabled) {
         return {
@@ -294,7 +340,6 @@ export function resolveCandidateRoutes(
  * that disappears once the route succeeds again. Unknown routes sit in the
  * middle, which makes a cold process behave like plain `fallback`.
  */
-const ROUTE_HEALTH_TTL_MS = 5 * 60_000;
 const FAILURE_PENALTY_MS = 2_500;
 const UNKNOWN_LATENCY_MS = 1_200;
 
@@ -339,11 +384,15 @@ export function resetRouteHealth(): void {
   routeHealth.clear();
 }
 
+function isRouteHealthFailing(health: RouteHealth): boolean {
+  if (health.consecutiveErrors <= 0) return false;
+  const ttlMinutes = getRouteHealthTtlMinutes();
+  return ttlMinutes === 0 || Date.now() - health.lastFailureAt < ttlMinutes * 60_000;
+}
+
 function routeScore(health: RouteHealth | undefined): number {
   if (!health) return UNKNOWN_LATENCY_MS;
-  const failing = health.consecutiveErrors > 0
-    && Date.now() - health.lastFailureAt < ROUTE_HEALTH_TTL_MS;
-  return health.latencyMs + (failing ? health.consecutiveErrors * FAILURE_PENALTY_MS : 0);
+  return health.latencyMs + (isRouteHealthFailing(health) ? health.consecutiveErrors * FAILURE_PENALTY_MS : 0);
 }
 
 /** Stable sort: healthier routes first, original step order on ties. */
@@ -446,10 +495,8 @@ function pruneSessionPins(now: number): void {
  */
 function shouldReleasePin(pinned: CandidateRoute, candidates: CandidateRoute[], threshold: number): boolean {
   const pinnedHealth = routeHealth.get(healthKey(pinned));
-  if (pinnedHealth) {
-    const failing = pinnedHealth.consecutiveErrors > 0
-      && Date.now() - pinnedHealth.lastFailureAt < ROUTE_HEALTH_TTL_MS;
-    if (failing) return true;
+  if (pinnedHealth && isRouteHealthFailing(pinnedHealth)) {
+    return true;
   }
 
   const pinnedScore = routeScore(pinnedHealth);
@@ -1565,7 +1612,15 @@ xGatewayRouter.get('/models', xGatewayAuth, (req: Request, res: Response) => {
   for (const account of getUsableXGatewayKeys()) {
     const providerEntry = getXGatewayProvider(account.provider);
     const alias = providerEntry?.alias ?? account.provider;
-    for (const model of accountModels(account)) {
+    const modelsForAccount = accountModels(account);
+    if (modelsForAccount.length > 0) {
+      const autoId = `${alias}/auto`;
+      if (!seen.has(autoId)) {
+        seen.add(autoId);
+        data.push({ id: autoId, object: 'model', created: 0, owned_by: account.provider });
+      }
+    }
+    for (const model of modelsForAccount) {
       const prefixed = `${alias}/${model.id}`;
       if (!seen.has(prefixed)) {
         seen.add(prefixed);

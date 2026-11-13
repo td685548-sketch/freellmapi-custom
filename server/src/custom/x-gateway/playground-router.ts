@@ -35,11 +35,21 @@ xPlaygroundRouter.get('/playground/models', (_req, res) => {
     if ((account.monthly_request_cap > 0 && account.requests >= account.monthly_request_cap)
       || (account.monthly_token_cap > 0 && account.tokens >= account.monthly_token_cap)) continue;
     const provider = getXGatewayProvider(account.provider);
-    for (const model of accountModels(account)) {
-      const id = `${provider?.alias ?? account.provider}/${model.id}`;
+    const alias = provider?.alias ?? account.provider;
+    const providerName = provider?.name ?? account.provider;
+    const accountModelList = accountModels(account);
+    if (accountModelList.length > 0) {
+      const autoId = `${alias}/auto`;
+      if (!seen.has(autoId)) {
+        seen.add(autoId);
+        models.push({ id: autoId, name: 'Auto', provider: providerName });
+      }
+    }
+    for (const model of accountModelList) {
+      const id = `${alias}/${model.id}`;
       if (seen.has(id)) continue;
       seen.add(id);
-      models.push({ id, name: model.name, provider: provider?.name ?? account.provider });
+      models.push({ id, name: model.name, provider: providerName });
     }
   }
   res.json({ enabled: snapshot.enabled, models } satisfies PlaygroundCatalog);

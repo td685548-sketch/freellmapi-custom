@@ -6,7 +6,7 @@ import { getDb, initDb } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
 import { createSession, createUser } from '../../services/auth.js';
 import { mintUserApiKey } from '../../services/user-keys.js';
-import { createCombo, invalidateConfigCache, setEnabled } from '../../custom/x-gateway/config.js';
+import { createCombo, invalidateConfigCache, setEnabled, setRouteHealthTtlMinutes } from '../../custom/x-gateway/config.js';
 import {
   applySessionStickiness,
   conversationFingerprint,
@@ -207,6 +207,51 @@ describe('smart combo session stickiness', () => {
     const resolved = resolveCandidateRoutes('combo:fallback-combo');
     const ordered = applySessionStickiness(resolved.candidates, resolved.combo, conversation());
     expect(ordered.map(candidate => candidate.account.id)).toEqual([first, second]);
+  });
+
+  it('expands provider/auto across enabled models and demotes failing subscription models', () => {
+    secret ??= encrypt('sk-routing-test');
+    const info = getDb().prepare(`INSERT INTO x_gateway_keys
+      (provider,label,auth_method,encrypted_key,iv,auth_tag,base_url,models_json,status,enabled)
+      VALUES (?,?,?,?,?,?,?,?,'healthy',1)`)
+      .run(
+        'codex',
+        'codex account',
+        'api_key',
+        secret.encrypted,
+        secret.iv,
+        secret.authTag,
+        null,
+        JSON.stringify([
+          { id: 'gpt-6.1-sol', name: 'GPT 6.1 Sol' },
+          { id: 'gpt-6-astra', name: 'GPT 6.0 Astra' },
+          { id: 'gpt-5.6-sol', name: 'GPT 5.6 Sol' },
+        ]),
+      );
+    const codexId = Number(info.lastInsertRowid);
+    invalidateXGatewayKeyCache();
+    setProviderModelConfig('codex', { disabledModels: ['gpt-6-astra'] });
+
+    const initial = resolveCandidateRoutes('cx/auto');
+    expect(initial.notFoundError).toBeUndefined();
+    expect(initial.candidates.map(c => c.modelId)).toEqual(['gpt-6.1-sol', 'gpt-5.6-sol']);
+
+    // Simulate gpt-6.1-sol failing (e.g. not in subscription); gpt-5.6-sol should move first.
+    recordRouteOutcome(`${codexId}:gpt-6.1-sol`, { error: true });
+    const afterFailure = resolveCandidateRoutes('cx/auto');
+    expect(afterFailure.candidates.map(c => c.modelId)).toEqual(['gpt-5.6-sol', 'gpt-6.1-sol']);
+
+    // When penalty TTL is set to 0, failed routes remain deprioritized even if time advances.
+    setRouteHealthTtlMinutes(0);
+    const futureNow = Date.now() + 60 * 60_000;
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(futureNow);
+    try {
+      const persistedOrder = resolveCandidateRoutes('cx/auto');
+      expect(persistedOrder.candidates.map(c => c.modelId)).toEqual(['gpt-5.6-sol', 'gpt-6.1-sol']);
+    } finally {
+      nowSpy.mockRestore();
+      setRouteHealthTtlMinutes(5);
+    }
   });
 });
 
