@@ -2,16 +2,9 @@
 
 This is a validation guide, not an implementation. Spec016 remains separate. Use the same integration branch for all four agents and preserve other agents' pending work.
 
-## Dispatch
+## Bàn giao đã hoàn thành
 
-Send the complete content of one prompt to each separate agent:
-
-1. [Agent1 — Runtime/context/quotas](prompts/agent-1.md)
-2. [Agent2 — Approval/outbox/safe HTTP](prompts/agent-2.md)
-3. [Agent3 — HTTP integration/lifecycle](prompts/agent-3.md)
-4. [Agent4 — Widget/integration UI](prompts/agent-4.md)
-
-Agents read the common contracts and ownership before coding. No one except the reviewer stages, commits, pushes or creates a PR. The original implementation is delegated to the four agents. After round 1 review, the user explicitly authorized the reviewer to fix identified defects. When all four finish, send their completion reports and ask the reviewer to review spec017.
+Spec017 đã hoàn thành. Bốn prompt cũ đã được dọn theo yêu cầu người dùng; mã và tài liệu kiểm chứng vẫn được giữ. Không dispatch lại đợt017. Dùng [spec019 và bốn prompt mới](../019-ai-support-service-desk/README.md) cho đợt kế tiếp;016 chưa triển khai chỉ là tham khảo.
 
 ## Targeted Verification
 

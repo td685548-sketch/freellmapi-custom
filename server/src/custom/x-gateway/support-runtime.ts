@@ -36,7 +36,15 @@ import {
 import {
   getSupportConversationForUser,
   createOrAppendSupportConversation,
+  type SupportConversation,
 } from './support-workflows.js';
+import {
+  prepareSupportDeskIntake,
+  commitSupportDeskIntake,
+  getInternalIntakeForGate,
+  type SupportDeskIntakeGate,
+} from './support-service-desk-runtime.js';
+import { SupportDeskError } from './support-service-desk-store.js';
 import { buildCustomerMemoryPrompt } from './support-crm-webhooks.js';
 import { listSupportTools, listSupportDbSources } from './support-store.js';
 import { buildAllowedToolsForContext } from './support-connectors.js';
@@ -93,6 +101,7 @@ function normalizeInputFingerprint(options: {
   userPermissions: string[];
   model: string;
   conversationId?: string;
+  intakeReceiptId?: string;
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
 }): string {
   const norm = {
@@ -102,6 +111,7 @@ function normalizeInputFingerprint(options: {
     permissions: [...options.userPermissions].sort(),
     model: options.model.trim().toLowerCase(),
     conversationId: options.conversationId ? options.conversationId.trim() : '',
+    ...(options.intakeReceiptId ? { intakeReceiptId: options.intakeReceiptId } : {}),
     messages: options.messages.map((m) => ({
       role: m.role,
       content: m.content.trim(),
@@ -247,6 +257,22 @@ export async function executeSupportTurn(options: {
   }
 
   // 7. Input fingerprint and Turn claim
+  let normalizedReceiptId: string | undefined;
+  if (input.intakeReceiptId !== undefined) {
+    if (typeof input.intakeReceiptId !== 'string') {
+      throw new SupportRuntimeError(400, 'invalid_input', 'intakeReceiptId must be a string.');
+    }
+    const trimmedReceipt = input.intakeReceiptId.trim();
+    if (!trimmedReceipt || trimmedReceipt.length > 128) {
+      throw new SupportRuntimeError(
+        400,
+        'invalid_input',
+        'intakeReceiptId must be a non-empty string up to 128 characters.',
+      );
+    }
+    normalizedReceiptId = trimmedReceipt;
+  }
+
   const inputHash = normalizeInputFingerprint({
     tenantId: tenant.id,
     userId: userContext.userId,
@@ -254,6 +280,7 @@ export async function executeSupportTurn(options: {
     userPermissions: userContext.permissions,
     model: effectiveModel,
     conversationId: input.conversationId,
+    intakeReceiptId: normalizedReceiptId,
     messages: rawMessages,
   });
 
@@ -314,6 +341,7 @@ export async function executeSupportTurn(options: {
 
     // 9. Load authoritative server history for conversation
     let serverMessages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+    let existingConv: SupportConversation | undefined;
 
     if (conversationId && isSigned) {
       // Authoritative previous history from server conversation
@@ -324,6 +352,7 @@ export async function executeSupportTurn(options: {
           { userId: userContext.userId, role: userContext.role },
         );
         if (conv.status === 'escalated') throw new SupportRuntimeError(409, 'conversation_handoff', 'A human agent is handling this conversation.');
+        existingConv = conv;
         if (conv) {
           // Bounded history slice
           const maxHist = policy.maxHistoryMessages;
@@ -349,6 +378,14 @@ export async function executeSupportTurn(options: {
       // New conversation: ignore any client assistant messages, use final user message
       serverMessages = [{ role: 'user', content: lastUserText }];
     }
+
+    // 9b. Enforce 019 Intake Gate before zero-model short-circuit or model execution
+    const intakeGate: SupportDeskIntakeGate = prepareSupportDeskIntake({
+      tenant,
+      context: userContext,
+      input,
+      conversation: existingConv,
+    });
 
     // 10. Zero-model abstention short-circuit when required mode has no matches
     if (evidencePrep.mode === 'required' && evidencePrep.shouldAbstain) {
@@ -379,6 +416,7 @@ export async function executeSupportTurn(options: {
           citations: [],
         };
 
+        const internalIntake = getInternalIntakeForGate(intakeGate);
         if (isSigned) {
           const maskedUserRes = maskSupportSensitiveText(String(tenant.id), lastUserText, userContext.role);
           totalRedactions += maskedUserRes.redactionCount;
@@ -398,6 +436,7 @@ export async function executeSupportTurn(options: {
             internalEvidence: {
               responseNotice: { requestId, reason: 'no_matches' },
             },
+            ...(internalIntake ? { internalIntake } : {}),
           });
           conversationId = conv.id;
           const customerMessageId = conv.messages[conv.messages.length - 1]?.id ?? '';
@@ -413,6 +452,11 @@ export async function executeSupportTurn(options: {
             evidence,
           });
         }
+
+        const intakeMetadata = commitSupportDeskIntake({
+          gate: intakeGate,
+          conversationId,
+        });
 
         const currentQuota = getSupportUserQuotaStatus(String(tenant.id), {
           userId: userContext.userId,
@@ -435,6 +479,7 @@ export async function executeSupportTurn(options: {
           },
           pendingActions: [],
           evidence,
+          ...(intakeMetadata ? { intake: intakeMetadata } : {}),
         };
 
         const finalResult: SupportChatCompletionResult & { runtime: SupportRuntimeMetadata } = {
@@ -702,7 +747,8 @@ export async function executeSupportTurn(options: {
           };
         });
 
-    return getDb().transaction(() => {
+    try {
+      return getDb().transaction(() => {
     assertSupportTurnActive(turnId, tenant.id, input.conversationId);
 
     let evidenceObj: SupportAnswerEvidence | undefined;
@@ -761,6 +807,7 @@ export async function executeSupportTurn(options: {
     }
 
     // 16. Persist Conversation Messages (exactly 1 customer message and at most 1 AI response)
+    const internalIntake = getInternalIntakeForGate(intakeGate);
     if (isSigned) {
       const conv = createOrAppendSupportConversation(String(tenant.id), {
         conversationId,
@@ -778,6 +825,7 @@ export async function executeSupportTurn(options: {
         ...(isRejectedRequired && rejectedReason
           ? { internalEvidence: { responseNotice: { requestId, reason: rejectedReason } } }
           : {}),
+        ...(internalIntake ? { internalIntake } : {}),
       });
       conversationId = conv.id;
       const customerMessageId = conv.messages[conv.messages.length - 1]?.id ?? '';
@@ -819,6 +867,11 @@ export async function executeSupportTurn(options: {
         });
       }
     }
+
+    const intakeMetadata = commitSupportDeskIntake({
+      gate: intakeGate,
+      conversationId,
+    });
 
     // 17. Reconcile Quota
     const actualTokens = observedCalls ? spentTokens : genResult.usage?.total_tokens;
@@ -867,6 +920,7 @@ export async function executeSupportTurn(options: {
       },
       pendingActions,
       ...(evidenceObj ? { evidence: evidenceObj } : {}),
+      ...(intakeMetadata ? { intake: intakeMetadata } : {}),
     };
 
     const maskedGenBase = isRejectedRequired
@@ -912,6 +966,36 @@ export async function executeSupportTurn(options: {
 
     return finalResult;
     })();
+    } catch (commitErr) {
+      if (commitErr instanceof SupportDeskError && commitErr.code === 'intake_schema_changed') {
+        const actualTokens = observedCalls ? spentTokens : genResult.usage?.total_tokens;
+        const hasActualTokens =
+          (observedCalls ? usageKnown : true) &&
+          typeof actualTokens === 'number' &&
+          Number.isSafeInteger(actualTokens) &&
+          actualTokens >= 0;
+        const settledTokens = hasActualTokens ? actualTokens : reservedTokens;
+        settleSupportQuotaReservation({
+          turnId,
+          actualTokens: settledTokens,
+          released: false,
+        });
+        if (hasActualTokens) {
+          const tokenDiff = settledTokens - reservedTokens;
+          if (tokenDiff !== 0) {
+            applySupportQuotaDelta(String(tenant.id), {
+              userId: userContext.userId,
+              userRole: userContext.role,
+              requestsDelta: 0,
+              tokensDelta: tokenDiff,
+              enforceLimits: false,
+              targetWindowStart: windowStart,
+            });
+          }
+        }
+      }
+      throw commitErr;
+    }
   } catch (err) {
     if (conversationId) releaseSupportConversationLease(tenant.id, conversationId, turnId);
     failSupportTurn({ turnId, interrupted: true });

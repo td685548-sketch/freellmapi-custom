@@ -46,7 +46,19 @@ export function getSupportRuntimeWidgetScript(): string {
       contextChanged: 'Knowledge context changed. Click to retry with a fresh request.',
       freshRetry: 'Retry with fresh request',
       sourcesLabel: 'Sources:',
-      nonAiNotice: 'System Notice'
+      nonAiNotice: 'System Notice',
+      intakeSelectPlaceholder: 'Select',
+      intakeHeading: 'Before we begin...',
+      intakeSubmit: 'Start Chat',
+      intakeSubmitting: 'Starting...',
+      intakeSkip: 'Skip',
+      intakeRequiredField: 'This field is required',
+      intakeInvalidEmail: 'Please enter a valid email address',
+      intakeInvalidNumber: 'Please enter a valid number',
+      intakeInvalidSelect: 'Please select a valid option',
+      intakeLoadError: 'Failed to load configuration. Click to retry.',
+      intakeContinue: 'Continue',
+      intakeRequiredNotice: 'Please complete the survey to continue chat.'
     },
     vi: {
       title: 'Trợ lý Hỗ trợ',
@@ -69,7 +81,19 @@ export function getSupportRuntimeWidgetScript(): string {
       contextChanged: 'Ngữ cảnh tri thức đã thay đổi. Bấm để thử lại với yêu cầu mới.',
       freshRetry: 'Thử lại với yêu cầu mới',
       sourcesLabel: 'Nguồn tham khảo:',
-      nonAiNotice: 'Thông báo hệ thống'
+      nonAiNotice: 'Thông báo hệ thống',
+      intakeSelectPlaceholder: 'Chọn',
+      intakeHeading: 'Trước khi bắt đầu...',
+      intakeSubmit: 'Bắt đầu chat',
+      intakeSubmitting: 'Đang bắt đầu...',
+      intakeSkip: 'Bỏ qua',
+      intakeRequiredField: 'Trường này là bắt buộc',
+      intakeInvalidEmail: 'Vui lòng nhập địa chỉ email hợp lệ',
+      intakeInvalidNumber: 'Vui lòng nhập số hợp lệ',
+      intakeInvalidSelect: 'Vui lòng chọn một mục hợp lệ',
+      intakeLoadError: 'Không thể tải cấu hình. Bấm để thử lại.',
+      intakeContinue: 'Tiếp tục',
+      intakeRequiredNotice: 'Vui lòng hoàn thành khảo sát để tiếp tục chat.'
     }
   };
 
@@ -97,8 +121,196 @@ export function getSupportRuntimeWidgetScript(): string {
     return Math.abs(hash).toString(36);
   }
 
+  function sanitizeHexColor(color, fallback) {
+    if (typeof color === 'string' && /^#[0-9a-fA-F]{6}$/.test(color)) {
+      return color;
+    }
+    return fallback || '#2563eb';
+  }
+
+  function applyPosition(rootEl, boxEl, pos) {
+    if (pos === 'bottom-left') {
+      rootEl.style.left = '24px';
+      rootEl.style.right = 'auto';
+      boxEl.style.left = '0';
+      boxEl.style.right = 'auto';
+    } else {
+      rootEl.style.right = '24px';
+      rootEl.style.left = 'auto';
+      boxEl.style.right = '0';
+      boxEl.style.left = 'auto';
+    }
+  }
+
+  // Shared safe appearance renderer for both the live widget and transport-free Studio preview.
+  function renderWidgetAppearance(view, appearance, onPrompt) {
+    var app = appearance || {};
+    var prefix = view.preview ? 'widget-preview-' : 'widget-';
+    var color = sanitizeHexColor(app.primaryColor, '#2563eb');
+    view.header.style.background = color;
+    view.send.style.background = color;
+    if (view.toggle) view.toggle.style.background = color;
+    if (typeof app.title === 'string') view.title.textContent = app.title;
+    if (view.root && app.position) applyPosition(view.root, view.box, app.position);
+    var oldWelcome = view.body.querySelector('[data-appearance-welcome]');
+    if (oldWelcome) oldWelcome.remove();
+    if (app.welcomeMessage && (view.preview || view.body.children.length === 0)) {
+      var welcome = document.createElement('div');
+      welcome.setAttribute('data-appearance-welcome', 'true');
+      welcome.setAttribute('data-testid', view.preview ? prefix + 'welcome' : 'widget-welcome-message');
+      welcome.style.cssText = 'align-self:flex-start;max-width:85%;padding:10px 14px;background:#e5e7eb;color:#1f2937;border-radius:16px 16px 16px 2px;word-break:break-word;font-size:13px;';
+      welcome.textContent = app.welcomeMessage;
+      view.body.prepend(welcome);
+    }
+    var oldPrompts = view.box.querySelector('[data-appearance-prompts]');
+    if (oldPrompts) oldPrompts.remove();
+    if (Array.isArray(app.quickPrompts) && app.quickPrompts.length > 0) {
+      var prompts = document.createElement('div');
+      prompts.setAttribute('data-appearance-prompts', 'true');
+      prompts.setAttribute('data-testid', prefix + 'quick-prompts');
+      prompts.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;padding:6px 12px;background:#fff;border-top:1px solid #f3f4f6;';
+      app.quickPrompts.forEach(function(text, index) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.setAttribute('data-testid', view.preview ? prefix + 'quick-prompt-' + index : 'widget-quick-prompt');
+        button.textContent = text;
+        button.style.cssText = 'padding:4px 10px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:12px;font-size:11px;color:#374151;cursor:pointer;';
+        button.disabled = !onPrompt;
+        if (onPrompt) button.addEventListener('click', function() { onPrompt(text); });
+        prompts.appendChild(button);
+      });
+      view.box.insertBefore(prompts, view.footer);
+    }
+  }
+
   window.FreeLLMAPISupport = {
-    _instance: null,
+    _instance: (window.FreeLLMAPISupport && window.FreeLLMAPISupport._instance) || null,
+    preview: function(container, publicConfig) {
+      if (!container) return { destroy: function() {} };
+      var locale = (publicConfig && publicConfig.locale === 'vi') ? 'vi' : 'en';
+      var strings = i18n[locale] || i18n.en;
+      var appearance = (publicConfig && publicConfig.appearance) || {};
+      var primaryColor = sanitizeHexColor(appearance.primaryColor, '#2563eb');
+      var titleText = appearance.title || strings.title;
+      var intake = (publicConfig && publicConfig.intake) || { required: false, fields: [] };
+      var fields = Array.isArray(intake.fields) ? intake.fields : [];
+
+      var previewRoot = document.createElement('div');
+      previewRoot.className = 'freellmapi-support-preview-root';
+      previewRoot.setAttribute('data-testid', 'widget-preview-box');
+      previewRoot.style.cssText = 'width:100%;max-width:380px;height:500px;background:#fff;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,0.15);display:flex;flex-direction:column;overflow:hidden;border:1px solid #e5e7eb;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px;';
+
+      // Header
+      var header = document.createElement('div');
+      header.style.cssText = 'background:' + primaryColor + ';color:#fff;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;font-weight:600;font-size:15px;';
+      var titleEl = document.createElement('span');
+      titleEl.setAttribute('data-testid', 'widget-preview-title');
+      titleEl.textContent = titleText; // SAFE TEXT
+      header.appendChild(titleEl);
+
+      var closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.setAttribute('data-testid', 'widget-preview-close-btn');
+      closeBtn.textContent = '×';
+      closeBtn.style.cssText = 'background:none;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1;';
+      header.appendChild(closeBtn);
+      previewRoot.appendChild(header);
+
+      // Body Area
+      var bodyArea = document.createElement('div');
+      bodyArea.style.cssText = 'flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;background:#f9fafb;';
+
+      if (fields.length > 0) {
+        var intakeBox = document.createElement('div');
+        intakeBox.setAttribute('data-testid', 'widget-preview-intake');
+        intakeBox.style.cssText = 'background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px;';
+
+        var intakeTitle = document.createElement('div');
+        intakeTitle.style.cssText = 'font-weight:600;font-size:13px;color:#374151;';
+        intakeTitle.textContent = strings.intakeHeading;
+        intakeBox.appendChild(intakeTitle);
+
+        for (var fi = 0; fi < fields.length; fi++) {
+          var fld = fields[fi];
+          var fg = document.createElement('div');
+          fg.style.cssText = 'display:flex;flex-direction:column;gap:2px;';
+          var lbl = document.createElement('label');
+          lbl.style.cssText = 'font-size:11px;font-weight:600;color:#4b5563;';
+          lbl.textContent = fld.label + (fld.required ? ' *' : '');
+          fg.appendChild(lbl);
+
+          if (fld.type === 'select') {
+            var sel = document.createElement('select');
+            sel.style.cssText = 'padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;background:#fff;';
+            var dOpt = document.createElement('option');
+            dOpt.textContent = '-- Select --';
+            sel.appendChild(dOpt);
+            var fOpts = fld.options || [];
+            for (var fo = 0; fo < fOpts.length; fo++) {
+              var optE = document.createElement('option');
+              optE.textContent = fOpts[fo];
+              sel.appendChild(optE);
+            }
+            fg.appendChild(sel);
+          } else {
+            var inp = document.createElement('input');
+            inp.type = fld.type === 'number' ? 'number' : (fld.type === 'email' ? 'email' : 'text');
+            inp.disabled = true;
+            inp.style.cssText = 'padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;background:#f9fafb;';
+            fg.appendChild(inp);
+          }
+          intakeBox.appendChild(fg);
+        }
+
+        var btnRow = document.createElement('div');
+        btnRow.style.cssText = 'display:flex;gap:8px;margin-top:6px;';
+        var sBtn = document.createElement('button');
+        sBtn.type = 'button';
+        sBtn.textContent = strings.intakeSubmit;
+        sBtn.style.cssText = 'flex:1;padding:6px 12px;background:' + primaryColor + ';color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:default;';
+        btnRow.appendChild(sBtn);
+        if (!intake.required) {
+          var skipBtn = document.createElement('button');
+          skipBtn.type = 'button';
+          skipBtn.textContent = strings.intakeSkip;
+          skipBtn.style.cssText = 'padding:6px 12px;background:#e5e7eb;color:#374151;border:none;border-radius:6px;font-size:12px;cursor:default;';
+          btnRow.appendChild(skipBtn);
+        }
+        intakeBox.appendChild(btnRow);
+        bodyArea.appendChild(intakeBox);
+      }
+
+      previewRoot.appendChild(bodyArea);
+
+      // Footer
+      var footer = document.createElement('div');
+      footer.style.cssText = 'display:flex;padding:12px;background:#fff;border-top:1px solid #e5e7eb;gap:8px;';
+      var mockInput = document.createElement('input');
+      mockInput.type = 'text';
+      mockInput.disabled = true;
+      mockInput.placeholder = strings.placeholder;
+      mockInput.style.cssText = 'flex:1;padding:8px 12px;border:1px solid #d1d5db;border-radius:20px;font-size:13px;background:#f9fafb;';
+      var mockSend = document.createElement('button');
+      mockSend.type = 'button';
+      mockSend.disabled = true;
+      mockSend.textContent = strings.send;
+      mockSend.style.cssText = 'padding:8px 14px;background:' + primaryColor + ';color:#fff;border:none;border-radius:20px;font-size:13px;opacity:0.7;';
+      footer.appendChild(mockInput);
+      footer.appendChild(mockSend);
+      previewRoot.appendChild(footer);
+
+      renderWidgetAppearance({ header: header, title: titleEl, send: mockSend,
+        body: bodyArea, box: previewRoot, footer: footer, preview: true }, appearance, null);
+      container.appendChild(previewRoot);
+
+      return {
+        destroy: function() {
+          if (previewRoot && previewRoot.parentNode) {
+            previewRoot.parentNode.removeChild(previewRoot);
+          }
+        }
+      };
+    },
     init: function(config) {
       if (!config || !config.tenantKey) {
         console.error('[FreeLLMAPI Support] Missing required tenantKey');
@@ -154,6 +366,10 @@ export function getSupportRuntimeWidgetScript(): string {
       }
       var activeToken = config.contextToken || storedGuest || '';
       var isGuest = !config.contextToken;
+      var activeReceiptId = null;
+      var currentIntakeConfig = null;
+      var currentConfigVersion = 1;
+      var profileLoadFailed = false;
       var conversationId = null;
       var isOpen = false;
       var isEscalated = false;
@@ -187,6 +403,7 @@ export function getSupportRuntimeWidgetScript(): string {
         }
         memoryStorage[p] = val;
       }
+      activeReceiptId = readStored('intake_receipt') || null;
 
       function clearCurrentStorage() {
         var prefix = getStoragePrefix();
@@ -301,13 +518,345 @@ export function getSupportRuntimeWidgetScript(): string {
       form.appendChild(input);
       form.appendChild(sendBtn);
 
+      var intakeContainer = document.createElement('div');
+      intakeContainer.id = 'freellmapi-support-intake';
+      intakeContainer.setAttribute('data-testid', 'widget-intake-form');
+      intakeContainer.style.cssText = 'display:none;flex:1;overflow-y:auto;padding:16px;background:#f9fafb;flex-direction:column;gap:12px;';
+
       box.appendChild(header);
       box.appendChild(bannerBox);
+      box.appendChild(intakeContainer);
       box.appendChild(msgList);
       box.appendChild(form);
       root.appendChild(box);
       root.appendChild(toggleBtn);
       document.body.appendChild(root);
+
+      function showLiveIntakeForm(intakeCfg, cfgVer) {
+        renderLiveIntakeForm(intakeCfg, cfgVer);
+        msgList.style.display = 'none';
+        form.style.display = 'none';
+        intakeContainer.style.display = 'flex';
+      }
+
+      function hideLiveIntakeForm() {
+        intakeContainer.style.display = 'none';
+        msgList.style.display = 'flex';
+        form.style.display = 'flex';
+        msgList.scrollTop = msgList.scrollHeight;
+      }
+
+      function renderLiveIntakeForm(intakeCfg, cfgVersion) {
+        intakeContainer.innerHTML = '';
+        var fields = (intakeCfg && intakeCfg.fields) || [];
+
+        var heading = document.createElement('div');
+        heading.style.cssText = 'font-weight:600;font-size:14px;color:#1f2937;margin-bottom:4px;';
+        heading.textContent = strings.intakeHeading;
+        intakeContainer.appendChild(heading);
+
+        var inputsMap = {};
+        var pendingIntake = null;
+        var errorsMap = {};
+
+        for (var i = 0; i < fields.length; i++) {
+          (function(fld) {
+            var fg = document.createElement('div');
+            fg.style.cssText = 'display:flex;flex-direction:column;gap:4px;';
+
+            var lbl = document.createElement('label');
+            lbl.style.cssText = 'font-size:12px;font-weight:600;color:#374151;';
+            lbl.textContent = fld.label + (fld.required ? ' *' : '');
+            fg.appendChild(lbl);
+
+            var inp;
+            if (fld.type === 'select') {
+              inp = document.createElement('select');
+              inp.setAttribute('data-testid', 'widget-intake-select-' + fld.key);
+              inp.name = fld.key;
+              inp.style.cssText = 'padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;background:#fff;';
+              var dOpt = document.createElement('option');
+              dOpt.value = '';
+              dOpt.textContent = '-- ' + (strings.intakeSelectPlaceholder || 'Select') + ' --';
+              inp.appendChild(dOpt);
+              var fOpts = fld.options || [];
+              for (var fo = 0; fo < fOpts.length; fo++) {
+                var opt = document.createElement('option');
+                opt.value = fOpts[fo];
+                opt.textContent = fOpts[fo]; // SAFE TEXT
+                inp.appendChild(opt);
+              }
+            } else {
+              inp = document.createElement('input');
+              inp.type = fld.type === 'number' ? 'number' : (fld.type === 'email' ? 'email' : 'text');
+              inp.setAttribute('data-testid', 'widget-intake-input-' + fld.key);
+              inp.name = fld.key;
+              inp.style.cssText = 'padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;';
+            }
+            inp.id = 'freellmapi-intake-' + fld.key;
+            lbl.htmlFor = inp.id;
+            inp.required = !!fld.required;
+            inputsMap[fld.key] = inp;
+            fg.appendChild(inp);
+
+            var errEl = document.createElement('div');
+            errEl.setAttribute('data-testid', 'widget-intake-error-' + fld.key);
+            errEl.style.cssText = 'color:#dc2626;font-size:11px;min-height:14px;';
+            errorsMap[fld.key] = errEl;
+            fg.appendChild(errEl);
+
+            intakeContainer.appendChild(fg);
+          })(fields[i]);
+        }
+
+        var btnRow = document.createElement('div');
+        btnRow.style.cssText = 'display:flex;gap:8px;margin-top:8px;';
+
+        var submitBtn = document.createElement('button');
+        submitBtn.type = 'button';
+        submitBtn.setAttribute('data-testid', 'widget-intake-submit-btn');
+        submitBtn.textContent = strings.intakeSubmit;
+        submitBtn.style.cssText = 'flex:1;padding:8px 16px;background:' + primaryColor + ';color:#fff;border:none;border-radius:8px;font-weight:600;cursor:pointer;';
+        btnRow.appendChild(submitBtn);
+
+        if (!intakeCfg.required) {
+          var skipBtn = document.createElement('button');
+          skipBtn.type = 'button';
+          skipBtn.setAttribute('data-testid', 'widget-intake-skip-btn');
+          skipBtn.textContent = strings.intakeSkip;
+          skipBtn.style.cssText = 'padding:8px 16px;background:#e5e7eb;color:#374151;border:none;border-radius:8px;font-weight:500;cursor:pointer;';
+          skipBtn.addEventListener('click', function() {
+            hideLiveIntakeForm();
+          });
+          btnRow.appendChild(skipBtn);
+        }
+
+        intakeContainer.appendChild(btnRow);
+
+        submitBtn.addEventListener('click', function() {
+          var hasError = false;
+          var values = {};
+
+          for (var k = 0; k < fields.length; k++) {
+            var f = fields[k];
+            var inputEl = inputsMap[f.key];
+            var errEl = errorsMap[f.key];
+            errEl.textContent = '';
+            var val = inputEl ? inputEl.value.trim() : '';
+
+            if (f.required && !val) {
+              errEl.textContent = strings.intakeRequiredField;
+              hasError = true;
+              continue;
+            }
+
+            if (val) {
+              if (f.type === 'email') {
+                if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(val)) {
+                  errEl.textContent = strings.intakeInvalidEmail;
+                  hasError = true;
+                  continue;
+                }
+                values[f.key] = val;
+              } else if (f.type === 'number') {
+                var num = Number(val);
+                if (isNaN(num) || !isFinite(num)) {
+                  errEl.textContent = strings.intakeInvalidNumber;
+                  hasError = true;
+                  continue;
+                }
+                values[f.key] = num;
+              } else if (f.type === 'select') {
+                if (!f.options || f.options.indexOf(val) === -1) {
+                  errEl.textContent = strings.intakeInvalidSelect;
+                  hasError = true;
+                  continue;
+                }
+                values[f.key] = val;
+              } else {
+                values[f.key] = val;
+              }
+            }
+          }
+
+          if (hasError) return;
+
+          submitBtn.disabled = true;
+          submitBtn.textContent = strings.intakeSubmitting;
+
+          var epoch = identityEpoch;
+          var tokenPromise = (!activeToken && allowGuestSession) ? renewGuestSession() : Promise.resolve(activeToken);
+
+          tokenPromise
+          .then(function(tok) {
+            if (destroyed || epoch !== identityEpoch) return null;
+            var ctrl = trackAbortController();
+            var headers = {
+              'Content-Type': 'application/json',
+              'X-Support-Tenant-Key': tenantKey
+            };
+            if (tok) headers['X-Support-Context-Token'] = tok;
+
+            var serializedValues = JSON.stringify(values);
+            if (!pendingIntake || pendingIntake.values !== serializedValues) {
+              pendingIntake = {values: serializedValues, requestId: 'req_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 9)};
+            }
+            var intakeReqId = pendingIntake.requestId;
+            return fetch(resolveUrl('/thruline/v1/support/widget/intake'), {
+              method: 'POST',
+              headers: headers,
+              body: JSON.stringify({
+                requestId: intakeReqId,
+                configVersion: cfgVersion || 1,
+                values: values,
+                conversationId: conversationId || undefined
+              }),
+              signal: ctrl.signal
+            })
+            .then(function(res) {
+              untrackAbortController(ctrl);
+              if (destroyed || epoch !== identityEpoch) return null;
+              if (!res.ok) {
+                return res.json().catch(function() { return {}; }).then(function(errData) {
+                  var code = (errData && errData.error && errData.error.code) || ('http_' + res.status);
+                  var err = new Error(code);
+                  err.status = res.status;
+                  err.data = errData;
+                  throw err;
+                });
+              }
+              return res.json();
+            });
+          })
+          .then(function(data) {
+            if (!data || destroyed || epoch !== identityEpoch) return;
+            var receipt = data.receipt;
+            if (receipt && receipt.intakeReceiptId) {
+              activeReceiptId = receipt.intakeReceiptId;
+              writeStored('intake_receipt', activeReceiptId);
+              writeStored('intake_schema_hash', receipt.schemaHash || intakeCfg.schemaHash);
+              hideLiveIntakeForm();
+              setBanner('', '');
+            }
+          })
+          .catch(function(err) {
+            if (destroyed || epoch !== identityEpoch) return;
+            submitBtn.disabled = false;
+            submitBtn.textContent = strings.intakeSubmit;
+            if (err && err.status === 409 && err.data && err.data.error &&
+                (err.data.error.code === 'widget_config_changed' || err.data.error.code === 'intake_schema_changed')) {
+              activeReceiptId = null;
+              writeStored('intake_receipt', '');
+              writeStored('intake_schema_hash', '');
+              ensureAndShowIntakeForm(true);
+              return;
+            }
+            if (err && err.data && err.data.error && err.data.error.fields) {
+              var fErrors = err.data.error.fields;
+              for (var fk in fErrors) {
+                if (errorsMap[fk]) errorsMap[fk].textContent = fErrors[fk];
+              }
+            } else {
+              setBanner(strings.networkError, 'error');
+            }
+          });
+        });
+      }
+
+      function ensureAndShowIntakeForm(refresh) {
+        if (!refresh && currentIntakeConfig && currentIntakeConfig.fields && currentIntakeConfig.fields.length > 0) {
+          showLiveIntakeForm(currentIntakeConfig, currentConfigVersion);
+        } else {
+          fetchTenantProfile().then(function(res) {
+            if (res && res.config && res.config.intake && res.config.intake.fields && res.config.intake.fields.length > 0) {
+              showLiveIntakeForm(res.config.intake, res.config.version);
+            }
+          });
+        }
+      }
+
+      bannerBox.addEventListener('click', function() {
+        if (profileLoadFailed && !destroyed) fetchTenantProfile();
+      });
+      bannerBox.addEventListener('keydown', function(event) {
+        if (profileLoadFailed && (event.key === 'Enter' || event.key === ' ')) {
+          event.preventDefault();
+          fetchTenantProfile();
+        }
+      });
+
+      function fetchTenantProfile() {
+        var epoch = identityEpoch;
+        var ctrl = trackAbortController();
+        var pHeaders = {
+          'X-Support-Tenant-Key': tenantKey
+        };
+        if (activeToken) pHeaders['X-Support-Context-Token'] = activeToken;
+
+        return fetch(resolveUrl('/thruline/v1/support/widget/config'), {
+          method: 'GET',
+          headers: pHeaders,
+          signal: ctrl.signal
+        })
+        .then(function(res) {
+          untrackAbortController(ctrl);
+          if (!res.ok) throw new Error('config_load_error_' + res.status);
+          return res.json();
+        })
+        .then(function(data) {
+          if (destroyed || epoch !== identityEpoch) return null;
+          if (data && data.config) {
+            applyPublicConfig(data.config);
+          }
+          return data;
+        })
+        .catch(function(err) {
+          untrackAbortController(ctrl);
+          if (destroyed || epoch !== identityEpoch || (err && err.name === 'AbortError')) return null;
+          profileLoadFailed = true;
+          bannerBox.setAttribute('role', 'button');
+          bannerBox.tabIndex = 0;
+          setBanner(strings.intakeLoadError, 'error');
+          return null;
+        });
+      }
+
+      function applyPublicConfig(pubConfig) {
+        if (!pubConfig) return;
+        profileLoadFailed = false;
+        bannerBox.setAttribute('role', 'status');
+        bannerBox.removeAttribute('tabindex');
+        if (pubConfig.enabled === false || !pubConfig.intake || !pubConfig.intake.fields.length) {
+          activeReceiptId = null;
+          currentIntakeConfig = null;
+          writeStored('intake_receipt', '');
+          writeStored('intake_schema_hash', '');
+          hideLiveIntakeForm();
+          if (pubConfig.enabled === false) return;
+        }
+        if (pubConfig.appearance) {
+          primaryColor = sanitizeHexColor(pubConfig.appearance.primaryColor, primaryColor);
+          renderWidgetAppearance({ root: root, box: box, header: header, title: headerTitle,
+            send: sendBtn, toggle: toggleBtn, body: msgList, footer: form, preview: false },
+            pubConfig.appearance, function(text) {
+              input.value = text;
+              form.dispatchEvent(new Event('submit'));
+            });
+        }
+
+        if (pubConfig.intake && Array.isArray(pubConfig.intake.fields) && pubConfig.intake.fields.length > 0) {
+          currentIntakeConfig = pubConfig.intake;
+          currentConfigVersion = pubConfig.version || 1;
+          var storedReceipt = readStored('intake_receipt');
+          var storedSchema = readStored('intake_schema_hash');
+          if (storedReceipt && storedSchema === pubConfig.intake.schemaHash) {
+            activeReceiptId = storedReceipt;
+          } else {
+            activeReceiptId = null;
+            showLiveIntakeForm(pubConfig.intake, pubConfig.version);
+          }
+        }
+      }
 
       function setBanner(text, type) {
         if (!text) {
@@ -798,16 +1347,21 @@ export function getSupportRuntimeWidgetScript(): string {
           };
           if (tok) headers['X-Support-Context-Token'] = tok;
 
+          var chatBody = {
+            tenantKey: tenantKey,
+            contextToken: tok || undefined,
+            conversationId: convId || undefined,
+            requestId: reqId,
+            messages: [{ role: 'user', content: text }]
+          };
+          if (activeReceiptId) {
+            chatBody.intakeReceiptId = activeReceiptId;
+          }
+
           return fetch(endpoint, {
             method: 'POST',
             headers: headers,
-            body: JSON.stringify({
-              tenantKey: tenantKey,
-              contextToken: tok || undefined,
-              conversationId: convId || undefined,
-              requestId: reqId,
-              messages: [{ role: 'user', content: text }]
-            }),
+            body: JSON.stringify(chatBody),
             signal: ctrl.signal
           })
           .then(function(res) {
@@ -825,6 +1379,7 @@ export function getSupportRuntimeWidgetScript(): string {
               // A renewed guest token is a new identity: discard the old conversation.
               clearCurrentStorage();
               conversationId = null;
+              activeReceiptId = null;
               renderedMessageIds = {};
               renderedRequestIds = {};
               renderedAssistantNodes = {};
@@ -837,14 +1392,55 @@ export function getSupportRuntimeWidgetScript(): string {
                 return null;
               });
             }
+            if (res.status === 428) {
+              return res.json().catch(function() { return {}; }).then(function() {
+                activeReceiptId = null;
+                writeStored('intake_receipt', '');
+                writeStored('intake_schema_hash', '');
+                sendBtn.disabled = false;
+                input.disabled = false;
+                setBanner(strings.intakeRequiredNotice, 'error');
+                ensureAndShowIntakeForm(true);
+                return null;
+              });
+            }
             if (res.status === 409) {
               return res.json().catch(function() { return {}; }).then(function(errData) {
                 var code = (errData && errData.error && errData.error.code) || 'http_409';
+                if (code === 'intake_schema_changed') {
+                  activeReceiptId = null;
+                  writeStored('intake_receipt', '');
+                  writeStored('intake_schema_hash', '');
+                  sendBtn.disabled = false;
+                  input.disabled = false;
+                  setBanner(strings.intakeRequiredNotice, 'error');
+                  ensureAndShowIntakeForm(true);
+                  return null;
+                }
                 var err = new Error(code);
                 if (code === 'knowledge_context_changed') {
                   err.isContextChanged = true;
                 }
                 err.status = 409;
+                err.data = errData;
+                throw err;
+              });
+            }
+            if (res.status === 410) {
+              return res.json().catch(function() { return {}; }).then(function(errData) {
+                var code = (errData && errData.error && errData.error.code) || 'http_410';
+                if (code === 'intake_expired') {
+                  activeReceiptId = null;
+                  writeStored('intake_receipt', '');
+                  writeStored('intake_schema_hash', '');
+                  sendBtn.disabled = false;
+                  input.disabled = false;
+                  setBanner(strings.intakeRequiredNotice, 'error');
+                  ensureAndShowIntakeForm(true);
+                  return null;
+                }
+                var err = new Error(code);
+                err.status = 410;
                 err.data = errData;
                 throw err;
               });
@@ -1045,6 +1641,10 @@ export function getSupportRuntimeWidgetScript(): string {
         resumeConversation(storedConv);
       }
 
+      if (config.loadTenantProfile === true) {
+        fetchTenantProfile();
+      }
+
       var instance = {
         open: function() {
           box.style.display = 'flex';
@@ -1085,6 +1685,20 @@ export function getSupportRuntimeWidgetScript(): string {
           activeToken = newToken || '';
           isGuest = !activeToken;
           conversationId = null;
+          activeReceiptId = null;
+
+          if (intakeContainer) {
+            intakeContainer.style.display = 'none';
+            intakeContainer.innerHTML = '';
+          }
+          msgList.style.display = 'flex';
+          form.style.display = 'flex';
+
+          if (currentIntakeConfig && currentIntakeConfig.fields && currentIntakeConfig.fields.length > 0) {
+            if (currentIntakeConfig.required) {
+              showLiveIntakeForm(currentIntakeConfig, currentConfigVersion);
+            }
+          }
 
           // Re-check stored conversation under new identity scope
           var newStored = readStored('conv_id');

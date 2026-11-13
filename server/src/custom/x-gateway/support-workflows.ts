@@ -1,7 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../../db/index.js';
 import type { SupportAnswerEvidence } from '@freellmapi/shared/support-evidence.js';
+import type {
+  SupportDeskConversationIntake,
+  SupportDeskInternalConversationIntake,
+} from '@freellmapi/shared/support-service-desk.js';
 import { sanitizeSupportEvidenceConversation } from './support-evidence-runtime.js';
+import { hydrateSupportConversationIntake } from './support-service-desk-runtime.js';
+import {
+  onHumanReplyLifecycle,
+  onTicketCreatedLifecycle,
+  onTicketUpdatedLifecycle,
+} from './support-service-desk-lifecycle.js';
 
 const CONVERSATIONS_KEY = 'x_gateway_support_conversations_v1';
 const TICKETS_KEY = 'x_gateway_support_tickets_v1';
@@ -58,6 +68,7 @@ export interface SupportConversation {
   status: SupportConversationStatus;
   messages: SupportConversationMessage[];
   assignedAgent?: string;
+  intake?: SupportDeskConversationIntake;
   createdAt: string;
   updatedAt: string;
 }
@@ -173,9 +184,13 @@ export function listSupportConversations(
     })
     .map((conv) =>
       Number.isInteger(numericTenantId) && numericTenantId > 0
-        ? sanitizeSupportEvidenceConversation({
+        ? hydrateSupportConversationIntake({
             tenantId: numericTenantId,
-            conversation: conv,
+            conversation: sanitizeSupportEvidenceConversation({
+              tenantId: numericTenantId,
+              conversation: conv,
+              viewerRole: conv.userRole,
+            }),
             viewerRole: conv.userRole,
           })
         : conv,
@@ -208,9 +223,13 @@ export function getSupportConversationForUser(
 
   const numericTenantId = Number(tid);
   if (Number.isInteger(numericTenantId) && numericTenantId > 0) {
-    return sanitizeSupportEvidenceConversation({
+    return hydrateSupportConversationIntake({
       tenantId: numericTenantId,
-      conversation: found,
+      conversation: sanitizeSupportEvidenceConversation({
+        tenantId: numericTenantId,
+        conversation: found,
+        viewerRole: requester.role,
+      }),
       viewerRole: requester.role,
     });
   }
@@ -232,6 +251,7 @@ export function createOrAppendSupportConversation(
       evidence?: SupportAnswerEvidence;
       responseNotice?: SupportConversationMessage['responseNotice'];
     };
+    internalIntake?: SupportDeskInternalConversationIntake;
   },
 ): SupportConversation {
   const tid = String(tenantId);
@@ -270,15 +290,32 @@ export function createOrAppendSupportConversation(
       );
     }
 
+    const persistedIntake = input.internalIntake
+      ? ({
+          schemaHash: input.internalIntake.schemaHash,
+          submittedAt: input.internalIntake.submittedAt,
+          receiptHash: input.internalIntake.receiptHash,
+        } as unknown as SupportDeskConversationIntake)
+      : existing.intake;
+
     conv = {
       ...existing,
       userName: input.userName ?? existing.userName,
       userEmail: input.userEmail ?? existing.userEmail,
+      ...(persistedIntake ? { intake: persistedIntake } : {}),
       messages: [...existing.messages, newMsg],
       updatedAt: now,
     };
     list[existingIdx] = conv;
   } else {
+    const persistedIntake = input.internalIntake
+      ? ({
+          schemaHash: input.internalIntake.schemaHash,
+          submittedAt: input.internalIntake.submittedAt,
+          receiptHash: input.internalIntake.receiptHash,
+        } as unknown as SupportDeskConversationIntake)
+      : undefined;
+
     conv = {
       id: `conv_${randomUUID()}`,
       tenantId: tid,
@@ -288,6 +325,7 @@ export function createOrAppendSupportConversation(
       userRole: input.userRole,
       subject: (input.subject ?? 'Support Conversation').trim(),
       status: 'active',
+      ...(persistedIntake ? { intake: persistedIntake } : {}),
       messages: [newMsg],
       createdAt: now,
       updatedAt: now,
@@ -306,39 +344,46 @@ export function addHumanAgentReply(
   input: { agentName: string; content: string; resolveConversation?: boolean },
 ): SupportConversation {
   const tid = String(tenantId);
-  const store = readStore<SupportConversation[]>(CONVERSATIONS_KEY);
-  const list = Array.isArray(store[tid]) ? store[tid] : [];
-  const idx = list.findIndex((c) => c.id === conversationId);
+  return getDb().transaction(() => {
+    const store = readStore<SupportConversation[]>(CONVERSATIONS_KEY);
+    const list = Array.isArray(store[tid]) ? store[tid] : [];
+    const idx = list.findIndex((c) => c.id === conversationId);
 
-  if (idx < 0) {
-    throw new SupportWorkflowError(404, `Conversation '${conversationId}' not found`);
-  }
+    if (idx < 0) {
+      throw new SupportWorkflowError(404, `Conversation '${conversationId}' not found`);
+    }
 
-  const existing = list[idx];
-  const now = new Date().toISOString();
+    const existing = list[idx];
+    const now = new Date().toISOString();
 
-  const agentMsg: SupportConversationMessage = {
-    id: `msg_${randomUUID()}`,
-    senderType: 'human_agent',
-    senderId: input.agentName,
-    senderName: input.agentName,
-    senderRole: 'staff',
-    content: input.content,
-    createdAt: now,
-  };
+    const agentMsg: SupportConversationMessage = {
+      id: `msg_${randomUUID()}`,
+      senderType: 'human_agent',
+      senderId: input.agentName,
+      senderName: input.agentName,
+      senderRole: 'staff',
+      content: input.content,
+      createdAt: now,
+    };
 
-  const updated: SupportConversation = {
-    ...existing,
-    assignedAgent: input.agentName,
-    status: input.resolveConversation ? 'resolved' : existing.status,
-    messages: [...existing.messages, agentMsg],
-    updatedAt: now,
-  };
+    const updated: SupportConversation = {
+      ...existing,
+      assignedAgent: input.agentName,
+      status: input.resolveConversation ? 'resolved' : existing.status,
+      messages: [...existing.messages, agentMsg],
+      updatedAt: now,
+    };
 
-  list[idx] = updated;
-  store[tid] = list;
-  writeStore(CONVERSATIONS_KEY, store);
-  return updated;
+    list[idx] = updated;
+    store[tid] = list;
+    writeStore(CONVERSATIONS_KEY, store);
+
+    onHumanReplyLifecycle(tid, conversationId, now, {
+      resolveConversation: input.resolveConversation,
+    });
+
+    return updated;
+  })();
 }
 
 // ---------------------------------------------------------------------------
@@ -374,46 +419,50 @@ export function createSupportEscalationTicket(
   },
 ): SupportEscalationTicket {
   const tid = String(tenantId);
-  const store = readStore<SupportEscalationTicket[]>(TICKETS_KEY);
-  const list = Array.isArray(store[tid]) ? store[tid] : [];
-  const now = new Date().toISOString();
+  return getDb().transaction(() => {
+    const store = readStore<SupportEscalationTicket[]>(TICKETS_KEY);
+    const list = Array.isArray(store[tid]) ? store[tid] : [];
+    const now = new Date().toISOString();
 
-  const ticket: SupportEscalationTicket = {
-    id: `tkt_${randomUUID()}`,
-    tenantId: tid,
-    conversationId: input.conversationId,
-    userId: input.userId,
-    userName: input.userName,
-    userRole: input.userRole,
-    subject: input.subject.trim(),
-    reason: input.reason.trim(),
-    priority: input.priority ?? 'medium',
-    status: 'open',
-    createdAt: now,
-    updatedAt: now,
-  };
+    const ticket: SupportEscalationTicket = {
+      id: `tkt_${randomUUID()}`,
+      tenantId: tid,
+      conversationId: input.conversationId,
+      userId: input.userId,
+      userName: input.userName,
+      userRole: input.userRole,
+      subject: input.subject.trim(),
+      reason: input.reason.trim(),
+      priority: input.priority ?? 'medium',
+      status: 'open',
+      createdAt: now,
+      updatedAt: now,
+    };
 
-  list.push(ticket);
-  store[tid] = list;
-  writeStore(TICKETS_KEY, store);
+    list.push(ticket);
+    store[tid] = list;
+    writeStore(TICKETS_KEY, store);
 
-  // If conversationId provided, update conversation status to 'escalated'
-  if (input.conversationId) {
-    const convStore = readStore<SupportConversation[]>(CONVERSATIONS_KEY);
-    const convList = Array.isArray(convStore[tid]) ? convStore[tid] : [];
-    const cIdx = convList.findIndex((c) => c.id === input.conversationId);
-    if (cIdx >= 0) {
-      convList[cIdx] = {
-        ...convList[cIdx],
-        status: 'escalated',
-        updatedAt: now,
-      };
-      convStore[tid] = convList;
-      writeStore(CONVERSATIONS_KEY, convStore);
+    // If conversationId provided, update conversation status to 'escalated'
+    if (input.conversationId) {
+      const convStore = readStore<SupportConversation[]>(CONVERSATIONS_KEY);
+      const convList = Array.isArray(convStore[tid]) ? convStore[tid] : [];
+      const cIdx = convList.findIndex((c) => c.id === input.conversationId);
+      if (cIdx >= 0) {
+        convList[cIdx] = {
+          ...convList[cIdx],
+          status: 'escalated',
+          updatedAt: now,
+        };
+        convStore[tid] = convList;
+        writeStore(CONVERSATIONS_KEY, convStore);
+      }
     }
-  }
 
-  return ticket;
+    onTicketCreatedLifecycle(ticket, Date.parse(now));
+
+    return ticket;
+  })();
 }
 
 export function updateSupportEscalationTicket(
@@ -422,40 +471,46 @@ export function updateSupportEscalationTicket(
   patch: Partial<Pick<SupportEscalationTicket, 'status' | 'priority' | 'assignedTo' | 'resolutionNotes'>>,
 ): SupportEscalationTicket | null {
   const tid = String(tenantId);
-  const store = readStore<SupportEscalationTicket[]>(TICKETS_KEY);
-  const list = Array.isArray(store[tid]) ? store[tid] : [];
-  const idx = list.findIndex((t) => t.id === ticketId);
-  if (idx < 0) return null;
+  return getDb().transaction(() => {
+    const store = readStore<SupportEscalationTicket[]>(TICKETS_KEY);
+    const list = Array.isArray(store[tid]) ? store[tid] : [];
+    const idx = list.findIndex((t) => t.id === ticketId);
+    if (idx < 0) return null;
 
-  const existing = list[idx];
-  const now = new Date().toISOString();
-  const updated: SupportEscalationTicket = {
-    ...existing,
-    ...patch,
-    updatedAt: now,
-  };
+    const existing = list[idx];
+    const now = new Date().toISOString();
+    const updated: SupportEscalationTicket = {
+      ...existing,
+      ...patch,
+      updatedAt: now,
+    };
 
-  list[idx] = updated;
-  store[tid] = list;
-  writeStore(TICKETS_KEY, store);
+    list[idx] = updated;
+    store[tid] = list;
+    writeStore(TICKETS_KEY, store);
 
-  // If status resolved and ticket is linked to a conversation, update conversation to resolved
-  if (patch.status === 'resolved' && updated.conversationId) {
-    const convStore = readStore<SupportConversation[]>(CONVERSATIONS_KEY);
-    const convList = Array.isArray(convStore[tid]) ? convStore[tid] : [];
-    const cIdx = convList.findIndex((c) => c.id === updated.conversationId);
-    if (cIdx >= 0) {
-      convList[cIdx] = {
-        ...convList[cIdx],
-        status: 'resolved',
-        updatedAt: now,
-      };
-      convStore[tid] = convList;
-      writeStore(CONVERSATIONS_KEY, convStore);
+    // If status resolved and ticket is linked to a conversation, update conversation to resolved
+    if (patch.status === 'resolved' && updated.conversationId) {
+      const convStore = readStore<SupportConversation[]>(CONVERSATIONS_KEY);
+      const convList = Array.isArray(convStore[tid]) ? convStore[tid] : [];
+      const cIdx = convList.findIndex((c) => c.id === updated.conversationId);
+      if (cIdx >= 0) {
+        convList[cIdx] = {
+          ...convList[cIdx],
+          status: 'resolved',
+          updatedAt: now,
+        };
+        convStore[tid] = convList;
+        writeStore(CONVERSATIONS_KEY, convStore);
+      }
     }
-  }
 
-  return updated;
+    onTicketUpdatedLifecycle(existing, updated, Date.parse(now), {
+      statusExplicitlySet: patch.status !== undefined,
+    });
+
+    return updated;
+  })();
 }
 
 // ---------------------------------------------------------------------------

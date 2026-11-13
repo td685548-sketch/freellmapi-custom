@@ -92,22 +92,23 @@ When asked to implement a new feature:
 
 To keep the `main` branch stable, ensure clean CI validation, and preserve full traceability:
 
-### Rule 1: Always Branch Before Modifying
-**Never commit or push directly to `main` for bug fixes or features.** Create a dedicated branch off `main`, except for the shared 9Router integration branch described below:
+### Rule 1: One Dedicated Branch per Feature or Fix
+**Never commit or push features or fixes directly to `main`. Every new feature, bug fix, or independent maintenance task gets its own branch from the latest `origin/main`.** This applies to 9Router integration too; there is no shared integration-branch exception.
+
 ```powershell
-git checkout main
-git pull origin main
-git checkout -b <type>/<short-description>
-# Examples: fix/login-session-timeout, feat/user-quota-limits, chore/update-deps
+git fetch origin
+git switch -c <type>/<short-description> origin/main
+# Examples: feat/support-service-desk, fix/kiro-client-version, chore/branch-policy
+# Codex-created branches use the codex/ prefix by default.
 ```
 
-#### 9Router integration: reuse one shared branch
-- Use **`feat/9router-integration`** for all work integrating 9Router features into FreeLLMAPI, including output savers, combos, gateway/API, UI, tests, fixes, and documentation for that integration.
-- Create this branch from `main` **once**, then reuse it. **Do not create a new branch for each integration feature or task.** Split changes into focused commits instead.
-- Keep the branch after a PR is merged. Before the next batch, merge the latest `origin/main` into it without discarding pending work or rewriting history.
-- Reuse an open PR from this branch; if the previous PR is already merged, open the next PR from **the same branch** to `main`.
-- Test/build requirements still apply, and merge only when CI is green. This exception changes branch reuse, not validation or the prohibition on direct feature commits to `main`.
-- Work unrelated to the 9Router integration still uses dedicated branches under the default rule above.
+- Do not reuse `feat/9router-integration` or another completed task's branch for new work.
+- Keep one task's follow-up review corrections on that task's dedicated branch and PR. Start a new branch for a different feature or fix.
+- Never share an active branch between independent tasks or parallel agent assignments. Each implementation agent uses its own branch/checkout; the reviewer integrates accepted commits into the feature's review branch.
+- Before switching, preserve pending work. If the current checkout contains unrelated changes, use a suitable isolated checkout rather than resetting, stashing, or moving someone else's work.
+- One feature/fix scope per PR, targeting `main`. Reuse a PR only for follow-up changes to that same task; never append another task to an unrelated open PR.
+- Existing open PRs keep their current branches until completed; do not rename, overwrite, or merge them merely to start a different task.
+- Run the required tests/build and require green CI before merging. Branch isolation does not relax validation or authorize an automatic merge.
 
 ### Rule 2: Verify Tests and Build
 Before committing or creating a PR, verify that the workspace passes all tests and builds:

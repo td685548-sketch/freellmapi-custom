@@ -1191,7 +1191,7 @@ xSupportPublicRouter.post('/chat', async (req: Request, res: Response): Promise<
 
   const { tenant, userContext, token } = authResult;
 
-  // Reject client-supplied evidence, citations, or policy overrides
+  // Reject client-supplied evidence, citations, or policy/intake metadata overrides
   const forbiddenBodyKeys = [
     'evidence',
     'citations',
@@ -1201,6 +1201,13 @@ xSupportPublicRouter.post('/chat', async (req: Request, res: Response): Promise<
     'snapshotId',
     'responseNotice',
     'replySource',
+    'intake',
+    'internalIntake',
+    'intakeMetadata',
+    'intakeReceipt',
+    'intakeSchemaHash',
+    'intakeSubmittedAt',
+    'receiptHash',
   ];
   if (req.body && typeof req.body === 'object') {
     for (const key of forbiddenBodyKeys) {
@@ -1296,6 +1303,21 @@ xSupportPublicRouter.post('/chat', async (req: Request, res: Response): Promise<
     }
   }
 
+  // Intake receipt ID (optional opaque string)
+  let intakeReceiptId: string | undefined;
+  if (req.body && typeof req.body === 'object' && Object.prototype.hasOwnProperty.call(req.body, 'intakeReceiptId') && req.body.intakeReceiptId !== undefined) {
+    if (typeof req.body.intakeReceiptId !== 'string') {
+      res.status(400).json({ error: { code: 'invalid_input', message: 'intakeReceiptId must be a string.' } });
+      return;
+    }
+    const trimmedReceipt = req.body.intakeReceiptId.trim();
+    if (!trimmedReceipt || trimmedReceipt.length > 128) {
+      res.status(400).json({ error: { code: 'invalid_input', message: 'intakeReceiptId must be a non-empty string up to 128 characters.' } });
+      return;
+    }
+    intakeReceiptId = trimmedReceipt;
+  }
+
   // Normalized messages for runtime: only final user message from client
   const finalUserMessage = nonEmpty[nonEmpty.length - 1];
   const messagesForTurn = [{ role: 'user' as const, content: finalUserMessage.content }];
@@ -1311,6 +1333,7 @@ xSupportPublicRouter.post('/chat', async (req: Request, res: Response): Promise<
         requestId,
         messages: messagesForTurn,
         model,
+        ...(intakeReceiptId !== undefined ? { intakeReceiptId } : {}),
       },
       generate: async (genCtx) => {
         return await executeSupportChatPipeline({

@@ -56,6 +56,7 @@ import { xSupportEnterpriseConsoleRouter } from './support-enterprise-router.js'
 import { xSupportGovernanceConsoleRouter } from './support-governance-router.js';
 import { xSupportRuntimeConsoleRouter } from './support-runtime-router.js';
 import { xSupportEvidenceConsoleRouter } from './support-evidence-router.js';
+import { xSupportServiceDeskConsoleRouter } from './support-service-desk-router.js';
 
 /** Console API for the gateway switch, outbound proxy, dedicated API keys, and default savers.
  *
@@ -456,6 +457,7 @@ xGatewayConsoleRouter.use('/support', xSupportEnterpriseConsoleRouter);
 xGatewayConsoleRouter.use('/support', xSupportGovernanceConsoleRouter);
 xGatewayConsoleRouter.use('/support', xSupportRuntimeConsoleRouter);
 xGatewayConsoleRouter.use('/support', xSupportEvidenceConsoleRouter);
+xGatewayConsoleRouter.use('/support', xSupportServiceDeskConsoleRouter);
 
 xGatewayConsoleRouter.use((_req, res) => {
   res.status(404).json({ error: { type: 'not_found', message: 'Not found' } });

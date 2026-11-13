@@ -29,6 +29,7 @@ import SupportEnterprise from './pages/SupportEnterprise'
 import SupportGovernance from './pages/SupportGovernance'
 import SupportIntegration from './pages/SupportIntegration'
 import SupportKnowledgeStudio from './pages/SupportKnowledgeStudio'
+import SupportServiceDesk from './pages/SupportServiceDesk'
 import ModelAvailabilityBadge from './components/ModelAvailabilityBadge'
 import { THRULINE_ICON, ThrulineLogo } from './ThrulineLogo'
 import { useShellStrings } from './shell-strings'
@@ -112,6 +113,7 @@ function XGatewayShell() {
         <Route path="endpoint" element={<Endpoint />} />
         <Route path="playground" element={<Playground />} />
         <Route path="support-integration" element={<SupportIntegration />} />
+        <Route path="support-desk" element={<SupportServiceDesk />} />
         <Route path="support" element={<SupportGateway />} />
         <Route path="support-knowledge" element={<SupportKnowledgeStudio />} />
         <Route path="support-ops" element={<SupportEnterprise />} />
