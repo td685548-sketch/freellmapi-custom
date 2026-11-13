@@ -360,7 +360,7 @@ export class CodexProvider extends BaseProvider {
 
   override async validateKey(apiKey: string): Promise<KeyValidationResult> {
     const { accessToken, accountId } = codexCredential(apiKey);
-    const res = await this.fetchWithTimeout(MODELS_URL, {
+    const res = await this.fetchWithTimeout(`${MODELS_URL}?client_version=${encodeURIComponent(CLI_VERSION)}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -386,7 +386,11 @@ export class CodexProvider extends BaseProvider {
         error: `OpenAI Codex rejected credentials (HTTP ${res.status})${detail ? `: ${detail.slice(0, 160)}` : ''}`,
       };
     }
-    await res.body?.cancel();
-    throw providerHttpError(res, `Credential check failed (HTTP ${res.status}).`, '');
+    const detail = await res.text().catch(() => '');
+    throw providerHttpError(
+      res,
+      `Credential check failed (HTTP ${res.status})${detail ? `: ${detail.slice(0, 200)}` : '.'}`,
+      detail,
+    );
   }
 }
