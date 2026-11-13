@@ -1,8 +1,16 @@
+import { createHash } from 'node:crypto';
 import type { ChatCompletionChunk, ChatCompletionResponse, ChatMessage, ChatToolCall, Platform, TokenUsage } from '@freellmapi/shared/types.js';
 import { BaseProvider, providerHttpError, type CompletionOptions, type KeyValidationResult } from '../../providers/base.js';
 import { parseOAuthCredential } from './oauth-credentials.js';
 import { kiroRegion } from './kiro-auth.js';
 import { kiroBody, kiroFrames } from './kiro-wire.js';
+
+const KIRO_IDE_VERSION = '1.4.178';
+
+function kiroClientSignature(seed: string): string {
+  const fingerprint = createHash('sha256').update(seed).digest('hex');
+  return `KiroIDE-${KIRO_IDE_VERSION}-${fingerprint}`;
+}
 
 export class KiroProvider extends BaseProvider {
   readonly platform: Platform = 'custom';
@@ -13,11 +21,14 @@ export class KiroProvider extends BaseProvider {
     const region = kiroRegion(auth.region);
     const body = kiroBody(messages, model, options);
     if (auth.profileArn) body.profileArn = auth.profileArn;
+    const clientSignature = kiroClientSignature(auth.profileArn || auth.accessToken);
     const response = await this.fetchWithTimeout(`https://codewhisperer.${region}.amazonaws.com/generateAssistantResponse`, {
       method: 'POST', redirect: 'error', headers: {
         'Content-Type': 'application/json', Accept: 'application/vnd.amazon.eventstream', Authorization: `Bearer ${auth.accessToken}`,
         'X-Amz-Target': 'AmazonCodeWhispererStreamingService.GenerateAssistantResponse',
-        'User-Agent': 'AWS-SDK-JS/3.0.0 kiro-ide/1.0.0', 'x-amz-sso-bearer': auth.accessToken,
+        'User-Agent': `aws-sdk-js/1.0.27 ua/2.1 os/win32#10.0.19044 lang/js md/nodejs#22.21.1 api/codewhispererstreaming#1.0.27 m/E ${clientSignature}`,
+        'x-amz-user-agent': `aws-sdk-js/1.0.27 ${clientSignature}`,
+        'x-amz-sso-bearer': auth.accessToken,
         'x-amzn-kiro-agent-mode': 'spec', ...(auth.profileArn ? { 'x-amzn-codewhisperer-profile-arn': auth.profileArn } : {}),
       }, body: JSON.stringify(body),
     }, options?.timeoutMs ?? 120_000, { signal: options?.signal });
