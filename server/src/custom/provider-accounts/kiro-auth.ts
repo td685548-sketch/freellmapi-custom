@@ -5,6 +5,18 @@ import type { OAuthCredential } from './oauth-credentials.js';
 
 const profileArnCache = new Map<string, string>();
 
+// Shared public CodeWhisperer profile ARNs (us-east-1) used by 9router when
+// ListAvailableProfiles returns no profile for Builder ID or Social OAuth.
+export const KIRO_DEFAULT_PROFILE_ARNS = {
+  'builder-id': 'arn:aws:codewhisperer:us-east-1:638616132270:profile/AAAACCCCXXXX',
+  social: 'arn:aws:codewhisperer:us-east-1:699475941385:profile/EHGA3GRVQMUK',
+} as const;
+
+export function resolveDefaultKiroProfileArn(authMethod?: OAuthCredential['authMethod']): string | undefined {
+  if (authMethod === 'idc') return undefined;
+  return authMethod === 'social' ? KIRO_DEFAULT_PROFILE_ARNS.social : KIRO_DEFAULT_PROFILE_ARNS['builder-id'];
+}
+
 export function kiroRegion(value = 'us-east-1'): string {
   if (!/^[a-z]{2}(?:-gov)?-[a-z]+-\d$/.test(value)) throw new Error('Invalid AWS region.');
   return value;
@@ -54,7 +66,7 @@ export async function fetchKiroProfileArn(region = 'us-east-1', accessToken: str
         Authorization: `Bearer ${accessToken}`,
         'X-Amz-Target': 'AmazonCodeWhispererService.ListAvailableProfiles',
       },
-      body: '{}',
+      body: JSON.stringify({ maxResults: 10 }),
     }, 'custom', 'unknown');
     if (!response.ok) {
       await response.body?.cancel().catch(() => {});
@@ -62,8 +74,17 @@ export async function fetchKiroProfileArn(region = 'us-east-1', accessToken: str
     }
     const data = await readSubscriptionJson(response);
     const profiles = Array.isArray(data.profiles) ? data.profiles : [];
-    const firstArn = profiles.find((entry: unknown) => entry && typeof (entry as { arn?: unknown }).arn === 'string' && (entry as { arn: string }).arn.trim()) as { arn: string } | undefined;
-    const arn = firstArn?.arn.trim() || (typeof data.defaultProfileArn === 'string' && data.defaultProfileArn.trim() ? data.defaultProfileArn.trim() : undefined);
+    const arnOf = (entry: unknown): string | undefined => {
+      if (!entry || typeof entry !== 'object') return undefined;
+      const record = entry as { arn?: unknown; profileArn?: unknown };
+      if (typeof record.arn === 'string' && record.arn.trim()) return record.arn.trim();
+      if (typeof record.profileArn === 'string' && record.profileArn.trim()) return record.profileArn.trim();
+      return undefined;
+    };
+    const regionMatch = profiles.map(arnOf).find(value => value?.split(':')[3] === normalizedRegion);
+    const arn = regionMatch
+      || profiles.map(arnOf).find(Boolean)
+      || (typeof data.defaultProfileArn === 'string' && data.defaultProfileArn.trim() ? data.defaultProfileArn.trim() : undefined);
     if (arn) {
       if (profileArnCache.size >= 500) {
         const oldest = profileArnCache.keys().next().value;
