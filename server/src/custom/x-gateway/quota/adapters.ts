@@ -245,7 +245,7 @@ export async function fetchAccountQuota(account: AccountRow): Promise<XQuotaWind
     headers['Editor-Version'] = 'vscode/1.100.0';
     headers['Editor-Plugin-Version'] = 'copilot-chat/0.26.7';
   }
-  let url = endpoints[account.provider];
+  const url = endpoints[account.provider];
   let method = 'GET'; let body: string | undefined;
   if (account.provider === 'codex' && structured?.accountId) headers['ChatGPT-Account-ID'] = structured.accountId;
   if (account.provider === 'kimi' && !structured?.accessToken) {
