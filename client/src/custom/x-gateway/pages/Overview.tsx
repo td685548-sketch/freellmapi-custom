@@ -38,7 +38,7 @@ export default function Overview() {
   const connected = providers.filter(provider => provider.accounts.length > 0).length
   const keyCount = keys.data?.keys.length
 
-  const base = new URL(`${import.meta.env.BASE_URL}x/v1`, window.location.origin).href
+  const base = new URL(`${import.meta.env.BASE_URL}thruline/v1`, window.location.origin).href
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(base)

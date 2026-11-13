@@ -219,7 +219,7 @@ function CLIToolsView() {
     const blob = new Blob([localSetupDownload(selectedTool.id, activeBaseUrl, activeApiKey, selectedModel)], { type: 'text/javascript' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.href = url; link.download = 'x-gateway-setup.mjs'; link.click(); URL.revokeObjectURL(url);
+    link.href = url; link.download = 'thruline-setup.mjs'; link.click(); URL.revokeObjectURL(url);
   };
 
   return (
@@ -234,7 +234,7 @@ function CLIToolsView() {
         <datalist id="x-cli-models">{modelQuery.data?.models.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</datalist>
         {LOCAL_SETUP_TOOLS.includes(selectedTool.id) && <>
           <button className="x-button" disabled={!activeApiKey || !selectedModel.trim()} onClick={downloadSetup}>Download local setup + backup/restore</button>
-          <p>Run <code>node x-gateway-setup.mjs</code> on your own computer. Then run the generated launcher. Existing settings are preserved; the script prints a restore command. Cursor gets manual instructions. Downloaded files contain the selected key: keep them private.</p>
+          <p>Run <code>node thruline-setup.mjs</code> on your own computer. Then run the generated launcher. Existing settings are preserved; the script prints a restore command. Cursor gets manual instructions. Downloaded files contain the selected key: keep them private.</p>
         </>}
       </section>
       {/* Header */}

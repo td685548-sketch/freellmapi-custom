@@ -121,7 +121,7 @@ xSkillsRouter.delete('/custom/:id', (req: Request, res: Response) => {
   res.json({ ok: true, id });
 });
 
-// Public Router: GET /x-skills/:id and GET /x-skills/:id/SKILL.md (Open without auth for AI agents)
+// Public Router: GET /thruline-skills/:id and GET /thruline-skills/:id/SKILL.md (Open without auth for AI agents)
 function handlePublicSkill(req: Request, res: Response) {
   const rawId = String(req.params.id ?? '').replace(/\.md$/i, '').replace(/\/SKILL$/i, '');
   const origin = extractOrigin(req);

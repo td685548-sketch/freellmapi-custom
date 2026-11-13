@@ -16,7 +16,7 @@ describe('X Gateway Agent Skills Hub', () => {
     const app = express();
     app.use(express.json());
     app.use('/api/x-gateway/skills', xSkillsRouter);
-    app.use('/x-skills', xSkillsPublicRouter);
+    app.use('/thruline-skills', xSkillsPublicRouter);
 
     await new Promise<void>((resolve) => {
       server = app.listen(0, () => {
@@ -172,14 +172,14 @@ describe('X Gateway Agent Skills Hub', () => {
       expect(text).toContain('name: 9router-chat');
     });
 
-    it('GET /x-skills/:id and /x-skills/:id/SKILL.md public agent endpoint works', async () => {
-      const res1 = await fetch(`${base}/x-skills/9router/SKILL.md`);
+    it('GET /thruline-skills/:id and /thruline-skills/:id/SKILL.md public agent endpoint works', async () => {
+      const res1 = await fetch(`${base}/thruline-skills/9router/SKILL.md`);
       expect(res1.status).toBe(200);
       expect(res1.headers.get('content-type')).toContain('text/markdown');
       const text1 = await res1.text();
       expect(text1).toContain('# 9Router');
 
-      const res2 = await fetch(`${base}/x-skills/9router`);
+      const res2 = await fetch(`${base}/thruline-skills/9router`);
       expect(res2.status).toBe(200);
       expect(res2.headers.get('content-type')).toContain('text/markdown');
     });

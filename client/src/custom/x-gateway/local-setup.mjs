@@ -155,7 +155,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         home: option('--home') ?? os.homedir(), opencodeVersion: option('--opencode-version') });
       const quote = process.platform === 'win32' ? ps : sh;
       console.log(`Setup saved locally. ${result.launcher.endsWith('.txt') ? 'Read instructions' : 'Launch'}: ${process.platform === 'win32' && !result.launcher.endsWith('.txt') ? 'pwsh -File ' : ''}${quote(result.launcher)}`);
-      console.log(`Restore: node x-gateway-setup.mjs --restore ${quote(result.backup)}`);
+      console.log(`Restore: node thruline-setup.mjs --restore ${quote(result.backup)}`);
       console.log('Downloads and backups may contain credentials. Keep them private. No client was launched.');
     }
   } catch { console.error('Setup failed. Verify tool, URL, full key and valid existing JSON settings. No credentials are logged.'); process.exitCode = 1; }

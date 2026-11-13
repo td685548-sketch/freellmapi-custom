@@ -210,7 +210,7 @@ export function registerCustomRoutes(app: Express): void {
   // path to its leaf (edit_x_settings for writes, use_x_gateway for reads).
   app.use('/api/x-gateway', xGatewayConsoleRouter);
   // Public skills server for AI coding agents (Claude, Cursor, Codex, OpenCode, Cline)
-  app.use('/x-skills', xSkillsPublicRouter);
+  app.use(['/thruline-skills', '/x-skills'], xSkillsPublicRouter);
 
   // Custom fork routes with their dedicated permission gates
   app.use('/api/auth', externalAuthRouter, customAuthRouter);

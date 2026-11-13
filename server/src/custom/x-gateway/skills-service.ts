@@ -103,10 +103,10 @@ export class SkillsService {
         isEntry: Boolean(b.isEntry),
         isCustom: false,
         rawUrl,
-        publicUrl: `${baseUrl}/x-skills/${b.id}/SKILL.md`,
+        publicUrl: `${baseUrl}/thruline-skills/${b.id}/SKILL.md`,
         githubUrl: `${GITHUB_RAW_BASE}/${b.githubPath}`,
         tokenEstimate: estimateTokens(replacedContent),
-        promptSnippet: `Read this skill and use it: ${rawUrl}`,
+        promptSnippet: `Read this skill and use it: ${baseUrl}/thruline-skills/${b.id}/SKILL.md`,
         content: replacedContent,
       };
     });
@@ -124,10 +124,10 @@ export class SkillsService {
         isEntry: false,
         isCustom: true,
         rawUrl,
-        publicUrl: `${baseUrl}/x-skills/${c.id}/SKILL.md`,
+        publicUrl: `${baseUrl}/thruline-skills/${c.id}/SKILL.md`,
         githubUrl: '',
         tokenEstimate: estimateTokens(replacedContent),
-        promptSnippet: `Read this skill and use it: ${rawUrl}`,
+        promptSnippet: `Read this skill and use it: ${baseUrl}/thruline-skills/${c.id}/SKILL.md`,
         content: replacedContent,
         updatedAt: c.updatedAt,
       };

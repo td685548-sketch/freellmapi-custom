@@ -343,7 +343,7 @@ export default function Endpoint() {
     setShowAddModel(false)
   }
 
-  const base = new URL(`${import.meta.env.BASE_URL}x/v1`, window.location.origin).href
+  const base = new URL(`${import.meta.env.BASE_URL}thruline/v1`, window.location.origin).href
   const anthropicBase = base.replace(/\/v1$/, '')
   const displayKey = newlyCreatedKey ?? s.placeholderKey
   const example = `curl '${base}/chat/completions' \\\n  -H 'Authorization: Bearer ${displayKey}' \\\n  -H 'Content-Type: application/json' \\\n  -d '{"model":"auto","messages":[{"role":"user","content":"Hello"}]}'`
