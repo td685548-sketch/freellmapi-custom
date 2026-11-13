@@ -547,4 +547,579 @@ describe('AI Support Runtime Widget (support-runtime-widget.ts)', () => {
     expect(mockFetch.mock.calls[0][0]).toBe('https://gateway.example.com/prefix/thruline/v1/support/chat');
   });
 
+  it.each(['thruline', 'x'])('keeps the deployment prefix and canonical URLs throughout the %s script lifecycle', async (scriptPrefix) => {
+    const apiBase = 'https://gateway.example.com/deployment/thruline/v1/support';
+    loadWidgetScript(`https://gateway.example.com/deployment/${scriptPrefix}/v1/support/widget.js`);
+    let escalated = false;
+    mockFetch.mockImplementation(async (url: string) => {
+      expect(url.startsWith(`${apiBase}/`)).toBe(true);
+      let data: unknown;
+      if (url.endsWith('/guest-session')) {
+        data = { contextToken: 'prefixed-guest', expiresIn: 900 };
+      } else if (url.endsWith('/chat')) {
+        data = { reply: 'Prefixed answer', runtime: { conversationId: 'prefixed-conversation' } };
+      } else if (url.endsWith('/escalate')) {
+        escalated = true;
+        data = { conversationId: 'prefixed-conversation', status: 'escalated' };
+      } else if (url.endsWith('/conversations/prefixed-conversation')) {
+        data = { conversation: { id: 'prefixed-conversation', status: escalated ? 'resolved' : 'open', messages: [] } };
+      } else if (url.endsWith('/csat')) {
+        data = { ok: true };
+      } else {
+        throw new Error(`Unexpected widget endpoint: ${url}`);
+      }
+      return { ok: true, status: 200, json: async () => data };
+    });
+
+    const instance = window.FreeLLMAPISupport.init({ tenantKey: 'prefixed-lifecycle', pollInterval: 10 });
+    instance.open();
+    instance.sendMessage('Hello');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('Prefixed answer'));
+    await vi.waitFor(() => expect(mockFetch.mock.calls.some(([url]) => url === `${apiBase}/conversations/prefixed-conversation`)).toBe(true));
+    document.querySelector<HTMLButtonElement>('[data-testid="widget-escalate-btn"]')!.click();
+    await vi.waitFor(() => expect(document.querySelector('[data-testid="widget-csat-btn-5"]')).not.toBeNull());
+    document.querySelector<HTMLButtonElement>('[data-testid="widget-csat-btn-5"]')!.click();
+    await vi.waitFor(() => expect(document.body.textContent).toContain('Thank you for your feedback!'));
+
+    for (const endpoint of ['guest-session', 'chat', 'conversations/prefixed-conversation', 'escalate', 'csat']) {
+      expect(mockFetch.mock.calls.some(([url]) => url === `${apiBase}/${endpoint}`)).toBe(true);
+    }
+    const [, chatInit] = mockFetch.mock.calls.find(([url]) => url === `${apiBase}/chat`)!;
+    expect(chatInit.headers['X-Support-Context-Token']).toBe('prefixed-guest');
+    instance.destroy();
+  });
+
+  it('renders verified citations from runtime.evidence with numbered cards and prevents XSS in title and excerpt', async () => {
+    loadWidgetScript();
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        reply: 'Here is the authorized refund policy [1]',
+        runtime: {
+          conversationId: 'conv-cite-xss-1',
+          replySource: 'model',
+          evidence: {
+            requestId: 'req_xss_test',
+            status: 'cited',
+            policyVersion: 1,
+            snapshotId: 'snap_xss_1',
+            citations: [
+              {
+                id: 'cit_refund_policy',
+                ordinal: 1,
+                sourceId: 'src_refund',
+                revisionId: 'rev_1',
+                chunkId: 'chk_1',
+                title: '<img src=x onerror=alert(1)>Refund Policy',
+                startLine: 1,
+                endLine: 15,
+                excerpt: '<script>alert("xss")</script>Eligible for 30-day refund.'
+              }
+            ]
+          }
+        }
+      })
+    });
+
+    const instance = window.FreeLLMAPISupport.init({ tenantKey: 'tenant_citations_xss', contextToken: 'tok_cite' });
+    instance.sendMessage('How do refunds work?');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('Here is the authorized refund policy [1]'));
+
+    const card = document.querySelector('[data-testid="widget-citation-card"]');
+    expect(card).toBeTruthy();
+    expect(card?.getAttribute('data-citation-id')).toBe('cit_refund_policy');
+    expect(card?.getAttribute('data-ordinal')).toBe('1');
+    expect(card?.textContent).toContain('[1]');
+    expect(card?.textContent).toContain('<img src=x onerror=alert(1)>Refund Policy');
+    // Verify no HTML elements were injected
+    expect(card?.querySelector('img')).toBeNull();
+    const excerptEl = card?.querySelector('[data-testid="widget-citation-excerpt"]');
+    expect(excerptEl).toBeTruthy();
+    expect(excerptEl?.textContent).toContain('<script>alert("xss")</script>Eligible for 30-day refund.');
+    expect(card?.querySelector('script')).toBeNull();
+  });
+
+  it('renders knowledge_abstention as localized non-AI status and allows human escalation', async () => {
+    loadWidgetScript();
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        reply: 'I do not have sufficient information.',
+        runtime: {
+          conversationId: 'conv-abstain-1',
+          replySource: 'knowledge_abstention',
+          evidence: {
+            requestId: 'req_abstain_test',
+            status: 'abstained',
+            reason: 'no_matches',
+            policyVersion: 1,
+            snapshotId: 'snap_empty',
+            citations: []
+          }
+        }
+      })
+    });
+
+    const instance = window.FreeLLMAPISupport.init({ tenantKey: 'tenant_abstain', contextToken: 'tok_abstain' });
+    instance.sendMessage('Tell me about secret project');
+    await vi.waitFor(() => expect(document.querySelector('[data-testid="widget-response-notice"]')).toBeTruthy());
+
+    const notice = document.querySelector('[data-testid="widget-response-notice"]');
+    expect(notice?.getAttribute('data-role')).toBe('system-notice');
+    expect(notice?.querySelector('[data-testid="widget-non-ai-status"]')?.textContent).toBe('System Notice');
+    expect(notice?.textContent).toContain('No relevant knowledge sources were found to answer this question.');
+    // It must NOT be labeled as an assistant message
+    expect(document.querySelector('.freellmapi-message-assistant')).toBeNull();
+
+    // Verify escalation with the real conversationId
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, conversationId: 'conv-abstain-1' })
+    });
+    const escalateBtn = document.querySelector('[data-testid="widget-escalate-btn"]') as HTMLButtonElement;
+    expect(escalateBtn).toBeTruthy();
+    escalateBtn.click();
+    await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+    const [escUrl, escInit] = mockFetch.mock.calls[1];
+    expect(escUrl).toContain('/thruline/v1/support/escalate');
+    expect(JSON.parse(escInit.body)).toMatchObject({ conversationId: 'conv-abstain-1', reason: 'user_requested' });
+  });
+
+  it('rehydrates cited messages and notices from history and deduplicates by requestId across reload and poll', async () => {
+    loadWidgetScript();
+
+    // First interaction sets up stored conversation ID
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        reply: 'Initial message',
+        runtime: { conversationId: 'conv-dedup-history' }
+      })
+    });
+
+    const first = window.FreeLLMAPISupport.init({
+      tenantKey: 'tenant_dedup',
+      contextToken: 'tok_dedup',
+      serverBase: 'https://api.test'
+    });
+    first.sendMessage('Initial query');
+    await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+    first.destroy();
+
+    // Reload with stored conversation containing cited message and notice
+    const historyPayload = {
+      ok: true,
+      conversation: {
+        id: 'conv-dedup-history',
+        status: 'open',
+        messages: [
+          {
+            id: 'msg_user_1',
+            role: 'user',
+            content: 'Do you offer warranty?',
+            requestId: 'req_warr_1',
+            responseNotice: { requestId: 'req_warr_1', reason: 'no_matches' }
+          },
+          {
+            id: 'msg_ai_1',
+            role: 'assistant',
+            senderType: 'ai_assistant',
+            content: 'Yes, 1-year limited warranty [1].',
+            requestId: 'req_warr_2',
+            evidence: {
+              requestId: 'req_warr_2',
+              status: 'cited',
+              policyVersion: 1,
+              snapshotId: 'snap_warr',
+              citations: [
+                { id: 'cit_warr', ordinal: 1, sourceId: 'src_w', revisionId: 'rev_w', chunkId: 'chk_w', title: 'Warranty Terms', excerpt: '1-year coverage.' }
+              ]
+            }
+          }
+        ]
+      }
+    };
+
+    mockFetch.mockClear();
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => historyPayload
+    });
+
+    const reloaded = window.FreeLLMAPISupport.init({
+      tenantKey: 'tenant_dedup',
+      contextToken: 'tok_dedup',
+      serverBase: 'https://api.test',
+      pollInterval: 50
+    });
+
+    await vi.waitFor(() => expect(document.body.textContent).toContain('Warranty Terms'));
+    expect(document.querySelectorAll('[data-testid="widget-response-notice"]').length).toBe(1);
+    expect(document.querySelectorAll('[data-testid="widget-citation-card"]').length).toBe(1);
+
+    // Mock poll returning same messages
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => historyPayload
+    });
+
+    reloaded.open();
+    await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+
+    // Deduplication should ensure no duplicate notices or citation cards
+    expect(document.querySelectorAll('[data-testid="widget-response-notice"]').length).toBe(1);
+    expect(document.querySelectorAll('[data-testid="widget-citation-card"]').length).toBe(1);
+  });
+
+  it('replaces redacted historical messages with localized notice and strips original citation metadata', async () => {
+    loadWidgetScript();
+
+    // First interaction sets up stored conversation ID
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        reply: 'Initial message',
+        runtime: { conversationId: 'conv-redacted-history' }
+      })
+    });
+
+    const first = window.FreeLLMAPISupport.init({
+      tenantKey: 'tenant_redacted',
+      contextToken: 'tok_redacted',
+      serverBase: 'https://api.test'
+    });
+    first.sendMessage('Initial query');
+    await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+    first.destroy();
+
+    // Reload with stored conversation containing redacted message
+    mockFetch.mockClear();
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        conversation: {
+          id: 'conv-redacted-history',
+          status: 'open',
+          messages: [
+            {
+              id: 'msg_ai_revoked',
+              role: 'assistant',
+              senderType: 'ai_assistant',
+              content: 'Revoked secret content',
+              evidence: {
+                requestId: 'req_revoked_1',
+                status: 'redacted',
+                reason: 'source_revoked',
+                policyVersion: 1,
+                snapshotId: '',
+                citations: []
+              }
+            }
+          ]
+        }
+      })
+    });
+
+    window.FreeLLMAPISupport.init({
+      tenantKey: 'tenant_redacted',
+      contextToken: 'tok_redacted',
+      serverBase: 'https://api.test'
+    });
+
+    await vi.waitFor(() => expect(document.querySelector('[data-testid="widget-response-notice"]')).toBeTruthy());
+    const notice = document.querySelector('[data-testid="widget-response-notice"]');
+    expect(notice?.textContent).toContain('This response referenced sources that have been revoked or are no longer available.');
+    // Ensure no citations or raw assistant text leaked
+    expect(document.querySelectorAll('[data-testid="widget-citation-card"]').length).toBe(0);
+    expect(document.body.textContent).not.toContain('Revoked secret content');
+  });
+
+  it('handles 409 knowledge_context_changed with explicit fresh requestId retry versus stable requestId on network retry', async () => {
+    loadWidgetScript();
+
+    // 1. First send returns 409 knowledge_context_changed
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        error: { code: 'knowledge_context_changed', message: 'Sources were updated in flight' },
+        requestId: 'req_stale_1'
+      })
+    });
+
+    const instance = window.FreeLLMAPISupport.init({ tenantKey: 'tenant_retry_test', contextToken: 'tok_retry' });
+    instance.sendMessage('Check product specs');
+
+    await vi.waitFor(() => expect(document.querySelector('[data-testid="widget-context-changed-box"]')).toBeTruthy());
+    expect(document.querySelector('[data-testid="widget-context-changed-box"]')?.textContent).toContain('Knowledge context changed. Click to retry with a fresh request.');
+
+    const firstReqBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+    const firstReqId = firstReqBody.requestId;
+    expect(firstReqId).toBeDefined();
+
+    // 2. Click fresh retry: should generate a FRESH requestId
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ reply: 'Fresh product specs answer', runtime: { conversationId: 'conv-fresh-1' } })
+    });
+
+    const freshRetryBtn = document.querySelector('[data-testid="widget-fresh-retry-btn"]') as HTMLButtonElement;
+    expect(freshRetryBtn).toBeTruthy();
+    freshRetryBtn.click();
+
+    await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+    const secondReqBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+    const secondReqId = secondReqBody.requestId;
+    expect(secondReqId).toBeDefined();
+    expect(secondReqId).not.toBe(firstReqId); // MUST be a fresh request ID!
+
+    // 3. In contrast, ordinary network error retry keeps same requestId
+    mockFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    instance.sendMessage('Ordinary network failure test');
+
+    await vi.waitFor(() => expect(document.querySelector('[data-testid="widget-error-box"]')).toBeTruthy());
+    const thirdReqBody = JSON.parse(mockFetch.mock.calls[2][1].body);
+    const thirdReqId = thirdReqBody.requestId;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ reply: 'Recovered from network error' })
+    });
+
+    const ordinaryRetryBtn = document.querySelector('[data-testid="widget-retry-btn"]') as HTMLButtonElement;
+    expect(ordinaryRetryBtn).toBeTruthy();
+    ordinaryRetryBtn.click();
+
+    await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(4));
+    const fourthReqBody = JSON.parse(mockFetch.mock.calls[3][1].body);
+    const fourthReqId = fourthReqBody.requestId;
+    expect(fourthReqId).toBe(thirdReqId); // Network retry preserves the exact same requestId
+  });
+
+  it('clears citation and notice state and isolates identity on updateContextToken and destroy', async () => {
+    loadWidgetScript();
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        reply: 'Verified answer [1]',
+        runtime: {
+          conversationId: 'conv-ident-1',
+          evidence: {
+            requestId: 'req_ident_1',
+            status: 'cited',
+            policyVersion: 1,
+            snapshotId: 'snap_ident',
+            citations: [{ id: 'c_ident', ordinal: 1, sourceId: 's', revisionId: 'r', chunkId: 'k', title: 'Ident Source', excerpt: 'Excerpt' }]
+          }
+        }
+      })
+    });
+
+    const instance = window.FreeLLMAPISupport.init({ tenantKey: 'tenant_ident', contextToken: 'tok_user_A' });
+    instance.sendMessage('Hello user A');
+    await vi.waitFor(() => expect(document.querySelector('[data-testid="widget-citation-card"]')).toBeTruthy());
+
+    // Switch to User B identity
+    instance.updateContextToken('tok_user_B');
+
+    // All citations and messages must be wiped
+    expect(document.querySelector('[data-testid="widget-citation-card"]')).toBeNull();
+    expect(document.querySelectorAll('.freellmapi-message').length).toBe(0);
+
+    // Destroy cleans up DOM completely
+    instance.destroy();
+    expect(document.getElementById('freellmapi-support-widget-root')).toBeNull();
+  });
+
+  it('localizes notices and UI strings in Vietnamese when locale is vi', async () => {
+    loadWidgetScript();
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        reply: 'Không đủ thông tin.',
+        runtime: {
+          conversationId: 'conv-vi-1',
+          replySource: 'knowledge_abstention',
+          evidence: {
+            requestId: 'req_vi_1',
+            status: 'abstained',
+            reason: 'no_matches',
+            policyVersion: 1,
+            snapshotId: 'snap_vi',
+            citations: []
+          }
+        }
+      })
+    });
+
+    const instance = window.FreeLLMAPISupport.init({
+      tenantKey: 'tenant_vi',
+      contextToken: 'tok_vi',
+      locale: 'vi'
+    });
+    instance.sendMessage('Hỏi chính sách');
+
+    await vi.waitFor(() => expect(document.querySelector('[data-testid="widget-response-notice"]')).toBeTruthy());
+    const notice = document.querySelector('[data-testid="widget-response-notice"]');
+    expect(notice?.textContent).toContain('Không tìm thấy tài liệu phù hợp để trả lời câu hỏi này');
+    expect(notice?.querySelector('[data-testid="widget-non-ai-status"]')?.textContent).toBe('Thông báo hệ thống');
+  });
+
+  it('updates rendered cited response to revocation notice when subsequent polls return redacted on the same instance', async () => {
+    loadWidgetScript();
+
+    let pollCount = 0;
+    let shouldRedact = false;
+    const testConvId = 'conv-redact-regression-1';
+    let userRequestId = '';
+
+    mockFetch.mockImplementation(async (url: string, init?: any) => {
+      // 1. Initial chat send
+      if (typeof url === 'string' && url.includes('/thruline/v1/support/chat')) {
+        const parsedBody = JSON.parse(init.body);
+        userRequestId = parsedBody.requestId;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            reply: 'Confidential knowledge answer that will be revoked',
+            runtime: {
+              conversationId: testConvId,
+              evidence: {
+                requestId: userRequestId,
+                status: 'cited',
+                policyVersion: 1,
+                snapshotId: 'snap_v1',
+                citations: [
+                  {
+                    id: 'cite_secret_doc',
+                    ordinal: 1,
+                    sourceId: 'src_sec_1',
+                    revisionId: 'rev_sec_1',
+                    chunkId: 'chk_1',
+                    title: 'Secret Internal Handbook',
+                    excerpt: 'Confidential policy details.'
+                  }
+                ]
+              }
+            }
+          })
+        };
+      }
+
+      // 2. Poll requests for conversation
+      if (typeof url === 'string' && url.includes(`/thruline/v1/support/conversations/${testConvId}`)) {
+        pollCount++;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            conversation: {
+              id: testConvId,
+              status: 'active',
+              messages: [
+                {
+                  id: 'msg_user_1',
+                  role: 'user',
+                  senderType: 'user',
+                  content: 'What is the secret policy?',
+                  requestId: userRequestId
+                },
+                {
+                  id: 'msg_asst_1',
+                  role: 'assistant',
+                  senderType: 'ai_assistant',
+                  content: 'Confidential knowledge answer that will be revoked',
+                  requestId: userRequestId,
+                  evidence: shouldRedact ? {
+                    requestId: userRequestId,
+                    status: 'redacted',
+                    reason: 'source_revoked',
+                    policyVersion: 2,
+                    snapshotId: 'snap_v2',
+                    citations: []
+                  } : {
+                    requestId: userRequestId,
+                    status: 'cited',
+                    policyVersion: 1,
+                    snapshotId: 'snap_v1',
+                    citations: [
+                      {
+                        id: 'cite_secret_doc',
+                        ordinal: 1,
+                        sourceId: 'src_sec_1',
+                        revisionId: 'rev_sec_1',
+                        chunkId: 'chk_1',
+                        title: 'Secret Internal Handbook',
+                        excerpt: 'Confidential policy details.'
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          })
+        };
+      }
+
+      return { ok: false, status: 404, json: async () => ({}) };
+    });
+
+    const instance = window.FreeLLMAPISupport.init({
+      tenantKey: 'tenant_redact_test',
+      contextToken: 'tok_redact_test',
+      pollInterval: 25
+    });
+    instance.open();
+
+    // Send question
+    instance.sendMessage('What is the secret policy?');
+
+    // Wait until cited reply and citation card are rendered
+    await vi.waitFor(() => {
+      const citeCard = document.querySelector('[data-testid="widget-citation-card"]');
+      expect(citeCard).toBeTruthy();
+      expect(citeCard?.textContent).toContain('Secret Internal Handbook');
+      expect(citeCard?.textContent).toContain('Confidential policy details.');
+      expect(document.body.textContent).toContain('Confidential knowledge answer that will be revoked');
+    });
+
+    // Now trigger redaction in subsequent polls
+    shouldRedact = true;
+    pollCount = 0;
+
+    // Wait for at least 7 polls to execute with redacted status on the SAME instance
+    await vi.waitFor(() => {
+      expect(pollCount).toBeGreaterThanOrEqual(7);
+    }, { timeout: 4000 });
+
+    // Assert that:
+    // 1. The original answer text is completely removed from the DOM
+    expect(document.body.textContent).not.toContain('Confidential knowledge answer that will be revoked');
+
+    // 2. All citation cards, source titles, and excerpts are completely removed from the DOM
+    expect(document.querySelectorAll('[data-testid="widget-citation-card"]').length).toBe(0);
+    expect(document.body.textContent).not.toContain('Secret Internal Handbook');
+    expect(document.body.textContent).not.toContain('Confidential policy details.');
+
+    // 3. Exactly 1 localized revocation notice is displayed (no duplicates from 7 polls)
+    const notices = document.querySelectorAll('[data-testid="widget-response-notice"]');
+    expect(notices.length).toBe(1);
+    expect(notices[0].textContent).toContain('referenced sources that have been revoked');
+    expect(notices[0].querySelector('[data-testid="widget-non-ai-status"]')?.textContent).toBe('System Notice');
+  });
+
 });

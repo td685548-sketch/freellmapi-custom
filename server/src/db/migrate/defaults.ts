@@ -83,6 +83,7 @@ import * as customPrimaryAdminScope from '../migrations/20261101_190500_custom_p
 import * as supportRuntimeState from '../migrations/20261112_170001_support_runtime_state.js';
 import * as supportExecutionOutbox from '../migrations/20261112_170002_support_execution_outbox.js';
 import * as supportRuntimeFencing from '../migrations/20261112_180001_support_runtime_fencing.js';
+import * as supportEvidence from '../migrations/20261113_090001_support_evidence.js';
 
 export interface MigrationModule {
   up(db: Db): void;
@@ -255,4 +256,5 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: '20261112_170001_support_runtime_state.ts', module: supportRuntimeState },
   { filename: '20261112_170002_support_execution_outbox.ts', module: supportExecutionOutbox },
   { filename: '20261112_180001_support_runtime_fencing.ts', module: supportRuntimeFencing },
+  { filename: '20261113_090001_support_evidence.ts', module: supportEvidence },
 ];

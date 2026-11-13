@@ -1,0 +1,295 @@
+{
+  "fixtureVersion": 1,
+  "sources": {
+    "shipping_faq": {
+      "name": "Public Shipping & Delivery FAQ",
+      "kind": "markdown",
+      "allowedRoles": ["guest", "customer", "staff", "admin"],
+      "format": "markdown",
+      "title": "Public Shipping and Delivery Guide",
+      "category": "shipping",
+      "tags": ["shipping", "delivery", "tracking", "courier", "package"],
+      "content": "Standard domestic delivery takes 3 to 5 business days across all regions.\nExpress delivery takes 1 to 2 business days for orders confirmed before noon.\nInternational delivery takes between 7 and 14 business days depending on customs clearance.\nCustomers receive a tracking number via email as soon as the package leaves our warehouse."
+    },
+    "return_policy": {
+      "name": "Customer Returns & Loyalty Benefits",
+      "kind": "markdown",
+      "allowedRoles": ["customer", "staff", "admin"],
+      "format": "markdown",
+      "title": "Returns and Loyalty Membership Overview",
+      "category": "policy",
+      "tags": ["return", "refund", "loyalty", "membership", "exchange"],
+      "content": "Customers can initiate a product return within 30 days of parcel delivery.\nReturned items must remain undamaged in original packaging with intact security seals.\nLoyalty tiers include Silver, Gold, and Platinum based on annual customer expenditure.\nGold tier members receive free return shipping on all domestic orders."
+    },
+    "staff_refund_sop": {
+      "name": "Internal Staff Refund & Escalation SOP",
+      "kind": "markdown",
+      "allowedRoles": ["staff", "admin"],
+      "format": "markdown",
+      "title": "Internal SOP for Refund Approvals and Escalations",
+      "category": "sop",
+      "tags": ["refund", "sop", "escalation", "approval", "dispute"],
+      "content": "Frontline support staff can directly authorize refunds up to 100 USD per claim.\nRefund claims exceeding 100 USD require secondary managerial approval from an admin.\nAny ticket involving chargeback threats or legal claims must be escalated immediately to the compliance team."
+    },
+    "admin_executive_margin": {
+      "name": "Executive Margin Targets & SLA Playbook",
+      "kind": "markdown",
+      "allowedRoles": ["admin"],
+      "format": "markdown",
+      "title": "Executive Margin Rules and Service Level Targets",
+      "category": "executive",
+      "tags": ["margin", "sla", "executive", "playbook", "pricing"],
+      "content": "Target operating gross margin is fixed at 35 percent for current fiscal quarters.\nDiscounts that erode product margin below 20 percent require executive finance signoff.\nUrgent severity tickets must receive a first substantive human reply within 15 minutes."
+    },
+    "vi_shipping_faq": {
+      "name": "Hỏi đáp giao nhận vận chuyển công khai",
+      "kind": "markdown",
+      "allowedRoles": ["guest", "customer", "staff", "admin"],
+      "format": "markdown",
+      "title": "Quy định giao nhận và cước phí vận chuyển",
+      "category": "van_chuyen",
+      "tags": ["giao_hang", "van_chuyen", "cuoc_phi", "thoi_gian"],
+      "content": "Thời gian giao hàng tiêu chuẩn kéo dài từ 3 đến 5 ngày làm việc trên toàn quốc.\nGiao hàng hỏa tốc trong vòng 24 giờ áp dụng tại khu vực nội thành Hà Nội và TP Hồ Chí Minh.\nMã vận đơn sẽ được gửi tự động qua thư điện tử ngay khi kiện hàng được bàn giao cho đơn vị vận chuyển."
+    },
+    "vi_return_policy": {
+      "name": "Chính sách đổi trả và quyền lợi thành viên",
+      "kind": "markdown",
+      "allowedRoles": ["customer", "staff", "admin"],
+      "format": "markdown",
+      "title": "Quy trình đổi trả hàng và quyền lợi hạng thành viên",
+      "category": "chinh_sach",
+      "tags": ["doi_tra", "hoan_tien", "thanh_vien", "khach_hang"],
+      "content": "Khách hàng được yêu cầu đổi trả sản phẩm trong vòng 30 ngày kể từ ngày nhận hàng thành công.\nSản phẩm đổi trả phải còn nguyên tem mác, chưa qua sử dụng và đầy đủ hóa đơn mua hàng.\nHạng thành viên Vàng được miễn phí hoàn toàn cước gửi hàng đổi trả trên toàn quốc."
+    },
+    "vi_staff_refund_sop": {
+      "name": "Quy trình SOP nội bộ xử lý hoàn tiền",
+      "kind": "markdown",
+      "allowedRoles": ["staff", "admin"],
+      "format": "markdown",
+      "title": "Quy trình phê duyệt hoàn tiền và chuyển cấp hỗ trợ",
+      "category": "sop_noi_bo",
+      "tags": ["hoan_tien", "phe_duyet", "sop", "khieu_nai"],
+      "content": "Nhân viên hỗ trợ được quyền duyệt hoàn tiền trực tiếp cho các khiếu nại dưới 2 triệu đồng.\nCác khoản hoàn tiền trên 2 triệu đồng bắt buộc phải có chữ ký phê duyệt từ cấp quản lý admin.\nKhi khách hàng nhắc đến khiếu nại pháp lý hoặc tranh chấp ngân hàng, nhân viên phải chuyển cấp ngay."
+    },
+    "vi_admin_margin": {
+      "name": "Sổ tay mục tiêu biên lợi nhuận và SLA điều hành",
+      "kind": "markdown",
+      "allowedRoles": ["admin"],
+      "format": "markdown",
+      "title": "Chiến lược biên lợi nhuận và cam kết chất lượng SLA",
+      "category": "quan_tri",
+      "tags": ["bien_loi_nhuan", "sla", "quan_tri", "chien_luoc"],
+      "content": "Mục tiêu biên lợi nhuận gộp toàn hệ thống được ấn định tối thiểu ở mức 35 phần trăm.\nMọi chính sách chiết khấu làm giảm biên lợi nhuận xuống dưới 20 phần trăm phải có văn bản phê duyệt.\nCam kết thời gian phản hồi đầu tiên cho sự cố cấp bách không được vượt quá 15 phút."
+    }
+  },
+  "cases": [
+    {
+      "id": "case_01_en_guest_shipping",
+      "query": "How many days does standard domestic delivery take?",
+      "role": "guest",
+      "expectedKeys": ["shipping_faq"],
+      "forbiddenKeys": ["staff_refund_sop", "admin_executive_margin"],
+      "expectAbstention": false
+    },
+    {
+      "id": "case_02_en_customer_shipping",
+      "query": "What is the delivery time for international shipping?",
+      "role": "customer",
+      "expectedKeys": ["shipping_faq"],
+      "forbiddenKeys": ["staff_refund_sop", "admin_executive_margin"],
+      "expectAbstention": false
+    },
+    {
+      "id": "case_03_en_customer_returns",
+      "query": "How many days do I have to return an item after delivery?",
+      "role": "customer",
+      "expectedKeys": ["return_policy"],
+      "forbiddenKeys": ["staff_refund_sop", "admin_executive_margin"],
+      "expectAbstention": false
+    },
+    {
+      "id": "case_04_en_guest_denied_returns",
+      "query": "Can guests read the loyalty membership overview and return policies?",
+      "role": "guest",
+      "expectedKeys": [],
+      "forbiddenKeys": ["return_policy", "staff_refund_sop", "admin_executive_margin"],
+      "expectAbstention": true
+    },
+    {
+      "id": "case_05_en_staff_refund_sop",
+      "query": "What is the maximum refund frontline support staff can directly authorize?",
+      "role": "staff",
+      "expectedKeys": ["staff_refund_sop"],
+      "forbiddenKeys": ["admin_executive_margin"],
+      "expectAbstention": false
+    },
+    {
+      "id": "case_06_en_customer_denied_sop",
+      "query": "What is the internal refund SOP approval threshold for support staff?",
+      "role": "customer",
+      "expectedKeys": [],
+      "forbiddenKeys": ["staff_refund_sop", "admin_executive_margin"],
+      "expectAbstention": true
+    },
+    {
+      "id": "case_07_en_admin_margin",
+      "query": "What is the target operating gross margin and SLA response time?",
+      "role": "admin",
+      "expectedKeys": ["admin_executive_margin"],
+      "forbiddenKeys": [],
+      "expectAbstention": false
+    },
+    {
+      "id": "case_08_en_staff_denied_margin",
+      "query": "What is the executive gross margin target for the current fiscal quarter?",
+      "role": "staff",
+      "expectedKeys": [],
+      "forbiddenKeys": ["admin_executive_margin"],
+      "expectAbstention": true
+    },
+    {
+      "id": "case_09_vi_guest_shipping",
+      "query": "Thời gian giao hàng tiêu chuẩn trên toàn quốc mất bao nhiêu ngày?",
+      "role": "guest",
+      "expectedKeys": ["vi_shipping_faq"],
+      "forbiddenKeys": ["vi_staff_refund_sop", "vi_admin_margin"],
+      "expectAbstention": false
+    },
+    {
+      "id": "case_10_vi_guest_unaccented_shipping",
+      "query": "thoi gian giao hang tieu chuan mat bao nhieu ngay",
+      "role": "guest",
+      "expectedKeys": ["vi_shipping_faq"],
+      "forbiddenKeys": ["vi_staff_refund_sop", "vi_admin_margin"],
+      "expectAbstention": false
+    },
+    {
+      "id": "case_11_vi_customer_returns",
+      "query": "Khách hàng có thể đổi trả sản phẩm trong vòng bao nhiêu ngày kể từ khi nhận hàng?",
+      "role": "customer",
+      "expectedKeys": ["vi_return_policy"],
+      "forbiddenKeys": ["vi_staff_refund_sop", "vi_admin_margin"],
+      "expectAbstention": false
+    },
+    {
+      "id": "case_12_vi_customer_unaccented_returns",
+      "query": "chinh sach doi tra va quyen loi thanh vien vang",
+      "role": "customer",
+      "expectedKeys": ["vi_return_policy"],
+      "forbiddenKeys": ["vi_staff_refund_sop", "vi_admin_margin"],
+      "expectAbstention": false
+    },
+    {
+      "id": "case_13_vi_guest_denied_returns",
+      "query": "Đặc quyền nâng hạng thành viên Bạc Vàng Bạch Kim",
+      "role": "guest",
+      "expectedKeys": [],
+      "forbiddenKeys": ["vi_return_policy", "vi_staff_refund_sop", "vi_admin_margin"],
+      "expectAbstention": true
+    },
+    {
+      "id": "case_14_vi_staff_refund_sop",
+      "query": "Nhân viên hỗ trợ được duyệt hoàn tiền tối đa bao nhiêu triệu đồng?",
+      "role": "staff",
+      "expectedKeys": ["vi_staff_refund_sop"],
+      "forbiddenKeys": ["vi_admin_margin"],
+      "expectAbstention": false
+    },
+    {
+      "id": "case_15_vi_customer_denied_sop",
+      "query": "Tài liệu SOP hướng dẫn nội bộ về thẩm quyền phê duyệt khiếu nại pháp lý",
+      "role": "customer",
+      "expectedKeys": [],
+      "forbiddenKeys": ["vi_staff_refund_sop", "vi_admin_margin"],
+      "expectAbstention": true
+    },
+    {
+      "id": "case_16_vi_admin_margin_sla",
+      "query": "Mục tiêu biên lợi nhuận gộp và thời gian cam kết SLA cho sự cố cấp bách là bao nhiêu?",
+      "role": "admin",
+      "expectedKeys": ["vi_admin_margin"],
+      "forbiddenKeys": [],
+      "expectAbstention": false
+    },
+    {
+      "id": "case_17_vi_staff_denied_margin",
+      "query": "Quy định mức chiết khấu tối đa và biên lợi nhuận tối thiểu trong sổ tay điều hành?",
+      "role": "staff",
+      "expectedKeys": [],
+      "forbiddenKeys": ["vi_admin_margin"],
+      "expectAbstention": true
+    },
+    {
+      "id": "case_18_en_no_match_astronomy",
+      "query": "Scientific astronomical measurements regarding planetary orbital mechanics on Saturn",
+      "role": "guest",
+      "expectedKeys": [],
+      "forbiddenKeys": ["shipping_faq", "return_policy", "staff_refund_sop", "admin_executive_margin"],
+      "expectAbstention": true
+    },
+    {
+      "id": "case_19_vi_no_match_cooking",
+      "query": "Công thức nấu món phở bò gia truyền chuẩn vị Nam Định như thế nào?",
+      "role": "customer",
+      "expectedKeys": [],
+      "forbiddenKeys": ["vi_shipping_faq", "vi_return_policy", "vi_staff_refund_sop", "vi_admin_margin"],
+      "expectAbstention": true
+    },
+    {
+      "id": "case_20_en_low_coverage_abstain",
+      "query": "Deep space telescope astronomical observatory instrumentation with standard calibration benchmarks",
+      "role": "guest",
+      "expectedKeys": [],
+      "forbiddenKeys": ["staff_refund_sop", "admin_executive_margin"],
+      "expectAbstention": true
+    },
+    {
+      "id": "case_21_vi_low_coverage_abstain",
+      "query": "Thiên thạch vũ trụ rơi xuống miệng núi lửa sâu khảo sát chuẩn",
+      "role": "customer",
+      "expectedKeys": [],
+      "forbiddenKeys": ["vi_staff_refund_sop", "vi_admin_margin"],
+      "expectAbstention": true
+    },
+    {
+      "id": "case_22_en_admin_shipping_and_returns",
+      "query": "Where can administrators verify shipping timelines and tracking notification email rules?",
+      "role": "admin",
+      "expectedKeys": ["shipping_faq"],
+      "forbiddenKeys": [],
+      "expectAbstention": false
+    },
+    {
+      "id": "case_23_vi_admin_all_access",
+      "query": "Thời gian giao hàng hỏa tốc trong 24 giờ áp dụng tại khu vực nào?",
+      "role": "admin",
+      "expectedKeys": ["vi_shipping_faq"],
+      "forbiddenKeys": [],
+      "expectAbstention": false
+    },
+    {
+      "id": "case_24_en_guest_express_shipping",
+      "query": "What is the delivery timeframe for domestic express delivery orders?",
+      "role": "guest",
+      "expectedKeys": ["shipping_faq"],
+      "forbiddenKeys": ["staff_refund_sop", "admin_executive_margin"],
+      "expectAbstention": false
+    },
+    {
+      "id": "case_25_vi_customer_gold_tier",
+      "query": "Hạng thành viên Vàng có được miễn phí cước gửi hàng đổi trả không?",
+      "role": "customer",
+      "expectedKeys": ["vi_return_policy"],
+      "forbiddenKeys": ["vi_staff_refund_sop", "vi_admin_margin"],
+      "expectAbstention": false
+    },
+    {
+      "id": "case_26_en_staff_chargeback_escalation",
+      "query": "Which team handles tickets with chargeback threats or legal claims?",
+      "role": "staff",
+      "expectedKeys": ["staff_refund_sop"],
+      "forbiddenKeys": ["admin_executive_margin"],
+      "expectAbstention": false
+    }
+  ]
+}

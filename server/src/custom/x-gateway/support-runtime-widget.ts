@@ -38,7 +38,15 @@ export function getSupportRuntimeWidgetScript(): string {
       authRequired: 'Authentication required. Please sign in to continue.',
       networkError: 'Network error. Please try again.',
       sending: 'Sending...',
-      retryFailed: 'Request failed. Click to retry.'
+      retryFailed: 'Request failed. Click to retry.',
+      knowledgeNoticeNoMatches: 'No relevant knowledge sources were found to answer this question. You can try rephrasing or talk to a human agent.',
+      knowledgeNoticeInvalidCitations: 'The generated answer could not be verified against authorized sources.',
+      knowledgeNoticeSourcesChanged: 'Knowledge sources were updated during the request. Please ask your question again.',
+      knowledgeNoticeSourceRevoked: 'This response referenced sources that have been revoked or are no longer available.',
+      contextChanged: 'Knowledge context changed. Click to retry with a fresh request.',
+      freshRetry: 'Retry with fresh request',
+      sourcesLabel: 'Sources:',
+      nonAiNotice: 'System Notice'
     },
     vi: {
       title: 'Trợ lý Hỗ trợ',
@@ -53,7 +61,15 @@ export function getSupportRuntimeWidgetScript(): string {
       authRequired: 'Yêu cầu xác thực. Vui lòng đăng nhập để tiếp tục.',
       networkError: 'Lỗi mạng. Vui lòng thử lại.',
       sending: 'Đang gửi...',
-      retryFailed: 'Yêu cầu thất bại. Bấm để thử lại.'
+      retryFailed: 'Yêu cầu thất bại. Bấm để thử lại.',
+      knowledgeNoticeNoMatches: 'Không tìm thấy tài liệu phù hợp để trả lời câu hỏi này. Bạn có thể diễn đạt lại hoặc gặp nhân viên hỗ trợ.',
+      knowledgeNoticeInvalidCitations: 'Câu trả lời không thể xác minh với tài liệu được cấp phép.',
+      knowledgeNoticeSourcesChanged: 'Nguồn tri thức đã thay đổi trong khi xử lý. Vui lòng hỏi lại câu hỏi của bạn.',
+      knowledgeNoticeSourceRevoked: 'Phản hồi này tham chiếu đến tài liệu đã bị thu hồi hoặc không còn khả dụng.',
+      contextChanged: 'Ngữ cảnh tri thức đã thay đổi. Bấm để thử lại với yêu cầu mới.',
+      freshRetry: 'Thử lại với yêu cầu mới',
+      sourcesLabel: 'Nguồn tham khảo:',
+      nonAiNotice: 'Thông báo hệ thống'
     }
   };
 
@@ -142,6 +158,9 @@ export function getSupportRuntimeWidgetScript(): string {
       var isOpen = false;
       var isEscalated = false;
       var renderedMessageIds = {};
+      var renderedRequestIds = {};
+      var renderedAssistantNodes = {};
+      var renderedNotices = {};
       var currentTurn = null; // { text, requestId, conversationId }
       var activeAbortControllers = [];
       var pollTimer = null;
@@ -356,6 +375,77 @@ export function getSupportRuntimeWidgetScript(): string {
         msgList.scrollTop = msgList.scrollHeight;
       }
 
+      function safeRenderNotice(reason, reqId) {
+        var noticeBox = document.createElement('div');
+        noticeBox.className = 'freellmapi-notice';
+        noticeBox.setAttribute('data-testid', 'widget-response-notice');
+        noticeBox.setAttribute('data-role', 'system-notice');
+        noticeBox.style.cssText = 'align-self:flex-start;max-width:85%;padding:10px 14px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:12px;font-size:13px;line-height:1.4;';
+        if (reqId) noticeBox.setAttribute('data-request-id', reqId);
+
+        var label = document.createElement('div');
+        label.setAttribute('data-testid', 'widget-non-ai-status');
+        label.style.cssText = 'font-weight:600;font-size:11px;color:#6b7280;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.05em;';
+        label.textContent = strings.nonAiNotice;
+        noticeBox.appendChild(label);
+
+        var text = document.createElement('div');
+        var msg = strings.knowledgeNoticeNoMatches;
+        if (reason === 'invalid_citations') msg = strings.knowledgeNoticeInvalidCitations;
+        else if (reason === 'sources_changed') msg = strings.knowledgeNoticeSourcesChanged;
+        else if (reason === 'source_revoked') msg = strings.knowledgeNoticeSourceRevoked;
+        text.textContent = msg; // SAFE TEXT - NO innerHTML
+        noticeBox.appendChild(text);
+
+        msgList.appendChild(noticeBox);
+        msgList.scrollTop = msgList.scrollHeight;
+        return noticeBox;
+      }
+
+      function safeRenderCitations(containerEl, citations) {
+        if (!citations || !citations.length) return;
+        var citeWrap = document.createElement('div');
+        citeWrap.setAttribute('data-testid', 'widget-citations-container');
+        citeWrap.style.cssText = 'margin-top:8px;padding-top:8px;border-top:1px solid rgba(0,0,0,0.1);display:flex;flex-direction:column;gap:6px;';
+
+        var headerSpan = document.createElement('span');
+        headerSpan.style.cssText = 'font-size:11px;font-weight:600;opacity:0.8;';
+        headerSpan.textContent = strings.sourcesLabel;
+        citeWrap.appendChild(headerSpan);
+
+        for (var i = 0; i < citations.length; i++) {
+          var c = citations[i];
+          var card = document.createElement('div');
+          card.setAttribute('data-testid', 'widget-citation-card');
+          card.setAttribute('data-citation-id', c.id || '');
+          card.setAttribute('data-ordinal', String(c.ordinal || (i + 1)));
+          card.style.cssText = 'background:rgba(255,255,255,0.7);border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:12px;color:#1f2937;';
+
+          var titleEl = document.createElement('div');
+          titleEl.style.cssText = 'font-weight:600;display:flex;gap:4px;align-items:center;';
+          var numSpan = document.createElement('span');
+          numSpan.style.cssText = 'color:' + primaryColor + ';';
+          numSpan.textContent = '[' + (c.ordinal || (i + 1)) + ']';
+          titleEl.appendChild(numSpan);
+          var titleText = document.createElement('span');
+          titleText.textContent = c.title || 'Source'; // SAFE TEXT
+          titleEl.appendChild(titleText);
+          card.appendChild(titleEl);
+
+          if (c.excerpt) {
+            var excerptEl = document.createElement('div');
+            excerptEl.setAttribute('data-testid', 'widget-citation-excerpt');
+            excerptEl.style.cssText = 'font-size:11px;color:#4b5563;margin-top:2px;font-style:italic;word-break:break-word;';
+            excerptEl.textContent = c.excerpt; // SAFE TEXT
+            card.appendChild(excerptEl);
+          }
+
+          citeWrap.appendChild(card);
+        }
+
+        containerEl.appendChild(citeWrap);
+      }
+
       function showCsatPrompt() {
         if (msgList.querySelector('[data-testid="widget-csat-container"]')) return;
         var container = document.createElement('div');
@@ -461,6 +551,88 @@ export function getSupportRuntimeWidgetScript(): string {
         });
       }
 
+      function processMessageItem(m) {
+        if (!m) return;
+        var mid = m.id || (m.createdAt + '_' + m.content);
+        var reqId = m.requestId || (m.evidence && m.evidence.requestId) || (m.responseNotice && m.responseNotice.requestId);
+
+        var isRedacted = m.evidence && (m.evidence.status === 'redacted' || m.evidence.reason === 'source_revoked');
+        if (isRedacted) {
+          var prevAssistant = (reqId && renderedAssistantNodes[reqId]) ||
+                              renderedAssistantNodes[mid] ||
+                              (reqId ? msgList.querySelector('.freellmapi-message-assistant[data-request-id="' + reqId + '"]') : null) ||
+                              msgList.querySelector('.freellmapi-message-assistant[data-message-id="' + mid + '"]');
+          if (prevAssistant && prevAssistant.parentNode) {
+            prevAssistant.parentNode.removeChild(prevAssistant);
+          }
+          if (reqId) delete renderedAssistantNodes[reqId];
+          delete renderedAssistantNodes[mid];
+
+          var existingNotice = (reqId && renderedNotices[reqId]) || renderedNotices[mid];
+          if (!existingNotice || !existingNotice.parentNode) {
+            var noticeBox = safeRenderNotice('source_revoked', reqId);
+            if (reqId) renderedNotices[reqId] = noticeBox;
+            renderedNotices[mid] = noticeBox;
+          }
+          if (reqId) renderedRequestIds[reqId] = true;
+          renderedMessageIds[mid] = true;
+          return;
+        }
+
+        var isAbstained = (m.evidence && m.evidence.status === 'abstained') || !!m.responseNotice;
+        if (isAbstained) {
+          var reason = (m.evidence && m.evidence.reason) || (m.responseNotice && m.responseNotice.reason) || 'no_matches';
+          var prevAssistant2 = (reqId && renderedAssistantNodes[reqId]) ||
+                               renderedAssistantNodes[mid] ||
+                               (reqId ? msgList.querySelector('.freellmapi-message-assistant[data-request-id="' + reqId + '"]') : null) ||
+                               msgList.querySelector('.freellmapi-message-assistant[data-message-id="' + mid + '"]');
+          if (prevAssistant2 && prevAssistant2.parentNode) {
+            prevAssistant2.parentNode.removeChild(prevAssistant2);
+          }
+          if (reqId) delete renderedAssistantNodes[reqId];
+          delete renderedAssistantNodes[mid];
+
+          var existingNotice2 = (reqId && renderedNotices[reqId]) || renderedNotices[mid];
+          if (!existingNotice2 || !existingNotice2.parentNode) {
+            var noticeBox2 = safeRenderNotice(reason, reqId);
+            if (reqId) renderedNotices[reqId] = noticeBox2;
+            renderedNotices[mid] = noticeBox2;
+          }
+          if (reqId) renderedRequestIds[reqId] = true;
+          renderedMessageIds[mid] = true;
+          return;
+        }
+
+        if (reqId && renderedRequestIds[reqId]) {
+          renderedMessageIds[mid] = true;
+          if (renderedAssistantNodes[reqId]) {
+            renderedAssistantNodes[mid] = renderedAssistantNodes[reqId];
+          }
+          return;
+        }
+
+        if (!renderedMessageIds[mid]) {
+          renderedMessageIds[mid] = true;
+          if (reqId) renderedRequestIds[reqId] = true;
+
+          var role = m.senderType || m.role || 'user';
+          if (role === 'human_agent' || role === 'staff' || role === 'agent') {
+            safeRenderMessage('staff', m.content, m.senderName || 'Support Agent');
+          } else if (role === 'ai_assistant' || role === 'assistant') {
+            var assistantEl = safeRenderMessage('assistant', m.content);
+            if (reqId) assistantEl.setAttribute('data-request-id', reqId);
+            assistantEl.setAttribute('data-message-id', mid);
+            if (reqId) renderedAssistantNodes[reqId] = assistantEl;
+            renderedAssistantNodes[mid] = assistantEl;
+            if (m.evidence && m.evidence.status === 'cited' && m.evidence.citations && m.evidence.citations.length > 0) {
+              safeRenderCitations(assistantEl, m.evidence.citations);
+            }
+          } else if (role === 'user') {
+            safeRenderMessage('user', m.content);
+          }
+        }
+      }
+
       function resumeConversation(convId) {
         var epoch = identityEpoch;
         if (!convId) return;
@@ -513,19 +685,7 @@ export function getSupportRuntimeWidgetScript(): string {
           sendBtn.disabled = isEscalated;
           var msgs = conv.messages || [];
           for (var i = 0; i < msgs.length; i++) {
-            var m = msgs[i];
-            var mid = m.id || (m.createdAt + '_' + m.content);
-            if (!renderedMessageIds[mid]) {
-              renderedMessageIds[mid] = true;
-              var role = m.senderType || m.role || 'user';
-              if (role === 'human_agent' || role === 'staff' || role === 'agent') {
-                safeRenderMessage('staff', m.content, m.senderName || 'Support Agent');
-              } else if ((role === 'ai_assistant' || role === 'assistant')) {
-                safeRenderMessage('assistant', m.content);
-              } else {
-                safeRenderMessage('user', m.content);
-              }
-            }
+            processMessageItem(msgs[i]);
           }
           if (isOpen) startPolling();
         })
@@ -601,17 +761,7 @@ export function getSupportRuntimeWidgetScript(): string {
           sendBtn.disabled = isEscalated;
           var msgs = conv.messages || [];
           for (var i = 0; i < msgs.length; i++) {
-            var m = msgs[i];
-            var mid = m.id || (m.createdAt + '_' + m.content);
-            if (!renderedMessageIds[mid]) {
-              renderedMessageIds[mid] = true;
-              var role = m.senderType || m.role || '';
-              if (role === 'human_agent' || role === 'staff' || role === 'agent') {
-                safeRenderMessage('staff', m.content, m.senderName || 'Support Agent');
-              } else if ((role === 'ai_assistant' || role === 'assistant') && !isEscalated) {
-                safeRenderMessage('assistant', m.content);
-              }
-            }
+            processMessageItem(msgs[i]);
           }
           if (conv.status === 'resolved' || conv.status === 'closed') {
             showCsatPrompt();
@@ -676,12 +826,27 @@ export function getSupportRuntimeWidgetScript(): string {
               clearCurrentStorage();
               conversationId = null;
               renderedMessageIds = {};
+              renderedRequestIds = {};
+              renderedAssistantNodes = {};
+              renderedNotices = {};
               msgList.textContent = '';
               return renewGuestSession().then(function() {
                 identityEpoch++;
                 safeRenderMessage('user', text);
                 performSend(text, reqId, null, true);
                 return null;
+              });
+            }
+            if (res.status === 409) {
+              return res.json().catch(function() { return {}; }).then(function(errData) {
+                var code = (errData && errData.error && errData.error.code) || 'http_409';
+                var err = new Error(code);
+                if (code === 'knowledge_context_changed') {
+                  err.isContextChanged = true;
+                }
+                err.status = 409;
+                err.data = errData;
+                throw err;
               });
             }
             if (!res.ok) {
@@ -712,9 +877,29 @@ export function getSupportRuntimeWidgetScript(): string {
             writeStored('conv_id', conversationId);
           }
 
-          var reply = data.reply || (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
-          if (reply && !isEscalated) {
-            safeRenderMessage('assistant', reply);
+          var isAbstained = data.runtime && (
+            data.runtime.replySource === 'knowledge_abstention' ||
+            (data.runtime.evidence && data.runtime.evidence.status === 'abstained')
+          );
+
+          if (isAbstained) {
+            var reason = (data.runtime.evidence && data.runtime.evidence.reason) ||
+                         (data.runtime.responseNotice && data.runtime.responseNotice.reason) ||
+                         'no_matches';
+            renderedRequestIds[reqId] = true;
+            var noticeBox = safeRenderNotice(reason, reqId);
+            renderedNotices[reqId] = noticeBox;
+          } else {
+            var reply = data.reply || (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+            if (reply && !isEscalated) {
+              renderedRequestIds[reqId] = true;
+              var assistantEl = safeRenderMessage('assistant', reply);
+              assistantEl.setAttribute('data-request-id', reqId);
+              renderedAssistantNodes[reqId] = assistantEl;
+              if (data.runtime && data.runtime.evidence && data.runtime.evidence.status === 'cited' && data.runtime.evidence.citations) {
+                safeRenderCitations(assistantEl, data.runtime.evidence.citations);
+              }
+            }
           }
 
           if (data.runtime && Array.isArray(data.runtime.pendingActions)) {
@@ -733,6 +918,32 @@ export function getSupportRuntimeWidgetScript(): string {
 
           sendBtn.disabled = false;
           input.disabled = false;
+
+          if (err && err.isContextChanged) {
+            var ctxBox = document.createElement('div');
+            ctxBox.setAttribute('data-testid', 'widget-context-changed-box');
+            ctxBox.style.cssText = 'align-self:flex-start;padding:8px 12px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:8px;font-size:12px;display:flex;align-items:center;gap:8px;';
+
+            var ctxText = document.createElement('span');
+            ctxText.textContent = strings.contextChanged;
+            ctxBox.appendChild(ctxText);
+
+            var freshRetryBtn = document.createElement('button');
+            freshRetryBtn.type = 'button';
+            freshRetryBtn.setAttribute('data-testid', 'widget-fresh-retry-btn');
+            freshRetryBtn.textContent = strings.freshRetry;
+            freshRetryBtn.style.cssText = 'padding:2px 8px;background:#d97706;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:500;';
+            freshRetryBtn.addEventListener('click', function() {
+              ctxBox.remove();
+              var freshRequestId = 'req_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 9);
+              performSend(turn.text, freshRequestId, turn.conversationId);
+            });
+            ctxBox.appendChild(freshRetryBtn);
+
+            msgList.appendChild(ctxBox);
+            msgList.scrollTop = msgList.scrollHeight;
+            return;
+          }
 
           var errBox = document.createElement('div');
           errBox.setAttribute('data-testid', 'widget-error-box');
@@ -857,6 +1068,9 @@ export function getSupportRuntimeWidgetScript(): string {
           bannerBox.style.display = 'none';
           bannerBox.textContent = '';
           renderedMessageIds = {};
+          renderedRequestIds = {};
+          renderedAssistantNodes = {};
+          renderedNotices = {};
           currentTurn = null;
           isEscalated = false;
           escalateBtn.style.display = 'inline-block';
@@ -889,6 +1103,10 @@ export function getSupportRuntimeWidgetScript(): string {
           destroyed = true;
           isOpen = false;
           identityEpoch++;
+          renderedMessageIds = {};
+          renderedRequestIds = {};
+          renderedAssistantNodes = {};
+          renderedNotices = {};
           abortAllRequests();
           stopPolling();
           if (root && root.parentNode) {

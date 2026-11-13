@@ -28,6 +28,7 @@ import SupportGateway from './pages/SupportGateway'
 import SupportEnterprise from './pages/SupportEnterprise'
 import SupportGovernance from './pages/SupportGovernance'
 import SupportIntegration from './pages/SupportIntegration'
+import SupportKnowledgeStudio from './pages/SupportKnowledgeStudio'
 import ModelAvailabilityBadge from './components/ModelAvailabilityBadge'
 import { THRULINE_ICON, ThrulineLogo } from './ThrulineLogo'
 import { useShellStrings } from './shell-strings'
@@ -112,6 +113,7 @@ function XGatewayShell() {
         <Route path="playground" element={<Playground />} />
         <Route path="support-integration" element={<SupportIntegration />} />
         <Route path="support" element={<SupportGateway />} />
+        <Route path="support-knowledge" element={<SupportKnowledgeStudio />} />
         <Route path="support-ops" element={<SupportEnterprise />} />
         <Route path="support-guardrails" element={<SupportGovernance />} />
         <Route path="tools" element={<CLITools />} />
@@ -128,12 +130,6 @@ function XGatewayShell() {
       </Routes></ErrorBoundary></main>
     </div><QuickJump groups={groups} open={jumpOpen} onClose={() => setJumpOpen(false)} /><ConfirmHost /><Toaster />
   </div>
-}
-
-/** Where a pre-rename console address (`/x/...`) lives now, or null for any other path. */
-export function legacyGatewayTarget(location: { pathname: string; search: string; hash: string }): string | null {
-  if (location.pathname !== '/x' && !location.pathname.startsWith('/x/')) return null
-  return `/thruline${location.pathname.slice(2)}${location.search}${location.hash}`
 }
 
 export default function XGatewayApp() {
