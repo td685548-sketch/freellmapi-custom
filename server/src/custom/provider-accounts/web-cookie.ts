@@ -12,6 +12,7 @@ import { contentToString, estimateInputTokens } from '../../lib/content.js';
 import { BaseProvider, providerHttpError, type CompletionOptions, type KeyValidationResult } from '../../providers/base.js';
 import type { QuotaObservationContext } from '../../services/provider-quota.js';
 import { runChatGptWebChat } from './chatgpt-web-chat.js';
+import { runDeepSeekWebChat, streamDeepSeekWebChat } from './deepseek-web-chat.js';
 import {
   fetchChatGptWebAccessToken,
   normalizeChatGptWebCookie,
@@ -291,6 +292,9 @@ export class WebCookieProvider extends BaseProvider {
     if (this.providerId === 'chatgpt-web') {
       return this.chatGptWebCompletion(apiKey, messages, modelId, options);
     }
+    if (this.providerId === 'deepseek-web') {
+      return this.deepSeekWebCompletion(apiKey, messages, modelId, options);
+    }
 
     const { pathSuffix, body } = buildWebProviderPayload(this.providerId, messages, modelId, false, options);
     const url = resolveTargetUrl(this.baseUrl, pathSuffix);
@@ -421,6 +425,35 @@ export class WebCookieProvider extends BaseProvider {
         id: chatGptId,
         object: 'chat.completion.chunk',
         created: chatGptCreated,
+        model: modelId,
+        choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+      };
+      return;
+    }
+
+    if (this.providerId === 'deepseek-web') {
+      const deepSeekId = this.makeId();
+      const deepSeekCreated = Math.floor(Date.now() / 1000);
+      for await (const delta of streamDeepSeekWebChat({
+        credential: apiKey,
+        messages,
+        modelId,
+        baseUrl: this.baseUrl,
+        platform: this.platform,
+        options,
+      })) {
+        yield {
+          id: deepSeekId,
+          object: 'chat.completion.chunk',
+          created: deepSeekCreated,
+          model: modelId,
+          choices: [{ index: 0, delta, finish_reason: null }],
+        };
+      }
+      yield {
+        id: deepSeekId,
+        object: 'chat.completion.chunk',
+        created: deepSeekCreated,
         model: modelId,
         choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
       };
@@ -581,6 +614,47 @@ export class WebCookieProvider extends BaseProvider {
     };
   }
 
+  /** Non-streaming DeepSeek Web turn (users/current -> session -> PoW -> JSON-patch SSE). */
+  private async deepSeekWebCompletion(
+    apiKey: string,
+    messages: ChatMessage[],
+    modelId: string,
+    options?: CompletionOptions,
+  ): Promise<ChatCompletionResponse> {
+    const { content, reasoning_content } = await runDeepSeekWebChat({
+      credential: apiKey,
+      messages,
+      modelId,
+      baseUrl: this.baseUrl,
+      platform: this.platform,
+      options,
+    });
+    const promptTokens = estimateInputTokens(messages);
+    const completionTokens = Math.max(1, Math.ceil((content.length + (reasoning_content?.length ?? 0)) / 4));
+    return {
+      id: this.makeId(),
+      object: 'chat.completion',
+      created: Math.floor(Date.now() / 1000),
+      model: modelId,
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content,
+            ...(reasoning_content ? { reasoning_content } : {}),
+          },
+          finish_reason: 'stop',
+        },
+      ],
+      usage: {
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        total_tokens: promptTokens + completionTokens,
+      },
+    };
+  }
+
   private htmlChallengeError(phase: string): Error {
     return Object.assign(
       new Error(`${this.name} returned an HTML challenge page (${phase}); refresh the web session cookie`),
@@ -718,7 +792,7 @@ export class AnthropicWireProvider extends BaseProvider {
     const credential = parseOAuthCredential(apiKey);
     if (credential) {
       if (credential.kind !== 'claude') throw new Error('Claude requires a matching OAuth credential.');
-      return { ...this.extraHeaders, 'Content-Type': 'application/json', Authorization: `Bearer ${credential.accessToken}`, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14', 'User-Agent': 'claude-cli/2.1.290 (external, sdk-cli)', 'x-app': 'cli' };
+      return { ...this.extraHeaders, 'Content-Type': 'application/json', Authorization: `Bearer ${credential.accessToken}`, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14', 'User-Agent': 'claude-cli/2.1.280 (external, sdk-cli)', 'x-app': 'cli' };
     }
     const token = apiKey.trim().replace(/^Bearer\s+/i, '');
     return {
