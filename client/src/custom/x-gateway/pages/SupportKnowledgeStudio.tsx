@@ -351,7 +351,7 @@ function SourcesPanel({
 
       {/* Create Source Card */}
       {canEdit && (
-        <div className="x-card" style={{ padding: 16, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+        <div className="x-card" style={{ padding: 16, background: 'var(--x-alt)', border: '1px solid var(--x-border)', borderRadius: 8 }}>
           <h3 style={{ margin: '0 0 12px 0', fontSize: 15 }}>{s.sources.newSource}</h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 12 }}>
             <div className="x-field">
@@ -459,40 +459,40 @@ function SourcesPanel({
                 className="x-card"
                 style={{
                   padding: 14,
-                  border: isSelected ? '2px solid #2563eb' : '1px solid #e2e8f0',
+                  border: isSelected ? '2px solid var(--x-primary)' : '1px solid var(--x-border)',
                   borderRadius: 8,
-                  background: isArchived ? '#f1f5f9' : '#fff',
+                  background: isArchived ? 'var(--x-alt)' : 'var(--x-panel)',
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
                   <div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                       <strong style={{ fontSize: 15 }}>{src.name}</strong>
-                      <span className="x-badge" style={{ fontSize: 11, background: '#e0f2fe', color: '#0369a1' }}>
+                      <span className="x-badge" style={{ fontSize: 11, background: 'var(--x-tint)', color: 'var(--x-primary)' }}>
                         {s.sources.kinds[src.kind]}
                       </span>
                       <span
                         className="x-badge"
                         style={{
                           fontSize: 11,
-                          background: isArchived ? '#fee2e2' : '#dcfce7',
-                          color: isArchived ? '#991b1b' : '#166534',
+                          background: isArchived ? 'var(--x-red-bg)' : 'var(--x-green-bg)',
+                          color: isArchived ? 'var(--x-red)' : 'var(--x-green)',
                         }}
                       >
                         {isArchived ? s.sources.statusArchived : s.sources.statusActive}
                       </span>
-                      <span className="x-badge" style={{ fontSize: 11, background: '#f3f4f6', color: '#374151' }}>
+                      <span className="x-badge" style={{ fontSize: 11, background: 'var(--x-alt)', color: 'var(--x-muted)' }}>
                         v{src.version}
                       </span>
                     </div>
 
-                    <div style={{ fontSize: 12, color: '#475569', marginTop: 6, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: 12, color: 'var(--x-muted)', marginTop: 6, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
                       <span>
                         <strong>{s.sources.publishedRevision}:</strong>{' '}
                         {src.publishedRevisionId ? (
-                          <span style={{ color: '#059669', fontWeight: 600 }}>{src.publishedRevisionId}</span>
+                          <span style={{ color: 'var(--x-green)', fontWeight: 600 }}>{src.publishedRevisionId}</span>
                         ) : (
-                          <span style={{ color: '#d97706' }}>{s.sources.noPublished}</span>
+                          <span style={{ color: 'var(--x-amber)' }}>{s.sources.noPublished}</span>
                         )}
                       </span>
                       {src.draftRevisionId && (
@@ -531,7 +531,7 @@ function SourcesPanel({
                     {editingSourceRolesId === src.id && (
                       <div
                         data-testid={`edit-source-roles-form-${src.id}`}
-                        style={{ marginTop: 10, padding: 10, background: '#f8fafc', borderRadius: 6, border: '1px solid #cbd5e1' }}
+                        style={{ marginTop: 10, padding: 10, background: 'var(--x-alt)', borderRadius: 6, border: '1px solid var(--x-border)' }}
                       >
                         <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>{s.sources.editRoles}:</div>
                         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
@@ -628,7 +628,7 @@ function SourcesPanel({
 
                 {/* Selected Source Revisions & Import Area */}
                 {isSelected && (
-                  <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #e2e8f0' }}>
+                  <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--x-border)' }}>
                     <h4 style={{ fontSize: 14, margin: '0 0 10px 0' }}>{s.sources.revisionsHeading}</h4>
                     {revisionsQuery.isPending && <div className="x-loading">{s.loading}</div>}
                     {revisionsQuery.isError && (
@@ -648,8 +648,10 @@ function SourcesPanel({
                             data-testid={`revision-row-${rev.id}`}
                             style={{
                               padding: 10,
-                              background: isCurrentPublished ? '#f0fdf4' : '#f8fafc',
-                              border: isCurrentPublished ? '1px solid #86efac' : '1px solid #e2e8f0',
+                              background: isCurrentPublished ? 'var(--x-green-bg)' : 'var(--x-alt)',
+                              border: isCurrentPublished
+                                ? '1px solid color-mix(in srgb, var(--x-green) 45%, var(--x-border))'
+                                : '1px solid var(--x-border)',
                               borderRadius: 6,
                               fontSize: 12,
                             }}
@@ -657,13 +659,13 @@ function SourcesPanel({
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                               <div>
                                 <strong style={{ fontSize: 13 }}>{rev.title}</strong>{' '}
-                                <span style={{ color: '#64748b' }}>({rev.id})</span>
+                                <span style={{ color: 'var(--x-muted)' }}>({rev.id})</span>
                                 {isCurrentPublished && (
-                                  <span className="x-badge" style={{ marginLeft: 8, background: '#22c55e', color: '#fff', fontSize: 10 }}>
+                                  <span className="x-badge" style={{ marginLeft: 8, background: 'var(--x-green)', color: 'var(--x-on-primary)', fontSize: 10 }}>
                                     {s.sources.publishedRevision}
                                   </span>
                                 )}
-                                <div style={{ color: '#475569', marginTop: 4 }}>
+                                <div style={{ color: 'var(--x-muted)', marginTop: 4 }}>
                                   <span>{rev.chunkCount} {s.sources.chunksCount}</span>
                                   {rev.category && <span> • {rev.category}</span>}
                                   {rev.tags?.length > 0 && <span> • Tags: {rev.tags.join(', ')}</span>}
@@ -708,12 +710,12 @@ function SourcesPanel({
 
                             {/* Decrypted content viewer */}
                             {isViewing && (
-                              <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed #cbd5e1' }}>
+                              <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--x-border)' }}>
                                 <pre
                                   data-testid={`revision-content-view-${rev.id}`}
                                   style={{
-                                    background: '#1e293b',
-                                    color: '#e2e8f0',
+                                    background: 'var(--x-bg)',
+                                    color: 'var(--x-text)',
                                     padding: 10,
                                     borderRadius: 4,
                                     maxHeight: 200,
@@ -732,7 +734,7 @@ function SourcesPanel({
 
                     {/* Import Draft Revision Form */}
                     {canEdit && (
-                      <div style={{ background: '#f1f5f9', padding: 12, borderRadius: 6 }}>
+                      <div style={{ background: 'var(--x-alt)', padding: 12, borderRadius: 6 }}>
                         <h5 style={{ margin: '0 0 10px 0', fontSize: 13 }}>{s.sources.newDraftRevision}</h5>
 
                         {importNotice && (
@@ -916,7 +918,7 @@ function PreviewPanel({ tenantBase }: { tenantBase: string }) {
         <span style={{ fontSize: 13, lineHeight: 1.5 }}>{s.preview.description}</span>
       </div>
 
-      <div className="x-card" style={{ padding: 16, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+      <div className="x-card" style={{ padding: 16, background: 'var(--x-alt)', border: '1px solid var(--x-border)', borderRadius: 8 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, alignItems: 'flex-end', marginBottom: 12 }}>
           <div className="x-field">
             <label htmlFor="preview-query">
@@ -976,33 +978,33 @@ function PreviewPanel({ tenantBase }: { tenantBase: string }) {
       {/* Results View */}
       {preview && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div className="x-card" style={{ padding: 14, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+          <div className="x-card" style={{ padding: 14, background: 'var(--x-panel)', border: '1px solid var(--x-border)', borderRadius: 8 }}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, fontSize: 13 }}>
               <div>
-                <strong style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase' }}>{s.preview.snapshotId}</strong>
+                <strong style={{ color: 'var(--x-muted)', fontSize: 11, textTransform: 'uppercase' }}>{s.preview.snapshotId}</strong>
                 <div data-testid="preview-snapshot-id" style={{ fontFamily: 'monospace', fontWeight: 600 }}>
                   {preview.snapshotId?.slice(0, 16)}…
                 </div>
               </div>
               <div>
-                <strong style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase' }}>{s.preview.policyVersion}</strong>
+                <strong style={{ color: 'var(--x-muted)', fontSize: 11, textTransform: 'uppercase' }}>{s.preview.policyVersion}</strong>
                 <div data-testid="preview-policy-version" style={{ fontWeight: 600 }}>
                   v{preview.policyVersion}
                 </div>
               </div>
               <div>
-                <strong style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase' }}>{s.preview.contextChars}</strong>
+                <strong style={{ color: 'var(--x-muted)', fontSize: 11, textTransform: 'uppercase' }}>{s.preview.contextChars}</strong>
                 <div data-testid="preview-context-chars" style={{ fontWeight: 600 }}>
                   {preview.contextChars}
                 </div>
               </div>
               <div>
-                <strong style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase' }}>{s.preview.willAbstain}</strong>
+                <strong style={{ color: 'var(--x-muted)', fontSize: 11, textTransform: 'uppercase' }}>{s.preview.willAbstain}</strong>
                 <div
                   data-testid="preview-will-abstain"
                   style={{
                     fontWeight: 600,
-                    color: preview.willAbstain ? '#dc2626' : '#16a34a',
+                    color: preview.willAbstain ? 'var(--x-red)' : 'var(--x-green)',
                   }}
                 >
                   {preview.willAbstain ? s.preview.willAbstainYes : s.preview.willAbstainNo}
@@ -1024,25 +1026,25 @@ function PreviewPanel({ tenantBase }: { tenantBase: string }) {
                     key={cand.citationId || idx}
                     data-testid="preview-candidate-card"
                     className="x-card"
-                    style={{ padding: 12, border: '1px solid #e2e8f0', borderRadius: 8, background: '#fff' }}
+                    style={{ padding: 12, border: '1px solid var(--x-border)', borderRadius: 8, background: 'var(--x-panel)' }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                       <strong style={{ fontSize: 13 }}>
                         [{idx + 1}] {cand.title}
                       </strong>
                       <div style={{ display: 'flex', gap: 12, fontSize: 12 }}>
-                        <span data-testid="candidate-lexical-coverage" style={{ color: '#2563eb', fontWeight: 600 }}>
+                        <span data-testid="candidate-lexical-coverage" style={{ color: 'var(--x-primary)', fontWeight: 600 }}>
                           {s.preview.lexicalCoverage}: {(cand.lexicalCoverage * 100).toFixed(0)}%
                         </span>
-                        <span data-testid="candidate-lexical-score" style={{ color: '#059669', fontWeight: 600 }}>
+                        <span data-testid="candidate-lexical-score" style={{ color: 'var(--x-green)', fontWeight: 600 }}>
                           {s.preview.lexicalScore}: {cand.score.toFixed(2)}
                         </span>
-                        <span style={{ color: '#64748b' }}>
+                        <span style={{ color: 'var(--x-muted)' }}>
                           {s.preview.lines} {cand.startLine}-{cand.endLine}
                         </span>
                       </div>
                     </div>
-                    <p style={{ margin: 0, fontSize: 12, color: '#334155', fontStyle: 'italic', background: '#f8fafc', padding: 8, borderRadius: 4 }}>
+                    <p style={{ margin: 0, fontSize: 12, color: 'var(--x-muted)', fontStyle: 'italic', background: 'var(--x-alt)', padding: 8, borderRadius: 4 }}>
                       "{cand.excerpt || cand.providedText || ''}"
                     </p>
                   </div>
@@ -1136,7 +1138,7 @@ function PolicyPanel({
         conflict={conflictOccurred}
       />
 
-      <div className="x-card" style={{ padding: 16, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+      <div className="x-card" style={{ padding: 16, background: 'var(--x-panel)', border: '1px solid var(--x-border)', borderRadius: 8 }}>
         {/* Mode selector */}
         <div className="x-field" style={{ marginBottom: 16 }}>
           <label htmlFor="policy-mode-select">
@@ -1259,7 +1261,7 @@ function PolicyPanel({
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: 12, color: '#64748b' }}>
+          <span style={{ fontSize: 12, color: 'var(--x-muted)' }}>
             {s.policy.versionLabel}: <strong data-testid="policy-version">v{activePolicy.version}</strong>
           </span>
 
@@ -1500,7 +1502,7 @@ function EvaluationsPanel({
 
       {/* Suite Creator / Editor */}
       {canEdit && (
-        <div className="x-card" style={{ padding: 16, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+        <div className="x-card" style={{ padding: 16, background: 'var(--x-alt)', border: '1px solid var(--x-border)', borderRadius: 8 }}>
           <h3 style={{ margin: '0 0 12px 0', fontSize: 15 }}>
             {editingSuiteId ? `${s.evaluations.editSuite} (v${editingSuiteVersion})` : s.evaluations.newSuite}
           </h3>
@@ -1554,15 +1556,15 @@ function EvaluationsPanel({
                   key={idx}
                   style={{
                     padding: 10,
-                    background: '#fff',
-                    border: '1px solid #cbd5e1',
+                    background: 'var(--x-panel)',
+                    border: '1px solid var(--x-border)',
                     borderRadius: 6,
                     fontSize: 12,
                   }}
                 >
                   <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 120px auto', gap: 8, marginBottom: 8 }}>
                     <div>
-                      <label style={{ fontSize: 11, color: '#475569' }}>{s.evaluations.caseId}</label>
+                      <label style={{ fontSize: 11, color: 'var(--x-muted)' }}>{s.evaluations.caseId}</label>
                       <input
                         data-testid={`case-id-input-${idx}`}
                         type="text"
@@ -1575,7 +1577,7 @@ function EvaluationsPanel({
                       />
                     </div>
                     <div>
-                      <label style={{ fontSize: 11, color: '#475569' }}>{s.evaluations.caseQuery}</label>
+                      <label style={{ fontSize: 11, color: 'var(--x-muted)' }}>{s.evaluations.caseQuery}</label>
                       <input
                         data-testid={`case-query-input-${idx}`}
                         type="text"
@@ -1588,7 +1590,7 @@ function EvaluationsPanel({
                       />
                     </div>
                     <div>
-                      <label style={{ fontSize: 11, color: '#475569' }}>{s.evaluations.caseRole}</label>
+                      <label style={{ fontSize: 11, color: 'var(--x-muted)' }}>{s.evaluations.caseRole}</label>
                       <select
                         data-testid={`case-role-select-${idx}`}
                         className="x-select"
@@ -1614,7 +1616,7 @@ function EvaluationsPanel({
                           style={{ padding: '6px 8px' }}
                           onClick={() => handleRemoveCase(idx)}
                         >
-                          <Trash2 size={13} color="#dc2626" />
+                          <Trash2 size={13} color="var(--x-red)" />
                         </button>
                       )}
                     </div>
@@ -1622,7 +1624,7 @@ function EvaluationsPanel({
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 8, alignItems: 'center' }}>
                     <div>
-                      <label style={{ fontSize: 11, color: '#475569' }}>{s.evaluations.expectedSources}</label>
+                      <label style={{ fontSize: 11, color: 'var(--x-muted)' }}>{s.evaluations.expectedSources}</label>
                       <input
                         data-testid={`case-expected-input-${idx}`}
                         type="text"
@@ -1636,7 +1638,7 @@ function EvaluationsPanel({
                       />
                     </div>
                     <div>
-                      <label style={{ fontSize: 11, color: '#475569' }}>{s.evaluations.forbiddenSources}</label>
+                      <label style={{ fontSize: 11, color: 'var(--x-muted)' }}>{s.evaluations.forbiddenSources}</label>
                       <input
                         data-testid={`case-forbidden-input-${idx}`}
                         type="text"
@@ -1718,12 +1720,12 @@ function EvaluationsPanel({
               key={suite.id}
               data-testid={`suite-card-${suite.id}`}
               className="x-card"
-              style={{ padding: 14, border: '1px solid #e2e8f0', borderRadius: 8, background: '#fff' }}
+              style={{ padding: 14, border: '1px solid var(--x-border)', borderRadius: 8, background: 'var(--x-panel)' }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                 <div>
                   <strong style={{ fontSize: 14 }}>{suite.name}</strong>
-                  <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
+                  <div style={{ fontSize: 12, color: 'var(--x-muted)', marginTop: 4 }}>
                     <span>{suite.cases.length} {s.evaluations.casesCount}</span> • <span>v{suite.version}</span>
                   </div>
                 </div>
@@ -1759,7 +1761,7 @@ function EvaluationsPanel({
 
       {/* Run Results View */}
       {selectedRun && (
-        <div data-testid="evaluation-run-results" className="x-card" style={{ padding: 16, background: '#fff', border: '2px solid #2563eb', borderRadius: 8 }}>
+        <div data-testid="evaluation-run-results" className="x-card" style={{ padding: 16, background: 'var(--x-panel)', border: '2px solid var(--x-primary)', borderRadius: 8 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <h4 style={{ margin: 0, fontSize: 15 }}>Run Details ({selectedRun.id})</h4>
             <span
@@ -1769,16 +1771,16 @@ function EvaluationsPanel({
                 fontSize: 12,
                 background:
                   selectedRun.status === 'completed'
-                    ? '#dcfce7'
+                    ? 'var(--x-green-bg)'
                     : selectedRun.status === 'partial'
-                    ? '#fef3c7'
-                    : '#fee2e2',
+                    ? 'var(--x-amber-bg)'
+                    : 'var(--x-red-bg)',
                 color:
                   selectedRun.status === 'completed'
-                    ? '#166534'
+                    ? 'var(--x-green)'
                     : selectedRun.status === 'partial'
-                    ? '#92400e'
-                    : '#991b1b',
+                    ? 'var(--x-amber)'
+                    : 'var(--x-red)',
               }}
             >
               {selectedRun.status}
@@ -1787,25 +1789,25 @@ function EvaluationsPanel({
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, fontSize: 12, marginBottom: 14 }}>
             <div>
-              <strong style={{ color: '#64748b' }}>{s.evaluations.allPassed}:</strong>{' '}
-              <span data-testid="run-all-passed" style={{ fontWeight: 600, color: selectedRun.allPassed ? '#16a34a' : '#dc2626' }}>
+              <strong style={{ color: 'var(--x-muted)' }}>{s.evaluations.allPassed}:</strong>{' '}
+              <span data-testid="run-all-passed" style={{ fontWeight: 600, color: selectedRun.allPassed ? 'var(--x-green)' : 'var(--x-red)' }}>
                 {selectedRun.allPassed ? 'Yes' : 'No'}
               </span>
             </div>
             <div>
-              <strong style={{ color: '#64748b' }}>{s.evaluations.casesChecked}:</strong>{' '}
+              <strong style={{ color: 'var(--x-muted)' }}>{s.evaluations.casesChecked}:</strong>{' '}
               <span data-testid="run-cases-checked" style={{ fontWeight: 600 }}>
                 {selectedRun.casesChecked} / {selectedRun.totalCases}
               </span>
             </div>
             <div>
-              <strong style={{ color: '#64748b' }}>{s.evaluations.hitAtK}:</strong>{' '}
+              <strong style={{ color: 'var(--x-muted)' }}>{s.evaluations.hitAtK}:</strong>{' '}
               <span data-testid="run-hit-at-k" style={{ fontWeight: 600 }}>
                 {selectedRun.matchedExpectedCases}/{selectedRun.expectedCasesChecked} ({(selectedRun.hitAtK * 100).toFixed(1)}%)
               </span>
             </div>
             <div>
-              <strong style={{ color: '#64748b' }}>{s.evaluations.snapshots}:</strong>{' '}
+              <strong style={{ color: 'var(--x-muted)' }}>{s.evaluations.snapshots}:</strong>{' '}
               <span data-testid="run-snapshots" style={{ fontFamily: 'monospace' }}>
                 {(selectedRun.snapshotIds || []).map(s => s.slice(0, 8)).join(', ')}
               </span>
@@ -1821,8 +1823,10 @@ function EvaluationsPanel({
                   data-testid={`case-result-${res.caseId}`}
                   style={{
                     padding: 8,
-                    background: res.passed ? '#f0fdf4' : '#fef2f2',
-                    border: res.passed ? '1px solid #bbf7d0' : '1px solid #fecaca',
+                    background: res.passed ? 'var(--x-green-bg)' : 'var(--x-red-bg)',
+                    border: res.passed
+                      ? '1px solid color-mix(in srgb, var(--x-green) 45%, var(--x-border))'
+                      : '1px solid color-mix(in srgb, var(--x-red) 45%, var(--x-border))',
                     borderRadius: 6,
                     display: 'flex',
                     justifyContent: 'space-between',
@@ -1832,15 +1836,15 @@ function EvaluationsPanel({
                 >
                   <div>
                     <strong>{res.caseId}</strong> ({s.roles[res.role]})
-                    <div style={{ color: '#64748b', fontSize: 11, marginTop: 2 }}>
+                    <div style={{ color: 'var(--x-muted)', fontSize: 11, marginTop: 2 }}>
                       Expected hit: {res.expectedHit ? 'Yes' : 'No'} • Forbidden hits: {res.forbiddenHitCount} • Abstention matched: {res.abstentionMatched ? 'Yes' : 'No'}
                     </div>
                   </div>
                   <span
                     className="x-badge"
                     style={{
-                      background: res.passed ? '#22c55e' : '#ef4444',
-                      color: '#fff',
+                      background: res.passed ? 'var(--x-green)' : 'var(--x-red)',
+                      color: 'var(--x-on-primary)',
                       fontSize: 10,
                     }}
                   >
@@ -1871,7 +1875,7 @@ function EvaluationsPanel({
               className="x-card"
               style={{
                 padding: 10,
-                border: '1px solid #e2e8f0',
+                border: '1px solid var(--x-border)',
                 borderRadius: 6,
                 display: 'flex',
                 justifyContent: 'space-between',
@@ -1881,8 +1885,8 @@ function EvaluationsPanel({
               onClick={() => setSelectedRun(run)}
             >
               <div>
-                <strong>{run.id}</strong> • <span style={{ color: '#64748b' }}>Suite: {run.suiteId}</span>
-                <div style={{ fontSize: 11, color: '#475569', marginTop: 2 }}>
+                <strong>{run.id}</strong> • <span style={{ color: 'var(--x-muted)' }}>Suite: {run.suiteId}</span>
+                <div style={{ fontSize: 11, color: 'var(--x-muted)', marginTop: 2 }}>
                   {run.casesChecked}/{run.totalCases} cases • Hit@K: {(run.hitAtK * 100).toFixed(1)}% • {new Date(run.startedAt).toLocaleString()}
                 </div>
               </div>
@@ -1890,8 +1894,8 @@ function EvaluationsPanel({
               <span
                 className="x-badge"
                 style={{
-                  background: run.allPassed ? '#22c55e' : '#f59e0b',
-                  color: '#fff',
+                  background: run.allPassed ? 'var(--x-green)' : 'var(--x-amber)',
+                  color: 'var(--x-on-primary)',
                   fontSize: 11,
                 }}
               >
@@ -2011,7 +2015,7 @@ export default function SupportKnowledgeStudio() {
       <div className="x-page-header" style={{ marginBottom: 20 }}>
         <div>
           <h1 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <BookOpen size={24} style={{ color: '#2563eb' }} />
+            <BookOpen size={24} style={{ color: 'var(--x-primary)' }} />
             <span>{s.title}</span>
           </h1>
           <p className="x-hint" style={{ marginTop: 4 }}>

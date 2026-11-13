@@ -163,7 +163,7 @@ function ReadinessPanel({
                       {isReady ? s.readiness.statusReady : isWarn ? s.readiness.statusWarning : s.readiness.statusError}
                     </span>
                   </td>
-                  <td style={{ color: '#4b5563', fontSize: 13 }}>{codeText}</td>
+                  <td style={{ color: 'var(--x-muted)', fontSize: 13 }}>{codeText}</td>
                 </tr>
               )
             })}
@@ -570,7 +570,7 @@ function DeliveriesPanel({
                   </td>
                   <td>{item.attempts}</td>
                   <td>{item.nextAttemptAt ? new Date(item.nextAttemptAt).toLocaleString() : '—'}</td>
-                  <td style={{ color: '#dc2626', fontSize: 12 }}>
+                  <td style={{ color: 'var(--x-red)', fontSize: 12 }}>
                     {item.lastError ? item.lastError.slice(0, 48) : '—'}
                   </td>
                   <td>
@@ -640,8 +640,8 @@ function EmbedPanel({ tenant, serverOrigin, configuredSnippet }: { tenant: Suppo
         <pre
           data-testid="embed-snippet-pre"
           style={{
-            background: '#1e293b',
-            color: '#e2e8f0',
+            background: 'var(--x-bg)',
+            color: 'var(--x-text)',
             padding: 16,
             borderRadius: 8,
             overflowX: 'auto',
@@ -654,19 +654,19 @@ function EmbedPanel({ tenant, serverOrigin, configuredSnippet }: { tenant: Suppo
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div className="x-card" style={{ padding: 14, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+        <div className="x-card" style={{ padding: 14, background: 'var(--x-alt)', border: '1px solid var(--x-border)', borderRadius: 8 }}>
           <h4 style={{ margin: '0 0 6px 0', fontSize: 14 }}>{s.embed.backendAuthTitle}</h4>
-          <p style={{ margin: 0, fontSize: 13, color: '#475569' }}>{s.embed.backendAuthDesc}</p>
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--x-muted)' }}>{s.embed.backendAuthDesc}</p>
         </div>
 
-        <div className="x-card" style={{ padding: 14, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+        <div className="x-card" style={{ padding: 14, background: 'var(--x-alt)', border: '1px solid var(--x-border)', borderRadius: 8 }}>
           <h4 style={{ margin: '0 0 6px 0', fontSize: 14 }}>{s.embed.tokenUpdateTitle}</h4>
-          <p style={{ margin: 0, fontSize: 13, color: '#475569' }}>{s.embed.tokenUpdateDesc}</p>
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--x-muted)' }}>{s.embed.tokenUpdateDesc}</p>
         </div>
 
-        <div className="x-card" style={{ padding: 14, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+        <div className="x-card" style={{ padding: 14, background: 'var(--x-alt)', border: '1px solid var(--x-border)', borderRadius: 8 }}>
           <h4 style={{ margin: '0 0 6px 0', fontSize: 14 }}>{s.embed.guestSessionTitle}</h4>
-          <p style={{ margin: 0, fontSize: 13, color: '#475569' }}>{s.embed.guestSessionDesc}</p>
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--x-muted)' }}>{s.embed.guestSessionDesc}</p>
         </div>
       </div>
     </div>
@@ -845,7 +845,7 @@ export default function SupportIntegration() {
       <div className="x-page-header" style={{ marginBottom: 20 }}>
         <div>
           <h1 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Sparkles size={24} style={{ color: '#2563eb' }} />
+            <Sparkles size={24} style={{ color: 'var(--x-primary)' }} />
             <span>{s.title}</span>
           </h1>
           <p className="x-hint" style={{ marginTop: 4 }}>
