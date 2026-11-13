@@ -111,6 +111,7 @@ describe('OpenAI multimodal array content', () => {
   });
 
   it('successfully routes an array-content request and gets a 200 (mocked groq)', async () => {
+    vi.restoreAllMocks();
     const origFetch = global.fetch;
     vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
       const urlStr = typeof url === 'string' ? url : url.toString();
@@ -153,6 +154,7 @@ describe('OpenAI multimodal array content', () => {
     const dataUri = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAA==';
     let upstream: any = null;
 
+    vi.restoreAllMocks();
     const origFetch = global.fetch;
     vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
       const urlStr = typeof url === 'string' ? url : url.toString();
@@ -379,6 +381,7 @@ describe('OpenAI multimodal array content', () => {
     });
 
     it('drops null/empty tool_calls instead of forwarding them upstream', async () => {
+      vi.restoreAllMocks();
       const origFetch = global.fetch;
       vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
         const urlStr = typeof url === 'string' ? url : url.toString();

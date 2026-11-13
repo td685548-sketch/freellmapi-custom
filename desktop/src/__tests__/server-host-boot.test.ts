@@ -179,6 +179,7 @@ describe('desktop server boot sequence (#949)', () => {
       'installLogRedaction',
       'installProcessSafetyNet',
       'initDb',
+      'startWorkerLifecycle',
       'cleanupExpiredCooldowns',
       'restoreProxySettings',
       'loadCacheFromDb',
