@@ -485,25 +485,27 @@ providerAccountsRouter.post('/test-batch', requirePermission('test_keys'), async
     }
     try {
       const credential = decrypt(row.encrypted_key, row.iv, row.auth_tag);
-      const ok = await withKeyProxy(resolveXGatewayAccountProxy(row), async () => {
-        return (await provider.validateKey(credential, { platform: row.platform, keyId: row.id })) === true;
+      const check = await withKeyProxy(resolveXGatewayAccountProxy(row), async () => {
+        const val = await provider.validateKey(credential, { platform: row.platform, keyId: row.id });
+        if (typeof val === 'boolean') return { ok: val };
+        return { ok: Boolean(val && (val as { valid?: boolean }).valid), message: (val as { error?: string })?.error };
       });
-      setAccountStatus(row.id, ok ? 'healthy' : 'error');
+      setAccountStatus(row.id, check.ok ? 'healthy' : 'error');
       results.push({
         id: row.id,
         label: row.label,
         provider: row.provider,
-        ok,
-        ...(ok ? {} : { message: 'Account health check failed.' }),
+        ok: check.ok,
+        ...(check.ok ? {} : { message: check.message || 'Account health check failed.' }),
       });
-    } catch {
+    } catch (err: unknown) {
       setAccountStatus(row.id, 'error');
       results.push({
         id: row.id,
         label: row.label,
         provider: row.provider,
         ok: false,
-        message: 'Account health check failed.',
+        message: err instanceof Error ? err.message : 'Account health check failed.',
       });
     }
   }
@@ -838,18 +840,22 @@ providerAccountsRouter.post('/:id/test', requirePermission('test_keys'), async (
   if (body.message && (!model || !models.some(m => m.id === model))) throw new AccountError(400, 'Select an eligible account model.');
   try {
     const credential = decrypt(row.encrypted_key, row.iv, row.auth_tag);
-    const ok = await withKeyProxy(resolveXGatewayAccountProxy(row), async () => {
-      if (!body.message) return await provider.validateKey(credential, { platform: row.platform, keyId: row.id }) === true;
+    const check = await withKeyProxy(resolveXGatewayAccountProxy(row), async () => {
+      if (!body.message) {
+        const val = await provider.validateKey(credential, { platform: row.platform, keyId: row.id });
+        if (typeof val === 'boolean') return { ok: val };
+        return { ok: Boolean(val && (val as { valid?: boolean }).valid), message: (val as { error?: string })?.error };
+      }
       const result = await provider.chatCompletion(credential, [{ role: 'user', content: body.message }], model!, {
         max_tokens: 128, timeoutMs: 30_000,
       }, { platform: row.platform, keyId: row.id, modelId: model });
-      return Array.isArray(result.choices) && result.choices.length > 0;
+      return { ok: Array.isArray(result.choices) && result.choices.length > 0 };
     });
-    setAccountStatus(row.id, ok ? 'healthy' : 'error');
-    res.json({ ok, ...(ok ? {} : { message: 'Account health check failed.' }) });
-  } catch {
+    setAccountStatus(row.id, check.ok ? 'healthy' : 'error');
+    res.json({ ok: check.ok, ...(check.ok ? {} : { message: check.message || 'Account health check failed.' }) });
+  } catch (err: unknown) {
     setAccountStatus(row.id, 'error');
-    res.json({ ok: false, message: 'Account health check failed.' });
+    res.json({ ok: false, message: err instanceof Error ? err.message : 'Account health check failed.' });
   }
 });
 

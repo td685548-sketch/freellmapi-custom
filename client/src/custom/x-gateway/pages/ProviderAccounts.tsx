@@ -148,7 +148,7 @@ export default function ProviderAccounts() {
   const [poolId, setPoolId] = useState('')
   const [remove, setRemove] = useState<ProviderAccount | null>(null)
   const [tab, setTab] = useState<'accounts' | 'models'>('accounts')
-  const [testResult, setTestResult] = useState<{ id: number; ok: boolean } | null>(null)
+  const [testResult, setTestResult] = useState<{ id: number; ok: boolean; message?: string } | null>(null)
   const [batchSummary, setBatchSummary] = useState<BatchTestResponse['summary'] | null>(null)
   const [customModelId, setCustomModelId] = useState('')
   const [customModelName, setCustomModelName] = useState('')
@@ -247,7 +247,7 @@ export default function ProviderAccounts() {
     mutationFn: async (action: { type: 'edit' | 'remove' | 'toggle' | 'test'; id: number; label?: string; proxyUrl?: string; proxyPoolId?: number | null; enabled?: boolean }) => {
       if (action.type === 'test') {
         const result = await accountsApi.test(action.id)
-        setTestResult({ id: action.id, ok: result.ok })
+        setTestResult({ id: action.id, ok: result.ok, message: result.message })
       } else if (action.type === 'remove') await accountsApi.remove(action.id)
       else await accountsApi.edit(action.id, action.type === 'toggle' ? { enabled: action.enabled } : { label: action.label, ...(action.proxyUrl !== undefined ? { proxyUrl: action.proxyUrl } : {}), ...(action.proxyPoolId !== undefined ? { proxyPoolId: action.proxyPoolId } : {}) })
     },
@@ -988,7 +988,7 @@ export default function ProviderAccounts() {
 
               {testResult && testResult.id === account.id && (
                 <p className={testResult.ok ? 'x-test-ok' : 'x-error'} role="status">
-                  {testResult.ok && <CircleCheck size={16} />}{testResult.ok ? s.testOk : s.testFailed}
+                  {testResult.ok && <CircleCheck size={16} />}{testResult.ok ? s.testOk : (testResult.message ? `${s.testFailed}: ${testResult.message}` : s.testFailed)}
                 </p>
               )}
             </article>

@@ -376,8 +376,15 @@ export class CodexProvider extends BaseProvider {
       return true;
     }
     if (res.status === 401 || res.status === 403) {
-      await res.body?.cancel();
-      return false;
+      if (res.headers?.get('cf-mitigated') === 'challenge') {
+        await res.body?.cancel();
+        throw providerHttpError(res, `OpenAI Codex check blocked by Cloudflare challenge (HTTP ${res.status}).`, '');
+      }
+      const detail = await res.text().catch(() => '');
+      return {
+        valid: false,
+        error: `OpenAI Codex rejected credentials (HTTP ${res.status})${detail ? `: ${detail.slice(0, 160)}` : ''}`,
+      };
     }
     await res.body?.cancel();
     throw providerHttpError(res, `Credential check failed (HTTP ${res.status}).`, '');

@@ -70,7 +70,9 @@ export function resolveAccountProvider(account: AccountRow): BaseProvider | unde
       })();
     }
     override validateKey(_credential: string, quotaContext?: QuotaObservationContext) { return this.run(async credential => {
-      if (!parseOAuthCredential(credential)) return delegate!.validateKey(credential, quotaContext);
+      if (delegate!.supportsKeyValidation) {
+        return delegate!.validateKey(credential, quotaContext);
+      }
       const model = accountModels(account)[0]?.id;
       if (!model) throw new Error('Configure an eligible model before testing this account.');
       const result = await delegate!.chatCompletion(credential, [{ role: 'user', content: 'Reply OK.' }], model, { max_tokens: 8, timeoutMs: 20_000 });
