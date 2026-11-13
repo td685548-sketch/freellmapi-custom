@@ -8,7 +8,9 @@ import { isGuestRequest } from '../services/guest-access.js';
 /** Resolve known operations only. New/unrecognized endpoints require the old
  * parent capability, so a leaf cannot accidentally unlock future features. */
 export function permissionForAction(parent: ParentPermission, method: string, url: string): Permission {
-  const path = url.split('?')[0]!.replace(/\/+$/, '');
+  // Express matches routes case-insensitively, so the path is compared in lower case too:
+  // `/api/x-gateway/Quota` must resolve to the same permission as `/api/x-gateway/quota`.
+  const path = url.split('?')[0]!.replace(/\/+$/, '').toLowerCase();
   const read = method === 'GET' || method === 'HEAD';
   if (parent === 'manage_keys') {
     if (/^\/api\/(health|free-tier)(\/|$)/.test(path) || path === '/api/fallback/rate-limit-usage') return read ? 'view_keys' : 'test_keys';

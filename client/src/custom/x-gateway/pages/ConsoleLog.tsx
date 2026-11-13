@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Check, Coins, Copy, ScrollText, Search, Terminal, Trash2, X } from 'lucide-react'
-import { apiFetch } from '@/lib/api'
+import { apiFetch, getToken } from '@/lib/api'
 import { useSessionRevision } from '../../session-state'
 import { mgmtApi, type XLog } from '../management-api'
 import { useMgmtStrings } from '../management-strings'
@@ -14,6 +14,7 @@ import {
 } from './AccountUsage'
 
 const MAX_TERMINAL_LINES = 1000
+const CONSOLE_LOGS_URL = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api/translator/console-logs`
 
 const LEVEL_COLORS: Record<string, string> = {
   DEBUG: '#c084fc', // purple-400
@@ -73,16 +74,13 @@ export default function ConsoleLog() {
     if (activeTab !== 'terminal') return
 
     let isMounted = true
-    const es = new EventSource('/api/translator/console-logs/stream')
+    let retry: ReturnType<typeof setTimeout> | undefined
+    const abort = new AbortController()
 
-    es.onopen = () => {
-      if (isMounted) setConnected(true)
-    }
-
-    es.onmessage = (e) => {
+    const onMessage = (data: string) => {
       if (!isMounted) return
       try {
-        const msg = JSON.parse(e.data) as {
+        const msg = JSON.parse(data) as {
           type: string
           logs?: string[]
           line?: string
@@ -110,13 +108,46 @@ export default function ConsoleLog() {
       }
     }
 
-    es.onerror = () => {
-      if (isMounted) setConnected(false)
+    // The stream needs the session token, which EventSource cannot send, so it is read with fetch.
+    const connect = async () => {
+      let refused = false
+      try {
+        const token = getToken()
+        const response = await fetch(CONSOLE_LOGS_URL + '/stream', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          signal: abort.signal,
+        })
+        refused = response.status === 401 || response.status === 403
+        if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)
+        if (isMounted) setConnected(true)
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          let end = buffer.indexOf('\n\n')
+          while (end !== -1) {
+            const event = buffer.slice(0, end)
+            buffer = buffer.slice(end + 2)
+            for (const line of event.split('\n')) if (line.startsWith('data: ')) onMessage(line.slice(6))
+            end = buffer.indexOf('\n\n')
+          }
+        }
+      } catch {
+        // dropped connection; retried below
+      }
+      if (!isMounted) return
+      setConnected(false)
+      if (!refused) retry = setTimeout(connect, 3000)
     }
+    void connect()
 
     return () => {
       isMounted = false
-      es.close()
+      if (retry) clearTimeout(retry)
+      abort.abort()
     }
   }, [activeTab])
 
@@ -129,7 +160,8 @@ export default function ConsoleLog() {
 
   const handleClearLogs = async () => {
     try {
-      await fetch('/api/translator/console-logs', { method: 'DELETE' })
+      const token = getToken()
+      await fetch(CONSOLE_LOGS_URL, { method: 'DELETE', headers: token ? { Authorization: `Bearer ${token}` } : {} })
       setTerminalLogs([])
     } catch (err) {
       console.error('Failed to clear console logs:', err)

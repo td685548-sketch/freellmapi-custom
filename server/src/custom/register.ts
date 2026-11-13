@@ -169,6 +169,10 @@ export function registerCustomRoutes(app: Express): void {
   // unrelated system-settings reads. The dedicated router enforces its gates.
   app.use('/api/cache/preferences', requireAuth, cachePreferencesRouter);
 
+  // MiProxy dynamic webhook endpoint for automated proxy updates. It authenticates with its own
+  // token, so it is mounted ahead of the session gate that covers the rest of /api/x-gateway.
+  app.use(['/api/proxy-webhook', '/api/x-gateway/proxy-webhook'], proxyWebhookRouter);
+
   // Granular route-level permission gates for upstream-mounted endpoints
   for (const gate of PERMISSION_GATES) installGate(app, gate);
   app.use(['/api/keys', '/api/embeddings', '/api/media', '/api/decisions'], guardKeyAddition);
@@ -207,9 +211,6 @@ export function registerCustomRoutes(app: Express): void {
   app.use('/api/x-gateway', xGatewayConsoleRouter);
   // Public skills server for AI coding agents (Claude, Cursor, Codex, OpenCode, Cline)
   app.use('/x-skills', xSkillsPublicRouter);
-
-  // MiProxy dynamic webhook endpoint for automated proxy updates
-  app.use(['/api/proxy-webhook', '/api/x-gateway/proxy-webhook'], proxyWebhookRouter);
 
   // Custom fork routes with their dedicated permission gates
   app.use('/api/auth', externalAuthRouter, customAuthRouter);
