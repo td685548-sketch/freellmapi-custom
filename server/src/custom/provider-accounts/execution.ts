@@ -71,10 +71,7 @@ export function resolveAccountProvider(account: AccountRow): BaseProvider | unde
     }
     override validateKey(_credential: string, quotaContext?: QuotaObservationContext) { return this.run(async credential => {
       if (delegate!.supportsKeyValidation) {
-        const result = await delegate!.validateKey(credential, quotaContext);
-        if (typeof result === 'boolean') return result;
-        if (result && typeof result === 'object' && 'valid' in result) return result.valid;
-        return Boolean(result);
+        return delegate!.validateKey(credential, quotaContext);
       }
       const model = accountModels(account)[0]?.id;
       if (!model) throw new Error('Configure an eligible model before testing this account.');
