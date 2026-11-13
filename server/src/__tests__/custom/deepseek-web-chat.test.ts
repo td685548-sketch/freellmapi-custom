@@ -24,6 +24,14 @@ describe('deepseek-web executor', () => {
     expect(extractDeepSeekUserToken('tok_raw')).toBe('tok_raw');
     expect(extractDeepSeekUserToken('Bearer tok_bearer')).toBe('tok_bearer');
     expect(extractDeepSeekUserToken('{"value":"tok_json"}')).toBe('tok_json');
+    expect(extractDeepSeekUserToken('"{\\"value\\":\\"tok_double\\"}"')).toBe('tok_double');
+    expect(
+      extractDeepSeekUserToken(
+        JSON.stringify({
+          origins: [{ origin: 'https://chat.deepseek.com', localStorage: [{ name: 'userToken', value: '{"value":"tok_state"}' }] }],
+        }),
+      ),
+    ).toBe('tok_state');
     expect(extractDeepSeekUserToken('foo=1; userToken=tok_cookie; bar=2')).toBe('tok_cookie');
   });
 

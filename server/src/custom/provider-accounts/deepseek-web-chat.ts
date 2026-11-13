@@ -51,6 +51,37 @@ export function deepSeekWebChatErrorStatus(error: unknown): number | undefined {
     : undefined;
 }
 
+function unwrapUserTokenCandidate(parsed: unknown): string | null {
+  if (typeof parsed === 'string') {
+    const trimmed = parsed.trim();
+    if (!trimmed) return null;
+    try {
+      return unwrapUserTokenCandidate(JSON.parse(trimmed)) ?? trimmed;
+    } catch {
+      return trimmed;
+    }
+  }
+  if (!parsed || typeof parsed !== 'object') return null;
+  const obj = parsed as Record<string, unknown>;
+  if (typeof obj.value === 'string' && obj.value.trim()) {
+    return obj.value.trim();
+  }
+  if (typeof obj.userToken === 'string' && obj.userToken.trim()) {
+    return unwrapUserTokenCandidate(obj.userToken) ?? obj.userToken.trim();
+  }
+  if (Array.isArray(obj.origins)) {
+    for (const origin of obj.origins) {
+      const items = (origin as { localStorage?: Array<{ name?: unknown; value?: unknown }> } | null)?.localStorage;
+      if (!Array.isArray(items)) continue;
+      const hit = items.find(entry => entry?.name === 'userToken' && typeof entry.value === 'string');
+      if (hit && typeof hit.value === 'string') {
+        return unwrapUserTokenCandidate(hit.value) ?? hit.value.trim();
+      }
+    }
+  }
+  return null;
+}
+
 export function extractDeepSeekUserToken(credential: string): string {
   let raw = credential.trim();
   if (/^bearer\s+/i.test(raw)) {
@@ -58,14 +89,19 @@ export function extractDeepSeekUserToken(credential: string): string {
   }
   if (!raw) return '';
   try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    if (typeof parsed?.value === 'string' && parsed.value.trim()) {
-      return parsed.value.trim();
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      const hit = parsed.find((c: any) => c?.name === 'userToken' && typeof c?.value === 'string');
+      if (hit) return unwrapUserTokenCandidate(hit.value) ?? hit.value.trim();
+      throw new DeepSeekWebChatError(
+        'Cookie Editor JSON does not contain DeepSeek `userToken` (DeepSeek stores `userToken` in Local Storage, not Cookies).',
+        401,
+      );
     }
-    if (typeof parsed?.userToken === 'string' && parsed.userToken.trim()) {
-      return parsed.userToken.trim();
-    }
-  } catch {
+    const extracted = unwrapUserTokenCandidate(parsed);
+    if (extracted) return extracted;
+  } catch (err) {
+    if (err instanceof DeepSeekWebChatError) throw err;
     // not JSON
   }
   const cookieMatch = raw.match(/(?:^|;\s*)userToken=([^;]+)/);
@@ -209,6 +245,12 @@ async function acquireAccessToken(
   const json = (await resp.json()) as Record<string, any>;
   if (json?.code && json.code !== 0) {
     tokenCache.delete(userToken);
+    if (Number(json.code) === 40003) {
+      throw new DeepSeekWebChatError(
+        'DeepSeek userToken is invalid or expired — copy a fresh `userToken` from https://chat.deepseek.com Local Storage and reconnect.',
+        401,
+      );
+    }
     const errMsg = json.msg || json?.data?.biz_msg || `error code ${json.code}`;
     throw new DeepSeekWebChatError(`DeepSeek rejected token: ${errMsg}`, 401);
   }
