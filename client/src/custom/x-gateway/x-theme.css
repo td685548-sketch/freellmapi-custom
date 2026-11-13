@@ -217,6 +217,86 @@ section.x-panel[style]:not([style*="padding"]) { padding: 20px; }
 .x-bar-err { background: var(--x-red); }
 .x-chat-user { background: var(--x-tint); }
 
+/* ---------- Support form primitives ----------
+   The Support / Knowledge & Evidence pages tag their markup with .x-card,
+   .x-field, .x-input, .x-select, .x-hint, .x-btn and .x-alert, but the base
+   stylesheet never defined them, so those controls fell back to bare browser
+   defaults (label sitting inside the field, no box, no spacing). These rules
+   give them the same language as .x-form, in both themes. */
+.x-card { background: var(--x-panel); border: 1px solid var(--x-border); border-radius: var(--x-radius); }
+.x-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.x-field > label { font-size: 12.5px; font-weight: 500; color: var(--x-text); line-height: 1.35; }
+.x-field > label strong { font-weight: 600; }
+.x-input, .x-select, .x-textarea {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--x-border);
+  border-radius: 7px;
+  background: var(--x-bg);
+  color: var(--x-text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.x-input::placeholder { color: var(--x-muted); }
+.x-input:hover:not(:disabled), .x-select:hover:not(:disabled) { border-color: color-mix(in srgb, var(--x-muted) 45%, var(--x-border)); }
+.x-input:focus, .x-select:focus, .x-textarea:focus {
+  border-color: var(--x-primary);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--x-primary) 16%, transparent);
+}
+.x-input[type='file'] { padding: 7px 9px; font-size: 12.5px; }
+.x-field input[type='checkbox'], .x-field input[type='radio'] { accent-color: var(--x-primary); width: 15px; height: 15px; margin: 0; }
+.x-hint { display: block; font-size: 12px; color: var(--x-muted); line-height: 1.45; }
+.x-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border: 1px solid var(--x-border);
+  border-radius: 7px;
+  background: var(--x-panel);
+  color: var(--x-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.25;
+  white-space: nowrap;
+  transition: background .12s, border-color .12s;
+}
+.x-btn svg { flex-shrink: 0; }
+.x-btn:hover:not(:disabled) { background: var(--x-alt); }
+.x-btn:disabled { opacity: .5; cursor: not-allowed; }
+.x-btn-primary { background: var(--x-primary); border-color: var(--x-primary); color: var(--x-on-primary); }
+.x-btn-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--x-primary) 88%, var(--x-text)); border-color: transparent; }
+.x-btn-secondary { background: var(--x-alt); }
+.x-btn-secondary:hover:not(:disabled) { background: color-mix(in srgb, var(--x-muted) 16%, var(--x-alt)); }
+.x-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 13px;
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius);
+  background: var(--x-alt);
+  color: var(--x-text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.x-alert svg { flex-shrink: 0; margin-top: 1px; }
+.x-alert-info { background: var(--x-tint); border-color: color-mix(in srgb, var(--x-primary) 30%, var(--x-border)); }
+.x-alert-info svg { color: var(--x-primary); }
+.x-alert-success { background: var(--x-green-bg); border-color: color-mix(in srgb, var(--x-green) 35%, var(--x-border)); }
+.x-alert-success svg { color: var(--x-green); }
+.x-alert-warning { background: var(--x-amber-bg); border-color: color-mix(in srgb, var(--x-amber) 35%, var(--x-border)); }
+.x-alert-warning svg { color: var(--x-amber); }
+.x-alert-error { background: var(--x-red-bg); border-color: color-mix(in srgb, var(--x-red) 35%, var(--x-border)); }
+.x-alert-error svg { color: var(--x-red); }
+/* The Support studio marks the active tab with `.active`; the base sheet only
+   knew `.selected`. */
+.x-tabs button.active { border-bottom-color: var(--x-primary); color: var(--x-primary); }
+
 /* ---------- Quick jump ---------- */
 .x-jump-scrim { position: fixed; inset: 0; z-index: 60; background: rgb(10 14 22 / 45%); display: flex; justify-content: center; align-items: flex-start; padding: 12vh 16px 16px; }
 .x-jump { width: min(520px, 100%); background: var(--x-panel); border: 1px solid var(--x-border); border-radius: 12px; box-shadow: 0 24px 64px rgb(10 14 22 / 28%); overflow: hidden; display: flex; flex-direction: column; max-height: 70vh; }
