@@ -108,7 +108,5 @@ export function kiroBody(messages: ChatMessage[], model: string, options?: Compl
   });
   if (tools?.length) (currentMessage.userInputMessage.userInputMessageContext ??= {}).tools = tools;
   currentMessage.userInputMessage.content ||= 'Continue.';
-  return { conversationState: { chatTriggerType: 'MANUAL', conversationId: randomUUID(), currentMessage, history }, inferenceConfig: {
-    maxTokens: options?.max_tokens ?? 8192, ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}), ...(options?.top_p !== undefined ? { topP: options.top_p } : {}),
-  } };
+  return { conversationState: { chatTriggerType: 'MANUAL', conversationId: randomUUID(), currentMessage, history } };
 }

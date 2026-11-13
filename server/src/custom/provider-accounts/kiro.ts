@@ -21,7 +21,15 @@ export class KiroProvider extends BaseProvider {
         'x-amzn-kiro-agent-mode': 'spec', ...(auth.profileArn ? { 'x-amzn-codewhisperer-profile-arn': auth.profileArn } : {}),
       }, body: JSON.stringify(body),
     }, options?.timeoutMs ?? 120_000, { signal: options?.signal });
-    if (!response.ok) { await response.body?.cancel(); throw providerHttpError(response, `Kiro inference failed (HTTP ${response.status}).`, ''); }
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      const summary = detail.replace(/\s+/g, ' ').trim().slice(0, 200);
+      throw providerHttpError(
+        response,
+        `Kiro inference failed (HTTP ${response.status})${summary ? `: ${summary}` : '.'}`,
+        detail,
+      );
+    }
     const id = this.makeId(); const created = Math.floor(Date.now() / 1000);
     const chunk = (delta: Record<string, unknown>, finish: string | null = null, usage?: TokenUsage): ChatCompletionChunk => ({ id, object: 'chat.completion.chunk', created, model,
       choices: [{ index: 0, delta, finish_reason: finish }], ...(usage ? { usage } : {}) });
