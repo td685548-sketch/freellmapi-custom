@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { createHmac } from 'node:crypto';
+import dns from 'node:dns';
 import { initDb, getDb } from '../../db/index.js';
 import {
   listSupportCustomerProfiles,
@@ -596,6 +597,9 @@ describe('Customer CRM Memory, CSAT Ratings & Outbound Partner Webhooks', () => 
 
     it('dispatchSupportPartnerEvent: caps deliveries history at 200 per tenant', async () => {
       vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('OK', { status: 200 }));
+      // 205 dispatches each resolve the target host first. Answer from a stub so the test
+      // measures the cap, not how fast this machine's resolver is.
+      vi.spyOn(dns.promises, 'lookup').mockResolvedValue([{ address: '93.184.216.34', family: 4 }] as never);
 
       upsertSupportWebhookSubscription(TENANT_A, {
         name: 'Active Sub',
