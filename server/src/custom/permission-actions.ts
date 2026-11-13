@@ -91,7 +91,7 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
     if (path === '/api/thruline/enabled' || path === '/api/thruline/defaults' || path === '/api/thruline/proxy') {
       return read ? 'use_x_gateway' : 'edit_x_settings';
     }
-    if (path === '/api/thruline/pricing' || path === '/api/thruline/config-backup') {
+    if (path === '/api/thruline/pricing' || path === '/api/thruline/config-backup' || path === '/api/thruline/routing-health') {
       return read ? 'use_x_gateway' : 'edit_x_settings';
     }
     if (path === '/api/thruline/keys' || /^\/api\/thruline\/keys\/\d+(?:\/access)?$/.test(path)) {

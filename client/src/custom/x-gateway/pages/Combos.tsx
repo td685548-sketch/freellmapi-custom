@@ -120,6 +120,27 @@ export default function Combos() {
   const [newVisionModel, setNewVisionModel] = useState('')
   const [newAudioModel, setNewAudioModel] = useState('')
 
+  // Auto route health cooldown
+  const routingHealthQuery = useQuery({
+    queryKey: ['x-routing-health', revision],
+    queryFn: ({ signal }) => apiFetch<{ penaltyTtlMinutes: number }>('/api/thruline/routing-health', { signal }),
+    retry: false,
+  })
+  const [ttlDraft, setTtlDraft] = useState<string | null>(null)
+  const effectiveTtl = ttlDraft ?? String(routingHealthQuery.data?.penaltyTtlMinutes ?? 5)
+  const saveRoutingHealth = useMutation({
+    meta: { silenceToast: true },
+    mutationFn: (body: { penaltyTtlMinutes?: number; reset?: boolean }) =>
+      apiFetch<{ penaltyTtlMinutes: number }>('/api/thruline/routing-health', {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    onSuccess: async () => {
+      setTtlDraft(null)
+      await client.invalidateQueries({ queryKey: ['x-routing-health'] })
+    },
+  })
+
   // Model aliases & catalog sync
   const canEditAliases = canEdit || session.hasPermission('manage_key_models')
   const aliasesQuery = useQuery({
@@ -770,6 +791,63 @@ export default function Combos() {
           </button>
         )}
         {syncCatalog.isError && <span role="alert" style={{ fontSize: '0.82rem', color: 'var(--x-danger, #dc2626)' }}>Sync failed.</span>}
+      </div>
+    </section>
+
+    <section className="x-panel" style={{ marginTop: 24, display: 'grid', gap: 12 }}>
+      <div>
+        <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <RefreshCw size={18} />
+          Auto Route Priority Cooldown
+        </h2>
+        <p className="x-muted" style={{ fontSize: '0.85rem', margin: '4px 0 0' }}>
+          How long (in minutes) a failing model/route stays deprioritized in Auto and Smart routing before being retried. Set to <code>0</code> to keep failed routes deprioritized until they succeed or the server restarts.
+        </p>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.85rem' }}>
+          <span>Cooldown (minutes):</span>
+          <input
+            type="number"
+            min={0}
+            max={1440}
+            aria-label="Auto Route Cooldown Minutes"
+            value={effectiveTtl}
+            disabled={!canEdit || saveRoutingHealth.isPending}
+            onChange={e => setTtlDraft(e.target.value)}
+            style={{ width: 90, padding: '4px 8px', fontSize: '0.85rem', borderRadius: 6, border: '1px solid var(--x-border)' }}
+          />
+        </label>
+        {canEdit && (
+          <>
+            <button
+              type="button"
+              className="x-button x-primary"
+              disabled={saveRoutingHealth.isPending}
+              onClick={() => {
+                const parsed = Number(effectiveTtl)
+                const clamped = Number.isFinite(parsed) ? Math.max(0, Math.min(1440, Math.round(parsed))) : 5
+                saveRoutingHealth.mutate({ penaltyTtlMinutes: clamped })
+              }}
+            >
+              Save Cooldown
+            </button>
+            <button
+              type="button"
+              className="x-button"
+              disabled={saveRoutingHealth.isPending}
+              onClick={() => saveRoutingHealth.mutate({ reset: true })}
+            >
+              Reset Route Priorities
+            </button>
+          </>
+        )}
+        {saveRoutingHealth.isSuccess && (
+          <span style={{ fontSize: '0.82rem', color: 'var(--x-success, #16a34a)' }}>Saved.</span>
+        )}
+        {saveRoutingHealth.isError && (
+          <span role="alert" style={{ fontSize: '0.82rem', color: 'var(--x-danger, #dc2626)' }}>Could not update cooldown.</span>
+        )}
       </div>
     </section>
   </>
