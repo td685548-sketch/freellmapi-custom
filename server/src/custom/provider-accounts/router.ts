@@ -96,7 +96,7 @@ const bulkCreateSchema = z.object({
 const providerToggleSchema = z.object({
   enabled: z.boolean(),
 }).strict();
-const providerModelsSchema = z.object({
+export const providerModelsSchema = z.object({
   disabledModels: z.array(z.string().trim().min(1).max(200)).max(500).optional(),
   customModels: z.array(z.object({
     id: z.string().trim().min(1).max(200),
@@ -120,7 +120,7 @@ const bulkProxySchema = z.object({
   mode: z.enum(['none', 'one-to-one', 'pool']),
   proxyPoolId: z.number().int().positive().safe().nullable().optional(),
 }).strict();
-const customNodeSchema = z.object({
+export const customNodeSchema = z.object({
   id: z.string().trim().min(1).max(100).optional(),
   name: z.string().trim().min(1).max(200),
   prefix: z.string().trim().min(1).max(100),

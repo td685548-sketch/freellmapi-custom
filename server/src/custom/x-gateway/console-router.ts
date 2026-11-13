@@ -1,7 +1,9 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
 import type { SessionUser } from '../../services/auth.js';
+import type { Permission } from '@freellmapi/shared/user-access.js';
 import { getSetting, setSetting } from '../../db/index.js';
+import { hasPermission } from '../../middleware/requirePermission.js';
 import { isValidKeyProxyUrl, KEY_PROXY_URL_ERROR, KEY_PROXY_URL_MAX, maskProxyUrl } from '../../lib/key-proxy.js';
 import { probeProxyUrl } from '../../lib/proxy.js';
 import {
@@ -33,6 +35,14 @@ import {
   updatePricingOverrides,
   validatePricingPatch,
 } from './pricing.js';
+import {
+  applyCustomNodesRestore,
+  applyProviderModelConfigsRestore,
+  prepareCustomNodesRestore,
+  prepareProviderModelConfigsRestore,
+} from '../provider-accounts/config-restore.js';
+import { AccountError } from '../provider-accounts/http.js';
+import { listCustomProviderNodes, listProviderModelConfigs } from '../provider-accounts/store.js';
 import { xGatewayManagementRouter } from './management-router.js';
 import { xQuotaRouter } from './quota/router.js';
 import { xPlaygroundRouter } from './playground-router.js';
@@ -258,15 +268,34 @@ function parseJsonSetting<T>(key: string, fallback: T): T {
   }
 }
 
-xGatewayConsoleRouter.get('/config-backup', (_req, res) => {
-  let customNodes = parseJsonSetting<unknown[]>('x_gateway_custom_provider_nodes', []);
-  if (!Array.isArray(customNodes) || customNodes.length === 0) {
-    customNodes = parseJsonSetting<unknown[]>('x_gateway_custom_nodes', []);
+const isRecord = (value: unknown): boolean => !!value && typeof value === 'object' && !Array.isArray(value);
+
+/** A backup spans several permission groups. The route gate only proves `edit_x_settings`,
+ * so each section present in the payload also needs the permission its own endpoint asks
+ * for (combos, and `/api/thruline-accounts` nodes, provider models, aliases, capabilities).
+ * Returns what the caller lacks; the restore is refused whole rather than applied in part. */
+export function missingRestorePermissions(user: SessionUser | undefined, body: Record<string, unknown>): string[] {
+  const missing = new Set<string>();
+  const need = (...permissions: Permission[]) => {
+    for (const permission of permissions) if (!hasPermission(user, permission)) missing.add(permission);
+  };
+  if (Array.isArray(body.combos)) need('edit_x_combos');
+  // The node list is replaced whole, which adds, changes and removes entries at once.
+  if (Array.isArray(body.customProviderNodes)) need('add_keys', 'edit_keys', 'delete_keys');
+  if (isRecord(body.providerModelConfigs)) need('edit_keys');
+  if ((isRecord(body.modelAliases) || isRecord(body.customModelCaps))
+    && !hasPermission(user, 'edit_x_combos') && !hasPermission(user, 'manage_key_models')) {
+    missing.add('edit_x_combos or manage_key_models');
   }
-  let providerModelConfigs = parseJsonSetting<Record<string, unknown>>('x_gateway_provider_models', {});
-  if (!providerModelConfigs || typeof providerModelConfigs !== 'object' || Object.keys(providerModelConfigs).length === 0) {
-    providerModelConfigs = parseJsonSetting<Record<string, unknown>>('provider_model_configs', {});
-  }
+  return [...missing];
+}
+
+xGatewayConsoleRouter.get('/config-backup', (req, res) => {
+  // Nodes and provider model settings are readable elsewhere only with View keys.
+  const canViewKeys = hasPermission((req as Request & { user?: SessionUser }).user, 'view_keys');
+  // Read from the provider accounts store, the same data the Providers page shows and routes on.
+  const customNodes = listCustomProviderNodes();
+  const providerModelConfigs = listProviderModelConfigs();
   const modelAliases = parseJsonSetting<Record<string, string>>('x_gateway_model_aliases', {});
   const customModelCaps = parseJsonSetting<Record<string, unknown>>('x_gateway_custom_model_caps', {});
 
@@ -277,19 +306,33 @@ xGatewayConsoleRouter.get('/config-backup', (_req, res) => {
     combos: listCombos(),
     capacityAdapter: getCapacityAdapterSettings(),
     pricingOverrides: getPricingOverrides(),
-    customProviderNodes: customNodes,
-    providerModelConfigs,
+    ...(canViewKeys ? { customProviderNodes: customNodes, providerModelConfigs } : {}),
     modelAliases,
     customModelCaps,
   };
   res.json(backup);
 });
 
-xGatewayConsoleRouter.post('/config-backup', (req, res) => {
+xGatewayConsoleRouter.post('/config-backup', async (req, res) => {
   const uid = userId(req);
   const body = req.body;
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new ConsoleError(400, 'Invalid backup payload.');
+  }
+  const missing = missingRestorePermissions((req as Request & { user?: SessionUser }).user, body);
+  if (missing.length) {
+    res.status(403).json({ error: { type: 'forbidden', message: `Permission denied: this backup also needs ${missing.map(p => `'${p}'`).join(', ')}. Nothing was restored.` } });
+    return;
+  }
+  // Validated before anything is written, so a refused node or model configuration restores nothing.
+  let restoredNodes: Awaited<ReturnType<typeof prepareCustomNodesRestore>> | null = null;
+  let restoredModelConfigs: ReturnType<typeof prepareProviderModelConfigsRestore> | null = null;
+  try {
+    if (Array.isArray(body.customProviderNodes)) restoredNodes = await prepareCustomNodesRestore(body.customProviderNodes);
+    if (isRecord(body.providerModelConfigs)) restoredModelConfigs = prepareProviderModelConfigsRestore(body.providerModelConfigs);
+  } catch (err) {
+    if (err instanceof AccountError) throw new ConsoleError(err.status, err.message);
+    throw err;
   }
 
   // 1. Defaults (savers)
@@ -374,18 +417,13 @@ xGatewayConsoleRouter.post('/config-backup', (req, res) => {
 
   // 5. Custom Provider Nodes
   let customNodesCount = 0;
-  if (Array.isArray(body.customProviderNodes)) {
-    const serialized = JSON.stringify(body.customProviderNodes);
-    setSetting('x_gateway_custom_provider_nodes', serialized);
-    setSetting('x_gateway_custom_nodes', serialized);
-    customNodesCount = body.customProviderNodes.length;
+  if (restoredNodes) {
+    applyCustomNodesRestore(restoredNodes);
+    customNodesCount = restoredNodes.length;
   }
 
   // 6. Provider Model Configs
-  if (body.providerModelConfigs && typeof body.providerModelConfigs === 'object' && !Array.isArray(body.providerModelConfigs)) {
-    const serialized = JSON.stringify(body.providerModelConfigs);
-    setSetting('x_gateway_provider_models', serialized);
-  }
+  if (restoredModelConfigs) applyProviderModelConfigsRestore(restoredModelConfigs);
 
   // 7. Model Aliases & Custom Model Capabilities
   if (body.modelAliases && typeof body.modelAliases === 'object' && !Array.isArray(body.modelAliases)) {

@@ -309,6 +309,11 @@ function saveAllProviderModelConfigs(configs: Record<string, ProviderModelConfig
   cachedModelConfigs = configs;
 }
 
+/** Every stored provider model configuration, keyed by provider id (config backup export). */
+export function listProviderModelConfigs(): Record<string, ProviderModelConfig> {
+  return { ...loadAllProviderModelConfigs() };
+}
+
 export function getProviderModelConfig(providerId: string): ProviderModelConfig {
   const normalized = normalizeXGatewayProviderId(providerId) ?? providerId;
   const all = loadAllProviderModelConfigs();

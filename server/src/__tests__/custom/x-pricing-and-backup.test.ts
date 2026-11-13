@@ -1,7 +1,13 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Server } from 'node:http';
 import { createApp } from '../../app.js';
-import { getDb, initDb, setSetting } from '../../db/index.js';
+import { getDb, initDb } from '../../db/index.js';
+import {
+  getProviderModelConfig,
+  listCustomProviderNodes,
+  saveCustomProviderNode,
+  setProviderModelConfig,
+} from '../../custom/provider-accounts/store.js';
 import { createUser, createSession } from '../../services/auth.js';
 import { permissionForAction } from '../../custom/permission-actions.js';
 import {
@@ -36,7 +42,7 @@ describe('X-Gateway Custom Pricing & Config Backup / Restore', () => {
     // Grant full permissions
     getDb()
       .prepare('UPDATE users SET role = ?, permissions = ? WHERE id = ?')
-      .run('admin', JSON.stringify(['use_x_gateway', 'edit_x_settings', 'manage_x_gateway']), adminUserId);
+      .run('admin', JSON.stringify(['use_x_gateway', 'edit_x_settings', 'manage_x_gateway', 'manage_keys']), adminUserId);
     adminToken = createSession(adminUserId);
 
     readonlyUserId = createUser('readonly-pricing@test.dev', 'Password123!', 'member').userId;
@@ -119,6 +125,120 @@ describe('X-Gateway Custom Pricing & Config Backup / Restore', () => {
 
       const getBackupRes = await api('/config-backup', { token: readonlyToken });
       expect(getBackupRes.status).toBe(200);
+    });
+  });
+
+  describe('Config restore needs the permission of every section in the payload', () => {
+    const tokenFor = (name: string, permissions: string[]) => {
+      const id = createUser(`${name}-restore@test.dev`, 'Password123!', 'member').userId;
+      getDb().prepare('UPDATE users SET permissions = ? WHERE id = ?').run(JSON.stringify(permissions), id);
+      return createSession(id);
+    };
+    const restore = (token: string, body: unknown) => api('/config-backup', { method: 'POST', token, body });
+    const combo = { name: 'Escalation', entries: [{ provider: 'openai', model: 'gpt-4o' }] };
+    const node = { id: 'custom-evil', name: 'Evil', prefix: 'evil', type: 'openai-compatible', baseUrl: 'https://example.com/v1' };
+
+    it('lets Configure gateway alone restore only the gateway settings sections', async () => {
+      const token = tokenFor('settings', ['use_x_gateway', 'edit_x_settings']);
+      const ok = await restore(token, { defaults: { caveman: true, ponytail: 'lite', input: 'lossless' }, pricingOverrides: {} });
+      expect(ok.status).toBe(200);
+      expect(getConfigSnapshot().savers.caveman).toBe(true);
+    });
+
+    it('refuses combos, nodes, provider models, aliases and capabilities without their own permissions', async () => {
+      const token = tokenFor('settings2', ['use_x_gateway', 'edit_x_settings']);
+      const before = getDb().prepare("SELECT key, value FROM settings WHERE key LIKE 'x_gateway_%' ORDER BY key").all();
+      for (const [section, value, permission] of [
+        ['combos', [combo], 'edit_x_combos'],
+        ['customProviderNodes', [node], 'add_keys'],
+        ['customProviderNodes', [], 'delete_keys'],
+        ['providerModelConfigs', { openai: { disabledModels: ['gpt-4o'] } }, 'edit_keys'],
+        ['modelAliases', { fast: 'openai/gpt-4o' }, 'manage_key_models'],
+        ['customModelCaps', { 'openai/gpt-4o': { vision: true } }, 'manage_key_models'],
+      ] as const) {
+        const res = await restore(token, { [section]: value });
+        expect(res.status, section).toBe(403);
+        expect((await res.json() as { error: { message: string } }).error.message, section).toContain(permission);
+      }
+      expect(listCombos()).toHaveLength(0);
+      expect(getDb().prepare("SELECT key, value FROM settings WHERE key LIKE 'x_gateway_%' ORDER BY key").all()).toEqual(before);
+    });
+
+    it('restores nothing at all when one section is not permitted', async () => {
+      setDefaultSavers({ caveman: false, ponytail: 'off', input: 'off' }, adminUserId);
+      const token = tokenFor('settings3', ['use_x_gateway', 'edit_x_settings']);
+      const res = await restore(token, { defaults: { caveman: true, ponytail: 'ultra', input: 'standard' }, combos: [combo] });
+      expect(res.status).toBe(403);
+      expect(getConfigSnapshot().savers).toEqual({ caveman: false, ponytail: 'off', input: 'off' });
+      expect(listCombos()).toHaveLength(0);
+    });
+
+    it('accepts each section once its permission is held', async () => {
+      expect((await restore(tokenFor('combos', ['use_x_gateway', 'edit_x_settings', 'edit_x_combos']), { combos: [combo], modelAliases: { fast: 'openai/gpt-4o' } })).status).toBe(200);
+      expect(listCombos().map(c => c.name)).toEqual(['escalation']);
+      // Replacing the node list needs add, edit and delete together.
+      expect((await restore(tokenFor('partkeys', ['use_x_gateway', 'edit_x_settings', 'add_keys', 'edit_keys']), { customProviderNodes: [node] })).status).toBe(403);
+      expect((await restore(tokenFor('keys', ['use_x_gateway', 'edit_x_settings', 'add_keys', 'edit_keys', 'delete_keys']), { customProviderNodes: [node], providerModelConfigs: {} })).status).toBe(200);
+      expect((await restore(tokenFor('models', ['use_x_gateway', 'edit_x_settings', 'manage_key_models']), { customModelCaps: { 'openai/gpt-4o': { vision: true } } })).status).toBe(200);
+    });
+
+    it('exports nodes and provider model settings only to accounts that may view keys', async () => {
+      const plain = await (await api('/config-backup', { token: readonlyToken })).json() as Record<string, unknown>;
+      expect(plain).not.toHaveProperty('customProviderNodes');
+      expect(plain).not.toHaveProperty('providerModelConfigs');
+      expect(plain).toHaveProperty('combos');
+      const viewer = await (await api('/config-backup', { token: tokenFor('viewer', ['use_x_gateway', 'view_keys']) })).json() as Record<string, unknown>;
+      expect(viewer).toHaveProperty('customProviderNodes');
+      expect(viewer).toHaveProperty('providerModelConfigs');
+    });
+  });
+
+  describe('Config restore validates nodes and provider model settings like their own endpoints', () => {
+    const restore = (body: unknown) => api('/config-backup', { method: 'POST', body });
+    const good = { id: 'keep-me', name: 'Keep', prefix: 'keep', type: 'openai-compatible', baseUrl: 'https://api.together.xyz/v1' };
+
+    it('refuses nodes that point at private, loopback or metadata addresses, and restores nothing', async () => {
+      expect((await restore({ customProviderNodes: [good] })).status).toBe(200);
+      setDefaultSavers({ caveman: false, ponytail: 'off', input: 'off' }, adminUserId);
+      for (const baseUrl of ['http://127.0.0.1:8080/v1', 'http://10.0.0.5/v1', 'http://169.254.169.254/latest', 'file:///etc/passwd', 'not a url']) {
+        const res = await restore({
+          defaults: { caveman: true, ponytail: 'ultra', input: 'standard' },
+          customProviderNodes: [good, { id: 'inner', name: 'Inner', prefix: 'inner', baseUrl }],
+        });
+        expect(res.status, baseUrl).toBe(400);
+        expect((await res.json() as { error: { message: string } }).error.message, baseUrl).toContain('customProviderNodes[1]');
+      }
+      expect(listCustomProviderNodes()).toEqual([good]);
+      expect(getConfigSnapshot().savers.caveman).toBe(false);
+    });
+
+    it('refuses malformed nodes, duplicate ids and malformed provider model settings', async () => {
+      expect((await restore({ customProviderNodes: [{ id: 'x', name: 'X', prefix: 'x', baseUrl: 'https://example.com', apiKey: 'sk-secret' }] })).status).toBe(400);
+      expect((await restore({ customProviderNodes: ['nope'] })).status).toBe(400);
+      expect((await restore({ customProviderNodes: [good, good] })).status).toBe(400);
+      expect((await restore({ providerModelConfigs: { openai: { stickyLimit: 'many' } } })).status).toBe(400);
+      expect((await restore({ providerModelConfigs: { openai: { customHeaders: { Authorization: 5 } } } })).status).toBe(400);
+      expect((await restore({ providerModelConfigs: { constructor: {} } })).status).toBe(400);
+      expect(listCustomProviderNodes()).toEqual([good]);
+    });
+
+    it('keeps a node whose stored address is unchanged and replaces the rest of the list', async () => {
+      saveCustomProviderNode({ id: 'lan', name: 'LAN box', prefix: 'lan', type: 'openai-compatible', baseUrl: 'http://192.168.1.20:11434' });
+      const lan = { id: 'lan', name: 'LAN box renamed', prefix: 'lan', type: 'openai-compatible', baseUrl: 'http://192.168.1.20:11434' };
+      expect((await restore({ customProviderNodes: [lan] })).status).toBe(200);
+      expect(listCustomProviderNodes()).toEqual([lan]);
+      // Moving it to another private address is a new address and is assessed again.
+      expect((await restore({ customProviderNodes: [{ ...lan, baseUrl: 'http://192.168.1.21:11434' }] })).status).toBe(400);
+      expect((await restore({ customProviderNodes: [] })).status).toBe(200);
+      expect(listCustomProviderNodes()).toEqual([]);
+    });
+
+    it('round-trips provider model settings through export and restore', async () => {
+      setProviderModelConfig('openai', { strategy: 'round-robin', stickyLimit: 7, disabledModels: ['gpt-4o'] });
+      const exported = await (await api('/config-backup')).json() as { providerModelConfigs: Record<string, unknown> };
+      setProviderModelConfig('openai', { strategy: 'fallback', stickyLimit: 1, disabledModels: [] });
+      expect((await restore({ providerModelConfigs: exported.providerModelConfigs })).status).toBe(200);
+      expect(getProviderModelConfig('openai')).toMatchObject({ strategy: 'round-robin', stickyLimit: 7, disabledModels: ['gpt-4o'] });
     });
   });
 
@@ -248,12 +368,8 @@ describe('X-Gateway Custom Pricing & Config Backup / Restore', () => {
         audioInput: { enabled: false, roundRobin: true, models: [] },
       }, adminUserId);
       createCombo('research-combo', [{ target: 'openai/gpt-4o' }], adminUserId, { description: 'Research combo' });
-      setSetting('x_gateway_custom_provider_nodes', JSON.stringify([
-        { id: 'node-1', name: 'Local Ollama', baseUrl: 'http://localhost:11434', prefix: 'ollama', type: 'openai-compatible' },
-      ]));
-      setSetting('x_gateway_provider_models', JSON.stringify({
-        openai: { strategy: 'round-robin', stickyLimit: 5 },
-      }));
+      saveCustomProviderNode({ id: 'node-1', name: 'Local Ollama', baseUrl: 'http://localhost:11434', prefix: 'ollama', type: 'openai-compatible' });
+      setProviderModelConfig('openai', { strategy: 'round-robin', stickyLimit: 5 });
 
       const res = await api('/config-backup');
       expect(res.status).toBe(200);
@@ -266,9 +382,9 @@ describe('X-Gateway Custom Pricing & Config Backup / Restore', () => {
       expect(backup.capacityAdapter.vision.models).toEqual(['gpt-4o']);
       expect(backup.combos).toHaveLength(1);
       expect(backup.combos[0].name).toBe('research-combo');
-      expect(backup.customProviderNodes).toEqual([
+      expect(backup.customProviderNodes).toContainEqual(
         { id: 'node-1', name: 'Local Ollama', baseUrl: 'http://localhost:11434', prefix: 'ollama', type: 'openai-compatible' },
-      ]);
+      );
       expect(backup.providerModelConfigs.openai.strategy).toBe('round-robin');
 
       // Crucial security invariant: No secrets, encrypted keys, or raw tokens anywhere in exported payload
@@ -357,6 +473,12 @@ describe('X-Gateway Custom Pricing & Config Backup / Restore', () => {
       // Verify pricing overrides restored
       const pricing = getPricingOverrides();
       expect(pricing.gemini['gemini-2.5-pro']).toMatchObject({ input: 1.5, output: 9.0 });
+
+      // Nodes and provider model settings land in the store the Providers page and the router read
+      expect(listCustomProviderNodes()).toEqual([
+        { id: 'imported-node-1', name: 'Imported Node', baseUrl: 'https://api.together.xyz/v1', prefix: 'together', type: 'openai-compatible' },
+      ]);
+      expect(getProviderModelConfig('gemini')).toMatchObject({ strategy: 'round-robin', stickyLimit: 10 });
 
       // Verify combos restored
       const combos = listCombos();
