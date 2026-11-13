@@ -28,10 +28,19 @@ export async function startKiroDevice(region = 'us-east-1') {
     interval: Math.max(5, Math.min(30, Number(authorized.data.interval) || 5)),
     expiresIn: Math.max(60, Math.min(600, Number(authorized.data.expiresIn) || 600)) };
 }
+function profileArnCacheKey(region: string, accessToken: string): string {
+  return createHash('sha256').update(`${kiroRegion(region)}:${accessToken}`).digest('hex');
+}
+
+export function getCachedKiroProfileArn(region = 'us-east-1', accessToken: string): string | undefined {
+  if (!accessToken) return undefined;
+  return profileArnCache.get(profileArnCacheKey(region, accessToken));
+}
+
 export async function fetchKiroProfileArn(region = 'us-east-1', accessToken: string, signal?: AbortSignal): Promise<string | undefined> {
   if (!accessToken) return undefined;
   const normalizedRegion = kiroRegion(region);
-  const cacheKey = createHash('sha256').update(`${normalizedRegion}:${accessToken}`).digest('hex');
+  const cacheKey = profileArnCacheKey(normalizedRegion, accessToken);
   const cached = profileArnCache.get(cacheKey);
   if (cached) return cached;
   try {

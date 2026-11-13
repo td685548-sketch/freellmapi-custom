@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { ChatCompletionChunk, ChatCompletionResponse, ChatMessage, ChatToolCall, Platform, TokenUsage } from '@freellmapi/shared/types.js';
 import { BaseProvider, providerHttpError, type CompletionOptions, type KeyValidationResult } from '../../providers/base.js';
 import { parseOAuthCredential } from './oauth-credentials.js';
-import { fetchKiroProfileArn, kiroRegion } from './kiro-auth.js';
+import { fetchKiroProfileArn, getCachedKiroProfileArn, kiroRegion } from './kiro-auth.js';
 import { kiroBody, kiroFrames } from './kiro-wire.js';
 
 const KIRO_IDE_VERSION = '1.4.178';
@@ -19,28 +19,41 @@ export class KiroProvider extends BaseProvider {
     const auth = parseOAuthCredential(credential);
     if (!auth || auth.kind !== 'kiro') throw new Error('Kiro requires a structured OAuth credential.');
     const region = kiroRegion(auth.region);
-    const profileArn = auth.profileArn || await fetchKiroProfileArn(region, auth.accessToken, options?.signal);
-    const body = kiroBody(messages, model, options);
-    if (profileArn) body.profileArn = profileArn;
-    const clientSignature = kiroClientSignature(profileArn || auth.accessToken);
-    const response = await this.fetchWithTimeout(`https://codewhisperer.${region}.amazonaws.com/generateAssistantResponse`, {
-      method: 'POST', redirect: 'error', headers: {
-        'Content-Type': 'application/json', Accept: 'application/vnd.amazon.eventstream', Authorization: `Bearer ${auth.accessToken}`,
-        'X-Amz-Target': 'AmazonCodeWhispererStreamingService.GenerateAssistantResponse',
-        'User-Agent': `aws-sdk-js/1.0.27 ua/2.1 os/win32#10.0.19044 lang/js md/nodejs#22.21.1 api/codewhispererstreaming#1.0.27 m/E ${clientSignature}`,
-        'x-amz-user-agent': `aws-sdk-js/1.0.27 ${clientSignature}`,
-        'x-amz-sso-bearer': auth.accessToken,
-        'x-amzn-kiro-agent-mode': 'spec', ...(profileArn ? { 'x-amzn-codewhisperer-profile-arn': profileArn } : {}),
-      }, body: JSON.stringify(body),
-    }, options?.timeoutMs ?? 120_000, { signal: options?.signal });
+    let profileArn = auth.profileArn || getCachedKiroProfileArn(region, auth.accessToken);
+    const sendInference = async (resolvedProfileArn?: string) => {
+      const body = kiroBody(messages, model, options);
+      if (resolvedProfileArn) body.profileArn = resolvedProfileArn;
+      const clientSignature = kiroClientSignature(resolvedProfileArn || auth.accessToken);
+      return this.fetchWithTimeout(`https://codewhisperer.${region}.amazonaws.com/generateAssistantResponse`, {
+        method: 'POST', redirect: 'error', headers: {
+          'Content-Type': 'application/json', Accept: 'application/vnd.amazon.eventstream', Authorization: `Bearer ${auth.accessToken}`,
+          'X-Amz-Target': 'AmazonCodeWhispererStreamingService.GenerateAssistantResponse',
+          'User-Agent': `aws-sdk-js/1.0.27 ua/2.1 os/win32#10.0.19044 lang/js md/nodejs#22.21.1 api/codewhispererstreaming#1.0.27 m/E ${clientSignature}`,
+          'x-amz-user-agent': `aws-sdk-js/1.0.27 ${clientSignature}`,
+          'x-amz-sso-bearer': auth.accessToken,
+          'x-amzn-kiro-agent-mode': 'spec', ...(resolvedProfileArn ? { 'x-amzn-codewhisperer-profile-arn': resolvedProfileArn } : {}),
+        }, body: JSON.stringify(body),
+      }, options?.timeoutMs ?? 120_000, { signal: options?.signal });
+    };
+    let response = await sendInference(profileArn);
     if (!response.ok) {
-      const detail = await response.text().catch(() => '');
-      const summary = detail.replace(/\s+/g, ' ').trim().slice(0, 200);
-      throw providerHttpError(
-        response,
-        `Kiro inference failed (HTTP ${response.status})${summary ? `: ${summary}` : '.'}`,
-        detail,
-      );
+      let detail = await response.text().catch(() => '');
+      if (response.status === 400 && !profileArn && /profileArn/i.test(detail)) {
+        const discovered = await fetchKiroProfileArn(region, auth.accessToken, options?.signal);
+        if (discovered) {
+          profileArn = discovered;
+          response = await sendInference(profileArn);
+          if (!response.ok) detail = await response.text().catch(() => '');
+        }
+      }
+      if (!response.ok) {
+        const summary = detail.replace(/\s+/g, ' ').trim().slice(0, 200);
+        throw providerHttpError(
+          response,
+          `Kiro inference failed (HTTP ${response.status})${summary ? `: ${summary}` : '.'}`,
+          detail,
+        );
+      }
     }
     const id = this.makeId(); const created = Math.floor(Date.now() / 1000);
     const chunk = (delta: Record<string, unknown>, finish: string | null = null, usage?: TokenUsage): ChatCompletionChunk => ({ id, object: 'chat.completion.chunk', created, model,

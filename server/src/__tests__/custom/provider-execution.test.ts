@@ -76,6 +76,7 @@ beforeAll(async () => {
     if (req.path.endsWith('/responses')) return sse(res, [{ type: 'response.output_text.delta', delta: 'Xin chào' }, { type: 'response.completed', response: { usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 } } }]);
     if (req.path.includes('streamGenerateContent')) return sse(res, [{ response: { candidates: [{ content: { parts: [{ text: 'Xin chào' }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 2, totalTokenCount: 5 } } }]);
     if (req.path.endsWith('/generateAssistantResponse')) {
+      if (!req.body?.profileArn) return json(res, { message: 'profileArn is required for this request.', reason: null }, 400);
       res.type('application/vnd.amazon.eventstream');
       const binary = Buffer.concat([frame('assistantResponseEvent', { content: 'Xin chào' }), frame('messageStopEvent', { stopReason: 'end_turn' })]);
       res.write(binary.subarray(0, 5)); res.end(binary.subarray(5)); return;
