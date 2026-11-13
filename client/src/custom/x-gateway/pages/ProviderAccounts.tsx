@@ -31,7 +31,10 @@ import { apiFetch } from '@/lib/api'
 import type { ProviderAccount, ProviderRoutingStrategy, ProviderThinkingMode } from '../../../../../shared/x-accounts'
 import { accountsApi, refreshAccounts, useAccounts, type BatchTestResponse } from '../api'
 import { useSessionRevision } from '../../session-state'
+import { useUserSession } from '../../use-session'
 import { proxyPoolApi } from '../proxy-pool-api'
+import { quotaApi } from '../quota-api'
+import AccountQuotaSummary from '../components/AccountQuotaSummary'
 import { usePoolStrings } from '../proxy-pool-strings'
 import { useXStrings } from '../strings'
 import { useXGatewayCopy } from '../copy'
@@ -327,6 +330,22 @@ export default function ProviderAccounts() {
   })
 
   // Priority reorder mutation
+  const session = useUserSession()
+  const canViewQuota = session.hasPermission('view_x_usage')
+  const quotaQuery = useQuery({
+    queryKey: ['x-quota', revision],
+    queryFn: ({ signal }) => quotaApi.list(signal),
+    enabled: canViewQuota,
+    refetchInterval: 30_000,
+    retry: false,
+  })
+  const refreshQuota = useMutation({
+    meta: { silenceToast: true },
+    mutationFn: (id: number) => quotaApi.refresh(id),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['x-quota', revision] }),
+  })
+  const quotaByAccount = new Map((quotaQuery.data?.accounts ?? []).map(a => [a.accountId, a]))
+
   const reorderPriorityMutation = useMutation({
     meta: { silenceToast: true },
     mutationFn: async (accountIds: number[]) => {
@@ -939,9 +958,18 @@ export default function ProviderAccounts() {
               </div>
 
               <div className="x-account-metrics">
-                <div><span>{s.requests}</span><strong>{count(account.monthlyUsage.requests)}<small> / {account.monthlyRequestCap ? count(account.monthlyRequestCap) : '∞'}</small></strong></div>
-                <div><span>{s.tokens}</span><strong>{count(account.monthlyUsage.tokens)}<small> / {account.monthlyTokenCap ? count(account.monthlyTokenCap) : '∞'}</small></strong></div>
+                <div><span>{s.requests}</span><strong>{count(account.monthlyUsage.requests)}{account.monthlyRequestCap > 0 && <small> / {count(account.monthlyRequestCap)}</small>}</strong></div>
+                <div><span>{s.tokens}</span><strong>{count(account.monthlyUsage.tokens)}{account.monthlyTokenCap > 0 && <small> / {count(account.monthlyTokenCap)}</small>}</strong></div>
               </div>
+              {canViewQuota && quotaByAccount.get(account.id)?.supported && (
+                <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border)' }}>
+                  <AccountQuotaSummary
+                    quota={quotaByAccount.get(account.id)}
+                    refreshing={refreshQuota.isPending && refreshQuota.variables === account.id}
+                    onRefresh={() => refreshQuota.mutate(account.id)}
+                  />
+                </div>
+              )}
 
               <div className="x-account-actions">
                 {permissions.test && (

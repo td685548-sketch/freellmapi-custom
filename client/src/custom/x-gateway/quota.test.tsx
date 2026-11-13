@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api';
 import type { XQuotaResponse } from '../../../../shared/x-quota';
 import Quota from './pages/Quota';
+import AccountQuotaSummary from './components/AccountQuotaSummary';
 import { quotaCountdown } from './quota-format';
 
 vi.mock('@/lib/api', () => ({ apiFetch: vi.fn() }));
@@ -73,5 +74,21 @@ describe('Quota view', () => {
     expect(quotaCountdown(null, Date.now())).toBeNull();
     expect(quotaCountdown('invalid', Date.now())).toBeNull();
     expect(quotaCountdown('2026-11-07T06:59:59Z', Date.now())).toBe('reset');
+  });
+  it('renders Kiro credit and free trial windows in AccountQuotaSummary', async () => {
+    const kiroQuota = {
+      accountId: 2, provider: 'kiro', providerName: 'Kiro', label: 'Kiro Dev', enabled: true, tier: 'free' as const, supported: true,
+      windows: [
+        { id: 'CREDIT', limit: 50, remaining: 40, unit: 'credits', source: 'quota_api' as const, blocking: false, resetAt: '2026-11-07T07:05:00Z' },
+        { id: 'CREDIT_freetrial', limit: 500, remaining: 380, unit: 'credits', source: 'quota_api' as const, blocking: false, resetAt: '2026-11-10T07:00:00Z' },
+      ],
+      observedAt: '2026-11-07T07:00:00Z', checkedAt: '2026-11-07T07:00:00Z', stale: false, error: null,
+      local: { requests: 10, tokens: 2000, requestCap: 0, tokenCap: 0, resetAt: '2026-12-01T00:00:00Z' },
+    };
+    await act(async () => root.render(<AccountQuotaSummary quota={kiroQuota} now={Date.parse('2026-11-07T07:00:00Z')} />));
+    expect(container.textContent).toContain('Credits');
+    expect(container.textContent).toContain('40 / 50 credits (80%)');
+    expect(container.textContent).toContain('Free Trial');
+    expect(container.textContent).toContain('380 / 500 credits (76%)');
   });
 });

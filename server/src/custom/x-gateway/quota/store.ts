@@ -110,3 +110,11 @@ export async function refreshAccountQuota(accountId: number): Promise<XAccountQu
   active.set(accountId, task);
   try { return await task; } finally { active.delete(accountId); }
 }
+export async function refreshAllSupportedQuotas(force = false): Promise<XAccountQuota[]> {
+  const targets = listAccountQuotas().filter(a => a.supported && a.enabled && (force || a.stale));
+  const concurrency = 5;
+  for (let i = 0; i < targets.length; i += concurrency) {
+    await Promise.allSettled(targets.slice(i, i + concurrency).map(a => refreshAccountQuota(a.accountId)));
+  }
+  return listAccountQuotas();
+}
