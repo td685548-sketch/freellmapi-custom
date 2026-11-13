@@ -36,7 +36,7 @@ describe('X-Gateway Custom Pricing & Config Backup / Restore', () => {
     // Grant full permissions
     getDb()
       .prepare('UPDATE users SET role = ?, permissions = ? WHERE id = ?')
-      .run('admin', JSON.stringify(['use_x_gateway', 'edit_x_settings', 'manage_x_gateway']), adminUserId);
+      .run('admin', JSON.stringify(['use_x_gateway', 'edit_x_settings', 'manage_x_gateway', 'manage_keys']), adminUserId);
     adminToken = createSession(adminUserId);
 
     readonlyUserId = createUser('readonly-pricing@test.dev', 'Password123!', 'member').userId;
@@ -119,6 +119,71 @@ describe('X-Gateway Custom Pricing & Config Backup / Restore', () => {
 
       const getBackupRes = await api('/config-backup', { token: readonlyToken });
       expect(getBackupRes.status).toBe(200);
+    });
+  });
+
+  describe('Config restore needs the permission of every section in the payload', () => {
+    const tokenFor = (name: string, permissions: string[]) => {
+      const id = createUser(`${name}-restore@test.dev`, 'Password123!', 'member').userId;
+      getDb().prepare('UPDATE users SET permissions = ? WHERE id = ?').run(JSON.stringify(permissions), id);
+      return createSession(id);
+    };
+    const restore = (token: string, body: unknown) => api('/config-backup', { method: 'POST', token, body });
+    const combo = { name: 'Escalation', entries: [{ provider: 'openai', model: 'gpt-4o' }] };
+    const node = { id: 'custom-evil', name: 'Evil', prefix: 'evil', type: 'openai-compatible', baseUrl: 'https://example.com/v1' };
+
+    it('lets Configure gateway alone restore only the gateway settings sections', async () => {
+      const token = tokenFor('settings', ['use_x_gateway', 'edit_x_settings']);
+      const ok = await restore(token, { defaults: { caveman: true, ponytail: 'lite', input: 'lossless' }, pricingOverrides: {} });
+      expect(ok.status).toBe(200);
+      expect(getConfigSnapshot().savers.caveman).toBe(true);
+    });
+
+    it('refuses combos, nodes, provider models, aliases and capabilities without their own permissions', async () => {
+      const token = tokenFor('settings2', ['use_x_gateway', 'edit_x_settings']);
+      const before = getDb().prepare("SELECT key, value FROM settings WHERE key LIKE 'x_gateway_%' ORDER BY key").all();
+      for (const [section, value, permission] of [
+        ['combos', [combo], 'edit_x_combos'],
+        ['customProviderNodes', [node], 'add_keys'],
+        ['customProviderNodes', [], 'delete_keys'],
+        ['providerModelConfigs', { openai: { disabledModels: ['gpt-4o'] } }, 'edit_keys'],
+        ['modelAliases', { fast: 'openai/gpt-4o' }, 'manage_key_models'],
+        ['customModelCaps', { 'openai/gpt-4o': { vision: true } }, 'manage_key_models'],
+      ] as const) {
+        const res = await restore(token, { [section]: value });
+        expect(res.status, section).toBe(403);
+        expect((await res.json() as { error: { message: string } }).error.message, section).toContain(permission);
+      }
+      expect(listCombos()).toHaveLength(0);
+      expect(getDb().prepare("SELECT key, value FROM settings WHERE key LIKE 'x_gateway_%' ORDER BY key").all()).toEqual(before);
+    });
+
+    it('restores nothing at all when one section is not permitted', async () => {
+      setDefaultSavers({ caveman: false, ponytail: 'off', input: 'off' }, adminUserId);
+      const token = tokenFor('settings3', ['use_x_gateway', 'edit_x_settings']);
+      const res = await restore(token, { defaults: { caveman: true, ponytail: 'ultra', input: 'standard' }, combos: [combo] });
+      expect(res.status).toBe(403);
+      expect(getConfigSnapshot().savers).toEqual({ caveman: false, ponytail: 'off', input: 'off' });
+      expect(listCombos()).toHaveLength(0);
+    });
+
+    it('accepts each section once its permission is held', async () => {
+      expect((await restore(tokenFor('combos', ['use_x_gateway', 'edit_x_settings', 'edit_x_combos']), { combos: [combo], modelAliases: { fast: 'openai/gpt-4o' } })).status).toBe(200);
+      expect(listCombos().map(c => c.name)).toEqual(['escalation']);
+      // Replacing the node list needs add, edit and delete together.
+      expect((await restore(tokenFor('partkeys', ['use_x_gateway', 'edit_x_settings', 'add_keys', 'edit_keys']), { customProviderNodes: [node] })).status).toBe(403);
+      expect((await restore(tokenFor('keys', ['use_x_gateway', 'edit_x_settings', 'add_keys', 'edit_keys', 'delete_keys']), { customProviderNodes: [node], providerModelConfigs: {} })).status).toBe(200);
+      expect((await restore(tokenFor('models', ['use_x_gateway', 'edit_x_settings', 'manage_key_models']), { customModelCaps: { 'openai/gpt-4o': { vision: true } } })).status).toBe(200);
+    });
+
+    it('exports nodes and provider model settings only to accounts that may view keys', async () => {
+      const plain = await (await api('/config-backup', { token: readonlyToken })).json() as Record<string, unknown>;
+      expect(plain).not.toHaveProperty('customProviderNodes');
+      expect(plain).not.toHaveProperty('providerModelConfigs');
+      expect(plain).toHaveProperty('combos');
+      const viewer = await (await api('/config-backup', { token: tokenFor('viewer', ['use_x_gateway', 'view_keys']) })).json() as Record<string, unknown>;
+      expect(viewer).toHaveProperty('customProviderNodes');
+      expect(viewer).toHaveProperty('providerModelConfigs');
     });
   });
 

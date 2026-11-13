@@ -1,7 +1,9 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
 import type { SessionUser } from '../../services/auth.js';
+import type { Permission } from '@freellmapi/shared/user-access.js';
 import { getSetting, setSetting } from '../../db/index.js';
+import { hasPermission } from '../../middleware/requirePermission.js';
 import { isValidKeyProxyUrl, KEY_PROXY_URL_ERROR, KEY_PROXY_URL_MAX, maskProxyUrl } from '../../lib/key-proxy.js';
 import { probeProxyUrl } from '../../lib/proxy.js';
 import {
@@ -257,7 +259,31 @@ function parseJsonSetting<T>(key: string, fallback: T): T {
   }
 }
 
-xGatewayConsoleRouter.get('/config-backup', (_req, res) => {
+const isRecord = (value: unknown): boolean => !!value && typeof value === 'object' && !Array.isArray(value);
+
+/** A backup spans several permission groups. The route gate only proves `edit_x_settings`,
+ * so each section present in the payload also needs the permission its own endpoint asks
+ * for (combos, and `/api/thruline-accounts` nodes, provider models, aliases, capabilities).
+ * Returns what the caller lacks; the restore is refused whole rather than applied in part. */
+export function missingRestorePermissions(user: SessionUser | undefined, body: Record<string, unknown>): string[] {
+  const missing = new Set<string>();
+  const need = (...permissions: Permission[]) => {
+    for (const permission of permissions) if (!hasPermission(user, permission)) missing.add(permission);
+  };
+  if (Array.isArray(body.combos)) need('edit_x_combos');
+  // The node list is replaced whole, which adds, changes and removes entries at once.
+  if (Array.isArray(body.customProviderNodes)) need('add_keys', 'edit_keys', 'delete_keys');
+  if (isRecord(body.providerModelConfigs)) need('edit_keys');
+  if ((isRecord(body.modelAliases) || isRecord(body.customModelCaps))
+    && !hasPermission(user, 'edit_x_combos') && !hasPermission(user, 'manage_key_models')) {
+    missing.add('edit_x_combos or manage_key_models');
+  }
+  return [...missing];
+}
+
+xGatewayConsoleRouter.get('/config-backup', (req, res) => {
+  // Nodes and provider model settings are readable elsewhere only with View keys.
+  const canViewKeys = hasPermission((req as Request & { user?: SessionUser }).user, 'view_keys');
   let customNodes = parseJsonSetting<unknown[]>('x_gateway_custom_provider_nodes', []);
   if (!Array.isArray(customNodes) || customNodes.length === 0) {
     customNodes = parseJsonSetting<unknown[]>('x_gateway_custom_nodes', []);
@@ -276,8 +302,7 @@ xGatewayConsoleRouter.get('/config-backup', (_req, res) => {
     combos: listCombos(),
     capacityAdapter: getCapacityAdapterSettings(),
     pricingOverrides: getPricingOverrides(),
-    customProviderNodes: customNodes,
-    providerModelConfigs,
+    ...(canViewKeys ? { customProviderNodes: customNodes, providerModelConfigs } : {}),
     modelAliases,
     customModelCaps,
   };
@@ -289,6 +314,11 @@ xGatewayConsoleRouter.post('/config-backup', (req, res) => {
   const body = req.body;
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new ConsoleError(400, 'Invalid backup payload.');
+  }
+  const missing = missingRestorePermissions((req as Request & { user?: SessionUser }).user, body);
+  if (missing.length) {
+    res.status(403).json({ error: { type: 'forbidden', message: `Permission denied: this backup also needs ${missing.map(p => `'${p}'`).join(', ')}. Nothing was restored.` } });
+    return;
   }
 
   // 1. Defaults (savers)

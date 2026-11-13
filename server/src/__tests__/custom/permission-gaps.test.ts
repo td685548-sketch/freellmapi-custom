@@ -21,6 +21,9 @@ describe('permission gates: console logs, path case and the proxy webhook', () =
     };
     grant('gateway', ['use_x_gateway']);
     grant('logs', ['use_x_gateway', 'view_keys']);
+    grant('reader', ['use_x_gateway', 'view_server_logs']);
+    grant('cleaner', ['use_x_gateway', 'clear_server_logs']);
+    grant('logsOnly', ['view_server_logs', 'clear_server_logs']);
     grant('profiles', ['view_client_profiles']);
     setEnabled(true);
     server = createApp().listen(0, '127.0.0.1');
@@ -38,7 +41,21 @@ describe('permission gates: console logs, path case and the proxy webhook', () =
     expect(await status('/api/translator/console-logs', undefined, 'DELETE')).toBe(401);
     expect(await status('/api/translator/console-logs', 'gateway')).toBe(403);
     expect(await status('/api/translator/console-logs', 'gateway', 'DELETE')).toBe(403);
-    expect(await status('/api/translator/console-logs', 'logs')).toBe(200);
+  });
+
+  it('reads the server console log with View server logs and clears it with Clear server logs only', async () => {
+    // View keys opens the request log page, not the server console output.
+    expect(await status('/api/translator/console-logs', 'logs')).toBe(403);
+    expect(await status('/api/translator/console-logs/stream', 'logs')).toBe(403);
+    expect(await status('/api/translator/console-logs', 'logs', 'DELETE')).toBe(403);
+    expect(await status('/api/translator/console-logs', 'reader')).toBe(200);
+    expect(await status('/api/translator/console-logs', 'reader', 'DELETE')).toBe(403);
+    expect(await status('/api/translator/console-logs', 'cleaner')).toBe(403);
+    expect(await status('/api/translator/console-logs/stream', 'cleaner')).toBe(403);
+    expect(await status('/api/translator/console-logs', 'cleaner', 'DELETE')).toBe(204);
+    // The log permissions alone do not open the Thruline console.
+    expect(await status('/api/translator/console-logs', 'logsOnly')).toBe(403);
+    expect(await status('/api/translator/console-logs', 'logsOnly', 'DELETE')).toBe(403);
   });
 
   it('resolves the same permission whatever the letter case of the path', async () => {

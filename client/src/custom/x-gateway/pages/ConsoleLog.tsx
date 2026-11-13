@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Check, Coins, Copy, ScrollText, Search, Terminal, Trash2, X } from 'lucide-react'
 import { apiFetch, getToken } from '@/lib/api'
 import { useSessionRevision } from '../../session-state'
+import { useUserSession } from '../../use-session'
 import { mgmtApi, type XLog } from '../management-api'
 import { useMgmtStrings } from '../management-strings'
 import { useXStrings } from '../strings'
@@ -35,6 +36,9 @@ export default function ConsoleLog() {
   const s = useMgmtStrings()
   const xs = useXStrings()
   const revision = useSessionRevision()
+  const session = useUserSession()
+  const canReadTerminal = session.hasPermission('view_server_logs')
+  const canClearTerminal = session.hasPermission('clear_server_logs')
   const [activeTab, setActiveTab] = useState<'requests' | 'terminal'>('requests')
 
   // Request logs state
@@ -197,7 +201,7 @@ export default function ConsoleLog() {
           <ScrollText size={16} />
           {xs.requestLogs}
         </button>
-        <button
+        {canReadTerminal && <button
           className={`x-button ${activeTab === 'terminal' ? 'x-primary' : ''}`}
           onClick={() => setActiveTab('terminal')}
           style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
@@ -205,7 +209,7 @@ export default function ConsoleLog() {
           <Terminal size={16} />
           {xs.terminalLiveLog}
           {connected && <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', display: 'inline-block' }} />}
-        </button>
+        </button>}
       </div>
 
       {activeTab === 'requests' ? (
@@ -570,14 +574,14 @@ export default function ConsoleLog() {
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <button
+              {canClearTerminal && <button
                 className="x-button"
                 onClick={handleClearLogs}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8125rem' }}
               >
                 <Trash2 size={14} />
                 {xs.clearLogs}
-              </button>
+              </button>}
             </div>
           </div>
 
