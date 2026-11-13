@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { accountRow } from '../../provider-accounts/store.js';
 import { listAccountQuotas, QUOTA_FRESHNESS_MS, refreshAccountQuota, refreshAllSupportedQuotas, setQuotaTier } from './store.js';
+import { consumeCodexResetCredit, fetchCodexResetCredits } from './codex-reset.js';
 
 export const xQuotaRouter = Router();
 xQuotaRouter.get('/quota', (_req, res) => res.json({ accounts: listAccountQuotas(), freshnessMs: QUOTA_FRESHNESS_MS }));
@@ -25,4 +26,66 @@ xQuotaRouter.put('/quota/:id/tier', (req, res) => {
   if (!parsed.success) { res.status(400).json({ error: { message: 'Invalid routing tier.', type: 'invalid_request_error' } }); return; }
   setQuotaTier(Number(req.params.id), parsed.data.tier);
   res.json({ ok: true, tier: parsed.data.tier });
+});
+
+xQuotaRouter.get('/quota/:id/codex-reset-credits', async (req, res) => {
+  try {
+    const account = accountRow(Number(req.params.id));
+    if (account.provider !== 'codex') {
+      res.status(400).json({ error: { message: 'Codex reset credits are only available for Codex accounts.', type: 'invalid_request_error' } });
+      return;
+    }
+    const info = await fetchCodexResetCredits(account);
+    res.json(info);
+  } catch (err) {
+    const status = typeof (err as { status?: unknown })?.status === 'number' ? (err as { status: number }).status : 500;
+    const message = err instanceof Error ? err.message : 'Failed to load Codex reset credits.';
+    res.status(status >= 400 && status < 600 ? status : 500).json({ error: { message, type: 'upstream_error' } });
+  }
+});
+
+xQuotaRouter.post('/quota/:id/codex-reset-credits', async (req, res) => {
+  try {
+    const account = accountRow(Number(req.params.id));
+    if (account.provider !== 'codex') {
+      res.status(400).json({ error: { message: 'Codex reset credits are only available for Codex accounts.', type: 'invalid_request_error' } });
+      return;
+    }
+    const result = await consumeCodexResetCredit(account);
+    if (result.ok) {
+      const quota = await refreshAccountQuota(account.id, true).catch(() => null);
+      res.json({
+        ok: true,
+        code: result.code,
+        reset: true,
+        windows_reset: result.windowsReset,
+        redeemRequestId: result.redeemRequestId,
+        credit: result.credit,
+        quota,
+      });
+      return;
+    }
+    if (result.noCredit) {
+      res.status(409).json({
+        ok: false,
+        code: 'no_credit',
+        reset: false,
+        windows_reset: result.windowsReset,
+        message: 'No Codex reset credits available.',
+      });
+      return;
+    }
+    const status = result.status >= 400 && result.status < 500 ? result.status : 502;
+    res.status(status).json({
+      ok: false,
+      code: result.code ?? 'unknown_response',
+      reset: false,
+      windows_reset: result.windowsReset,
+      message: result.message ?? 'Codex reset credit consume returned an unexpected response.',
+    });
+  } catch (err) {
+    const status = typeof (err as { status?: unknown })?.status === 'number' ? (err as { status: number }).status : 500;
+    const message = err instanceof Error ? err.message : 'Failed to consume Codex reset credit.';
+    res.status(status >= 400 && status < 600 ? status : 500).json({ error: { message, type: 'upstream_error' } });
+  }
 });

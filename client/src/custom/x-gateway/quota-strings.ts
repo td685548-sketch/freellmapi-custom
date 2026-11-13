@@ -15,6 +15,11 @@ const en = {
   error: 'Could not load quota.', refreshError: 'Could not refresh quota.', saveError: 'Could not save routing tier.',
   auto: 'Auto refresh supported accounts every minute', noWindows: 'Provider quota not reported yet.',
   readOnly: 'Viewing quota only', modelOnly: 'Model-specific / optional pool',
+  resetCredits: 'Reset credits', useReset: 'Reset quota', resetting: 'Resetting…',
+  confirmReset: 'Spend 1 Codex reset credit now? This cannot be undone.', confirmBtn: 'Confirm reset', cancelBtn: 'Cancel',
+  resetSuccess: 'Codex quota window reset.', resetError: 'Could not use Codex reset credit.',
+  viewResetDetails: 'Credit expiry', loadingDetails: 'Loading…', noCreditDetails: 'No reset credits found.',
+  creditStatus: 'Status', creditExpires: 'Expires',
 };
 const vi: Record<keyof typeof en, string> = {
   title: 'Quota', help: 'Hạn mức và thời điểm reset do provider báo, tách biệt với mức sử dụng nội bộ.',
@@ -32,5 +37,10 @@ const vi: Record<keyof typeof en, string> = {
   error: 'Không tải được quota.', refreshError: 'Không cập nhật được quota.', saveError: 'Không lưu được tầng định tuyến.',
   auto: 'Tự cập nhật tài khoản hỗ trợ mỗi phút', noWindows: 'Chưa ghi nhận quota từ provider.',
   readOnly: 'Chỉ xem quota', modelOnly: 'Hạn mức riêng model / nhóm tùy chọn',
+  resetCredits: 'Lượt reset', useReset: 'Reset quota', resetting: 'Đang reset…',
+  confirmReset: 'Dùng 1 lượt reset Codex ngay? Thao tác này không thể hoàn tác.', confirmBtn: 'Xác nhận reset', cancelBtn: 'Huỷ',
+  resetSuccess: 'Đã reset cửa sổ quota Codex.', resetError: 'Không thể dùng lượt reset Codex.',
+  viewResetDetails: 'Xem hạn dùng', loadingDetails: 'Đang tải…', noCreditDetails: 'Không có lượt reset nào.',
+  creditStatus: 'Trạng thái', creditExpires: 'Hết hạn',
 };
 export const useQuotaStrings = () => useI18n().locale === 'vi' ? vi : en;
