@@ -1,10 +1,14 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { accountRow } from '../../provider-accounts/store.js';
-import { listAccountQuotas, QUOTA_FRESHNESS_MS, refreshAccountQuota, setQuotaTier } from './store.js';
+import { listAccountQuotas, QUOTA_FRESHNESS_MS, refreshAccountQuota, refreshAllSupportedQuotas, setQuotaTier } from './store.js';
 
 export const xQuotaRouter = Router();
 xQuotaRouter.get('/quota', (_req, res) => res.json({ accounts: listAccountQuotas(), freshnessMs: QUOTA_FRESHNESS_MS }));
+xQuotaRouter.post('/quota/refresh', async (req, res) => {
+  const force = req.query.force === '1' || req.query.force === 'true';
+  res.json({ accounts: await refreshAllSupportedQuotas(force), freshnessMs: QUOTA_FRESHNESS_MS });
+});
 const tierSchema = z.object({ tier: z.enum(['subscription', 'cheap', 'free']) }).strict();
 xQuotaRouter.use('/quota/:id', (req, res, next) => {
   if (!/^[1-9]\d*$/.test(String(req.params.id)) || !Number.isSafeInteger(Number(req.params.id))) {

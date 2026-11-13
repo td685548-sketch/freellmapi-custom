@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -17,6 +17,7 @@ import {
   Cpu,
   Layers,
   Plus,
+  RefreshCw,
   RotateCcw,
   Save,
   Search,
@@ -30,6 +31,9 @@ import { useXStrings } from '../strings'
 import { useSessionRevision } from '../../session-state'
 import { useUserSession } from '../../use-session'
 import { mgmtApi } from '../management-api'
+import { quotaApi } from '../quota-api'
+import type { XAccountQuota } from '../../../../../shared/x-quota'
+import AccountQuotaSummary, { formatWindowValue } from '../components/AccountQuotaSummary'
 import { AccountLoadState } from './Providers'
 import ProviderTopology, { type TopologyNode } from '../components/ProviderTopology'
 
@@ -149,7 +153,13 @@ export default function AccountUsage() {
   const queryClient = useQueryClient()
   const canEditPricing =
     session.hasPermission('edit_x_settings') || session.hasPermission('manage_x_gateway')
+  const canViewQuota = session.hasPermission('view_x_usage')
   const query = useAccounts()
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 5_000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   // Filters State
   const [timeRange, setTimeRange] = useState<TimeRange>('7d')
@@ -197,6 +207,61 @@ export default function AccountUsage() {
     retry: false,
   })
   const breakdown = breakdownQuery.data
+
+  const quotaQuery = useQuery({
+    queryKey: ['x-quota', revision],
+    queryFn: ({ signal }) => quotaApi.list(signal),
+    enabled: canViewQuota,
+    refetchInterval: 30_000,
+    retry: false,
+  })
+
+  const refreshAllQuotas = useMutation({
+    meta: { silenceToast: true },
+    mutationFn: () => quotaApi.refreshAll(true),
+    onSuccess: data => {
+      queryClient.setQueryData(['x-quota', revision], data)
+    },
+  })
+
+  const refreshOneQuota = useMutation({
+    meta: { silenceToast: true },
+    mutationFn: (id: number) => quotaApi.refresh(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['x-quota', revision] }),
+  })
+
+  const quotaByAccount = useMemo(
+    () => new Map<number, XAccountQuota>((quotaQuery.data?.accounts ?? []).map(a => [a.accountId, a])),
+    [quotaQuery.data],
+  )
+
+  const quotaSummaryByProvider = useMemo(() => {
+    const map = new Map<string, string>()
+    const grouped = new Map<string, XAccountQuota[]>()
+    for (const a of quotaQuery.data?.accounts ?? []) {
+      if (!a.windows.length) continue
+      const list = grouped.get(a.provider) ?? []
+      list.push(a)
+      grouped.set(a.provider, list)
+    }
+    for (const [prov, list] of grouped) {
+      const firstWin = list[0]?.windows[0]
+      if (!firstWin) continue
+      if (list.length === 1) {
+        map.set(prov, formatWindowValue(firstWin))
+      } else if (firstWin.unit === '%') {
+        const minPct = Math.min(...list.flatMap(a => a.windows.map(w => w.remaining ?? 100)))
+        map.set(prov, `Min ${Math.round(minPct)}% (${list.length} accts)`)
+      } else {
+        const totalRem = list.reduce((sum, a) => sum + (a.windows[0]?.remaining ?? 0), 0)
+        const totalLim = list.reduce((sum, a) => sum + (a.windows[0]?.limit ?? 0), 0)
+        if (totalLim > 0) {
+          map.set(prov, `${totalRem.toLocaleString()} / ${totalLim.toLocaleString()} ${firstWin.unit}`)
+        }
+      }
+    }
+    return map
+  }, [quotaQuery.data])
 
   const pricingMap = pricingDraft ?? pricingQuery.data?.pricing
 
@@ -890,6 +955,11 @@ export default function AccountUsage() {
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                       {p.accountsCount} tài khoản kết nối • {p.requests.toLocaleString()} requests
                     </div>
+                    {quotaSummaryByProvider.has(p.provider) && (
+                      <div style={{ fontSize: '0.72rem', color: '#3b82f6', marginTop: '0.15rem' }}>
+                        Hạn mức: {quotaSummaryByProvider.get(p.provider)}
+                      </div>
+                    )}
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <strong style={{ fontSize: '0.9rem', color: '#10b981' }}>{fmtTokens(p.tokens)}</strong>
@@ -965,32 +1035,45 @@ export default function AccountUsage() {
             <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 600 }}>Chi tiết hạn mức & Sử dụng theo tài khoản</h3>
           </div>
 
-          {/* Search / Filter Provider Input */}
-          <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-            <Search size={14} style={{ position: 'absolute', left: '0.6rem', color: 'var(--text-muted)' }} />
-            <input
-              type="text"
-              placeholder="Tìm kiếm tài khoản / Provider..."
-              value={providerSearch}
-              onChange={e => setProviderSearch(e.target.value)}
-              style={{
-                padding: '0.375rem 0.6rem 0.375rem 2rem',
-                borderRadius: '6px',
-                border: '1px solid var(--border)',
-                backgroundColor: 'var(--bg-subtle, rgba(0,0,0,0.03))',
-                fontSize: '0.8125rem',
-                width: '240px',
-              }}
-            />
-            {providerSearch && (
+          {/* Search / Filter Provider Input + Refresh Quotas */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            {canViewQuota && (
               <button
                 type="button"
-                onClick={() => setProviderSearch('')}
-                style={{ position: 'absolute', right: '0.5rem', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+                className="x-button x-small"
+                disabled={refreshAllQuotas.isPending}
+                onClick={() => refreshAllQuotas.mutate()}
               >
-                <X size={12} />
+                <RefreshCw size={13} className={refreshAllQuotas.isPending ? 'x-spin' : undefined} />
+                {refreshAllQuotas.isPending ? 'Đang đo hạn mức…' : 'Cập nhật hạn mức'}
               </button>
             )}
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <Search size={14} style={{ position: 'absolute', left: '0.6rem', color: 'var(--text-muted)' }} />
+              <input
+                type="text"
+                placeholder="Tìm kiếm tài khoản / Provider..."
+                value={providerSearch}
+                onChange={e => setProviderSearch(e.target.value)}
+                style={{
+                  padding: '0.375rem 0.6rem 0.375rem 2rem',
+                  borderRadius: '6px',
+                  border: '1px solid var(--border)',
+                  backgroundColor: 'var(--bg-subtle, rgba(0,0,0,0.03))',
+                  fontSize: '0.8125rem',
+                  width: '240px',
+                }}
+              />
+              {providerSearch && (
+                <button
+                  type="button"
+                  onClick={() => setProviderSearch('')}
+                  style={{ position: 'absolute', right: '0.5rem', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1000,8 +1083,8 @@ export default function AccountUsage() {
               <tr>
                 <th>{s.accounts}</th>
                 <th>{s.providers}</th>
-                <th>{s.requests}</th>
-                <th>{s.tokens}</th>
+                <th>Hạn mức Provider (Quota)</th>
+                <th>Sử dụng tháng này</th>
                 <th>Ước tính chi phí</th>
               </tr>
             </thead>
@@ -1022,12 +1105,32 @@ export default function AccountUsage() {
                     </th>
                     <td>{account.providerName}</td>
                     <td>
-                      {account.monthlyUsage.requests.toLocaleString()}
-                      <small> / {account.monthlyRequestCap || '∞'}</small>
+                      <AccountQuotaSummary
+                        quota={quotaByAccount.get(account.id)}
+                        now={now}
+                        compact
+                        refreshing={
+                          refreshAllQuotas.isPending ||
+                          (refreshOneQuota.isPending && refreshOneQuota.variables === account.id)
+                        }
+                        onRefresh={canViewQuota ? () => refreshOneQuota.mutate(account.id) : undefined}
+                      />
                     </td>
                     <td>
-                      {account.monthlyUsage.tokens.toLocaleString()}
-                      <small> / {account.monthlyTokenCap || '∞'}</small>
+                      <div style={{ fontSize: '0.8125rem' }}>
+                        <div>
+                          {account.monthlyUsage.requests.toLocaleString()} reqs
+                          {account.monthlyRequestCap > 0 && (
+                            <small> / {account.monthlyRequestCap.toLocaleString()}</small>
+                          )}
+                        </div>
+                        <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                          {fmtTokens(account.monthlyUsage.tokens)} tokens
+                          {account.monthlyTokenCap > 0 && (
+                            <small> / {fmtTokens(account.monthlyTokenCap)}</small>
+                          )}
+                        </div>
+                      </div>
                     </td>
                     <td>
                       <span style={{ color: '#f59e0b', fontWeight: 500 }}>

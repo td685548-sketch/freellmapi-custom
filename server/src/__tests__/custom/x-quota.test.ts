@@ -33,6 +33,27 @@ describe('provider quota parsing', () => {
     expect(parseProviderQuota('openrouter', { data: { limit: 10, usage: 3 } })[0]).toMatchObject({ remaining: 7, unit: 'USD' });
     expect(parseProviderQuota('deepseek', { is_available: true, balance_infos: [{ currency: 'USD', total_balance: '2.5' }] })[0])
       .toMatchObject({ remaining: 2.5, limit: null });
+    expect(parseProviderQuota('kiro', {
+      nextDateReset: '2026-12-01T00:00:00Z',
+      usageBreakdownList: [{
+        resourceType: 'CREDIT',
+        usageLimitWithPrecision: 50,
+        freeTrialInfo: { freeTrialStatus: 'ACTIVE', usageLimitWithPrecision: 500, currentUsageWithPrecision: 120, freeTrialExpiry: '2026-11-20T00:00:00Z' },
+      }],
+    })).toMatchObject([
+      { id: 'CREDIT', limit: 50, remaining: 50, unit: 'credits', blocking: false, resetAt: '2026-12-01T00:00:00.000Z' },
+      { id: 'CREDIT_freetrial', limit: 500, remaining: 380, unit: 'credits', blocking: false, resetAt: '2026-11-20T00:00:00.000Z' },
+    ]);
+    expect(parseProviderQuota('glm', { data: { limits: [{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 25, nextResetTime: 1794096000000 }] } })[0])
+      .toMatchObject({ id: 'Session (5h)', limit: 100, remaining: 75, unit: '%' });
+    expect(parseProviderQuota('opencode-go', { usage: { rolling: { percent: 40, resetsAt: '2026-11-08T00:00:00Z' } } })[0])
+      .toMatchObject({ id: 'Rolling', limit: 100, remaining: 60, unit: '%' });
+    expect(parseProviderQuota('ollama', { limits: { session: { usage: 0.3 } } })[0])
+      .toMatchObject({ id: 'Session (5h)', limit: 100, remaining: 70, unit: '%' });
+    expect(parseProviderQuota('vercel-ai-gateway', { balance: '80.5', total_used: '19.5' })[0])
+      .toMatchObject({ id: 'credits', limit: 100, remaining: 80.5, unit: 'USD' });
+    expect(parseProviderQuota('kimi', { usage: { limit: 1000, used: 250, resetTime: '2026-11-08T00:00:00Z' } })[0])
+      .toMatchObject({ id: 'Weekly', limit: 1000, remaining: 750, unit: 'requests' });
   });
   it('parses compound resets and exact zero remaining without inventing totals', () => {
     const now = Date.now();
@@ -89,6 +110,29 @@ describe('X account quota HTTP, routing and isolation', () => {
     const data = await (await call()).json();
     expect(data.accounts.find((a: { accountId: number }) => a.accountId === first).windows[0]).toMatchObject({ remaining: 120, limit: 500, source: 'header' });
     expect(JSON.stringify(data)).not.toMatch(/gsk_quota_secret|encrypted_key|auth_tag/);
+  });
+  it('supports Kiro multi-endpoint fallback and bulk quota refresh', async () => {
+    upstream.mockImplementation(async (url, init) => {
+      const target = String(url);
+      if (target.includes('codewhisperer') && init?.method === 'GET') {
+        return new Response('not found', { status: 404 });
+      }
+      if (target.includes('codewhisperer') && init?.method === 'POST') {
+        return new Response(JSON.stringify({
+          nextDateReset: '2026-12-01T00:00:00Z',
+          usageBreakdownList: [{ resourceType: 'CREDIT', usageLimitWithPrecision: 500, currentUsageWithPrecision: 50 }],
+        }), { headers: { 'content-type': 'application/json' } });
+      }
+      return new Response('{}', { status: 503 });
+    });
+    const res = await call(`/${third}/refresh`, reader, 'POST');
+    expect(res.status).toBe(200);
+    const kiroAccount = await res.json();
+    expect(kiroAccount.windows[0]).toMatchObject({ id: 'CREDIT', limit: 500, remaining: 450, unit: 'credits' });
+    const bulkRes = await call('/refresh', reader, 'POST');
+    expect(bulkRes.status).toBe(200);
+    const bulkData = await bulkRes.json();
+    expect(bulkData.accounts.find((a: { accountId: number }) => a.accountId === third).windows[0]).toMatchObject({ remaining: 450 });
   });
   it('uses subscription → cheap → free and skips only fresh account-wide exhaustion', () => {
     setQuotaTier(first, 'cheap'); setQuotaTier(second, 'subscription'); setQuotaTier(third, 'free');

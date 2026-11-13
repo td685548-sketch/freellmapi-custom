@@ -19,6 +19,15 @@ const endpoints: Record<string, string> = {
   openrouter: 'https://openrouter.ai/api/v1/key',
   deepseek: 'https://api.deepseek.com/user/balance',
   groq: 'https://api.groq.com/openai/v1/models',
+  glm: 'https://api.z.ai/api/monitor/usage/quota/limit',
+  'glm-cn': 'https://open.bigmodel.cn/api/monitor/usage/quota/limit',
+  'opencode-go': 'https://opencode.ai/zen/go/v1/usage',
+  'opencode-zen': 'https://opencode.ai/zen/v1/usage',
+  ollama: 'https://ollama.com/api/usage',
+  'vercel-ai-gateway': 'https://ai-gateway.vercel.sh/v1/credits',
+  kimi: 'https://api.kimi.com/coding/v1/usages',
+  minimax: 'https://www.minimax.io/v1/api/openplatform/coding_plan/remains',
+  'minimax-cn': 'https://www.minimaxi.com/v1/api/openplatform/coding_plan/remains',
 };
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -89,13 +98,92 @@ export function parseProviderQuota(provider: string, payload: unknown): XQuotaWi
       result.push(window(item.modelId, 100, fraction * 100, quotaReset(item.resetTime), '%', false));
     }
   } else if (provider === 'kiro' && Array.isArray(data.usageBreakdownList)) {
+    const defaultReset = quotaReset(data.nextDateReset ?? data.resetDate);
     for (const raw of data.usageBreakdownList) {
-      const item = object(raw); const limit = quotaNumber(item.usageLimitWithPrecision ?? item.usageLimit); const used = quotaNumber(item.currentUsageWithPrecision ?? item.currentUsage);
-      if (limit == null || used == null || typeof item.resourceType !== 'string') continue;
-      let remaining = Math.max(0, limit - used); let total = limit;
-      const trial = object(item.freeTrialInfo); const trialLimit = quotaNumber(trial.usageLimitWithPrecision); const trialUsed = quotaNumber(trial.currentUsageWithPrecision);
-      if (trial.freeTrialStatus === 'ACTIVE' && trialLimit != null && trialUsed != null) { total += trialLimit; remaining += Math.max(0, trialLimit - trialUsed); }
-      result.push(window(item.resourceType, total, remaining, quotaReset(data.nextDateReset ?? data.resetDate), 'credits'));
+      const item = object(raw);
+      const limit = quotaNumber(item.usageLimitWithPrecision ?? item.usageLimit);
+      const used = quotaNumber(item.currentUsageWithPrecision ?? item.currentUsage) ?? 0;
+      if (limit == null || typeof item.resourceType !== 'string') continue;
+      const remaining = Math.max(0, limit - used);
+      const trial = object(item.freeTrialInfo);
+      const trialLimit = quotaNumber(trial.usageLimitWithPrecision ?? trial.usageLimit);
+      const trialUsed = quotaNumber(trial.currentUsageWithPrecision ?? trial.currentUsage) ?? 0;
+      const trialActive = trial.freeTrialStatus === 'ACTIVE' && trialLimit != null && trialLimit > 0;
+      const trialRemaining = trialActive ? Math.max(0, trialLimit - trialUsed) : 0;
+      // Do not block the account on main credits while an active free-trial pool still has balance.
+      result.push(window(item.resourceType, limit, remaining, defaultReset, 'credits', trialRemaining <= 0));
+      if (trialActive) {
+        result.push(window(`${item.resourceType}_freetrial`, trialLimit, trialRemaining,
+          quotaReset(trial.freeTrialExpiry) ?? defaultReset, 'credits', remaining <= 0));
+      }
+    }
+  } else if ((provider === 'glm' || provider === 'glm-cn') && Array.isArray(object(data.data).limits)) {
+    for (const raw of object(data.data).limits as unknown[]) {
+      const item = object(raw);
+      if (item.type !== 'TOKENS_LIMIT' && item.type !== 'CREDIT_LIMIT') continue;
+      const usedPct = quotaNumber(item.percentage);
+      if (usedPct == null) continue;
+      const id = item.unit === 3 ? `Session (${item.number ?? 5}h)` : item.unit === 6 ? 'Weekly (7d)'
+        : item.type === 'TOKENS_LIMIT' ? 'Tokens' : `Limit (${item.number ?? ''})`;
+      result.push(window(id, 100, Math.max(0, 100 - usedPct), quotaReset(item.nextResetTime), '%'));
+    }
+  } else if ((provider === 'opencode-go' || provider === 'opencode-zen') && typeof data.usage === 'object' && data.usage !== null) {
+    const usage = object(data.usage);
+    for (const [period, label] of [['rolling', 'Rolling'], ['weekly', 'Weekly'], ['monthly', 'Monthly']] as const) {
+      const item = object(usage[period]);
+      const pct = quotaNumber(item.percent);
+      if (pct == null) continue;
+      result.push(window(label, 100, Math.max(0, 100 - Math.min(100, pct)), quotaReset(item.resetsAt), '%'));
+    }
+  } else if (provider === 'ollama' && typeof data.limits === 'object' && data.limits !== null) {
+    const limits = object(data.limits);
+    for (const [period, label] of [['session', 'Session (5h)'], ['weekly', 'Weekly (7d)'], ['monthly', 'Monthly']] as const) {
+      const item = object(limits[period]);
+      const ratio = quotaNumber(item.usage);
+      if (ratio == null || ratio > 1) continue;
+      result.push(window(label, 100, Math.max(0, Math.round((1 - ratio) * 100)), quotaReset(item.resetAt ?? item.resetsAt), '%'));
+    }
+  } else if (provider === 'vercel-ai-gateway') {
+    const balance = quotaNumber(data.balance);
+    const used = quotaNumber(data.total_used);
+    if (balance != null) {
+      const limit = used != null ? balance + used : null;
+      result.push(window('credits', limit, balance, null, 'USD'));
+    }
+  } else if (provider === 'kimi') {
+    const usage = object(data.usage);
+    const limit = quotaNumber(usage.limit ?? usage.Limit);
+    const used = quotaNumber(usage.used ?? usage.Used) ?? 0;
+    const rem = quotaNumber(usage.remaining ?? usage.Remaining);
+    if (limit != null && limit > 0) {
+      result.push(window('Weekly', limit, rem ?? Math.max(0, limit - used),
+        quotaReset(usage.resetTime ?? usage.ResetTime ?? usage.reset_at ?? usage.resetAt), 'requests'));
+    }
+    if (Array.isArray(data.limits)) {
+      for (const raw of data.limits) {
+        const detail = object(object(raw).detail);
+        const dLimit = quotaNumber(detail.limit ?? detail.Limit);
+        const dRem = quotaNumber(detail.remaining ?? detail.Remaining);
+        if (dLimit != null && dLimit > 0 && dRem != null) {
+          result.push(window('Ratelimit', dLimit, dRem,
+            quotaReset(detail.resetTime ?? detail.reset_at ?? detail.resetAt), 'requests'));
+        }
+      }
+    }
+  } else if ((provider === 'minimax' || provider === 'minimax-cn') && Array.isArray(data.model_remains ?? data.modelRemains)) {
+    const models = (data.model_remains ?? data.modelRemains) as unknown[];
+    for (const raw of models) {
+      const item = object(raw);
+      const name = String(item.model_name ?? item.modelName ?? 'MiniMax').trim() || 'MiniMax';
+      const total = quotaNumber(item.current_interval_total_count ?? item.currentIntervalTotalCount);
+      const rem = quotaNumber(item.current_interval_usage_count ?? item.currentIntervalUsageCount);
+      const pct = quotaNumber(item.current_interval_remaining_percent ?? item.currentIntervalRemainingPercent);
+      const resetAt = quotaReset(item.end_time ?? item.endTime);
+      if (total != null && total > 0 && rem != null) {
+        result.push(window(name, total, Math.min(total, rem), resetAt, 'requests', false));
+      } else if (pct != null) {
+        result.push(window(name, 100, Math.min(100, pct), resetAt, '%', false));
+      }
     }
   } else if (provider === 'github-copilot') {
     const resetAt = quotaReset(data.quota_reset_date ?? data.limited_user_reset_date);
@@ -157,9 +245,14 @@ export async function fetchAccountQuota(account: AccountRow): Promise<XQuotaWind
     headers['Editor-Version'] = 'vscode/1.100.0';
     headers['Editor-Plugin-Version'] = 'copilot-chat/0.26.7';
   }
-  let url = endpoints[account.provider];
+  const url = endpoints[account.provider];
   let method = 'GET'; let body: string | undefined;
   if (account.provider === 'codex' && structured?.accountId) headers['ChatGPT-Account-ID'] = structured.accountId;
+  if (account.provider === 'kimi' && !structured?.accessToken) {
+    delete headers.Authorization;
+    headers['x-api-key'] = secret;
+    headers['Content-Type'] = 'application/json';
+  }
   if (account.provider === 'gemini-cli') {
     const project = structured?.projectId ?? await fetchGeminiProjectId(secret);
     if (!project) throw new Error('Gemini CLI project is unknown; configure Code Assist access before checking quota.');
@@ -167,12 +260,41 @@ export async function fetchAccountQuota(account: AccountRow): Promise<XQuotaWind
   }
   if (account.provider === 'kiro') {
     const region = kiroRegion(structured?.region);
-    const profileArn = structured?.profileArn
-      || (structured?.accessToken ? await fetchKiroProfileArn(region, structured.accessToken) : undefined)
-      || resolveDefaultKiroProfileArn(structured?.authMethod);
-    const params = new URLSearchParams({ origin: 'AI_EDITOR', resourceType: 'AGENTIC_REQUEST', isEmailRequired: 'true' });
-    if (profileArn) params.set('profileArn', profileArn);
-    url = `https://codewhisperer.${region}.amazonaws.com/getUsageLimits?${params}`;
+    const authMethod: string | undefined = structured?.authMethod ?? account.auth_method;
+    const isApiKey = authMethod === 'api_key';
+    if (isApiKey) headers.tokentype = 'API_KEY';
+    if (authMethod === 'external_idp') headers.TokenType = 'EXTERNAL_IDP';
+    headers['x-amz-user-agent'] = 'aws-sdk-js/1.0.0 KiroIDE';
+    headers['user-agent'] = 'aws-sdk-js/1.0.0 KiroIDE';
+    const profileArn = isApiKey
+      ? (structured?.profileArn || undefined)
+      : (structured?.profileArn
+        || (structured?.accessToken ? await fetchKiroProfileArn(region, structured.accessToken) : undefined)
+        || resolveDefaultKiroProfileArn(structured?.authMethod));
+    const getParams = new URLSearchParams({ origin: 'AI_EDITOR', resourceType: 'AGENTIC_REQUEST', isEmailRequired: 'true' });
+    if (profileArn) getParams.set('profileArn', profileArn);
+    const qParams = new URLSearchParams({ origin: 'AI_EDITOR', resourceType: 'AGENTIC_REQUEST' });
+    if (profileArn) qParams.set('profileArn', profileArn);
+    const attempts: Array<{ url: string; method: string; headers: Record<string, string>; body?: string }> = [
+      { url: `https://codewhisperer.${region}.amazonaws.com/getUsageLimits?${getParams}`, method: 'GET', headers },
+      {
+        url: `https://codewhisperer.${region}.amazonaws.com/`,
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/x-amz-json-1.0', 'x-amz-target': 'AmazonCodeWhispererService.GetUsageLimits' },
+        body: JSON.stringify({ origin: 'AI_EDITOR', resourceType: 'AGENTIC_REQUEST', ...(profileArn ? { profileArn } : {}) }),
+      },
+      { url: `https://q.${region}.amazonaws.com/getUsageLimits?${qParams}`, method: 'GET', headers },
+    ];
+    let lastStatus = 0;
+    for (const attempt of attempts) {
+      const response = await proxyFetch(attempt.url, {
+        headers: attempt.headers, method: attempt.method, body: attempt.body, signal: AbortSignal.timeout(10_000), redirect: 'error',
+      }, account.platform, 'unknown');
+      if (response.ok) return parseProviderQuota('kiro', await readSubscriptionJson(response));
+      lastStatus = response.status;
+      await response.body?.cancel();
+    }
+    throw Object.assign(new Error(`Quota endpoint returned HTTP ${lastStatus}. Check account authorization or retry later.`), { status: lastStatus });
   }
     const response = await proxyFetch(url, {
       headers, method, body, signal: AbortSignal.timeout(10_000), redirect: 'error',
