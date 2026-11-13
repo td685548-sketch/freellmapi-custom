@@ -4,6 +4,7 @@ import { runMigrations } from '../../db/migrate/runner.js';
 import { nodeSqliteFactory } from '../../db/node-sqlite.js';
 import { initEncryptionKey } from '../../lib/crypto.js';
 import * as supportStore from '../../custom/x-gateway/support-store.js';
+import * as documentStorage from '../../custom/x-gateway/support-document-storage.js';
 import {
   createSupportEvidenceSource,
   ensureSupportEvidenceTables,
@@ -56,11 +57,35 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   db?.close?.();
 });
 
 describe('support-evidence-store', () => {
+  it('does not commit a revision or change the source when Azure archive fails', async () => {
+    const source = createSupportEvidenceSource(tenantAId, { name: 'Archive failure', kind: 'markdown' });
+    vi.stubEnv('SUPPORT_DOCUMENT_STORAGE', 'azure');
+    vi.stubEnv('AZURE_STORAGE_ACCOUNT_NAME', 'invalid/account');
+    await expect(importSupportEvidenceRevision({ tenantId: tenantAId, sourceId: source.id,
+      expectedVersion: source.version, title: 'Title', format: 'markdown', content: '# Private document' }))
+      .rejects.toMatchObject({ status: 503, code: 'document_storage_unavailable' });
+    expect(listSupportEvidenceRevisions(tenantAId, source.id)).toEqual([]);
+    expect(getSupportEvidenceSource(tenantAId, source.id)).toEqual(source);
+  });
+
+  it('archives validated imports and rejects a foreign tenant before contacting storage', async () => {
+    const source = createSupportEvidenceSource(tenantAId, { name: 'Archived knowledge', kind: 'markdown' });
+    const archive = vi.spyOn(documentStorage, 'archiveSupportDocument').mockResolvedValue('private/key');
+    const input = { tenantId: tenantAId, sourceId: source.id, expectedVersion: source.version,
+      title: 'Title', format: 'markdown' as const, content: '# Private document' };
+    await expect(importSupportEvidenceRevision({ ...input, tenantId: tenantBId })).rejects.toMatchObject({ status: 404 });
+    expect(archive).not.toHaveBeenCalled();
+    const result = await importSupportEvidenceRevision(input);
+    expect(archive).toHaveBeenCalledWith(tenantAId, source.id, expect.objectContaining({ content: input.content }), undefined);
+    expect(getSupportEvidenceRevision(tenantAId, source.id, result.revision.id).content).toBe(input.content);
+  });
+
   it('returns fresh DEFAULT_EVIDENCE_POLICY for healthy missing row and throws 503 on corrupt policy', () => {
     const p1 = getSupportEvidencePolicy(tenantAId);
     expect(p1).toEqual(DEFAULT_EVIDENCE_POLICY);
@@ -233,6 +258,7 @@ describe('support-evidence-store', () => {
   });
 
   it('enforces max 50 sources/tenant and max 20 revisions/source', async () => {
+    const archive = vi.spyOn(documentStorage, 'archiveSupportDocument').mockResolvedValue('private/key');
     for (let i = 0; i < SUPPORT_EVIDENCE_LIMITS.maxSourcesPerTenant; i++) {
       createSupportEvidenceSource(tenantAId, { name: `Src ${i}`, kind: 'text' });
     }
@@ -253,6 +279,7 @@ describe('support-evidence-store', () => {
       });
       ver = res.source.version;
     }
+    archive.mockClear();
     await expect(
       importSupportEvidenceRevision({
         tenantId: tenantBId,
@@ -263,6 +290,14 @@ describe('support-evidence-store', () => {
         content: 'Unique content 21',
       }),
     ).rejects.toMatchObject({ status: 409, code: 'evidence_capacity_exceeded' });
+    expect(archive).not.toHaveBeenCalled();
+    const lastIndex = SUPPORT_EVIDENCE_LIMITS.maxRevisionsPerSource - 1;
+    const duplicate = await importSupportEvidenceRevision({
+      tenantId: tenantBId, sourceId: src.id, expectedVersion: ver,
+      title: `Rev ${lastIndex}`, format: 'text', content: `Unique content ${lastIndex}`,
+    });
+    expect(duplicate.deduplicated).toBe(true);
+    expect(duplicate.source.version).toBe(ver);
   });
 
   it('encrypts revisions, chunks, suites, runs, and answers at rest and enforces suite/run/answer constraints', async () => {

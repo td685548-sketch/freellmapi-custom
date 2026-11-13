@@ -7,7 +7,8 @@ export default defineConfig({
     // The Cloudflare neuron meter asks Cloudflare's analytics API for the
     // account's own count in the background; that call would land in every
     // test's fetch mock. Its own tests switch it back on.
-    env: { CLOUDFLARE_NEURON_ANALYTICS: '0' },
+    // Local .env may enable Azure; offline tests opt in only with SDK mocks.
+    env: { CLOUDFLARE_NEURON_ANALYTICS: '0', SUPPORT_DOCUMENT_STORAGE: 'disabled' },
     include: ['src/__tests__/**/*.test.ts'],
     coverage: {
       enabled: process.env.COVERAGE === '1',

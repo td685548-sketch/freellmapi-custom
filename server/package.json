@@ -21,6 +21,8 @@
     "db:migration:create": "tsx src/db/migrate/cli.ts create"
   },
   "dependencies": {
+    "@azure/identity": "^4.14.1",
+    "@azure/storage-blob": "^12.34.0",
     "@freellmapi/shared": "*",
     "ajv": "^8.20.0",
     "compression": "^1.8.0",
