@@ -1,0 +1,67 @@
+{
+  "agent-1": {
+    "title": "Shared DTOs, all019 persistence, widget profile & intake validation",
+    "create": [
+      "shared/support-service-desk.ts",
+      "server/src/custom/x-gateway/support-service-desk-store.ts",
+      "server/src/custom/x-gateway/support-widget-profile.ts",
+      "server/src/db/migrations/20261113_180001_support_service_desk.ts",
+      "server/src/__tests__/custom/x-support-service-desk-store.test.ts",
+      "server/src/__tests__/custom/x-support-widget-profile.test.ts",
+      "server/src/__tests__/db/migrate/support-service-desk.test.ts"
+    ],
+    "edit": [
+      "shared/support-runtime.ts",
+      "server/src/db/migrate/defaults.ts",
+      "server/src/__tests__/db/migrate/roundtrip.test.ts"
+    ]
+  },
+  "agent-2": {
+    "title": "Real-model grounded operator Copilot",
+    "create": [
+      "server/src/custom/x-gateway/support-agent-copilot.ts",
+      "server/src/__tests__/custom/x-support-agent-copilot.test.ts",
+      "server/src/__tests__/fixtures/support-service-desk/copilot-cases.json"
+    ],
+    "edit": []
+  },
+  "agent-3": {
+    "title": "SLA/routing lifecycle, real HTTP and intake runtime enforcement",
+    "create": [
+      "server/src/custom/x-gateway/support-sla-routing.ts",
+      "server/src/custom/x-gateway/support-service-desk-lifecycle.ts",
+      "server/src/custom/x-gateway/support-service-desk-runtime.ts",
+      "server/src/custom/x-gateway/support-service-desk-router.ts",
+      "server/src/__tests__/custom/x-support-sla-routing.test.ts",
+      "server/src/__tests__/custom/x-support-service-desk-lifecycle.test.ts",
+      "server/src/__tests__/custom/x-support-service-desk-runtime.test.ts",
+      "server/src/__tests__/custom/x-support-service-desk-http.test.ts"
+    ],
+    "edit": [
+      "server/src/custom/x-gateway/console-router.ts",
+      "server/src/custom/x-gateway/router.ts",
+      "server/src/custom/x-gateway/support-router.ts",
+      "server/src/custom/x-gateway/support-runtime.ts",
+      "server/src/custom/x-gateway/support-runtime-store.ts",
+      "server/src/custom/x-gateway/support-workflows.ts",
+      "server/src/__tests__/custom/x-support-runtime.test.ts",
+      "server/src/__tests__/custom/x-support-runtime-http.test.ts",
+      "server/src/__tests__/custom/x-support-workflows.test.ts"
+    ]
+  },
+  "agent-4": {
+    "title": "Service Desk Studio, native UI and actual served widget",
+    "create": [
+      "client/src/custom/x-gateway/support-service-desk-strings.ts",
+      "client/src/custom/x-gateway/pages/SupportServiceDesk.tsx",
+      "client/src/custom/x-gateway/components/SupportWidgetPreview.tsx",
+      "client/src/custom/x-gateway/support-service-desk.test.tsx"
+    ],
+    "edit": [
+      "client/src/custom/x-gateway/XGatewayApp.tsx",
+      "client/src/custom/x-gateway/shell/nav.ts",
+      "server/src/custom/x-gateway/support-runtime-widget.ts",
+      "server/src/__tests__/custom/x-support-runtime-widget.test.ts"
+    ]
+  }
+}

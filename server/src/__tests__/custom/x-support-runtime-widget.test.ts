@@ -1122,4 +1122,593 @@ describe('AI Support Runtime Widget (support-runtime-widget.ts)', () => {
     expect(notices[0].querySelector('[data-testid="widget-non-ai-status"]')?.textContent).toBe('System Notice');
   });
 
+  it('default init has no added config fetch and preserves 017/018 behavior', async () => {
+    loadWidgetScript('https://remote-gateway.example.com/thruline/v1/support/widget.js');
+
+    const instance = window.FreeLLMAPISupport.init({
+      tenantKey: 'tenant_default_off',
+      contextToken: 'signed_tok_1'
+    });
+
+    expect(instance).toBeDefined();
+    // Verify no fetch was called for /thruline/v1/support/widget/config
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('opt-in loadTenantProfile: true fetches /thruline/v1/support/widget/config and applies branding', async () => {
+    loadWidgetScript('https://remote-gateway.example.com/thruline/v1/support/widget.js');
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        config: {
+          version: 2,
+          enabled: true,
+          appearance: {
+            primaryColor: '#10b981',
+            title: 'Acme Branded Support',
+            welcomeMessage: 'Welcome to Acme Support! How can we help?',
+            position: 'bottom-left',
+            quickPrompts: ['Check refund status', 'Shipping fees']
+          },
+          intake: {
+            required: false,
+            fields: []
+          }
+        }
+      })
+    });
+
+    window.FreeLLMAPISupport.init({
+      tenantKey: 'tenant_branded_1',
+      contextToken: 'signed_tok_2',
+      loadTenantProfile: true
+    });
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="widget-title"]')?.textContent).toBe('Acme Branded Support');
+    });
+
+    const [callUrl, callInit] = mockFetch.mock.calls[0];
+    expect(callUrl).toBe('https://remote-gateway.example.com/thruline/v1/support/widget/config');
+    expect(callInit.headers['X-Support-Tenant-Key']).toBe('tenant_branded_1');
+    expect(callInit.headers['X-Support-Context-Token']).toBe('signed_tok_2');
+
+    // Verify title and styling
+    expect(document.querySelector('[data-testid="widget-toggle-btn"]')?.getAttribute('style')).toContain('rgb(16, 185, 129)');
+    expect(document.getElementById('freellmapi-support-widget-root')?.style.left).toBe('24px');
+    expect(document.querySelector('[data-testid="widget-welcome-message"]')?.textContent).toBe('Welcome to Acme Support! How can we help?');
+
+    const quickPromptBtns = document.querySelectorAll('[data-testid="widget-quick-prompt"]');
+    expect(quickPromptBtns.length).toBe(2);
+    expect(quickPromptBtns[0].textContent).toBe('Check refund status');
+  });
+
+  it('renders pre-chat intake form when required fields exist and client-validates required and email fields', async () => {
+    loadWidgetScript('https://remote-gateway.example.com/thruline/v1/support/widget.js');
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        config: {
+          version: 1,
+          enabled: true,
+          appearance: {
+            primaryColor: '#2563eb',
+            title: 'Support Desk',
+            welcomeMessage: '',
+            position: 'bottom-right',
+            quickPrompts: []
+          },
+          intake: {
+            required: true,
+            fields: [
+              { key: 'customer_name', label: 'Full Name', type: 'text', required: true },
+              { key: 'email', label: 'Email Address', type: 'email', required: true },
+              { key: 'category', label: 'Category', type: 'select', required: true, options: ['billing', 'tech'] }
+            ],
+            schemaHash: 'hash_abc123'
+          }
+        }
+      })
+    });
+
+    window.FreeLLMAPISupport.init({
+      tenantKey: 'tenant_intake_1',
+      loadTenantProfile: true
+    });
+
+    await vi.waitFor(() => {
+      const intakeForm = document.querySelector('[data-testid="widget-intake-form"]');
+      expect(intakeForm).not.toBeNull();
+      expect((intakeForm as HTMLElement).style.display).toBe('flex');
+    });
+
+    expect((document.getElementById('freellmapi-support-messages') as HTMLElement).style.display).toBe('none');
+
+    // Click submit with empty fields -> client validation triggers
+    const submitBtn = document.querySelector('[data-testid="widget-intake-submit-btn"]') as HTMLButtonElement;
+    submitBtn.click();
+
+    expect(document.querySelector('[data-testid="widget-intake-error-customer_name"]')?.textContent).toBe('This field is required');
+    expect(document.querySelector('[data-testid="widget-intake-error-email"]')?.textContent).toBe('This field is required');
+    // Ensure no intake POST was made due to validation error
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    // Enter invalid email
+    const nameInput = document.querySelector('[data-testid="widget-intake-input-customer_name"]') as HTMLInputElement;
+    const emailInput = document.querySelector('[data-testid="widget-intake-input-email"]') as HTMLInputElement;
+    nameInput.value = 'John Doe';
+    emailInput.value = 'invalid-email-no-at';
+    submitBtn.click();
+
+    expect(document.querySelector('[data-testid="widget-intake-error-email"]')?.textContent).toBe('Please enter a valid email address');
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('renews signed guest session before submitting intake and sends intake POST without identity in body', async () => {
+    loadWidgetScript('https://remote-gateway.example.com/thruline/v1/support/widget.js');
+
+    // 1. Config fetch
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        config: {
+          version: 1,
+          enabled: true,
+          appearance: { primaryColor: '#2563eb', title: 'Support', welcomeMessage: '', position: 'bottom-right', quickPrompts: [] },
+          intake: {
+            required: true,
+            fields: [
+              { key: 'user_email', label: 'Email', type: 'email', required: true }
+            ],
+            schemaHash: 'hash_email_only'
+          }
+        }
+      })
+    });
+
+    window.FreeLLMAPISupport.init({
+      tenantKey: 'tenant_guest_intake',
+      loadTenantProfile: true
+    });
+
+    await vi.waitFor(() => {
+      const emailInput = document.querySelector('[data-testid="widget-intake-input-user_email"]');
+      expect(emailInput).not.toBeNull();
+    });
+
+    // 2. Next: guest session renewal mock
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        contextToken: 'signed_guest_token_xyz',
+        expiresIn: 900
+      })
+    });
+
+    // 3. Intake submission response mock
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      json: async () => ({
+        ok: true,
+        receipt: {
+          intakeReceiptId: 'receipt_opaque_999',
+          expiresAt: '2026-11-13T21:00:00Z',
+          schemaHash: 'hash_email_only',
+          replayed: false
+        }
+      })
+    });
+
+    const emailInput = document.querySelector('[data-testid="widget-intake-input-user_email"]') as HTMLInputElement;
+    emailInput.value = 'guest@example.com';
+
+    const submitBtn = document.querySelector('[data-testid="widget-intake-submit-btn"]') as HTMLButtonElement;
+    submitBtn.click();
+
+    await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(3));
+
+    // Verify call 2: guest session renewal
+    const [renewUrl, renewInit] = mockFetch.mock.calls[1];
+    expect(renewUrl).toBe('https://remote-gateway.example.com/thruline/v1/support/guest-session');
+    expect(JSON.parse(renewInit.body)).toEqual({ tenantKey: 'tenant_guest_intake' });
+
+    // Verify call 3: intake submission
+    const [intakeUrl, intakeInit] = mockFetch.mock.calls[2];
+    expect(intakeUrl).toBe('https://remote-gateway.example.com/thruline/v1/support/widget/intake');
+    expect(intakeInit.headers['X-Support-Context-Token']).toBe('signed_guest_token_xyz');
+
+    const submittedBody = JSON.parse(intakeInit.body);
+    expect(submittedBody.values).toEqual({ user_email: 'guest@example.com' });
+    expect(submittedBody.configVersion).toBe(1);
+    // Public intake body must NEVER set identity/role/internal metadata
+    expect(submittedBody.role).toBeUndefined();
+    expect(submittedBody.userId).toBeUndefined();
+    expect(submittedBody.internalMetadata).toBeUndefined();
+
+    // Verify intake form is dismissed and messages are shown
+    expect((document.querySelector('[data-testid="widget-intake-form"]') as HTMLElement).style.display).toBe('none');
+    expect((document.getElementById('freellmapi-support-messages') as HTMLElement).style.display).toBe('flex');
+
+    // Verify raw intake values are NOT persisted in sessionStorage
+    const storageKeys = Object.keys(window.sessionStorage);
+    for (const k of storageKeys) {
+      expect(window.sessionStorage.getItem(k)).not.toContain('guest@example.com');
+    }
+  });
+
+  it('attaches intakeReceiptId to chat message and sends to server', async () => {
+    loadWidgetScript('https://remote-gateway.example.com/thruline/v1/support/widget.js');
+
+    // 1. Config fetch
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        config: {
+          version: 1,
+          enabled: true,
+          appearance: { primaryColor: '#2563eb', title: 'Support', welcomeMessage: '', position: 'bottom-right', quickPrompts: [] },
+          intake: {
+            required: true,
+            fields: [{ key: 'topic', label: 'Topic', type: 'text', required: true }],
+            schemaHash: 'hash_topic_1'
+          }
+        }
+      })
+    });
+
+    const instance = window.FreeLLMAPISupport.init({
+      tenantKey: 'tenant_chat_receipt',
+      contextToken: 'signed_cust_tok',
+      loadTenantProfile: true
+    });
+
+    await vi.waitFor(() => {
+      const topicInput = document.querySelector('[data-testid="widget-intake-input-topic"]');
+      expect(topicInput).not.toBeNull();
+    });
+
+    // 2. Intake submission
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        receipt: {
+          intakeReceiptId: 'receipt_bound_777',
+          expiresAt: '2026-11-13T21:00:00Z',
+          schemaHash: 'hash_topic_1',
+          replayed: false
+        }
+      })
+    });
+
+    const topicInput = document.querySelector('[data-testid="widget-intake-input-topic"]') as HTMLInputElement;
+    topicInput.value = 'Billing issue';
+    const submitBtn = document.querySelector('[data-testid="widget-intake-submit-btn"]') as HTMLButtonElement;
+    submitBtn.click();
+
+    await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+
+    // 3. Send chat message
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        reply: 'We have received your billing question.',
+        runtime: { conversationId: 'conv-rec-1' }
+      })
+    });
+
+    instance?.sendMessage('Help with billing');
+
+    await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(3));
+    const [chatUrl, chatInit] = mockFetch.mock.calls[2];
+    expect(chatUrl).toBe('https://remote-gateway.example.com/thruline/v1/support/chat');
+    const chatBody = JSON.parse(chatInit.body);
+    expect(chatBody.intakeReceiptId).toBe('receipt_bound_777');
+  });
+
+  it('handles 428 intake_required and 409 intake_schema_changed without silent AI resubmission', async () => {
+    loadWidgetScript('https://remote-gateway.example.com/thruline/v1/support/widget.js');
+
+    const instance = window.FreeLLMAPISupport.init({
+      tenantKey: 'tenant_428_test',
+      contextToken: 'cust_token_428'
+    });
+
+    // First chat send returns 428 intake_required
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 428,
+      json: async () => ({
+        error: { code: 'intake_required', message: 'Survey intake required before chatting' }
+      })
+    });
+
+    // Server config fetch triggered by 428
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        config: {
+          version: 2,
+          enabled: true,
+          appearance: { primaryColor: '#2563eb', title: 'Support', welcomeMessage: '', position: 'bottom-right', quickPrompts: [] },
+          intake: {
+            required: true,
+            fields: [{ key: 'notes', label: 'Notes', type: 'text', required: true }],
+            schemaHash: 'hash_notes_2'
+          }
+        }
+      })
+    });
+
+    instance?.sendMessage('Starting without intake');
+
+    await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+
+    // Verify intake form is shown on 428
+    await vi.waitFor(() => {
+      const intakeForm = document.querySelector('[data-testid="widget-intake-form"]');
+      expect(intakeForm).not.toBeNull();
+      expect((intakeForm as HTMLElement).style.display).toBe('flex');
+    });
+
+    expect(document.querySelector('[data-testid="widget-banner"]')?.textContent).toContain('survey');
+
+    // Verify it did NOT auto-retry chat (mockFetch still at 2 calls)
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('optional intake renders explicit skip button which dismisses intake form and allows direct chat', async () => {
+    loadWidgetScript('https://remote-gateway.example.com/thruline/v1/support/widget.js');
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        config: {
+          version: 1,
+          enabled: true,
+          appearance: { primaryColor: '#2563eb', title: 'Support', welcomeMessage: '', position: 'bottom-right', quickPrompts: [] },
+          intake: {
+            required: false,
+            fields: [{ key: 'feedback', label: 'Optional Feedback', type: 'text', required: false }],
+            schemaHash: 'hash_opt_1'
+          }
+        }
+      })
+    });
+
+    window.FreeLLMAPISupport.init({
+      tenantKey: 'tenant_optional_intake',
+      contextToken: 'signed_token_opt',
+      loadTenantProfile: true
+    });
+
+    await vi.waitFor(() => {
+      const skipBtn = document.querySelector('[data-testid="widget-intake-skip-btn"]');
+      expect(skipBtn).not.toBeNull();
+    });
+
+    const skipBtn = document.querySelector('[data-testid="widget-intake-skip-btn"]') as HTMLButtonElement;
+    skipBtn.click();
+
+    expect((document.querySelector('[data-testid="widget-intake-form"]') as HTMLElement).style.display).toBe('none');
+    expect((document.getElementById('freellmapi-support-messages') as HTMLElement).style.display).toBe('flex');
+  });
+
+  it('FreeLLMAPISupport.preview renders in container with transport disabled and zero effect on global _instance', async () => {
+    loadWidgetScript();
+
+    expect(window.FreeLLMAPISupport.preview).toBeDefined();
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+
+    const preview = window.FreeLLMAPISupport.preview(container, {
+      version: 1,
+      enabled: true,
+      appearance: {
+        primaryColor: '#7c3aed',
+        title: 'Studio Preview Title',
+        welcomeMessage: 'Welcome to preview mode!',
+        position: 'bottom-right',
+        quickPrompts: ['Preview Prompt 1']
+      },
+      intake: {
+        required: true,
+        fields: [{ key: 'test_field', label: 'Test Field', type: 'text', required: true }],
+        schemaHash: 'preview_hash'
+      }
+    });
+
+    expect(preview).toBeDefined();
+    expect(typeof preview.destroy).toBe('function');
+
+    // Assert preview elements inside container
+    expect(container.querySelector('[data-testid="widget-preview-box"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="widget-preview-title"]')?.textContent).toBe('Studio Preview Title');
+    expect(container.querySelector('[data-testid="widget-preview-welcome"]')?.textContent).toBe('Welcome to preview mode!');
+    expect(container.querySelector('[data-testid="widget-preview-intake"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="widget-preview-quick-prompt-0"]')?.textContent).toBe('Preview Prompt 1');
+
+    // Assert zero transport
+    expect(mockFetch).not.toHaveBeenCalled();
+
+    // Assert zero effect on window.FreeLLMAPISupport._instance
+    expect(window.FreeLLMAPISupport._instance).toBeNull();
+
+    // Destroy preview
+    preview.destroy();
+    expect(container.children.length).toBe(0);
+    container.remove();
+  });
+
+  it('switching context token cancels in-flight callbacks and isolates receipts across identities', async () => {
+    loadWidgetScript('https://remote-gateway.example.com/thruline/v1/support/widget.js');
+
+    const instance = window.FreeLLMAPISupport.init({
+      tenantKey: 'tenant_epoch_test',
+      contextToken: 'user_A_token'
+    });
+
+    instance?.sendMessage('User A message');
+    await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+
+    // Switch contextToken to User B before User A response arrives
+    instance?.updateContextToken('user_B_token');
+
+    // Resolve User A response late
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        reply: 'Late reply for User A',
+        runtime: { conversationId: 'conv-user-A' }
+      })
+    });
+
+    // Verify late reply is not rendered into message list for User B
+    const messages = document.getElementById('freellmapi-support-messages');
+    expect(messages?.textContent).not.toContain('Late reply for User A');
+  });
+
+  it('preserves deployment prefix in widget config and intake requests', async () => {
+    loadWidgetScript('https://remote-gateway.example.com/my-prefix/thruline/v1/support/widget.js');
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        config: {
+          version: 1,
+          enabled: true,
+          appearance: { primaryColor: '#2563eb', title: 'Prefixed', welcomeMessage: '', position: 'bottom-right', quickPrompts: [] },
+          intake: { required: false, fields: [] }
+        }
+      })
+    });
+
+    window.FreeLLMAPISupport.init({
+      tenantKey: 'tenant_prefix_1',
+      contextToken: 'signed_prefix_tok',
+      loadTenantProfile: true
+    });
+
+    await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+    const [callUrl] = mockFetch.mock.calls[0];
+    expect(callUrl).toBe('https://remote-gateway.example.com/my-prefix/thruline/v1/support/widget/config');
+  });
+
+  it.each(['chat', 'intake'])('reloads current profile after a %s schema conflict without auto-sending', async (conflictAt) => {
+    loadWidgetScript('https://gateway.example/prefix/thruline/v1/support/widget.js');
+    let profileReads = 0;
+    let intakePosts = 0;
+    let chats = 0;
+    mockFetch.mockImplementation(async (url: string, options: RequestInit = {}) => {
+      if (url.endsWith('/widget/config')) {
+        profileReads++;
+        const version = profileReads === 1 ? 1 : 2;
+        return {ok:true,status:200,json:async()=>({config:{enabled:true,version,
+          appearance:{primaryColor:'#123456',title:'Support',welcomeMessage:'Hello',position:'bottom-left',quickPrompts:[]},
+          intake:{required:true,schemaHash:'schema_'+version,fields:[{key:version===1?'issue':'order',label:'Question',type:'text',required:true}]}}})};
+      }
+      if (url.endsWith('/widget/intake')) {
+        intakePosts++;
+        if (conflictAt === 'intake' && intakePosts === 1) return {ok:false,status:409,json:async()=>({error:{code:'widget_config_changed'}})};
+        return {ok:true,status:201,json:async()=>({receipt:{intakeReceiptId:'receipt_'+intakePosts,schemaHash:'schema_'+(profileReads===1?1:2)}})};
+      }
+      if (url.endsWith('/chat')) {
+        chats++;
+        return {ok:false,status:409,json:async()=>({error:{code:'intake_schema_changed'}})};
+      }
+      throw new Error('Unexpected transport '+url+' '+options.method);
+    });
+    const instance = window.FreeLLMAPISupport.init({tenantKey:'public_key',contextToken:'signed_customer',loadTenantProfile:true});
+    await vi.waitFor(()=>expect(document.querySelector('[data-testid="widget-intake-input-issue"]')).not.toBeNull());
+    const issue = document.querySelector('[data-testid="widget-intake-input-issue"]') as HTMLInputElement;
+    issue.value = 'help';
+    (document.querySelector('[data-testid="widget-intake-submit-btn"]') as HTMLButtonElement).click();
+    await vi.waitFor(()=>expect(intakePosts).toBe(1));
+    if (conflictAt === 'chat') {
+      await vi.waitFor(()=>expect((document.querySelector('[data-testid="widget-intake-form"]') as HTMLElement).style.display).toBe('none'));
+      instance.sendMessage('help');
+    }
+    await vi.waitFor(()=>expect(document.querySelector('[data-testid="widget-intake-input-order"]')).not.toBeNull());
+    expect(profileReads).toBe(2);
+    (document.querySelector('[data-testid="widget-intake-input-order"]') as HTMLInputElement).value = 'order1';
+    (document.querySelector('[data-testid="widget-intake-submit-btn"]') as HTMLButtonElement).click();
+    await vi.waitFor(()=>expect(intakePosts).toBe(2));
+    const calls = mockFetch.mock.calls.filter(([url])=>String(url).endsWith('/widget/intake'));
+    expect(JSON.parse(calls[1][1].body)).toMatchObject({configVersion:2,values:{order:'order1'}});
+    expect(chats).toBe(conflictAt === 'chat' ? 1 : 0);
+    expect(mockFetch.mock.calls.every(([url])=>String(url).startsWith('https://gateway.example/prefix/'))).toBe(true);
+    instance.destroy();
+  });
+
+  it('retries failed profile loading explicitly and preserves intake identity on network retry', async () => {
+    loadWidgetScript('https://gateway.example/thruline/v1/support/widget.js');
+    let profiles = 0;
+    let submissions = 0;
+    mockFetch.mockImplementation(async (url: string) => {
+      if (url.endsWith('/widget/config')) {
+        profiles++;
+        if (profiles === 1) return {ok:false,status:503,json:async()=>({})};
+        return {ok:true,status:200,json:async()=>({config:{version:1,enabled:true,appearance:{title:'Help',primaryColor:'#123456',quickPrompts:[]},intake:{required:true,schemaHash:'schema',fields:[{key:'issue',label:'Issue',type:'text',required:true}]}}})};
+      }
+      if (url.endsWith('/widget/intake')) {
+        submissions++;
+        if (submissions === 1) throw new Error('response lost');
+        return {ok:true,status:201,json:async()=>({receipt:{intakeReceiptId:'receipt',schemaHash:'schema'}})};
+      }
+      throw new Error('Unexpected transport '+url);
+    });
+    const instance = window.FreeLLMAPISupport.init({tenantKey:'public',contextToken:'signed',loadTenantProfile:true});
+    const banner = document.querySelector('[data-testid="widget-banner"]') as HTMLElement;
+    await vi.waitFor(()=>expect(banner.getAttribute('role')).toBe('button'));
+    banner.click();
+    await vi.waitFor(()=>expect(document.querySelector('[data-testid="widget-intake-input-issue"]')).not.toBeNull());
+    const input = document.querySelector('[data-testid="widget-intake-input-issue"]') as HTMLInputElement;
+    input.value='private customer issue';
+    const submit = document.querySelector('[data-testid="widget-intake-submit-btn"]') as HTMLButtonElement;
+    submit.click();
+    await vi.waitFor(()=>{expect(submissions).toBe(1);expect(submit.disabled).toBe(false);});
+    submit.click();
+    await vi.waitFor(()=>expect(submissions).toBe(2));
+    const calls = mockFetch.mock.calls.filter(([url])=>String(url).endsWith('/widget/intake'));
+    expect(JSON.parse(calls[0][1].body).requestId).toBe(JSON.parse(calls[1][1].body).requestId);
+    expect(JSON.stringify(window.sessionStorage)).not.toContain('private customer issue');
+    instance.destroy();
+  });
+
+  it('preserves an existing live instance when the served factory loads again for preview', () => {
+    loadWidgetScript();
+    const live=window.FreeLLMAPISupport.init({tenantKey:'public',contextToken:'signed'});
+    loadWidgetScript();
+    expect(window.FreeLLMAPISupport._instance).toBe(live);
+    const container=document.createElement('div');
+    document.body.appendChild(container);
+    const preview=window.FreeLLMAPISupport.preview(container,{enabled:true,version:1,appearance:{title:'Preview',primaryColor:'#123456',quickPrompts:[]},intake:{required:false,fields:[]}});
+    expect(window.FreeLLMAPISupport._instance).toBe(live);
+    expect(mockFetch).not.toHaveBeenCalled();
+    preview.destroy();
+    expect(window.FreeLLMAPISupport._instance).toBe(live);
+    live.destroy();
+  });
 });

@@ -23,6 +23,7 @@ export interface SupportRuntimeChatInput {
   requestId?: string; // ASCII [A-Za-z0-9_-], 1..128; generate if absent, but replay needs client-supplied ID
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
   model?: string;
+  intakeReceiptId?: string;
 }
 
 export type SupportActionExecutionStatus = 'pending' | 'executing' | 'succeeded' | 'failed' | 'unknown';
@@ -37,6 +38,7 @@ export interface SupportRuntimeMetadata {
   quota: { requestsUsed: number; tokensUsed: number; resetAt: string; accounting: 'actual' | 'estimated' };
   pendingActions: Array<{ id: string; toolName: string; executionStatus: SupportActionExecutionStatus }>;
   evidence?: SupportAnswerEvidence;
+  intake?: { schemaHash: string; submittedAt: string };
 }
 
 export interface SupportIntegrationCheck {

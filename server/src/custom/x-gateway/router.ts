@@ -47,6 +47,7 @@ import { preprocessGatewayMessages } from './token-savers-pipeline.js';
 import { xSupportPublicRouter } from './support-router.js';
 import { xSupportEnterprisePublicRouter } from './support-enterprise-router.js';
 import { xSupportGovernancePublicRouter } from './support-governance-router.js';
+import { xSupportServiceDeskPublicRouter } from './support-service-desk-router.js';
 
 export const xGatewayRouter = Router();
 
@@ -1611,6 +1612,7 @@ xGatewayRouter.use(xGatewayProtocolsRouter);
 xGatewayRouter.use('/support', xSupportPublicRouter);
 xGatewayRouter.use('/support', xSupportEnterprisePublicRouter);
 xGatewayRouter.use('/support', xSupportGovernancePublicRouter);
+xGatewayRouter.use('/support', xSupportServiceDeskPublicRouter);
 
 // Catch-all: any other path under /thruline/v1 returns JSON 404
 xGatewayRouter.use((_req: Request, res: Response) => {

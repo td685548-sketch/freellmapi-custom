@@ -214,6 +214,7 @@ describe('migration round trip', () => {
         '20261112_170002_support_execution_outbox.ts',
         '20261112_180001_support_runtime_fencing.ts',
         '20261113_090001_support_evidence.ts',
+        '20261113_180001_support_service_desk.ts',
       ]);
     } finally {
       db.close();

@@ -1,0 +1,671 @@
+{
+  "fixtureVersion": 1,
+  "sources": {
+    "en_guest_shipping": {
+      "name": "Public Shipping FAQ",
+      "kind": "markdown",
+      "allowedRoles": ["guest", "customer", "staff", "admin"],
+      "title": "Public Shipping FAQ",
+      "content": "Standard domestic delivery takes 3 to 5 business days across all regions. Express delivery takes 1 to 2 business days. Tracking details are sent to the registered email address."
+    },
+    "vi_guest_shipping": {
+      "name": "Câu hỏi thường gặp về giao hàng",
+      "kind": "markdown",
+      "allowedRoles": ["guest", "customer", "staff", "admin"],
+      "title": "Giao hàng tiêu chuẩn và hỏa tốc",
+      "content": "Giao hàng tiêu chuẩn mất từ 3 đến 5 ngày làm việc. Giao hàng hỏa tốc trong 24 giờ cho các thành phố lớn. Thông tin mã vận đơn được gửi qua thư điện tử."
+    },
+    "en_customer_returns": {
+      "name": "Customer Returns Policy",
+      "kind": "markdown",
+      "allowedRoles": ["customer", "staff", "admin"],
+      "title": "30-Day Return Policy",
+      "content": "Customers can return unused items within 30 days of parcel arrival. Refunds are issued to the original payment method within 5 to 7 business days after inspection."
+    },
+    "vi_customer_returns": {
+      "name": "Chính sách đổi trả cho khách hàng",
+      "kind": "markdown",
+      "allowedRoles": ["customer", "staff", "admin"],
+      "title": "Chính sách đổi trả trong 30 ngày",
+      "content": "Khách hàng có quyền yêu cầu hoàn trả sản phẩm nguyên seal trong vòng 30 ngày. Tiền hoàn trả sẽ về tài khoản thanh toán ban đầu trong 5 đến 7 ngày làm việc sau khi thẩm định."
+    },
+    "en_staff_disputes": {
+      "name": "Staff Escalation and Dispute SOP",
+      "kind": "markdown",
+      "allowedRoles": ["staff", "admin"],
+      "title": "Staff Dispute Procedures",
+      "content": "Staff operators can issue courtesy credits up to 50 USD without supervisor approval. For courier disputes exceeding 100 USD, escalate directly to logistics lead."
+    },
+    "vi_staff_disputes": {
+      "name": "Quy trình xử lý khiếu nại nhân viên",
+      "kind": "markdown",
+      "allowedRoles": ["staff", "admin"],
+      "title": "Quy định hỗ trợ viên và mức đền bù",
+      "content": "Nhân viên hỗ trợ có quyền cấp phiếu giảm giá tối đa 50 USD mà không cần cấp quản lý duyệt. Khiếu nại vận chuyển trên 100 USD cần chuyển tiếp đến trưởng bộ phận vận hành."
+    },
+    "en_admin_controls": {
+      "name": "Admin Tenant Governance",
+      "kind": "markdown",
+      "allowedRoles": ["admin"],
+      "title": "Admin Security Protocol",
+      "content": "Only organization administrators may rotate API keys, alter SLA targets, or grant elevated operator permissions. Security audits run at 00:00 UTC daily."
+    },
+    "vi_admin_controls": {
+      "name": "Quản trị phân quyền hệ thống Admin",
+      "kind": "markdown",
+      "allowedRoles": ["admin"],
+      "title": "Quy tắc bảo mật và quản trị nâng cao",
+      "content": "Chỉ quản trị viên cấp cao mới có quyền thay đổi mục tiêu SLA, cấp quyền hỗ trợ viên và thu hồi khóa truy cập. Báo cáo kiểm toán chạy tự động lúc 00:00 UTC."
+    }
+  },
+  "cases": [
+    {
+      "id": "CASE-01-EN-CUSTOMER-COMPLETED",
+      "language": "en",
+      "role": "customer",
+      "scenario": "Standard successful Copilot draft generation for English customer return inquiry",
+      "sourceKey": "en_customer_returns",
+      "conversation": {
+        "subject": "Return window question",
+        "messages": [
+          { "senderType": "customer", "content": "How long do I have to return an item?" }
+        ]
+      },
+      "modelOutput": {
+        "summary": "Customer asks about return timeframe, covered under the 30-day policy [1].",
+        "drafts": [
+          {
+            "tone": "empathetic",
+            "text": "I completely understand you need to return your purchase. You have 30 days from delivery to initiate a return [1]."
+          },
+          {
+            "tone": "direct",
+            "text": "You can return unused items within 30 days of parcel arrival [1]."
+          },
+          {
+            "tone": "technical",
+            "text": "Per return policy guidelines, returns are accepted within a 30-day window with refunds issued in 5 to 7 business days [1]."
+          }
+        ]
+      },
+      "expected": {
+        "status": "completed",
+        "draftTones": ["empathetic", "direct", "technical"]
+      }
+    },
+    {
+      "id": "CASE-02-VI-CUSTOMER-COMPLETED",
+      "language": "vi",
+      "role": "customer",
+      "scenario": "Standard successful Copilot draft generation for Vietnamese customer return inquiry",
+      "sourceKey": "vi_customer_returns",
+      "conversation": {
+        "subject": "Hỏi về thời hạn đổi trả",
+        "messages": [
+          { "senderType": "customer", "content": "Tôi có bao nhiêu ngày để trả lại hàng đã mua?" }
+        ]
+      },
+      "modelOutput": {
+        "summary": "Khách hàng hỏi về thời gian đổi trả theo quy định 30 ngày [1].",
+        "drafts": [
+          {
+            "tone": "empathetic",
+            "text": "Dạ em rất tiếc khi sản phẩm chưa phù hợp. Quý khách có thể trả hàng trong vòng 30 ngày kể từ ngày nhận [1]."
+          },
+          {
+            "tone": "direct",
+            "text": "Quý khách có thể gửi trả hàng nguyên seal trong vòng 30 ngày kể từ lúc nhận bưu phẩm [1]."
+          },
+          {
+            "tone": "technical",
+            "text": "Theo điều khoản hoàn trả, thời hạn xử lý là 30 ngày và tiền hoàn về sau 5 đến 7 ngày làm việc [1]."
+          }
+        ]
+      },
+      "expected": {
+        "status": "completed",
+        "draftTones": ["empathetic", "direct", "technical"]
+      }
+    },
+    {
+      "id": "CASE-03-EN-GUEST-COMPLETED",
+      "language": "en",
+      "role": "guest",
+      "scenario": "Successful Copilot draft for unauthenticated guest asking about standard delivery time",
+      "sourceKey": "en_guest_shipping",
+      "conversation": {
+        "subject": "Delivery inquiry",
+        "messages": [
+          { "senderType": "customer", "content": "How long will standard shipping take?" }
+        ]
+      },
+      "modelOutput": {
+        "summary": "Guest inquiry regarding standard shipping duration [1].",
+        "drafts": [
+          {
+            "tone": "empathetic",
+            "text": "We know waiting for a delivery is important. Standard delivery takes 3 to 5 business days [1]."
+          },
+          {
+            "tone": "direct",
+            "text": "Standard shipping takes 3 to 5 business days [1]."
+          },
+          {
+            "tone": "technical",
+            "text": "Standard domestic logistics deliver parcels in 3 to 5 business days with tracking via email [1]."
+          }
+        ]
+      },
+      "expected": {
+        "status": "completed",
+        "draftTones": ["empathetic", "direct", "technical"]
+      }
+    },
+    {
+      "id": "CASE-04-VI-GUEST-COMPLETED",
+      "language": "vi",
+      "role": "guest",
+      "scenario": "Successful Copilot draft for Vietnamese guest asking about delivery timeframe",
+      "sourceKey": "vi_guest_shipping",
+      "conversation": {
+        "subject": "Thời gian giao hàng",
+        "messages": [
+          { "senderType": "customer", "content": "Thời gian giao hàng tiêu chuẩn là mấy ngày?" }
+        ]
+      },
+      "modelOutput": {
+        "summary": "Khách vãng lai hỏi về thời gian giao hàng tiêu chuẩn [1].",
+        "drafts": [
+          {
+            "tone": "empathetic",
+            "text": "Dạ đơn vị vận chuyển sẽ giao tới bạn sớm nhất. Thời gian tiêu chuẩn là 3 đến 5 ngày làm việc [1]."
+          },
+          {
+            "tone": "direct",
+            "text": "Thời gian giao hàng tiêu chuẩn là từ 3 đến 5 ngày làm việc [1]."
+          },
+          {
+            "tone": "technical",
+            "text": "Vận chuyển tiêu chuẩn mất 3 đến 5 ngày và mã vận đơn được cập nhật tự động qua email [1]."
+          }
+        ]
+      },
+      "expected": {
+        "status": "completed",
+        "draftTones": ["empathetic", "direct", "technical"]
+      }
+    },
+    {
+      "id": "CASE-05-EN-STAFF-COMPLETED",
+      "language": "en",
+      "role": "staff",
+      "scenario": "Staff role consulting internal dispute SOP for courtesy credit limit",
+      "sourceKey": "en_staff_disputes",
+      "conversation": {
+        "subject": "Credit limit lookup",
+        "messages": [
+          { "senderType": "customer", "content": "Can I give this user a $40 courtesy credit for the courier delay?" }
+        ]
+      },
+      "modelOutput": {
+        "summary": "Staff operator verifies courtesy credit limit policy [1].",
+        "drafts": [
+          {
+            "tone": "empathetic",
+            "text": "Offering compensation is a great gesture for the delay. You can issue up to $50 courtesy credit directly [1]."
+          },
+          {
+            "tone": "direct",
+            "text": "Staff may issue courtesy credit up to 50 USD without supervisor approval [1]."
+          },
+          {
+            "tone": "technical",
+            "text": "Authorized threshold allows staff credit issuance up to 50 USD; amounts over 100 USD escalate to logistics lead [1]."
+          }
+        ]
+      },
+      "expected": {
+        "status": "completed",
+        "draftTones": ["empathetic", "direct", "technical"]
+      }
+    },
+    {
+      "id": "CASE-06-VI-STAFF-COMPLETED",
+      "language": "vi",
+      "role": "staff",
+      "scenario": "Staff role consulting Vietnamese internal dispute SOP",
+      "sourceKey": "vi_staff_disputes",
+      "conversation": {
+        "subject": "Quy định mức đền bù",
+        "messages": [
+          { "senderType": "customer", "content": "Nhân viên có được tự quyết đền bù 40 USD không?" }
+        ]
+      },
+      "modelOutput": {
+        "summary": "Nhân viên kiểm tra hạn mức đền bù trực tiếp theo quy trình nội bộ [1].",
+        "drafts": [
+          {
+            "tone": "empathetic",
+            "text": "Để hỗ trợ khách hàng tốt nhất, bạn hoàn toàn có thể cấp phiếu giảm giá tối đa 50 USD trực tiếp [1]."
+          },
+          {
+            "tone": "direct",
+            "text": "Hỗ trợ viên được quyền cấp phiếu giảm giá tối đa 50 USD mà không cần duyệt [1]."
+          },
+          {
+            "tone": "technical",
+            "text": "Quy trình nội bộ quy định hạn mức 50 USD cho nhân viên; trên 100 USD bắt buộc chuyển trưởng bộ phận [1]."
+          }
+        ]
+      },
+      "expected": {
+        "status": "completed",
+        "draftTones": ["empathetic", "direct", "technical"]
+      }
+    },
+    {
+      "id": "CASE-07-EN-ADMIN-COMPLETED",
+      "language": "en",
+      "role": "admin",
+      "scenario": "Admin role querying SLA audit frequency",
+      "sourceKey": "en_admin_controls",
+      "conversation": {
+        "subject": "Security audit schedule",
+        "messages": [
+          { "senderType": "customer", "content": "When do tenant security audits run?" }
+        ]
+      },
+      "modelOutput": {
+        "summary": "Admin queries the schedule for automated tenant security audits [1].",
+        "drafts": [
+          {
+            "tone": "empathetic",
+            "text": "I appreciate your attention to our security posture. Audits run automatically at 00:00 UTC daily [1]."
+          },
+          {
+            "tone": "direct",
+            "text": "Security audits execute daily at 00:00 UTC [1]."
+          },
+          {
+            "tone": "technical",
+            "text": "Governance policies specify scheduled audit execution at 00:00 UTC along with admin privilege gating [1]."
+          }
+        ]
+      },
+      "expected": {
+        "status": "completed",
+        "draftTones": ["empathetic", "direct", "technical"]
+      }
+    },
+    {
+      "id": "CASE-08-VI-ADMIN-COMPLETED",
+      "language": "vi",
+      "role": "admin",
+      "scenario": "Admin role querying Vietnamese admin governance protocol",
+      "sourceKey": "vi_admin_controls",
+      "conversation": {
+        "subject": "Lịch kiểm toán hệ thống",
+        "messages": [
+          { "senderType": "customer", "content": "Báo cáo kiểm toán bảo mật chạy vào giờ nào?" }
+        ]
+      },
+      "modelOutput": {
+        "summary": "Quản trị viên hỏi về thời gian chạy báo cáo kiểm toán bảo mật [1].",
+        "drafts": [
+          {
+            "tone": "empathetic",
+            "text": "Dạ báo cáo bảo mật luôn được chạy định kỳ mỗi ngày lúc 00:00 UTC để bảo đảm an toàn [1]."
+          },
+          {
+            "tone": "direct",
+            "text": "Báo cáo kiểm toán bảo mật chạy tự động lúc 00:00 UTC hàng ngày [1]."
+          },
+          {
+            "tone": "technical",
+            "text": "Hệ thống thiết lập quy trình kiểm toán lúc 00:00 UTC đi kèm quyền quản trị khóa API cấp cao [1]."
+          }
+        ]
+      },
+      "expected": {
+        "status": "completed",
+        "draftTones": ["empathetic", "direct", "technical"]
+      }
+    },
+    {
+      "id": "CASE-09-EN-NO-EVIDENCE-ABSTAIN",
+      "language": "en",
+      "role": "customer",
+      "scenario": "Zero-model abstention when conversation query has no matching published sources",
+      "sourceKey": null,
+      "conversation": {
+        "subject": "Alien technology inquiry",
+        "messages": [
+          { "senderType": "customer", "content": "Can your software control hyperdrive warp nacelles?" }
+        ]
+      },
+      "modelOutput": null,
+      "expected": {
+        "status": "abstained",
+        "reason": "no_evidence"
+      }
+    },
+    {
+      "id": "CASE-10-VI-NO-EVIDENCE-ABSTAIN",
+      "language": "vi",
+      "role": "customer",
+      "scenario": "Zero-model abstention for Vietnamese query with no matching evidence",
+      "sourceKey": null,
+      "conversation": {
+        "subject": "Câu hỏi không có trong tài liệu",
+        "messages": [
+          { "senderType": "customer", "content": "Sản phẩm có dùng được trên phi thuyền vũ trụ không?" }
+        ]
+      },
+      "modelOutput": null,
+      "expected": {
+        "status": "abstained",
+        "reason": "no_evidence"
+      }
+    },
+    {
+      "id": "CASE-11-EN-FORGED-CITATIONS-ABSTAIN",
+      "language": "en",
+      "role": "customer",
+      "scenario": "Abstain with invalid_result when model output cites an unprovided fake citation ID",
+      "sourceKey": "en_customer_returns",
+      "conversation": {
+        "subject": "Return question",
+        "messages": [
+          { "senderType": "customer", "content": "How long do I have to return an item?" }
+        ]
+      },
+      "modelOutput": {
+        "summary": "Customer asks about returns [cite:cit_forged_fake_id].",
+        "drafts": [
+          { "tone": "empathetic", "text": "You can return items in 30 days [cite:cit_forged_fake_id]." },
+          { "tone": "direct", "text": "30 days return window [cite:cit_forged_fake_id]." },
+          { "tone": "technical", "text": "Policy dictates 30 days [cite:cit_forged_fake_id]." }
+        ]
+      },
+      "expected": {
+        "status": "abstained",
+        "reason": "invalid_result"
+      }
+    },
+    {
+      "id": "CASE-12-VI-FORGED-CITATIONS-ABSTAIN",
+      "language": "vi",
+      "role": "customer",
+      "scenario": "Abstain with invalid_result when model output cites an unprovided citation in Vietnamese",
+      "sourceKey": "vi_customer_returns",
+      "conversation": {
+        "subject": "Đổi trả hàng",
+        "messages": [
+          { "senderType": "customer", "content": "Bao nhiêu ngày thì hết hạn đổi trả?" }
+        ]
+      },
+      "modelOutput": {
+        "summary": "Thời hạn 30 ngày [cite:cit_khong_hop_le].",
+        "drafts": [
+          { "tone": "empathetic", "text": "Đổi trả trong 30 ngày [cite:cit_khong_hop_le]." },
+          { "tone": "direct", "text": "Thời hạn 30 ngày [cite:cit_khong_hop_le]." },
+          { "tone": "technical", "text": "Chính sách 30 ngày [cite:cit_khong_hop_le]." }
+        ]
+      },
+      "expected": {
+        "status": "abstained",
+        "reason": "invalid_result"
+      }
+    },
+    {
+      "id": "CASE-13-EN-DUPLICATE-TONES-ABSTAIN",
+      "language": "en",
+      "role": "customer",
+      "scenario": "Abstain with invalid_result when model returns duplicate tones instead of 3 unique ones",
+      "sourceKey": "en_customer_returns",
+      "conversation": {
+        "subject": "Return question",
+        "messages": [
+          { "senderType": "customer", "content": "How long do I have to return an item?" }
+        ]
+      },
+      "modelOutput": {
+        "summary": "Return window is 30 days [1].",
+        "drafts": [
+          { "tone": "empathetic", "text": "I understand your need. You have 30 days [1]." },
+          { "tone": "empathetic", "text": "I feel your concern. You have 30 days [1]." },
+          { "tone": "direct", "text": "30 days return window [1]." }
+        ]
+      },
+      "expected": {
+        "status": "abstained",
+        "reason": "invalid_result"
+      }
+    },
+    {
+      "id": "CASE-14-VI-MISSING-DRAFTS-ABSTAIN",
+      "language": "vi",
+      "role": "customer",
+      "scenario": "Abstain with invalid_result when model returns only 2 drafts instead of exactly 3",
+      "sourceKey": "vi_customer_returns",
+      "conversation": {
+        "subject": "Đổi trả hàng",
+        "messages": [
+          { "senderType": "customer", "content": "Quy định đổi trả thế nào?" }
+        ]
+      },
+      "modelOutput": {
+        "summary": "Khách hỏi đổi trả [1].",
+        "drafts": [
+          { "tone": "empathetic", "text": "Rất tiếc về sự cố. Bạn có 30 ngày đổi trả [1]." },
+          { "tone": "direct", "text": "Thời hạn 30 ngày [1]." }
+        ]
+      },
+      "expected": {
+        "status": "abstained",
+        "reason": "invalid_result"
+      }
+    },
+    {
+      "id": "CASE-15-EN-TOOL-MARKUP-ABSTAIN",
+      "language": "en",
+      "role": "customer",
+      "scenario": "Abstain with invalid_result when model injects unauthorized tool call tags",
+      "sourceKey": "en_customer_returns",
+      "conversation": {
+        "subject": "Return question",
+        "messages": [
+          { "senderType": "customer", "content": "How long do I have to return an item?" }
+        ]
+      },
+      "modelOutput": {
+        "summary": "Return timeframe is 30 days [1].",
+        "drafts": [
+          { "tone": "empathetic", "text": "You have 30 days [1]. <support_tool_call>{\"name\":\"refund\"}</support_tool_call>" },
+          { "tone": "direct", "text": "Return within 30 days [1]." },
+          { "tone": "technical", "text": "Policy window is 30 days [1]." }
+        ]
+      },
+      "expected": {
+        "status": "abstained",
+        "reason": "invalid_result"
+      }
+    },
+    {
+      "id": "CASE-16-VI-MALFORMED-JSON-ABSTAIN",
+      "language": "vi",
+      "role": "customer",
+      "scenario": "Abstain with invalid_result when model emits plain text or invalid JSON syntax",
+      "sourceKey": "vi_customer_returns",
+      "conversation": {
+        "subject": "Đổi trả",
+        "messages": [
+          { "senderType": "customer", "content": "Bao nhiêu ngày đổi trả?" }
+        ]
+      },
+      "modelOutput": "Dạ em xin trả lời là 30 ngày đổi trả ạ.",
+      "expected": {
+        "status": "abstained",
+        "reason": "invalid_result"
+      }
+    },
+    {
+      "id": "CASE-17-EN-SOURCES-CHANGED-ABSTAIN",
+      "language": "en",
+      "role": "customer",
+      "scenario": "Abstain with sources_changed when evidence source is updated/revoked during model call",
+      "sourceKey": "en_customer_returns",
+      "conversation": {
+        "subject": "Return policy check",
+        "messages": [
+          { "senderType": "customer", "content": "What is the return policy duration?" }
+        ]
+      },
+      "modelOutput": {
+        "summary": "Policy duration inquiry [1].",
+        "drafts": [
+          { "tone": "empathetic", "text": "Returns accepted within 30 days [1]." },
+          { "tone": "direct", "text": "Return window is 30 days [1]." },
+          { "tone": "technical", "text": "Standard return period 30 days [1]." }
+        ]
+      },
+      "expected": {
+        "status": "abstained",
+        "reason": "sources_changed"
+      }
+    },
+    {
+      "id": "CASE-18-EN-HOURLY-REQUEST-LIMIT-EXCEEDED",
+      "language": "en",
+      "role": "customer",
+      "scenario": "Reject with 429 copilot_quota_exceeded when operator exceeds 10 requests per UTC hour",
+      "sourceKey": "en_customer_returns",
+      "conversation": {
+        "subject": "Repeated copilot requests",
+        "messages": [
+          { "senderType": "customer", "content": "How do returns work?" }
+        ]
+      },
+      "modelOutput": null,
+      "expected": {
+        "status": "error",
+        "statusCode": 429,
+        "errorCode": "copilot_quota_exceeded"
+      }
+    },
+    {
+      "id": "CASE-19-EN-DAILY-TOKEN-LIMIT-EXCEEDED",
+      "language": "en",
+      "role": "customer",
+      "scenario": "Reject with 429 copilot_quota_exceeded when operator exceeds 250000 daily tokens",
+      "sourceKey": "en_customer_returns",
+      "conversation": {
+        "subject": "Token exhaustion check",
+        "messages": [
+          { "senderType": "customer", "content": "How do returns work?" }
+        ]
+      },
+      "modelOutput": null,
+      "expected": {
+        "status": "error",
+        "statusCode": 429,
+        "errorCode": "copilot_quota_exceeded"
+      }
+    },
+    {
+      "id": "CASE-20-EN-CONCURRENT-IN-PROGRESS-CONFLICT",
+      "language": "en",
+      "role": "customer",
+      "scenario": "Return 409 copilot_in_progress when an identical request is currently processing",
+      "sourceKey": "en_customer_returns",
+      "conversation": {
+        "subject": "Parallel execution check",
+        "messages": [
+          { "senderType": "customer", "content": "How do returns work?" }
+        ]
+      },
+      "modelOutput": null,
+      "expected": {
+        "status": "error",
+        "statusCode": 409,
+        "errorCode": "copilot_in_progress"
+      }
+    },
+    {
+      "id": "CASE-21-EN-REQUEST-CONFLICT-DIFFERENT-PARAMS",
+      "language": "en",
+      "role": "customer",
+      "scenario": "Return 409 request_conflict when same requestId is used for different conversationId",
+      "sourceKey": "en_customer_returns",
+      "conversation": {
+        "subject": "Conflicting conversation ID check",
+        "messages": [
+          { "senderType": "customer", "content": "How do returns work?" }
+        ]
+      },
+      "modelOutput": null,
+      "expected": {
+        "status": "error",
+        "statusCode": 409,
+        "errorCode": "request_conflict"
+      }
+    },
+    {
+      "id": "CASE-22-EN-LEASE-TIMEOUT",
+      "language": "en",
+      "role": "customer",
+      "scenario": "Fail with 504 copilot_timeout when model dispatch exceeds the 15-second deadline",
+      "sourceKey": "en_customer_returns",
+      "conversation": {
+        "subject": "Timeout check",
+        "messages": [
+          { "senderType": "customer", "content": "How do returns work?" }
+        ]
+      },
+      "modelOutput": null,
+      "expected": {
+        "status": "error",
+        "statusCode": 504,
+        "errorCode": "copilot_timeout"
+      }
+    },
+    {
+      "id": "CASE-23-EN-PROVIDER-FAILURE",
+      "language": "en",
+      "role": "customer",
+      "scenario": "Fail with 503 model_unavailable when upstream provider fails and no fallback completes",
+      "sourceKey": "en_customer_returns",
+      "conversation": {
+        "subject": "Provider failure check",
+        "messages": [
+          { "senderType": "customer", "content": "How do returns work?" }
+        ]
+      },
+      "modelOutput": null,
+      "expected": {
+        "status": "error",
+        "statusCode": 503,
+        "errorCode": "model_unavailable"
+      }
+    },
+    {
+      "id": "CASE-24-EN-CONTEXT-CHANGED-STALE",
+      "language": "en",
+      "role": "customer",
+      "scenario": "Reject GET/replay with 409 copilot_context_changed when conversation was updated after generation",
+      "sourceKey": "en_customer_returns",
+      "conversation": {
+        "subject": "Stale replay check",
+        "messages": [
+          { "senderType": "customer", "content": "How do returns work?" }
+        ]
+      },
+      "modelOutput": null,
+      "expected": {
+        "status": "error",
+        "statusCode": 409,
+        "errorCode": "copilot_context_changed"
+      }
+    }
+  ]
+}

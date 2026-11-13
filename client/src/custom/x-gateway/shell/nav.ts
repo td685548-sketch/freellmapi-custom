@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { ArrowLeftRight, BarChart3, BookOpen, Film, Gauge, Headset, Home, KeyRound, Layers, LifeBuoy, MessageSquare, Network, Scissors, ScrollText, Server, ShieldCheck, Sparkles, Terminal } from 'lucide-react'
+import { ArrowLeftRight, BarChart3, BookOpen, Film, Gauge, Headphones, Headset, Home, KeyRound, Layers, LifeBuoy, MessageSquare, Network, Scissors, ScrollText, Server, ShieldCheck, Sparkles, Terminal } from 'lucide-react'
 import { useUserSession } from '../../use-session'
 import { useXStrings } from '../strings'
 import { useMgmtStrings } from '../management-strings'
@@ -13,6 +13,7 @@ import { useSupportEnterpriseStrings } from '../support-enterprise-strings'
 import { useSupportGovernanceStrings } from '../support-governance-strings'
 import { useSupportIntegrationStrings } from '../support-integration-strings'
 import { useSupportEvidenceStrings } from '../support-evidence-strings'
+import { useSupportServiceDeskStrings } from '../support-service-desk-strings'
 import { useShellStrings } from '../shell-strings'
 
 export interface NavItem { to: string; label: string; icon: LucideIcon }
@@ -32,6 +33,7 @@ export function useNavGroups(): NavGroup[] {
   const gov = useSupportGovernanceStrings()
   const integration = useSupportIntegrationStrings()
   const evidence = useSupportEvidenceStrings()
+  const desk = useSupportServiceDeskStrings()
   const sh = useShellStrings()
   const session = useUserSession()
   const canView = session.hasPermission('view_keys')
@@ -58,6 +60,7 @@ export function useNavGroups(): NavGroup[] {
     ] },
     { id: 'support', label: sh.groupSupport, items: [
       { to: '/thruline/support-integration', label: integration.nav, icon: Sparkles },
+      { to: '/thruline/support-desk', label: desk.nav, icon: Headphones },
       { to: '/thruline/support', label: sup.supportNav, icon: Headset },
       { to: '/thruline/support-knowledge', label: evidence.nav, icon: BookOpen },
       { to: '/thruline/support-ops', label: ops.nav, icon: LifeBuoy },
