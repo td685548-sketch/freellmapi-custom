@@ -426,7 +426,7 @@ export default function ProviderAccounts() {
   if (query.isPending) return <AccountLoadState />
   if (query.isError) return <AccountLoadState error retry={() => void query.refetch()} />
   const provider = query.data.providers.find(item => item.id === providerId)
-  if (!provider) return <div className="x-empty"><h1>{s.providerNotFound}</h1><Link className="x-button" to="/x/providers">{s.returnProviders}</Link></div>
+  if (!provider) return <div className="x-empty"><h1>{s.providerNotFound}</h1><Link className="x-button" to="/thruline/providers">{s.returnProviders}</Link></div>
   const permissions = query.data.permissions
   const canConnect = permissions.add && ((provider.id !== 'github-copilot' && provider.id !== 'custom') || permissions.manageModels)
   const models = Array.from(new Map(provider.accounts.flatMap(account => account.models).map(model => [model.id, model])).values())
@@ -560,7 +560,7 @@ export default function ProviderAccounts() {
   })()
 
   return <>
-    <Link to="/x/providers" className="x-back-link"><ArrowLeft size={16} />{s.providers}</Link>
+    <Link to="/thruline/providers" className="x-back-link"><ArrowLeft size={16} />{s.providers}</Link>
     <div className="x-page-heading">
       <div className="x-provider-title">
         <ProviderMark id={provider.id} name={provider.name} />

@@ -35,7 +35,7 @@ beforeAll(async () => {
   });
   fixture = await new Promise(resolve => { const s = upstream.listen(0, '127.0.0.1', () => resolve(s)); });
   fixtureUrl = `http://127.0.0.1:${(fixture.address() as { port: number }).port}`;
-  const app = express(); app.use(express.json()); app.use('/x/v1', xGatewayRouter);
+  const app = express(); app.use(express.json()); app.use('/thruline/v1', xGatewayRouter);
   server = await new Promise(resolve => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
   base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 });
@@ -48,7 +48,7 @@ beforeEach(() => {
 });
 afterAll(async () => { server.closeAllConnections(); fixture.closeAllConnections(); await Promise.all([new Promise<void>(r => server.close(() => r())), new Promise<void>(r => fixture.close(() => r()))]); });
 async function request(path: string, stream = false) {
-  return httpFetch(base + '/x/v1' + path, { method: 'POST', headers: { Authorization: `Bearer ${key.key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'custom/fixture', messages: [{ role: 'user', content: 'Hi' }], input: 'Hi', max_tokens: 16, stream }) });
+  return httpFetch(base + '/thruline/v1' + path, { method: 'POST', headers: { Authorization: `Bearer ${key.key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'custom/fixture', messages: [{ role: 'user', content: 'Hi' }], input: 'Hi', max_tokens: 16, stream }) });
 }
 it.each(['/chat/completions', '/messages', '/responses', '/completions', '/embeddings', '/images/generations', '/audio/speech'])('rejects a disallowed model before any upstream request: %s', async path => {
   updateXGatewayClientKeyAccess(key.id, { restricted: true, allowedModels: ['other-model'] });
@@ -99,7 +99,7 @@ it('preserves Unicode history instead of replacing it with unreadable PNGs', asy
 it('forwards compressed Messages history with system and tool pairs intact over HTTP', async () => {
   setRtkEnabled(true);
   const output = '## main\n' + Array.from({ length: 40 }, (_, i) => `M  file_${i}.ts`).join('\n');
-  const res = await httpFetch(base + '/x/v1/messages', { method: 'POST', headers: { Authorization: `Bearer ${key.key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'custom/fixture', max_tokens: 8, system: 'Preserve this instruction.', messages: [{ role: 'assistant', content: [{ type: 'tool_use', id: 'call_A', name: 'shell', input: { command: 'git status' } }] }, { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_A', content: output }] }] }) });
+  const res = await httpFetch(base + '/thruline/v1/messages', { method: 'POST', headers: { Authorization: `Bearer ${key.key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'custom/fixture', max_tokens: 8, system: 'Preserve this instruction.', messages: [{ role: 'assistant', content: [{ type: 'tool_use', id: 'call_A', name: 'shell', input: { command: 'git status' } }] }, { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_A', content: output }] }] }) });
   expect(res.status).toBe(200);
   expect(forwarded.messages.find((m: any) => m.role === 'system').content).toContain('Preserve this instruction.');
   expect(forwarded.messages.find((m: any) => m.role === 'assistant').tool_calls[0].id).toBe('call_A');
@@ -108,7 +108,7 @@ it('forwards compressed Messages history with system and tool pairs intact over 
 it.each(['/messages', '/responses'])('forwards PXPIPE canonical image data to a real HTTP upstream from %s', async path => {
   setPxpipeEnabled(true); setPxpipeMinChars(1000);
   const history = [{ role: 'user', content: 'document '.repeat(4000) }, { role: 'user', content: 'Question' }];
-  const res = await httpFetch(base + '/x/v1' + path, { method: 'POST', headers: { Authorization: `Bearer ${key.key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'custom/gpt-4o', max_tokens: 8, messages: history, input: history }) });
+  const res = await httpFetch(base + '/thruline/v1' + path, { method: 'POST', headers: { Authorization: `Bearer ${key.key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'custom/gpt-4o', max_tokens: 8, messages: history, input: history }) });
   expect(res.status).toBe(200); expect(Number(res.headers.get('x-pxpipe-saved-tokens-est'))).toBeGreaterThan(0);
   const content = forwarded.messages.find((m: any) => Array.isArray(m.content))?.content;
   expect(content?.some((part: any) => part.type === 'image_url' && part.image_url.url.startsWith('data:image/png;base64,'))).toBe(true);

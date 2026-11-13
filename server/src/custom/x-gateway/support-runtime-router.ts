@@ -369,7 +369,7 @@ xSupportRuntimeConsoleRouter.get(
     }
     const serverOrigin = publicBase.toString().replace(/\/$/, '');
     const config = JSON.stringify({ tenantKey: tenant.publicKey, serverBase: serverOrigin, allowGuestSession: tenant.allowGuest }).replace(/</g, '\\u003c');
-    const embedSnippet = `<script src="${serverOrigin}/x/v1/support/widget.js"></script>\n<script>window.FreeLLMAPISupport.init(${config});</script>`;
+    const embedSnippet = `<script src="${serverOrigin}/thruline/v1/support/widget.js"></script>\n<script>window.FreeLLMAPISupport.init(${config});</script>`;
 
     const readiness: SupportIntegrationReadiness = {
       tenantId,

@@ -83,7 +83,7 @@ const STRINGS: Record<'en' | 'vi', CliToolsStrings> = {
     quickExportTip: 'Run this command once in your terminal session before launching the CLI tool.',
     activeStatus: 'Ready',
     noToolsFound: 'No tools match your search criteria.',
-    endpointPrefixTip: 'All tools connect to the Thruline OpenAI-compatible / Anthropic-compatible wire protocol on /x/v1.',
+    endpointPrefixTip: 'All tools connect to the Thruline OpenAI-compatible / Anthropic-compatible wire protocol on /thruline/v1.',
     cliToolsNav: 'CLI Tools',
   },
   vi: {
@@ -125,7 +125,7 @@ const STRINGS: Record<'en' | 'vi', CliToolsStrings> = {
     quickExportTip: 'Chạy lệnh này một lần trong cửa sổ terminal của bạn trước khi khởi chạy công cụ CLI.',
     activeStatus: 'Sẵn sàng',
     noToolsFound: 'Không tìm thấy công cụ nào phù hợp.',
-    endpointPrefixTip: 'Tất cả các công cụ đều kết nối qua giao thức chuẩn OpenAI / Anthropic tại đường dẫn /x/v1.',
+    endpointPrefixTip: 'Tất cả các công cụ đều kết nối qua giao thức chuẩn OpenAI / Anthropic tại đường dẫn /thruline/v1.',
     cliToolsNav: 'CLI Tools',
   },
 };

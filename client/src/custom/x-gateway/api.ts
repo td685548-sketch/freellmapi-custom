@@ -144,7 +144,7 @@ export const accountsApi = {
 }
 
 export function callbackAddress() {
-  return new URL(`${import.meta.env.BASE_URL}x/accounts/callback`, window.location.origin).href
+  return new URL(`${import.meta.env.BASE_URL}thruline/accounts/callback`, window.location.origin).href
 }
 
 export function trustedLoginUrl(value: string, provider: string) {

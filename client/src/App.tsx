@@ -54,7 +54,7 @@ import { AuditLogPage } from '@/custom/AuditLogPage'
 import PremiumPage from '@/pages/PremiumPage'
 import NotFoundPage from '@/pages/NotFoundPage'
 import AgentsPage from '@/pages/AgentsPage'
-import XGatewayApp from '@/custom/x-gateway/XGatewayApp'
+import XGatewayApp, { legacyGatewayTarget } from '@/custom/x-gateway/XGatewayApp'
 
 // Every failed mutation surfaces as an error toast, so no action fails
 // silently. A page that already shows the failure inline can opt out with
@@ -298,7 +298,7 @@ function Navbar() {
     // tabs only when the Analytics tab itself is hidden for this account.
     ...(!analyticsFolded && canViewUsage ? [{ to: '/usage', labelKey: 'nav.usage', customLabel: 'Usage' }] : []),
     ...(!analyticsFolded && hasPermission('view_audit_log') ? [{ to: '/audit', labelKey: 'nav.audit', customLabel: 'History' }] : []),
-    ...(hasPermission('use_x_gateway') ? [{ to: '/x/providers', labelKey: 'nav.xGateway', customLabel: 'Thruline' }] : []),
+    ...(hasPermission('use_x_gateway') ? [{ to: '/thruline/providers', labelKey: 'nav.xGateway', customLabel: 'Thruline' }] : []),
   ]
 
   return (
@@ -346,7 +346,7 @@ function Navbar() {
                 </div>
               ) : (
                 <NavItem key={item.to} to={item.to}>
-                  {item.to === '/x/providers'
+                  {item.to === '/thruline/providers'
                     ? <GatewayGalaxyLabel>{item.customLabel || t(item.labelKey)}</GatewayGalaxyLabel>
                     : item.customLabel || t(item.labelKey)}
                   {item.to === '/users' && <UsersNavBadge />}
@@ -427,7 +427,7 @@ function Navbar() {
                         onClick={() => navigate(item.to)}
                         className={location.pathname === item.to ? 'bg-accent text-accent-foreground font-medium' : undefined}
                       >
-                        {item.to === '/x/providers'
+                        {item.to === '/thruline/providers'
                           ? <GatewayGalaxyLabel>{item.customLabel || t(item.labelKey)}</GatewayGalaxyLabel>
                           : item.customLabel || t(item.labelKey)}
                         {item.to === '/users' && <UsersNavBadge />}
@@ -511,7 +511,9 @@ function PageContainer({ children }: { children: ReactNode }) {
 function AppShell({ children }: { children: ReactNode }) {
   const location = useLocation()
   const fullBleed = FULL_BLEED_ROUTES.has(location.pathname)
-  if (location.pathname === '/x' || location.pathname.startsWith('/x/')) return <XGatewayApp />
+  const legacyGateway = legacyGatewayTarget(location)
+  if (legacyGateway) return <Navigate to={legacyGateway} replace />
+  if (location.pathname === '/thruline' || location.pathname.startsWith('/thruline/')) return <XGatewayApp />
   return (
     <div className={`flex flex-col ${fullBleed ? 'h-dvh overflow-hidden' : 'min-h-screen'} ${isMacDesktop ? 'desktop-backdrop' : 'bg-background'}`}>
       {children}

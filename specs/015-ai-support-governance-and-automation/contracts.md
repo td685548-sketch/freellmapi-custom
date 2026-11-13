@@ -52,22 +52,22 @@ All Console endpoints require standard X-Gateway admin authentication (`requireA
 
 ---
 
-## 2. Public Partner API (`/x/v1/support/*` — Mounted via `xSupportGovernancePublicRouter`)
+## 2. Public Partner API (`/thruline/v1/support/*` — Mounted via `xSupportGovernancePublicRouter`)
 
 All Public Partner endpoints authenticate the tenant via `X-Support-Tenant-Key` (or `body.tenantKey`) and verify the signed user token via `X-Support-User-Token` (or `body.userToken`) using `verifySupportUserToken`.
 
-- **`POST /x/v1/support/guardrails/check`**
+- **`POST /thruline/v1/support/guardrails/check`**
   - Body: `{ text: string, tokens?: number }`
   - Step 1: Evaluates `evaluateSupportInputGuardrails(String(tenant.id), { text, userId: userContext.userId, userRole: userContext.role })`. If `!evaluation.allowed`, dispatches `'guardrail.blocked'` partner webhook event and returns HTTP `403` with `{ ok: false, blocked: true, evaluation }`.
   - Step 2: Checks & consumes quota via `checkAndConsumeSupportUserQuota(String(tenant.id), { userId: userContext.userId, userRole: userContext.role, tokens: req.body?.tokens })`. If `!quota.allowed`, returns HTTP `429` with `{ ok: false, quotaExceeded: true, quota }`.
   - Otherwise returns HTTP `200` with `{ ok: true, evaluation, quota }`.
-- **`GET /x/v1/support/profile`**
+- **`GET /thruline/v1/support/profile`**
   - Query: `?userId=...` (optional; if omitted defaults to `userContext.userId`).
   - Calls `getSupportCustomerProfileForRequester(String(tenant.id), targetUserId, { userId: userContext.userId, role: userContext.role })` (returns `403` if a customer requests another user's `userId`).
   - Returns `{ ok: true, profile: profile ?? null, memoryPrompt: buildCustomerMemoryPrompt(String(tenant.id), targetUserId, userContext.role) }`.
-- **`PATCH /x/v1/support/profile`**
+- **`PATCH /thruline/v1/support/profile`**
   - Body: `{ tags?: string[], memoryFacts?: string[], customAttributes?: Record<string, string | number | boolean> }`
   - Updates the caller's own profile (`userId: userContext.userId`, `name: userContext.name`, `email: userContext.email`, `role: userContext.role`) and returns `{ ok: true, profile }`.
-- **`POST /x/v1/support/csat`**
+- **`POST /thruline/v1/support/csat`**
   - Body: `{ conversationId?: string, score: number, category?: string, comment?: string }`
   - Submits CSAT rating locked to `userContext.userId` & `userContext.role`, dispatches `'csat.submitted'` partner webhook event, and returns `{ ok: true, rating: SupportCsatRating, summary: SupportCsatSummary }` (HTTP 201).

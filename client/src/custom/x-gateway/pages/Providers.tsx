@@ -98,7 +98,7 @@ function ProviderCard({
   const enabled = provider.accounts.filter(account => account.enabled).length
   const login = provider.category === 'oauth' || provider.authMethods.some(method => method === 'oauth_pkce' || method === 'device_code')
   const isCookie = (provider.category === 'webCookie' || provider.authMethods.includes('cookie')) && !login
-  return <Link to={`/x/providers/${encodeURIComponent(provider.id)}`} className="x-provider-card">
+  return <Link to={`/thruline/providers/${encodeURIComponent(provider.id)}`} className="x-provider-card">
     <div className="x-card-top">
       <ProviderMark id={provider.id} name={provider.name} />
       <div className="x-card-badges">

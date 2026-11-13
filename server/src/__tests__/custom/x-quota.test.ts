@@ -122,7 +122,7 @@ describe('X account quota HTTP, routing and isolation', () => {
       };
       return new Response(Buffer.concat([event('assistantResponseEvent', { content: 'Free tier answered' }), event('messageStopEvent', { stopReason: 'end_turn' })]), { headers: { 'content-type': 'application/vnd.amazon.eventstream' } });
     });
-    const response = await fetch(`${base}/x/v1/chat/completions`, { method: 'POST',
+    const response = await fetch(`${base}/thruline/v1/chat/completions`, { method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: 'auto', messages: [{ role: 'user', content: 'Hello' }] }),
     });

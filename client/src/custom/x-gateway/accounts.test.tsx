@@ -160,7 +160,7 @@ async function waitFor(predicate: () => boolean, timeout = 4000) {
   while (!predicate() && Date.now() < deadline) await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
   expect(predicate()).toBe(true)
 }
-function mount(node: React.ReactNode, path = '/x/providers') {
+function mount(node: React.ReactNode, path = '/thruline/providers') {
   act(() => root.render(
     <QueryClientProvider client={client}>
       <I18nProvider initialLocale="en">
@@ -170,7 +170,7 @@ function mount(node: React.ReactNode, path = '/x/providers') {
   ))
 }
 function providerRoute() {
-  return <Routes><Route path="/x/providers/:providerId" element={<ProviderAccounts />} /></Routes>
+  return <Routes><Route path="/thruline/providers/:providerId" element={<ProviderAccounts />} /></Routes>
 }
 function enter(input: HTMLInputElement, value: string) {
   act(() => {
@@ -312,7 +312,7 @@ describe('provider accounts', () => {
   it('hides every mutation in read-only mode and dedupes models with keyboard tabs', async () => {
     data.permissions = { add: false, edit: false, delete: false, test: false, manageModels: false }
     data.providers[0].accounts = [account(1), account(2, { models: [{ id: 'fixture-chat', name: 'Fixture Chat' }] })]
-    mount(providerRoute(), '/x/providers/openrouter')
+    mount(providerRoute(), '/thruline/providers/openrouter')
     await flush()
     expect(body().querySelector('[role="switch"]')).toBeNull()
     expect(body().textContent).not.toContain('Add account')
@@ -328,14 +328,14 @@ describe('provider accounts', () => {
   it('requires manage_key_models before reconnecting Copilot', async () => {
     data.permissions.manageModels = false
     data.providers[1].accounts = [account(3, { provider: 'github-copilot', authMethod: 'device_code', identity: '11' })]
-    mount(providerRoute(), '/x/providers/github-copilot')
+    mount(providerRoute(), '/thruline/providers/github-copilot')
     await flush()
     expect(body().textContent).not.toContain('Sign in again')
     expect(body().textContent).not.toContain('Add account')
   })
 
   it('toggles, tests, renames and deletes only after confirmation', async () => {
-    mount(providerRoute(), '/x/providers/openrouter')
+    mount(providerRoute(), '/thruline/providers/openrouter')
     await flush()
     click(body().querySelector('[role="switch"]')!)
     await flush()
@@ -359,7 +359,7 @@ describe('provider accounts', () => {
   })
 
   it('supports batch testing all accounts, toggling all provider accounts, and managing provider models', async () => {
-    mount(providerRoute(), '/x/providers/openrouter')
+    mount(providerRoute(), '/thruline/providers/openrouter')
     await flush()
 
     // Batch test provider accounts
@@ -385,7 +385,7 @@ describe('provider accounts', () => {
   })
 
   it('supports single model ping with real-time latency display', async () => {
-    mount(providerRoute(), '/x/providers/openrouter')
+    mount(providerRoute(), '/thruline/providers/openrouter')
     await flush()
 
     // Switch to Models tab
@@ -431,17 +431,17 @@ describe('connect dialog', () => {
     submit(body().querySelector<HTMLFormElement>('.x-dialog form')!)
     await flush()
     const start = vi.mocked(apiFetch).mock.calls.find(([p]) => p.endsWith('/start'))!
-    expect(JSON.parse(String(start[1]!.body))).toEqual({ label: 'Work login', callbackUrl: `${window.location.origin}/x/accounts/callback` })
+    expect(JSON.parse(String(start[1]!.body))).toEqual({ label: 'Work login', callbackUrl: `${window.location.origin}/thruline/accounts/callback` })
     const link = body().querySelector<HTMLAnchorElement>('a[target="_blank"]')!
     expect(link.href).toContain('https://openrouter.ai/auth')
     expect(link.rel).toContain('noopener')
     const manual = body().querySelector<HTMLInputElement>('input[type="url"]')!
-    enter(manual, `${window.location.origin}/x/accounts/callback?attemptId=other&code=x`)
+    enter(manual, `${window.location.origin}/thruline/accounts/callback?attemptId=other&code=x`)
     submit(manual.closest('form')!)
     await flush()
     expect(vi.mocked(apiFetch).mock.calls.some(([p]) => p.endsWith('/complete'))).toBe(false)
     expect(body().textContent).toContain('does not belong to the current login attempt')
-    enter(manual, `${window.location.origin}/x/accounts/callback?attemptId=attempt-1&code=fixture-code`)
+    enter(manual, `${window.location.origin}/thruline/accounts/callback?attemptId=attempt-1&code=fixture-code`)
     submit(manual.closest('form')!)
     await flush()
     const complete = vi.mocked(apiFetch).mock.calls.find(([p]) => p.endsWith('/complete'))!
@@ -537,8 +537,8 @@ describe('connect dialog', () => {
 
 describe('OAuth callback', () => {
   it('reports saved credentials as unverified after a subscription callback', async () => {
-    window.history.replaceState(null, '', '/x/accounts/callback?state=sub_fixture&code=fixture-code')
-    mount(<StrictMode><AccountCallback /></StrictMode>, '/x/accounts/callback')
+    window.history.replaceState(null, '', '/thruline/accounts/callback?state=sub_fixture&code=fixture-code')
+    mount(<StrictMode><AccountCallback /></StrictMode>, '/thruline/accounts/callback')
     await flush()
     expect(body().textContent).toContain('Credentials saved')
     expect(body().textContent).toContain('Upstream inference is unverified')
@@ -547,8 +547,8 @@ describe('OAuth callback', () => {
   })
 
   it('exchanges the code once under StrictMode, strips it from the URL and notifies the opener', async () => {
-    window.history.replaceState(null, '', '/x/accounts/callback?attemptId=attempt-1&code=fixture-code')
-    mount(<StrictMode><AccountCallback /></StrictMode>, '/x/accounts/callback')
+    window.history.replaceState(null, '', '/thruline/accounts/callback?attemptId=attempt-1&code=fixture-code')
+    mount(<StrictMode><AccountCallback /></StrictMode>, '/thruline/accounts/callback')
     await flush()
     await waitFor(() => container.textContent!.includes('Account connected'))
     expect(vi.mocked(apiFetch).mock.calls.filter(([p]) => p.endsWith('/complete'))).toHaveLength(1)
@@ -559,8 +559,8 @@ describe('OAuth callback', () => {
   })
 
   it('reports denial or missing parameters without exchanging a code', async () => {
-    window.history.replaceState(null, '', '/x/accounts/callback?error=access_denied&code=fixture-code')
-    mount(<AccountCallback />, '/x/accounts/callback')
+    window.history.replaceState(null, '', '/thruline/accounts/callback?error=access_denied&code=fixture-code')
+    mount(<AccountCallback />, '/thruline/accounts/callback')
     await flush()
     expect(container.textContent).toContain('Could not complete the connection.')
     expect(vi.mocked(apiFetch).mock.calls.some(([p]) => p.endsWith('/complete'))).toBe(false)

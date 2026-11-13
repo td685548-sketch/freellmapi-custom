@@ -41,6 +41,7 @@ import { createHostGuard } from './middleware/allowed-hosts.js';
 import { createProxyRateLimiter, createAdminRateLimiter } from './middleware/rateLimit.js';
 import { registerCustomRoutes } from './custom/register.js';
 import { preparseGuard } from './custom/preparse-guard.js';
+import { legacyGatewayPath } from './custom/legacy-gateway-path.js';
 import { installPerformanceMetrics } from './custom/performance/metrics.js';
 
 // Password-guess ceiling for GET /api/keys/export. Deliberately low: a real
@@ -118,6 +119,8 @@ export function createApp(config?: Config) {
   // credential is touched.
   app.use(createHostGuard(cfg.allowedHosts));
   app.use(installPerformanceMetrics());
+  // Pre-rename Thruline addresses (/x/...) keep working.
+  app.use(legacyGatewayPath);
   const allowedCorsOrigins = new Set([
     ...DEFAULT_DASHBOARD_ORIGINS,
     ...cfg.dashboardOrigins,
@@ -211,7 +214,7 @@ export function createApp(config?: Config) {
   // body was already parsed, so the second parser only sees what the first
   // didn't own; an over-limit body throws from whichever parser matched.
   app.use(
-    ['/v1', '/v1beta', '/x/v1', '/mcp', '/api/chat', '/api/generate', '/api/embed', '/api/embeddings'],
+    ['/v1', '/v1beta', '/thruline/v1', '/mcp', '/api/chat', '/api/generate', '/api/embed', '/api/embeddings'],
     express.json({ limit: cfg.requestBodyLimitBytes }),
   );
   app.use(express.json({ limit: '10mb' }));
@@ -318,7 +321,7 @@ export function createApp(config?: Config) {
 
   // X Gateway (9Router integration): admin-only OpenAI-compatible surface.
   // Same per-IP rate limiter as /v1; auth and permission are in the x-gateway router.
-  app.use('/x/v1', createProxyRateLimiter(cfg.proxyRateLimitRpm));
+  app.use('/thruline/v1', createProxyRateLimiter(cfg.proxyRateLimitRpm));
 
   // OpenAI-compatible proxy. Per-IP rate limiting (#35 item #6) runs first so
   // it throttles unauthenticated brute-force / flood attempts before any

@@ -69,7 +69,7 @@ function CLIToolsView() {
   const [selectedModel, setSelectedModel] = useState('auto');
   const [urlMode, setUrlMode] = useState<'origin' | 'custom'>('origin');
   const [customUrlInput, setCustomUrlInput] = useState<string>(
-    typeof window !== 'undefined' ? `${window.location.origin}/x/v1` : 'https://your-domain.onrender.com/x/v1'
+    typeof window !== 'undefined' ? `${window.location.origin}/thruline/v1` : 'https://your-domain.onrender.com/thruline/v1'
   );
   const [shellTab, setShellTab] = useState<ShellTab>('bash');
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'cli' | 'ide' | 'agent'>('all');
@@ -115,11 +115,11 @@ function CLIToolsView() {
 
   // Resolve active Base URL
   const activeBaseUrl = useMemo(() => {
-    if (urlMode === 'custom') return customUrlInput.trim() || 'https://your-domain.onrender.com/x/v1';
+    if (urlMode === 'custom') return customUrlInput.trim() || 'https://your-domain.onrender.com/thruline/v1';
     if (typeof window !== 'undefined') {
-      return `${window.location.origin}/x/v1`;
+      return `${window.location.origin}/thruline/v1`;
     }
-    return 'http://localhost:3001/x/v1';
+    return 'http://localhost:3001/thruline/v1';
   }, [urlMode, customUrlInput]);
 
   // Resolve active API Key
@@ -197,7 +197,7 @@ function CLIToolsView() {
 
   const handleTestConnection = async (toolId: string) => {
     setTestResults(prev => { const next = { ...prev }; delete next[toolId]; return next; });
-    if (!activeApiKey || activeBaseUrl.replace(/\/$/, '') !== `${window.location.origin}/x/v1`) {
+    if (!activeApiKey || activeBaseUrl.replace(/\/$/, '') !== `${window.location.origin}/thruline/v1`) {
       setTestResults(prev => ({ ...prev, [toolId]: { ok: false, toolId, error: 'Paste the full API key. Tests target this installation only; use its current origin URL.' } }));
       return;
     }
@@ -397,7 +397,7 @@ function CLIToolsView() {
                   value={customUrlInput}
                   disabled={testMutation.isPending}
                   onChange={(e) => { setCustomUrlInput(e.target.value); setTestResults({}); }}
-                  placeholder="https://your-domain.com/x/v1"
+                  placeholder="https://your-domain.com/thruline/v1"
                   style={{
                     flex: 1,
                     padding: '7px 10px',

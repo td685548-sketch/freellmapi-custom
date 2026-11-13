@@ -350,11 +350,11 @@ export default function Endpoint() {
 
   const cliSnippets: Record<typeof activeCliTab, { title: string; code: string }> = {
     'claude-code': {
-      title: 'Claude Code (/x/v1/messages — Anthropic compatible)',
+      title: 'Claude Code (/thruline/v1/messages — Anthropic compatible)',
       code: `export ANTHROPIC_BASE_URL="${anthropicBase}"\nexport ANTHROPIC_API_KEY="${displayKey}"\nclaude`,
     },
     codex: {
-      title: 'Codex CLI (/x/v1/responses)',
+      title: 'Codex CLI (/thruline/v1/responses)',
       code: `export OPENAI_BASE_URL="${base}"\nexport OPENAI_API_KEY="${displayKey}"\ncodex`,
     },
     'cursor-cline': {
@@ -1075,15 +1075,15 @@ export default function Endpoint() {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
         <small className="x-muted" style={{ marginRight: 4 }}>{s.supportedEndpointsTitle}:</small>
         {[
-          'POST /x/v1/chat/completions',
-          'POST /x/v1/messages',
-          'POST /x/v1/responses',
-          'POST /x/v1/completions',
-          'POST /x/v1/embeddings',
-          'POST /x/v1/images/generations',
-          'POST /x/v1/audio/speech',
-          'POST /x/v1/audio/transcriptions',
-          'GET /x/v1/models',
+          'POST /thruline/v1/chat/completions',
+          'POST /thruline/v1/messages',
+          'POST /thruline/v1/responses',
+          'POST /thruline/v1/completions',
+          'POST /thruline/v1/embeddings',
+          'POST /thruline/v1/images/generations',
+          'POST /thruline/v1/audio/speech',
+          'POST /thruline/v1/audio/transcriptions',
+          'GET /thruline/v1/models',
         ].map(ep => (
           <code key={ep} style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: 999, background: 'var(--x-surface-subtle)', border: '1px solid var(--x-border)' }}>
             {ep}

@@ -51,7 +51,7 @@ describe('X Gateway Media Providers', () => {
     expect(body.kinds.embedding).toBeDefined();
 
     const imageKind = body.kinds.image as { endpoint: string; providers: unknown[]; suggestedModels: string[] };
-    expect(imageKind.endpoint).toBe('/x/v1/images/generations');
+    expect(imageKind.endpoint).toBe('/thruline/v1/images/generations');
     expect(imageKind.suggestedModels).toContain('dall-e-3');
     expect(Array.isArray(imageKind.providers)).toBe(true);
   });

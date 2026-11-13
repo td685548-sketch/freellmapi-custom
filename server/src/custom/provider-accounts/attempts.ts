@@ -48,10 +48,10 @@ export function validateCallback(callbackUrl: string | undefined, requestOrigin:
     const origin = new URL(requestOrigin);
     if (!['https:', 'http:'].includes(origin.protocol) || origin.origin !== requestOrigin) throw new Error();
     if (url.origin !== origin.origin || url.username || url.password || url.hash || (callbackUrl ?? '').includes('#')) throw new Error();
-    if (!url.pathname.endsWith('/x/accounts/callback')) throw new Error();
+    if (!url.pathname.endsWith('/thruline/accounts/callback')) throw new Error();
     return url;
   } catch {
-    throw new AccountError(400, 'callbackUrl must be a same-origin /x/accounts/callback URL without credentials or fragments.');
+    throw new AccountError(400, 'callbackUrl must be a same-origin /thruline/accounts/callback URL without credentials or fragments.');
   }
 }
 

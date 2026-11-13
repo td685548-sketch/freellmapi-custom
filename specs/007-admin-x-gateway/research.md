@@ -17,7 +17,7 @@ All unknowns from the plan are resolved below. Nothing is left as NEEDS CLARIFIC
 ## D3. Authenticate with the administrator's personal key, one extra column set, no extra round trip
 
 - **Decision**: reuse the personal-key service and extend its existing lookup to also return the account's primary flag and permission list.
-- **Rationale**: the key lookup already joins the user row; adding columns costs nothing, so the per-request permission re-check (FR-006) does not add a storage round trip (SC-007). Rate limiting and usage tagging come from the existing personal-key gate once it is also mounted for `/x/v1`.
+- **Rationale**: the key lookup already joins the user row; adding columns costs nothing, so the per-request permission re-check (FR-006) does not add a storage round trip (SC-007). Rate limiting and usage tagging come from the existing personal-key gate once it is also mounted for `/thruline/v1`.
 - **Alternatives**: a separate key type (new table and UI, more attack surface, no benefit); a second query per request (+1 round trip, about 100 ms on Turso).
 
 ## D4. New permission group, checked per request
@@ -44,7 +44,7 @@ All unknowns from the plan are resolved below. Nothing is left as NEEDS CLARIFIC
 
 ## D8. Address space, body limits, rate limits, pre-parse guard
 
-- **Decision**: `/x/v1` is a credentialed path for the pre-parse guard, uses the large-body limit, and sits behind the proxy rate limiter; any unmatched path under `/x/v1` answers JSON 404 so the single-page-app fallback never serves HTML there.
+- **Decision**: `/thruline/v1` is a credentialed path for the pre-parse guard, uses the large-body limit, and sits behind the proxy rate limiter; any unmatched path under `/thruline/v1` answers JSON 404 so the single-page-app fallback never serves HTML there.
 - **Rationale**: without these edits the administrator's own large requests would be refused as anonymous (the guard defaults unknown paths to public) and the gateway would sit outside the rate limits. All are one-token changes.
 
 ## D9. Security considerations (new attack surface)
@@ -54,7 +54,7 @@ All unknowns from the plan are resolved below. Nothing is left as NEEDS CLARIFIC
 | Non-admin uses the gateway | permission checked on every request; 401/403; tests for anonymous, member, revoked key, demoted admin |
 | Combo names used from `/v1` | resolver answers only inside the gateway scope |
 | Privilege escalation through the new permission | existing delegation rule; group appears in the existing dialog |
-| Large or slow anonymous bodies | existing pre-parse guard extended to `/x/v1` |
+| Large or slow anonymous bodies | existing pre-parse guard extended to `/thruline/v1` |
 | Abuse by a stolen admin key | per-user rate limit, revocation (existing), kill switch, logging with the `x-gateway` tag |
 | Instruction injection through savers | fixed server-side text only; no user-supplied saver text in phase 1 |
 | Key disclosure through the console | the console never receives or displays a key; the usage example uses a placeholder |
@@ -72,5 +72,5 @@ Deliberately not done: OAuth subscription providers, web-session providers, clou
 
 ## D11. Models list
 
-- **Decision**: `GET /x/v1/models` returns the combos (as `combo:<name>`) followed by the same catalogue listing the main flow builds, for the administrator.
+- **Decision**: `GET /thruline/v1/models` returns the combos (as `combo:<name>`) followed by the same catalogue listing the main flow builds, for the administrator.
 - **Rationale**: reuses the existing listing builder; adds no query beyond the main flow's.

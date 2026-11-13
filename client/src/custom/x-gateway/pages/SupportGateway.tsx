@@ -2225,7 +2225,7 @@ export default function SupportGateway() {
                     className="x-button x-small"
                     onClick={() =>
                       handleCopy(
-                        `<script\n  src="${window.location.origin}/x/v1/support/widget.js"\n  data-tenant-key="${activeTenant.publicKey}"\n  data-endpoint="${window.location.origin}"\n  data-title="${activeTenant.name} AI Assistant"\n  async\n></script>`,
+                        `<script\n  src="${window.location.origin}/thruline/v1/support/widget.js"\n  data-tenant-key="${activeTenant.publicKey}"\n  data-endpoint="${window.location.origin}"\n  data-title="${activeTenant.name} AI Assistant"\n  async\n></script>`,
                         'widget-snippet'
                       )
                     }
@@ -2250,7 +2250,7 @@ export default function SupportGateway() {
                 >
 {`<!-- FreeLLMAPI AI Support Widget -->
 <script
-  src="${typeof window !== 'undefined' ? window.location.origin : 'https://gateway.example.com'}/x/v1/support/widget.js"
+  src="${typeof window !== 'undefined' ? window.location.origin : 'https://gateway.example.com'}/thruline/v1/support/widget.js"
   data-tenant-key="${activeTenant.publicKey}"
   data-endpoint="${typeof window !== 'undefined' ? window.location.origin : 'https://gateway.example.com'}"
   data-title="${activeTenant.name} AI Support"
@@ -2268,7 +2268,7 @@ export default function SupportGateway() {
                     className="x-button x-small"
                     onClick={() =>
                       handleCopy(
-                        `curl -X POST ${window.location.origin}/x/v1/support/session \\\n  -H "Authorization: Bearer <YOUR_SIGNING_SECRET>" \\\n  -H "Content-Type: application/json" \\\n  -d '{\n    "tenantKey": "${activeTenant.publicKey}",\n    "userId": "cust_101",\n    "name": "Customer Name",\n    "role": "customer"\n  }'`,
+                        `curl -X POST ${window.location.origin}/thruline/v1/support/session \\\n  -H "Authorization: Bearer <YOUR_SIGNING_SECRET>" \\\n  -H "Content-Type: application/json" \\\n  -d '{\n    "tenantKey": "${activeTenant.publicKey}",\n    "userId": "cust_101",\n    "name": "Customer Name",\n    "role": "customer"\n  }'`,
                         'backend-curl'
                       )
                     }
@@ -2291,7 +2291,7 @@ export default function SupportGateway() {
                     lineHeight: 1.6,
                   }}
                 >
-{`curl -X POST ${typeof window !== 'undefined' ? window.location.origin : 'https://gateway.example.com'}/x/v1/support/session \\
+{`curl -X POST ${typeof window !== 'undefined' ? window.location.origin : 'https://gateway.example.com'}/thruline/v1/support/session \\
   -H "Authorization: Bearer <YOUR_SIGNING_SECRET>" \\
   -H "Content-Type: application/json" \\
   -d '{

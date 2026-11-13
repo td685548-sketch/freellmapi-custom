@@ -85,7 +85,7 @@ describe('pre-parse guard and public probes', () => {
     await refused('/api/conversations', { authorization: 'Bearer bogus-session' });
     await refused('/v1/t/bogustoken/chat/completions');
     await refused('/mcp');
-    await refused('/x/v1/chat/completions');
+    await refused('/thruline/v1/chat/completions');
   }, 30000);
 
   it('refuses a large chunked body (no Content-Length) the same way', async () => {
@@ -108,7 +108,7 @@ describe('pre-parse guard and public probes', () => {
     const asUrlToken = await send(`/v1/t/${token}/chat/completions`, { body: big });
     expect(asUrlToken.body?.error?.message ?? '').not.toMatch(/body this large/);
     const personal = mintUserApiKey(createUser('admin-preparse@example.com', 'Password123!').userId);
-    const asPersonalKey = await send('/x/v1/chat/completions', { body: big, headers: { authorization: `Bearer ${personal.key}` } });
+    const asPersonalKey = await send('/thruline/v1/chat/completions', { body: big, headers: { authorization: `Bearer ${personal.key}` } });
     expect(asPersonalKey.body?.error?.message ?? '').not.toMatch(/body this large/);
   });
 

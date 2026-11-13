@@ -38,15 +38,15 @@ description: "Task list for 013-ai-support-gateway divided across 4 concurrent a
 
 - [ ] T011 [P] [US1] Cập nhật `server/src/custom/permission-actions.ts` ánh xạ `/api/x-gateway/support` sang `use_x_gateway` (đọc & mô phỏng) và `edit_x_settings` (ghi cấu hình).
 - [ ] T012 [US1] [US2] [US3] Xây dựng `xSupportConsoleRouter` trong `server/src/custom/x-gateway/support-router.ts` cho toàn bộ endpoints quản trị (`/tenants`, `/tools`, `/db-sources`, `/query-test`, `/mint-token`, `/simulate-chat`) và gắn vào `console-router.ts`.
-- [ ] T013 [US1] [US2] [US3] Xây dựng `xSupportPublicRouter` (`/x/v1/support/session`, `/x/v1/support/chat` với vòng lặp gọi công cụ tự động + fallback thông minh trên dữ liệu sandbox/webhook, và `/x/v1/support/widget.js`) và gắn vào `server/src/custom/x-gateway/router.ts`.
+- [ ] T013 [US1] [US2] [US3] Xây dựng `xSupportPublicRouter` (`/thruline/v1/support/session`, `/thruline/v1/support/chat` với vòng lặp gọi công cụ tự động + fallback thông minh trên dữ liệu sandbox/webhook, và `/thruline/v1/support/widget.js`) và gắn vào `server/src/custom/x-gateway/router.ts`.
 - [ ] T014 [US1] [US2] [US3] Viết integration tests trong `server/src/__tests__/custom/x-support-gateway.test.ts`.
 
 ---
 
-## Phase 4: Agent 4 — Frontend Web Dashboard (`/x/support`) & Role Simulator (Priority: P2)
+## Phase 4: Agent 4 — Frontend Web Dashboard (`/thruline/support`) & Role Simulator (Priority: P2)
 
 **Files**: `client/src/custom/x-gateway/support-strings.ts`, `client/src/custom/x-gateway/pages/SupportGateway.tsx`, `client/src/custom/x-gateway/XGatewayApp.tsx`, `client/src/custom/x-gateway/support-gateway.test.tsx`
 
 - [ ] T015 [P] [US4] Tạo file từ điển song ngữ Anh/Việt `client/src/custom/x-gateway/support-strings.ts`.
-- [ ] T016 [US4] Xây dựng trang `client/src/custom/x-gateway/pages/SupportGateway.tsx` với 5 tab: `Overview & Roles`, `Webhook Tools (Mode A)`, `Database & Table Policies (Mode B)`, `Live Role Simulator`, và `Embed Widget & Integration`, gắn route `/x/support` vào `XGatewayApp.tsx`.
+- [ ] T016 [US4] Xây dựng trang `client/src/custom/x-gateway/pages/SupportGateway.tsx` với 5 tab: `Overview & Roles`, `Webhook Tools (Mode A)`, `Database & Table Policies (Mode B)`, `Live Role Simulator`, và `Embed Widget & Integration`, gắn route `/thruline/support` vào `XGatewayApp.tsx`.
 - [ ] T017 [US4] Viết bài test giao diện `client/src/custom/x-gateway/support-gateway.test.tsx`.

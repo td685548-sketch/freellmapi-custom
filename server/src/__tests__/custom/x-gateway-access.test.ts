@@ -122,27 +122,27 @@ describe('X Gateway Access Control (US1 / Phase 3)', () => {
     setEnabled(false);
 
     // With no key
-    const anon = await requestX('/x/v1/chat/completions', { body: validChatPayload });
+    const anon = await requestX('/thruline/v1/chat/completions', { body: validChatPayload });
     expect(anon.status).toBe(404);
     expect(anon.body).toEqual({ error: { message: 'Not found', type: 'not_found' } });
 
     // With admin key
-    const asAdmin = await requestX('/x/v1/chat/completions', { key: adminKey, body: validChatPayload });
+    const asAdmin = await requestX('/thruline/v1/chat/completions', { key: adminKey, body: validChatPayload });
     expect(asAdmin.status).toBe(404);
     expect(asAdmin.body).toEqual({ error: { message: 'Not found', type: 'not_found' } });
 
     // With invalid key
-    const asInvalid = await requestX('/x/v1/chat/completions', { key: 'invalid-key', body: validChatPayload });
+    const asInvalid = await requestX('/thruline/v1/chat/completions', { key: 'invalid-key', body: validChatPayload });
     expect(asInvalid.status).toBe(404);
     expect(asInvalid.body).toEqual({ error: { message: 'Not found', type: 'not_found' } });
 
     // With revoked key
-    const asRevoked = await requestX('/x/v1/chat/completions', { key: revokedKey, body: validChatPayload });
+    const asRevoked = await requestX('/thruline/v1/chat/completions', { key: revokedKey, body: validChatPayload });
     expect(asRevoked.status).toBe(404);
     expect(asRevoked.body).toEqual({ error: { message: 'Not found', type: 'not_found' } });
 
     // Models endpoint when off
-    const models = await requestX('/x/v1/models', { method: 'GET', key: adminKey });
+    const models = await requestX('/thruline/v1/models', { method: 'GET', key: adminKey });
     expect(models.status).toBe(404);
     expect(models.body).toEqual({ error: { message: 'Not found', type: 'not_found' } });
   });
@@ -153,38 +153,38 @@ describe('X Gateway Access Control (US1 / Phase 3)', () => {
     });
 
     it('rejects anonymous caller with 401 authentication_error', async () => {
-      const res = await requestX('/x/v1/chat/completions', { body: validChatPayload });
+      const res = await requestX('/thruline/v1/chat/completions', { body: validChatPayload });
       expect(res.status).toBe(401);
       expect(res.body.error.type).toBe('authentication_error');
     });
 
     it('rejects unknown key with 401 authentication_error', async () => {
-      const res = await requestX('/x/v1/chat/completions', { key: 'sk-flm-unknownkey999', body: validChatPayload });
+      const res = await requestX('/thruline/v1/chat/completions', { key: 'sk-flm-unknownkey999', body: validChatPayload });
       expect(res.status).toBe(401);
       expect(res.body.error.type).toBe('authentication_error');
     });
 
     it('rejects non-personal key with 401 authentication_error', async () => {
-      const res = await requestX('/x/v1/chat/completions', { key: 'invalid-bearer-token', body: validChatPayload });
+      const res = await requestX('/thruline/v1/chat/completions', { key: 'invalid-bearer-token', body: validChatPayload });
       expect(res.status).toBe(401);
       expect(res.body.error.type).toBe('authentication_error');
     });
 
     it('rejects revoked key with 401 authentication_error', async () => {
-      const res = await requestX('/x/v1/chat/completions', { key: revokedKey, body: validChatPayload });
+      const res = await requestX('/thruline/v1/chat/completions', { key: revokedKey, body: validChatPayload });
       expect(res.status).toBe(401);
       expect(res.body.error.type).toBe('authentication_error');
     });
 
     it('rejects member without use_x_gateway with 403 permission_error', async () => {
-      const res = await requestX('/x/v1/chat/completions', { key: memberKey, body: validChatPayload });
+      const res = await requestX('/thruline/v1/chat/completions', { key: memberKey, body: validChatPayload });
       expect(res.status).toBe(403);
       expect(res.body.error.type).toBe('permission_error');
       expect(res.body.error.message).toMatch(/use_x_gateway/);
     });
 
     it('allows primary administrator with 200 and sets X-Gateway header', async () => {
-      const res = await requestX('/x/v1/chat/completions', { key: adminKey, body: validChatPayload });
+      const res = await requestX('/thruline/v1/chat/completions', { key: adminKey, body: validChatPayload });
       expect(res.status).toBe(200);
       expect(res.headers.get('x-gateway')).toBe('x');
       expect(res.headers.get('x-output-saver-applied')).toBe('');
@@ -193,7 +193,7 @@ describe('X Gateway Access Control (US1 / Phase 3)', () => {
     });
 
     it('allows delegated holder of use_x_gateway with 200', async () => {
-      const res = await requestX('/x/v1/chat/completions', { key: delegatedKey, body: validChatPayload });
+      const res = await requestX('/thruline/v1/chat/completions', { key: delegatedKey, body: validChatPayload });
       expect(res.status).toBe(200);
       expect(res.headers.get('x-gateway')).toBe('x');
       expect(res.body.choices[0].message.content).toBe('Hello from mock provider!');
@@ -201,14 +201,14 @@ describe('X Gateway Access Control (US1 / Phase 3)', () => {
 
     it('refuses account with 403 on the next call if permission is revoked (no caching)', async () => {
       // First call succeeds
-      const first = await requestX('/x/v1/chat/completions', { key: delegatedKey, body: validChatPayload });
+      const first = await requestX('/thruline/v1/chat/completions', { key: delegatedKey, body: validChatPayload });
       expect(first.status).toBe(200);
 
       // Demote the account by removing permission
       getDb().prepare("UPDATE users SET permissions = '[]' WHERE id = ?").run(delegatedUserId);
 
       // Next call must immediately fail with 403 without restarting server
-      const next = await requestX('/x/v1/chat/completions', { key: delegatedKey, body: validChatPayload });
+      const next = await requestX('/thruline/v1/chat/completions', { key: delegatedKey, body: validChatPayload });
       expect(next.status).toBe(403);
       expect(next.body.error.type).toBe('permission_error');
 
@@ -216,20 +216,20 @@ describe('X Gateway Access Control (US1 / Phase 3)', () => {
       getDb().prepare("UPDATE users SET permissions = '[\"use_x_gateway\"]' WHERE id = ?").run(delegatedUserId);
     });
 
-    it('allows primary administrator on GET /x/v1/models', async () => {
-      const res = await requestX('/x/v1/models', { method: 'GET', key: adminKey });
+    it('allows primary administrator on GET /thruline/v1/models', async () => {
+      const res = await requestX('/thruline/v1/models', { method: 'GET', key: adminKey });
       expect(res.status).toBe(200);
       expect(res.body.object).toBe('list');
       expect(Array.isArray(res.body.data)).toBe(true);
     });
 
-    it('returns JSON 404 (never HTML) for unmatched paths under /x/v1', async () => {
-      const res = await requestX('/x/v1/nonexistent-endpoint', { method: 'GET', key: adminKey });
+    it('returns JSON 404 (never HTML) for unmatched paths under /thruline/v1', async () => {
+      const res = await requestX('/thruline/v1/nonexistent-endpoint', { method: 'GET', key: adminKey });
       expect(res.status).toBe(404);
       expect(res.body).toEqual({ error: { message: 'Not found', type: 'not_found' } });
     });
 
-    it('supports dedicated X Gateway API keys (sk-xgw-...) on /x/v1 while rejecting them on /v1', async () => {
+    it('supports dedicated X Gateway API keys (sk-xgw-...) on /thruline/v1 while rejecting them on /v1', async () => {
       // Mint via console endpoint
       const createRes = await requestX('/api/x-gateway/keys', {
         method: 'POST',
@@ -249,8 +249,8 @@ describe('X Gateway Access Control (US1 / Phase 3)', () => {
       expect(listRes.status).toBe(200);
       expect(listRes.body.keys.some((k: { id: number; name: string }) => k.id === xKeyId && k.name === 'Cursor X Key')).toBe(true);
 
-      // Works on /x/v1/chat/completions and attributes usage to user
-      const chatRes = await requestX('/x/v1/chat/completions', {
+      // Works on /thruline/v1/chat/completions and attributes usage to user
+      const chatRes = await requestX('/thruline/v1/chat/completions', {
         key: xKey,
         body: validChatPayload,
       });
@@ -263,16 +263,16 @@ describe('X Gateway Access Control (US1 / Phase 3)', () => {
         key: xKey,
       });
       expect(mainRes.status).toBe(401);
-      expect(mainRes.body.error.message).toMatch(/scoped exclusively to \/x\/v1/);
+      expect(mainRes.body.error.message).toMatch(/scoped exclusively to \/thruline\/v1/);
 
-      // Revoking key immediately blocks subsequent /x/v1 calls
+      // Revoking key immediately blocks subsequent /thruline/v1 calls
       const delRes = await requestX(`/api/x-gateway/keys/${xKeyId}`, {
         method: 'DELETE',
         key: adminSessionToken,
       });
       expect(delRes.status).toBe(200);
 
-      const afterRevoke = await requestX('/x/v1/chat/completions', {
+      const afterRevoke = await requestX('/thruline/v1/chat/completions', {
         key: xKey,
         body: validChatPayload,
       });
@@ -333,9 +333,9 @@ describe('X Gateway Access Control (US1 / Phase 3)', () => {
       expect(resolveXGatewayAccountProxy(accountRow(inheritedId))).toBeUndefined();
     });
 
-    it('supports Anthropic Messages API (/x/v1/messages, /x/v1/messages/count_tokens, and anthropic-version /x/v1/models)', async () => {
-      // 1. Anthropic /x/v1/messages
-      const msgRes = await requestX('/x/v1/messages', {
+    it('supports Anthropic Messages API (/thruline/v1/messages, /thruline/v1/messages/count_tokens, and anthropic-version /thruline/v1/models)', async () => {
+      // 1. Anthropic /thruline/v1/messages
+      const msgRes = await requestX('/thruline/v1/messages', {
         key: adminKey,
         body: {
           model: 'claude-sonnet-4-5-20250929',
@@ -353,8 +353,8 @@ describe('X Gateway Access Control (US1 / Phase 3)', () => {
         text: 'Hello from mock provider!',
       });
 
-      // 2. Anthropic /x/v1/messages/count_tokens
-      const countRes = await requestX('/x/v1/messages/count_tokens', {
+      // 2. Anthropic /thruline/v1/messages/count_tokens
+      const countRes = await requestX('/thruline/v1/messages/count_tokens', {
         key: adminKey,
         body: {
           model: 'claude-sonnet-4-5-20250929',
@@ -365,8 +365,8 @@ describe('X Gateway Access Control (US1 / Phase 3)', () => {
       expect(typeof countRes.body.input_tokens).toBe('number');
       expect(countRes.body.input_tokens).toBeGreaterThan(0);
 
-      // 3. Anthropic GET /x/v1/models with anthropic-version header
-      const modelsRes = await realFetch(`${base}/x/v1/models`, {
+      // 3. Anthropic GET /thruline/v1/models with anthropic-version header
+      const modelsRes = await realFetch(`${base}/thruline/v1/models`, {
         method: 'GET',
         headers: {
           'x-api-key': adminKey,
@@ -379,9 +379,9 @@ describe('X Gateway Access Control (US1 / Phase 3)', () => {
       expect(modelsBody.data.some((m: { id: string; type: string }) => m.id === 'claude-sonnet-4-5-20250929' && m.type === 'model')).toBe(true);
     });
 
-    it('supports OpenAI Responses API (/x/v1/responses) and Legacy Completions (/x/v1/completions)', async () => {
+    it('supports OpenAI Responses API (/thruline/v1/responses) and Legacy Completions (/thruline/v1/completions)', async () => {
       // 1. OpenAI Responses API for Codex CLI
-      const respRes = await requestX('/x/v1/responses', {
+      const respRes = await requestX('/thruline/v1/responses', {
         key: adminKey,
         body: {
           model: 'auto',
@@ -396,7 +396,7 @@ describe('X Gateway Access Control (US1 / Phase 3)', () => {
       expect(respRes.body.output_text).toBe('Hello from mock provider!');
 
       // 2. Legacy Completions API for Continue.dev autocomplete
-      const cmplRes = await requestX('/x/v1/completions', {
+      const cmplRes = await requestX('/thruline/v1/completions', {
         key: adminKey,
         body: {
           model: 'auto',

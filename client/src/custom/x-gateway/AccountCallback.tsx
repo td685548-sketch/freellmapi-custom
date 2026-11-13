@@ -38,6 +38,6 @@ export function AccountCallback() {
     {state === 'pending' ? <LoaderCircle className="x-spin" size={36} /> : state === 'connected' ? <CheckCircle2 size={36} /> : <TriangleAlert size={36} />}
     <h1>{state === 'pending' ? s.connecting : state === 'connected' ? (subscriptionCallback ? 'Credentials saved' : s.connectionDone) : s.error}</h1>
     <p>{state === 'connected' ? (subscriptionCallback ? 'Upstream inference is unverified. Run an account test with an eligible model.' : s.callbackDone) : state === 'error' ? s.callbackError : s.encrypted}</p>
-    <Link className="x-button" to="/x/providers">{s.returnProviders}</Link>
+    <Link className="x-button" to="/thruline/providers">{s.returnProviders}</Link>
   </div>
 }

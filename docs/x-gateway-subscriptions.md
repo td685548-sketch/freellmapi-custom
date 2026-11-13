@@ -41,7 +41,7 @@ For Gemini browser login, configure server-side `GEMINI_CLIENT_ID`,
 `GEMINI_CLIENT_SECRET` and HTTPS `PUBLIC_APP_URL`. Register exactly:
 
 ```text
-https://YOUR-SERVICE.onrender.com/x/accounts/callback
+https://YOUR-SERVICE.onrender.com/thruline/accounts/callback
 ```
 
 Imported Gemini CLI tokens must have been issued to the configured OAuth client;
@@ -102,7 +102,7 @@ npm run test -w server -- --run src/__tests__/custom/provider-execution.test.ts 
 After importing/authorizing each live account, select an eligible model in the
 account test. The subscription health check performs a small real inference.
 Then run the public gateway smoke once for each provider, using its exact model
-ID from `/x/v1/models`:
+ID from `/thruline/v1/models`:
 
 ```sh
 export GATEWAY_URL=https://YOUR-SERVICE.onrender.com

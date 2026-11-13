@@ -36,7 +36,7 @@ export GATEWAY_URL="{{GATEWAY_URL}}"      # local or public Cloudflare Tunnel UR
 export GATEWAY_KEY="sk-..."              # from Dashboard → Keys / Endpoint
 \`\`\`
 
-All requests: \`\${GATEWAY_URL}/v1/...\` with header \`Authorization: Bearer \${GATEWAY_KEY}\` (or \`\${GATEWAY_URL}/x/v1/...\` for admin routes).
+All requests: \`\${GATEWAY_URL}/v1/...\` with header \`Authorization: Bearer \${GATEWAY_KEY}\` (or \`\${GATEWAY_URL}/thruline/v1/...\` for admin routes).
 
 Verify: \`curl \${GATEWAY_URL}/api/health\` → \`{"ok":true}\`
 
@@ -70,7 +70,7 @@ When you need a specific capability, inspect the dedicated skill:
 
 | Capability | Endpoint | Skill ID |
 |---|---|---|
-| Chat & Code-gen | \`POST /v1/chat/completions\` & \`POST /x/v1/messages\` | \`9router-chat\` |
+| Chat & Code-gen | \`POST /v1/chat/completions\` & \`POST /thruline/v1/messages\` | \`9router-chat\` |
 | Image Generation | \`POST /v1/images/generations\` | \`9router-image\` |
 | Video Generation | \`POST /v1/videos/generations\` | \`9router-video\` |
 | Text-to-Speech | \`POST /v1/audio/speech\` | \`9router-tts\` |
@@ -107,7 +107,7 @@ Requires \`GATEWAY_URL\` (and \`GATEWAY_KEY\` if auth enabled).
 ## Endpoints
 
 - \`POST \${GATEWAY_URL}/v1/chat/completions\` — OpenAI format
-- \`POST \${GATEWAY_URL}/x/v1/messages\` or \`POST \${GATEWAY_URL}/v1/messages\` — Anthropic format
+- \`POST \${GATEWAY_URL}/thruline/v1/messages\` or \`POST \${GATEWAY_URL}/v1/messages\` — Anthropic format
 
 ## Discover
 

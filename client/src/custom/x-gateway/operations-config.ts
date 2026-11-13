@@ -46,7 +46,7 @@ export const CLI_TOOLS_CATALOG: CliTool[] = [
     badge: 'Anthropic CLI',
     tagline: 'Anthropic official terminal coding agent for iterative development',
     docsUrl: 'https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview',
-    protocol: 'Anthropic Messages (/x/v1/messages)',
+    protocol: 'Anthropic Messages (/thruline/v1/messages)',
     envVars: {
       baseUrlKey: 'ANTHROPIC_BASE_URL',
       apiKeyKey: 'ANTHROPIC_API_KEY',
@@ -104,7 +104,7 @@ export const CLI_TOOLS_CATALOG: CliTool[] = [
     badge: 'OpenAI CLI',
     tagline: 'OpenAI official terminal code generator and autonomous executor',
     docsUrl: 'https://github.com/openai/codex',
-    protocol: 'OpenAI Responses (/x/v1/responses)',
+    protocol: 'OpenAI Responses (/thruline/v1/responses)',
     envVars: {
       baseUrlKey: 'OPENAI_BASE_URL',
       apiKeyKey: 'OPENAI_API_KEY',
@@ -138,7 +138,7 @@ export const CLI_TOOLS_CATALOG: CliTool[] = [
     id: 'gemini',
     name: 'Gemini CLI', category: 'cli', image: '/providers/gemini.png', badge: 'Gemini CLI',
     tagline: 'Gemini native protocol through Thruline', docsUrl: 'https://geminicli.com/docs/reference/configuration/',
-    protocol: 'Gemini (/x/v1beta/models)',
+    protocol: 'Gemini (/thruline/v1beta/models)',
     envVars: { baseUrlKey: 'GOOGLE_GEMINI_BASE_URL', apiKeyKey: 'GEMINI_API_KEY', modelKey: 'GEMINI_MODEL', extra: { GOOGLE_GENAI_API_VERSION: 'v1beta' } },
     steps: [{ title: 'Use local setup', desc: 'Download and run local setup, then launch its Gemini script with API-key authentication.' }],
   },
@@ -150,7 +150,7 @@ export const CLI_TOOLS_CATALOG: CliTool[] = [
     badge: 'AI IDE',
     tagline: 'AI-first code editor with inline editing and multi-file reasoning',
     docsUrl: 'https://docs.cursor.com',
-    protocol: 'OpenAI Compatible (/x/v1)',
+    protocol: 'OpenAI Compatible (/thruline/v1)',
     envVars: {
       baseUrlKey: 'OPENAI_BASE_URL',
       apiKeyKey: 'OPENAI_API_KEY',
@@ -184,7 +184,7 @@ export const CLI_TOOLS_CATALOG: CliTool[] = [
     badge: 'VS Code Extension',
     tagline: 'GitHub Copilot with custom router backend for VS Code and JetBrains',
     docsUrl: 'https://marketplace.visualstudio.com/items?itemName=hotrungnhan.9router-for-github-copilot',
-    protocol: 'OpenAI Compatible (/x/v1)',
+    protocol: 'OpenAI Compatible (/thruline/v1)',
     envVars: {
       baseUrlKey: 'OPENAI_BASE_URL',
       apiKeyKey: 'OPENAI_API_KEY',
@@ -212,7 +212,7 @@ export const CLI_TOOLS_CATALOG: CliTool[] = [
     badge: 'Agent Extension',
     tagline: 'Autonomous coding agents inside VS Code capable of multi-turn file edits',
     docsUrl: 'https://github.com/cline/cline',
-    protocol: 'Anthropic or OpenAI Compatible (/x/v1)',
+    protocol: 'Anthropic or OpenAI Compatible (/thruline/v1)',
     envVars: {
       baseUrlKey: 'ANTHROPIC_BASE_URL',
       apiKeyKey: 'ANTHROPIC_API_KEY',
@@ -240,7 +240,7 @@ export const CLI_TOOLS_CATALOG: CliTool[] = [
     badge: 'Multi-channel Agent',
     tagline: 'Autonomous AI assistant for Telegram, Discord, Slack, WhatsApp and CLI',
     docsUrl: 'https://openclaw.ai',
-    protocol: 'OpenAI Compatible (/x/v1)',
+    protocol: 'OpenAI Compatible (/thruline/v1)',
     envVars: {
       baseUrlKey: 'OPENAI_BASE_URL',
       apiKeyKey: 'OPENAI_API_KEY',
@@ -273,7 +273,7 @@ export const CLI_TOOLS_CATALOG: CliTool[] = [
     badge: 'IDE Assistant',
     tagline: 'Leading open-source AI code completion and chat extension for VS Code & JetBrains',
     docsUrl: 'https://docs.continue.dev',
-    protocol: 'OpenAI Compatible (/x/v1)',
+    protocol: 'OpenAI Compatible (/thruline/v1)',
     envVars: {
       baseUrlKey: 'OPENAI_BASE_URL',
       apiKeyKey: 'OPENAI_API_KEY',
@@ -314,7 +314,7 @@ export const CLI_TOOLS_CATALOG: CliTool[] = [
     badge: 'Terminal Agent',
     tagline: 'Open-source CLI assistant with direct terminal and repo search tools',
     docsUrl: 'https://github.com/opencode-ai/opencode',
-    protocol: 'OpenAI Compatible (/x/v1)',
+    protocol: 'OpenAI Compatible (/thruline/v1)',
     envVars: {
       baseUrlKey: 'OPENAI_BASE_URL',
       apiKeyKey: 'OPENAI_API_KEY',
@@ -339,7 +339,7 @@ export const CLI_TOOLS_CATALOG: CliTool[] = [
     badge: 'DeepMind Coding',
     tagline: 'Pair programming and autonomous developer workflows by Google DeepMind',
     docsUrl: 'https://deepmind.google',
-    protocol: 'OpenAI / Claude Wire (/x/v1)',
+    protocol: 'OpenAI / Claude Wire (/thruline/v1)',
     envVars: {
       baseUrlKey: 'OPENAI_BASE_URL',
       apiKeyKey: 'OPENAI_API_KEY',
@@ -359,7 +359,7 @@ export const CLI_TOOLS_CATALOG: CliTool[] = [
     badge: 'Fast Rust Editor',
     tagline: 'High-performance Rust-based code editor with built-in Assistant',
     docsUrl: 'https://zed.dev/docs/assistant',
-    protocol: 'OpenAI Compatible (/x/v1)',
+    protocol: 'OpenAI Compatible (/thruline/v1)',
     envVars: {
       baseUrlKey: 'OPENAI_BASE_URL',
       apiKeyKey: 'OPENAI_API_KEY',

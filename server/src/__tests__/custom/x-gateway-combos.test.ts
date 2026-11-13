@@ -402,7 +402,7 @@ describe('combo presets and fusion over HTTP', () => {
       }), { headers: { 'content-type': 'application/json' } });
     });
 
-    const res = await fetch(`${base}/x/v1/chat/completions`, {
+    const res = await fetch(`${base}/thruline/v1/chat/completions`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: 'combo:race', messages: [{ role: 'user', content: 'Hello' }] }),

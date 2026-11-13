@@ -53,8 +53,8 @@ describe('X Gateway ChatGPT Web image routing', () => {
     vi.mocked(generateChatGptWebImages).mockReset();
   });
 
-  it('routes /x/v1/images/generations through the picture_v2 flow for chatgpt-web', async () => {
-    const res = await realFetch(`${base}/x/v1/images/generations`, {
+  it('routes /thruline/v1/images/generations through the picture_v2 flow for chatgpt-web', async () => {
+    const res = await realFetch(`${base}/thruline/v1/images/generations`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${adminKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: 'gpt-image-2', prompt: 'a red cube', n: 1, size: '1024x1024' }),
@@ -78,7 +78,7 @@ describe('X Gateway ChatGPT Web image routing', () => {
 
   it('routes model:auto to the image model instead of the account chat model', async () => {
     vi.mocked(generateChatGptWebImages).mockClear();
-    const res = await realFetch(`${base}/x/v1/images/generations`, {
+    const res = await realFetch(`${base}/thruline/v1/images/generations`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${adminKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: 'auto', prompt: 'a red cube' }),
@@ -95,7 +95,7 @@ describe('X Gateway ChatGPT Web image routing', () => {
       { status: 429 },
     ));
 
-    const res = await realFetch(`${base}/x/v1/images/generations`, {
+    const res = await realFetch(`${base}/thruline/v1/images/generations`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${adminKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: 'gpt-image-2', prompt: 'a red cube' }),
@@ -113,7 +113,7 @@ describe('X Gateway ChatGPT Web image routing', () => {
       { status: 401 },
     ));
 
-    const res = await realFetch(`${base}/x/v1/images/generations`, {
+    const res = await realFetch(`${base}/thruline/v1/images/generations`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${adminKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: 'gpt-image-2', prompt: 'a red cube' }),

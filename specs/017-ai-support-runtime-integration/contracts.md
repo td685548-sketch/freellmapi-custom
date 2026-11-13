@@ -11,11 +11,11 @@ Canonical DTOs: [data-model.md](data-model.md). Preserve existing route prefixes
 
 ## Public Partner Routes
 
-### POST /x/v1/support/guest-session (NEW)
+### POST /thruline/v1/support/guest-session (NEW)
 
 Body `{ tenantKey: string }`. Requires enabled tenant with allowGuest; no signing secret. Reject body claims for userId, role, permissions. Server mints `guest_<randomUUID>` identity, role guest, configured guest permissions and TTL 900 seconds. Response `{ ok:true, contextToken, expiresIn:900, userContext }`. Rate limit 20 issuances/tenant/trusted client IP per minute in durable storage. Honor existing proxy trust; no arbitrary X-Forwarded-For parsing. Distinct sessions never share an identity. No signed privileged claims are created by this endpoint.
 
-### POST /x/v1/support/chat (EXTEND EXISTING)
+### POST /thruline/v1/support/chat (EXTEND EXISTING)
 
 Input SupportRuntimeChatInput, plus accepted identity token aliases above. Limit total message content to 64000 chars, at most 100 messages, each <=16000 chars; role is user/assistant only, last nonempty message must be user. Reject system/developer/unknown role messages. For existing conversation, use only final user message from client; server loads authoritative previous history. For new conversation, ignore client assistant history for model context and accept the final user message. Never persist client-supplied assistant text.
 
@@ -53,7 +53,7 @@ Readiness checks report actual component availability and configuration only. `m
 
 ## Widget Contract (Agent 4 module; Agent 3 serves it)
 
-`server/src/custom/x-gateway/support-runtime-widget.ts` exports `getSupportRuntimeWidgetScript(): string`. GET /x/v1/support/widget.js serves it with current content type; keep FreeLLMAPISupport.init({tenantKey,contextToken?,endpoint?,title?,primaryColor?,placeholder?}). Add optional serverBase, allowGuestSession=true, onAuthRequired callback; do not require changes to existing embed snippets.
+`server/src/custom/x-gateway/support-runtime-widget.ts` exports `getSupportRuntimeWidgetScript(): string`. GET /thruline/v1/support/widget.js serves it with current content type; keep FreeLLMAPISupport.init({tenantKey,contextToken?,endpoint?,title?,primaryColor?,placeholder?}). Add optional serverBase, allowGuestSession=true, onAuthRequired callback; do not require changes to existing embed snippets.
 
 - Capture currentScript.src at script evaluation; derive server base from its origin/base path when not configured. Never default requests to the partner website's origin. Explicit endpoint remains supported.
 - Expose instance.updateContextToken(token): clears conversation/view/polling on identity change; instance.destroy(): cancels requests/polls and removes DOM. No innerHTML insertion of title, replies, customer data or errors; use safe text rendering.
@@ -65,7 +65,7 @@ Readiness checks report actual component availability and configuration only. `m
 
 ## Admin UI Contract
 
-New `/x/support-integration` page, nav before generic `/x/support` prefix. `data-testid="support-integration-tenant"`; tab/panel IDs `readiness`, `runtime`, `deliveries`, `embed` using `tab-<id>` / `panel-<id>`.
+New `/thruline/support-integration` page, nav before generic `/thruline/support` prefix. `data-testid="support-integration-tenant"`; tab/panel IDs `readiness`, `runtime`, `deliveries`, `embed` using `tab-<id>` / `panel-<id>`.
 
 - Readiness: safe component checks, translated reason codes, retry/loading/error and honest warnings.
 - Runtime: allowed model selectors, per-tool read/approval-required selection, limits from DTO; fetch tool names via existing GET /tools. Explain POST default approval and no role bypass. Save with PUT runtime and validate bounds.

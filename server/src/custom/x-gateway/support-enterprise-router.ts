@@ -415,7 +415,7 @@ xSupportEnterpriseConsoleRouter.use(
 );
 
 // ===========================================================================
-// 2. Public Partner API (/x/v1/support/*)
+// 2. Public Partner API (/thruline/v1/support/*)
 // ===========================================================================
 
 export const xSupportEnterprisePublicRouter = Router();

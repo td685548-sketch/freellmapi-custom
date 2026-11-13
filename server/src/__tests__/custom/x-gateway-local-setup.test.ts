@@ -9,7 +9,7 @@ import { applySetup, restoreSetup } from '../../../../client/src/custom/x-gatewa
 const homes: string[] = [];
 afterEach(() => { for (const home of homes.splice(0)) fs.rmSync(home, { recursive: true, force: true }); });
 const homeFixture = () => { const home = fs.mkdtempSync(path.join(os.tmpdir(), 'x-gateway-setup-')); homes.push(home); return home; };
-const options = { baseUrl: 'https://gateway.example/x/v1', key: 'sk-xgw-fixture', model: 'combo:coding' };
+const options = { baseUrl: 'https://gateway.example/thruline/v1', key: 'sk-xgw-fixture', model: 'combo:coding' };
 
 describe('local setup preservation and restore', () => {
   it.each(['claude', 'codex', 'gemini', 'opencode', 'cursor'])('sets up %s locally and restores all changed files', tool => {
@@ -31,7 +31,7 @@ describe('local setup preservation and restore', () => {
     expect(fs.readFileSync(path.join(home, '.codex/auth.json'), 'utf8')).toBe(files['.codex/auth.json']);
     if (tool === 'claude') {
       const settings = JSON.parse(fs.readFileSync(path.join(home, '.claude/settings.json'), 'utf8'));
-      expect(settings).toMatchObject({ permissions: { allow: ['Read'] }, env: { KEEP: 'yes', ANTHROPIC_MODEL: options.model, ANTHROPIC_BASE_URL: 'https://gateway.example/x' } });
+      expect(settings).toMatchObject({ permissions: { allow: ['Read'] }, env: { KEEP: 'yes', ANTHROPIC_MODEL: options.model, ANTHROPIC_BASE_URL: 'https://gateway.example/thruline' } });
     }
     if (tool === 'opencode') {
       expect(JSON.parse(fs.readFileSync(path.join(home, '.config/opencode/opencode.json'), 'utf8'))).toMatchObject({ providers: { existing: { name: 'Keep' }, x_gateway: { settings: { baseURL: options.baseUrl } } } });
@@ -90,7 +90,7 @@ describe('local setup preservation and restore', () => {
   });
   it('refuses remote HTTP, credentialed URLs and placeholders', () => {
     const home = homeFixture();
-    for (const baseUrl of ['http://remote.example/x/v1', 'https://secret@remote.example/x/v1', 'https://remote.example/v1']) {
+    for (const baseUrl of ['http://remote.example/thruline/v1', 'https://secret@remote.example/thruline/v1', 'https://remote.example/v1']) {
       expect(() => applySetup({ ...options, baseUrl, home, tool: 'codex' })).toThrow();
     }
     expect(() => applySetup({ ...options, key: 'prefix...[full-key]', home, tool: 'claude' })).toThrow();

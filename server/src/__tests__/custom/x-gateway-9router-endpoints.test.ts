@@ -38,7 +38,7 @@ function seed(provider = 'xai', model = 'grok-imagine-video'): number {
 }
 
 function call(path: string, body?: unknown, headers: Record<string, string> = {}) {
-  return fetch(`${base}/x/v1${path}`, {
+  return fetch(`${base}/thruline/v1${path}`, {
     method: body === undefined ? 'GET' : 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', ...headers },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
@@ -138,7 +138,7 @@ describe('metadata, fetch compatibility, and context compaction', () => {
     for (const path of ['/models/info?id=openai/tts-1&kind=tts', '/models/openai/tts-1']) {
       const response = await call(path);
       expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({ id: 'openai/tts-1', kind: 'tts', endpoint: '/x/v1/audio/speech', voicesUrl: '/x/v1/audio/voices?provider=openai' });
+      expect(await response.json()).toMatchObject({ id: 'openai/tts-1', kind: 'tts', endpoint: '/thruline/v1/audio/speech', voicesUrl: '/thruline/v1/audio/voices?provider=openai' });
     }
     expect((await call('/models/replicate/owner/video-model')).status).toBe(200);
     expect((await call('/models/info')).status).toBe(400);
@@ -147,7 +147,7 @@ describe('metadata, fetch compatibility, and context compaction', () => {
     seed('elevenlabs', 'eleven_multilingual_v2');
     const tts = await call('/models/info?id=elevenlabs/eleven_multilingual_v2&kind=tts');
     expect(tts.status).toBe(200);
-    expect(await tts.json()).toMatchObject({ kind: 'tts', voicesUrl: '/x/v1/audio/voices?provider=elevenlabs' });
+    expect(await tts.json()).toMatchObject({ kind: 'tts', voicesUrl: '/thruline/v1/audio/voices?provider=elevenlabs' });
   });
   it('mounts web/fetch with the same SSRF guard', async () => {
     expect((await call('/web/fetch', { url: 'http://127.0.0.1/secrets' })).status).toBe(400);
@@ -305,7 +305,7 @@ describe('video generation and media configuration', () => {
   });
   it('adds video providers and persists defaults across unrelated saves', async () => {
     const config = await (await dashboard('/media/config')).json();
-    expect(config.kinds.video).toMatchObject({ label: 'Text to Video', endpoint: '/x/v1/videos/generations' });
+    expect(config.kinds.video).toMatchObject({ label: 'Text to Video', endpoint: '/thruline/v1/videos/generations' });
     expect(config.kinds.video.defaultProviders).toEqual(expect.arrayContaining(['xai', 'openai', 'gemini', 'replicate', 'fal-ai', 'together', 'siliconflow', 'minimax', 'kling', 'luma']));
     expect((await dashboard('/media/config', { video: { defaultModel: 'xai/grok-imagine-video', aspectRatio: '9:16' } })).status).toBe(200);
     await dashboard('/media/config', { tts: { defaultVoice: 'nova' } });
@@ -317,7 +317,7 @@ describe('video generation and media configuration', () => {
     expect((await dashboard('/media/test/video', { prompt: 'lake', aspect_ratio: 'bad' })).status).toBe(400);
   });
   it.each(['/audio/voices?provider=openai', '/models/info?id=openai/tts-1', '/videos/job'])('requires gateway auth for %s', async path => {
-    const response = await fetch(`${base}/x/v1${path}`, { headers: { Authorization: 'Bearer invalid' } });
+    const response = await fetch(`${base}/thruline/v1${path}`, { headers: { Authorization: 'Bearer invalid' } });
     expect(response.status).toBe(401);
   });
 });
