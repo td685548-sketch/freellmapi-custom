@@ -210,7 +210,7 @@ beforeEach(() => {
   vi.mocked(apiFetch).mockImplementation(async (path, options) => {
     const method = options?.method ?? 'GET'
     const body = options?.body ? JSON.parse(String(options.body)) : {}
-    if (path === '/api/x-gateway/support/tenants') return { tenants }
+    if (path === '/api/thruline/support/tenants') return { tenants }
     if (path.endsWith('/knowledge/seed')) {
       docs = [...docs, { id: 'kb_seed', title: 'Internal Refund SOP', category: 'internal_sop', allowedRoles: ['staff', 'admin'], tags: ['refund'], content: 'Refund after review.', enabled: true }]
       return { ok: true, docs }
@@ -267,7 +267,7 @@ describe('Support Operations Center', () => {
     await screen.findByText('Shipping FAQ')
     input('Title', 'Private draft for Demo Shop')
     fireEvent.change(screen.getByTestId('support-ops-tenant'), { target: { value: '2' } })
-    await waitFor(() => expect(vi.mocked(apiFetch).mock.calls.some(([path]) => path === '/api/x-gateway/support/tenants/2/knowledge')).toBe(true))
+    await waitFor(() => expect(vi.mocked(apiFetch).mock.calls.some(([path]) => path === '/api/thruline/support/tenants/2/knowledge')).toBe(true))
     expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('')
     expect(screen.queryByText('Shipping FAQ')).toBeNull()
     expect((screen.getByTestId('support-ops-tenant') as HTMLSelectElement).value).toBe('2')
@@ -429,7 +429,7 @@ describe('Support Operations Center', () => {
     render(<QueryClientProvider client={client}><SupportEnterprise /></QueryClientProvider>)
     await screen.findByText('Create a tenant in AI Support Gateway to get started.')
     expect(screen.queryByRole('tablist')).toBeNull()
-    expect(vi.mocked(apiFetch).mock.calls.every(([path]) => path === '/api/x-gateway/support/tenants')).toBe(true)
+    expect(vi.mocked(apiFetch).mock.calls.every(([path]) => path === '/api/thruline/support/tenants')).toBe(true)
   })
 
   it('shows loading and a retryable tenant error', async () => {

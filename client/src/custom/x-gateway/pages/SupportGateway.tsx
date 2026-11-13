@@ -225,7 +225,7 @@ export default function SupportGateway() {
   const tenantsQuery = useQuery({
     queryKey: ['x-support-tenants', revision],
     queryFn: ({ signal }) =>
-      apiFetch<{ tenants: SupportTenant[]; sampleSchemaSql?: string }>('/api/x-gateway/support/tenants', { signal }),
+      apiFetch<{ tenants: SupportTenant[]; sampleSchemaSql?: string }>('/api/thruline/support/tenants', { signal }),
   })
 
   const tenants = tenantsQuery.data?.tenants ?? []
@@ -245,14 +245,14 @@ export default function SupportGateway() {
   const toolsQuery = useQuery({
     queryKey: ['x-support-tools', activeId, revision],
     queryFn: ({ signal }) =>
-      apiFetch<{ tools: SupportWebhookTool[] }>(`/api/x-gateway/support/tenants/${activeId}/tools`, { signal }),
+      apiFetch<{ tools: SupportWebhookTool[] }>(`/api/thruline/support/tenants/${activeId}/tools`, { signal }),
     enabled: activeId !== null,
   })
 
   const dbSourcesQuery = useQuery({
     queryKey: ['x-support-db-sources', activeId, revision],
     queryFn: ({ signal }) =>
-      apiFetch<{ dbSources: SupportDbSource[] }>(`/api/x-gateway/support/tenants/${activeId}/db-sources`, { signal }),
+      apiFetch<{ dbSources: SupportDbSource[] }>(`/api/thruline/support/tenants/${activeId}/db-sources`, { signal }),
     enabled: activeId !== null,
   })
 
@@ -276,7 +276,7 @@ export default function SupportGateway() {
 
   const createTenantMutation = useMutation({
     mutationFn: (data: typeof createTenantDraft) =>
-      apiFetch<{ tenant: SupportTenant; signingSecret: string }>('/api/x-gateway/support/tenants', {
+      apiFetch<{ tenant: SupportTenant; signingSecret: string }>('/api/thruline/support/tenants', {
         method: 'POST',
         body: JSON.stringify({
           name: data.name,
@@ -312,7 +312,7 @@ export default function SupportGateway() {
   const rotateSecretMutation = useMutation({
     mutationFn: (tenantId: number) =>
       apiFetch<{ tenant: SupportTenant; signingSecret: string }>(
-        `/api/x-gateway/support/tenants/${tenantId}/rotate-secret`,
+        `/api/thruline/support/tenants/${tenantId}/rotate-secret`,
         { method: 'POST', body: JSON.stringify({}) }
       ),
     onSuccess: (res) => {
@@ -323,7 +323,7 @@ export default function SupportGateway() {
 
   const deleteTenantMutation = useMutation({
     mutationFn: (tenantId: number) =>
-      apiFetch<{ ok: boolean }>(`/api/x-gateway/support/tenants/${tenantId}`, { method: 'DELETE' }),
+      apiFetch<{ ok: boolean }>(`/api/thruline/support/tenants/${tenantId}`, { method: 'DELETE' }),
     onSuccess: () => {
       setSelectedTenantId(null)
       void client.invalidateQueries({ queryKey: ['x-support-tenants'] })
@@ -332,7 +332,7 @@ export default function SupportGateway() {
 
   const updateTenantMutation = useMutation({
     mutationFn: (payload: { id: number; data: Partial<SupportTenant> }) =>
-      apiFetch<{ tenant: SupportTenant }>(`/api/x-gateway/support/tenants/${payload.id}`, {
+      apiFetch<{ tenant: SupportTenant }>(`/api/thruline/support/tenants/${payload.id}`, {
         method: 'PATCH',
         body: JSON.stringify(payload.data),
       }),
@@ -396,7 +396,7 @@ export default function SupportGateway() {
       let parsedParams = {}
       try { parsedParams = JSON.parse(toolData.parametersSchema) } catch { /* ignore */ }
 
-      return apiFetch<{ tool: SupportWebhookTool }>(`/api/x-gateway/support/tenants/${activeId}/tools`, {
+      return apiFetch<{ tool: SupportWebhookTool }>(`/api/thruline/support/tenants/${activeId}/tools`, {
         method: 'POST',
         body: JSON.stringify({
           name: toolData.name.trim(),
@@ -431,7 +431,7 @@ export default function SupportGateway() {
 
   const deleteToolMutation = useMutation({
     mutationFn: (toolId: number) =>
-      apiFetch<{ ok: boolean }>(`/api/x-gateway/support/tenants/${activeId}/tools/${toolId}`, { method: 'DELETE' }),
+      apiFetch<{ ok: boolean }>(`/api/thruline/support/tenants/${activeId}/tools/${toolId}`, { method: 'DELETE' }),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: ['x-support-tools', activeId] })
     },
@@ -455,7 +455,7 @@ export default function SupportGateway() {
       let parsedArgs: Record<string, unknown> = {}
       try { parsedArgs = JSON.parse(testToolArgsJson) } catch { /* ignore */ }
       return apiFetch<{ ok: boolean; status: number; effectiveArgs: Record<string, unknown>; data: unknown }>(
-        `/api/x-gateway/support/tenants/${activeId}/tools/${payload.toolId}/test`,
+        `/api/thruline/support/tenants/${activeId}/tools/${payload.toolId}/test`,
         {
           method: 'POST',
           body: JSON.stringify({
@@ -539,7 +539,7 @@ export default function SupportGateway() {
 
   const createDbSourceMutation = useMutation({
     mutationFn: (data: typeof dbSourceDraft) =>
-      apiFetch<{ dbSource: SupportDbSource }>(`/api/x-gateway/support/tenants/${activeId}/db-sources`, {
+      apiFetch<{ dbSource: SupportDbSource }>(`/api/thruline/support/tenants/${activeId}/db-sources`, {
         method: 'POST',
         body: JSON.stringify({
           name: data.name.trim(),
@@ -560,7 +560,7 @@ export default function SupportGateway() {
 
   const deleteDbSourceMutation = useMutation({
     mutationFn: (sourceId: number) =>
-      apiFetch<{ ok: boolean }>(`/api/x-gateway/support/tenants/${activeId}/db-sources/${sourceId}`, {
+      apiFetch<{ ok: boolean }>(`/api/thruline/support/tenants/${activeId}/db-sources/${sourceId}`, {
         method: 'DELETE',
       }),
     onSuccess: () => {
@@ -590,7 +590,7 @@ export default function SupportGateway() {
         rowCount: number;
         rewrittenSql: string;
         referencedTables: string[];
-      }>(`/api/x-gateway/support/tenants/${activeId}/db-sources/${payload.sourceId}/query-test`, {
+      }>(`/api/thruline/support/tenants/${activeId}/db-sources/${payload.sourceId}/query-test`, {
         method: 'POST',
         body: JSON.stringify({
           userId: sqlUserId.trim(),
@@ -652,7 +652,7 @@ export default function SupportGateway() {
         toolTrace: SupportToolTraceEntry[];
         modelUsed: string;
         usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
-      }>(`/api/x-gateway/support/tenants/${activeId}/simulate-chat`, {
+      }>(`/api/thruline/support/tenants/${activeId}/simulate-chat`, {
         method: 'POST',
         body: JSON.stringify({
           userId: simUserId.trim(),
@@ -721,7 +721,7 @@ export default function SupportGateway() {
   const mintTokenMutation = useMutation({
     mutationFn: () =>
       apiFetch<{ token: string; context: SupportUserContext }>(
-        `/api/x-gateway/support/tenants/${activeId}/mint-token`,
+        `/api/thruline/support/tenants/${activeId}/mint-token`,
         {
           method: 'POST',
           body: JSON.stringify({

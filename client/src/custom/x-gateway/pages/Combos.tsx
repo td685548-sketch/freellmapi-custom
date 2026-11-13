@@ -114,7 +114,7 @@ export default function Combos() {
   // Capacity adapter query & state
   const capacityQuery = useQuery({
     queryKey: ['x-capacity-adapter', revision],
-    queryFn: ({ signal }) => apiFetch<CapacityAdapterSettings>('/api/x-gateway/capacity-adapter', { signal }),
+    queryFn: ({ signal }) => apiFetch<CapacityAdapterSettings>('/api/thruline/capacity-adapter', { signal }),
     retry: false,
   })
   const [newVisionModel, setNewVisionModel] = useState('')
@@ -124,12 +124,12 @@ export default function Combos() {
   const canEditAliases = canEdit || session.hasPermission('manage_key_models')
   const aliasesQuery = useQuery({
     queryKey: ['x-model-aliases', revision],
-    queryFn: ({ signal }) => apiFetch<{ aliases: Record<string, string> }>('/api/x-accounts/model-aliases', { signal }),
+    queryFn: ({ signal }) => apiFetch<{ aliases: Record<string, string> }>('/api/thruline-accounts/model-aliases', { signal }),
     retry: false,
   })
   const syncQuery = useQuery({
     queryKey: ['x-catalog-sync', revision],
-    queryFn: ({ signal }) => apiFetch<CatalogSyncStatus>('/api/x-accounts/catalog-sync', { signal }),
+    queryFn: ({ signal }) => apiFetch<CatalogSyncStatus>('/api/thruline-accounts/catalog-sync', { signal }),
     retry: false,
   })
   const [aliasName, setAliasName] = useState('')
@@ -147,7 +147,7 @@ export default function Combos() {
   const saveAlias = useMutation({
     meta: { silenceToast: true },
     mutationFn: (body: { alias: string; model: string }) =>
-      apiFetch<{ ok: true }>('/api/x-accounts/model-aliases', { method: 'PUT', body: JSON.stringify(body) }),
+      apiFetch<{ ok: true }>('/api/thruline-accounts/model-aliases', { method: 'PUT', body: JSON.stringify(body) }),
     onSuccess: () => {
       setAliasName('')
       setAliasModel('')
@@ -157,12 +157,12 @@ export default function Combos() {
   const removeAlias = useMutation({
     meta: { silenceToast: true },
     mutationFn: (alias: string) =>
-      apiFetch<{ ok: true }>(`/api/x-accounts/model-aliases?alias=${encodeURIComponent(alias)}`, { method: 'DELETE' }),
+      apiFetch<{ ok: true }>(`/api/thruline-accounts/model-aliases?alias=${encodeURIComponent(alias)}`, { method: 'DELETE' }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['x-model-aliases'] }),
   })
   const syncCatalog = useMutation({
     meta: { silenceToast: true },
-    mutationFn: () => apiFetch<CatalogSyncStatus>('/api/x-accounts/catalog-sync', { method: 'POST' }),
+    mutationFn: () => apiFetch<CatalogSyncStatus>('/api/thruline-accounts/catalog-sync', { method: 'POST' }),
     onSuccess: () => Promise.all([
       client.invalidateQueries({ queryKey: ['x-catalog-sync'] }),
       client.invalidateQueries({ queryKey: ['x-model-aliases'] }),
@@ -196,7 +196,7 @@ export default function Combos() {
   const saveCapacity = useMutation({
     meta: { silenceToast: true },
     mutationFn: (settings: CapacityAdapterSettings) =>
-      apiFetch<CapacityAdapterSettings>('/api/x-gateway/capacity-adapter', {
+      apiFetch<CapacityAdapterSettings>('/api/thruline/capacity-adapter', {
         method: 'PUT',
         body: JSON.stringify(settings),
       }),

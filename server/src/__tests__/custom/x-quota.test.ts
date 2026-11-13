@@ -68,7 +68,7 @@ describe('X account quota HTTP, routing and isolation', () => {
     vi.spyOn(global, 'fetch').mockImplementation((url, init) => String(url).startsWith(base) ? realFetch(url, init) : upstream(url, init));
   });
   afterAll(() => { server?.close(); vi.restoreAllMocks(); });
-  const call = (path = '', token = reader, method = 'GET', body?: unknown) => fetch(`${base}/api/x-gateway/quota${path}`, {
+  const call = (path = '', token = reader, method = 'GET', body?: unknown) => fetch(`${base}/api/thruline/quota${path}`, {
     method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
   });
   it('enforces quota reads/refresh and settings writes independently', async () => {

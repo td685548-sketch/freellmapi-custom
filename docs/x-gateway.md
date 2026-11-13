@@ -42,7 +42,7 @@ curl "$GATEWAY_URL/thruline/v1/chat/completions" \
 
 Granular permissions still apply: `view_keys`, account key actions,
 `edit_x_settings`, combo permissions, `manage_compression`, usage permissions.
-The CLI operations API is under `/api/x-gateway/tools`, behind console session
+The CLI operations API is under `/api/thruline/tools`, behind console session
 authentication and `use_x_gateway`; an inference key alone is not a console session.
 
 ## CLI Tools: setup and real tests
@@ -84,7 +84,7 @@ Downloads, launchers and backups can contain credentials: keep them private.
 
 ## Diagnostics
 
-`GET /api/x-gateway/tools/diagnostics` reports configuration without running any
+`GET /api/thruline/tools/diagnostics` reports configuration without running any
 paid inference. **Configured** means settings/accounts exist, **unverified** means
 no recent execution evidence, **ready** means a successful recent text probe for
 the displayed protocol/model/key, and **unavailable** means disabled/missing or

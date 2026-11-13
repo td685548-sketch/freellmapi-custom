@@ -48,11 +48,11 @@ beforeAll(async () => {
 
   const app = express();
   app.use(express.json());
-  app.use('/api/x-accounts', providerAccountsRouter);
+  app.use('/api/thruline-accounts', providerAccountsRouter);
   server = await new Promise(resolve => {
     const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
   });
-  base = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/x-accounts`;
+  base = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/thruline-accounts`;
 });
 
 afterAll(() => new Promise<void>(resolve => server.close(() => resolve())));

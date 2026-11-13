@@ -35,7 +35,7 @@ function seedRequest(r: {
 }
 
 function breakdown(range?: string, token = session) {
-  return fetch(`${base}/api/x-gateway/usage/breakdown${range ? `?range=${range}` : ''}`, {
+  return fetch(`${base}/api/thruline/usage/breakdown${range ? `?range=${range}` : ''}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
 }
@@ -62,9 +62,9 @@ beforeEach(() => {
   setEnabled(true);
 });
 
-describe('GET /api/x-gateway/usage/breakdown', () => {
+describe('GET /api/thruline/usage/breakdown', () => {
   it('requires authentication and rejects an unknown range', async () => {
-    const anon = await fetch(`${base}/api/x-gateway/usage/breakdown`);
+    const anon = await fetch(`${base}/api/thruline/usage/breakdown`);
     expect(anon.status).toBe(401);
     const bad = await breakdown('1y');
     expect(bad.status).toBe(400);

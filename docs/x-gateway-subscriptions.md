@@ -15,7 +15,7 @@ Saving/importing credentials sets status `unknown`, not `healthy`.
 | Other OAuth catalog entries | Yes | Provider-specific support varies | No general refresh guarantee | Unsupported entries are rejected instead of using a generic OpenAI adapter | Unknown unless an adapter exists | Unverified |
 
 The capability matrix is available to dashboard sessions with `view_keys` at
-`GET /api/x-accounts/subscriptions/capabilities`. Executor availability describes
+`GET /api/thruline-accounts/subscriptions/capabilities`. Executor availability describes
 implementation, not an account's subscription entitlement or live readiness.
 
 ## Browser account setup
@@ -58,7 +58,7 @@ Render URL for these public clients unless the provider explicitly supports it.
 Pending attempts are session-bound, expire after ten minutes and reset on server
 restart. Completed credentials persist in the configured database.
 
-Endpoints under `/api/x-accounts/subscriptions`:
+Endpoints under `/api/thruline-accounts/subscriptions`:
 
 - `POST /start`: `{provider, label, reconnectId?}`
 - `POST /import`: same fields plus `credential` containing full JSON as a string

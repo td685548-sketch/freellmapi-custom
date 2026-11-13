@@ -45,7 +45,7 @@ function call(path: string, body?: unknown, headers: Record<string, string> = {}
   });
 }
 function dashboard(path: string, body?: unknown) {
-  return fetch(`${base}/api/x-gateway${path}`, {
+  return fetch(`${base}/api/thruline${path}`, {
     method: body === undefined ? 'GET' : path === '/media/config' ? 'PUT' : 'POST',
     headers: { Authorization: `Bearer ${session}`, 'Content-Type': 'application/json' },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),

@@ -78,7 +78,7 @@ When you need a specific capability, inspect the dedicated skill:
 | Embeddings | \`POST /v1/embeddings\` | \`9router-embeddings\` |
 | Web Search | \`POST /v1/search\` | \`9router-web-search\` |
 | Web Fetch | \`POST /v1/web/fetch\` | \`9router-web-fetch\` |
-| Protocol Translator | \`POST /api/x-gateway/translator/inspect\` | \`9router-translator\` |
+| Protocol Translator | \`POST /api/thruline/translator/inspect\` | \`9router-translator\` |
 
 ## Error Codes
 
@@ -424,7 +424,7 @@ curl -X POST \${GATEWAY_URL}/v1/web/fetch \\
     name: 'Protocol Translator Inspector',
     category: 'tools',
     description: 'Inspect, debug, and test the 7-step cross-protocol transformation pipeline between OpenAI, Anthropic Claude, and Google Gemini wire formats.',
-    endpoint: '/api/x-gateway/translator/inspect',
+    endpoint: '/api/thruline/translator/inspect',
     icon: 'ArrowLeftRight',
     githubPath: 'docs/TRANSLATOR.md',
     content: `---
@@ -436,12 +436,12 @@ description: Cross-protocol translation engine connecting OpenAI Chat Completion
 
 ## Inspection Endpoint
 
-\`POST \${GATEWAY_URL}/api/x-gateway/translator/inspect\`
+\`POST \${GATEWAY_URL}/api/thruline/translator/inspect\`
 
 Inspect how a request translates across providers before dispatching:
 
 \`\`\`bash
-curl -X POST \${GATEWAY_URL}/api/x-gateway/translator/inspect \\
+curl -X POST \${GATEWAY_URL}/api/thruline/translator/inspect \\
   -H "Authorization: Bearer \${GATEWAY_KEY}" \\
   -H "Content-Type: application/json" \\
   -d '{

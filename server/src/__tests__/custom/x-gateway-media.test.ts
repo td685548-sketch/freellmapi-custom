@@ -38,7 +38,7 @@ describe('X Gateway Media Providers', () => {
   });
 
   it('retrieves media config with all 4 kinds and default settings', async () => {
-    const res = await fetch(`${base}/api/x-gateway/media/config`, {
+    const res = await fetch(`${base}/api/thruline/media/config`, {
       headers: { Authorization: `Bearer ${adminSessionToken}` },
     });
     expect(res.status).toBe(200);
@@ -64,7 +64,7 @@ describe('X Gateway Media Providers', () => {
       embedding: { defaultModel: 'text-embedding-3-large', defaultDimensions: 3072 },
     };
 
-    const res = await fetch(`${base}/api/x-gateway/media/config`, {
+    const res = await fetch(`${base}/api/thruline/media/config`, {
       method: 'PUT',
       headers: {
         Authorization: `Bearer ${adminSessionToken}`,
@@ -88,7 +88,7 @@ describe('X Gateway Media Providers', () => {
 
   it('validates request payload on test endpoints', async () => {
     // Missing prompt on image test
-    const imgRes = await fetch(`${base}/api/x-gateway/media/test/image`, {
+    const imgRes = await fetch(`${base}/api/thruline/media/test/image`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${adminSessionToken}`,
@@ -99,7 +99,7 @@ describe('X Gateway Media Providers', () => {
     expect(imgRes.status).toBe(400);
 
     // Missing input on TTS test
-    const ttsRes = await fetch(`${base}/api/x-gateway/media/test/tts`, {
+    const ttsRes = await fetch(`${base}/api/thruline/media/test/tts`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${adminSessionToken}`,
@@ -110,7 +110,7 @@ describe('X Gateway Media Providers', () => {
     expect(ttsRes.status).toBe(400);
 
     // Missing file on STT test
-    const sttRes = await fetch(`${base}/api/x-gateway/media/test/stt`, {
+    const sttRes = await fetch(`${base}/api/thruline/media/test/stt`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${adminSessionToken}`,
@@ -120,7 +120,7 @@ describe('X Gateway Media Providers', () => {
     expect(sttRes.status).toBe(400);
 
     // Missing input on Embedding test
-    const embRes = await fetch(`${base}/api/x-gateway/media/test/embedding`, {
+    const embRes = await fetch(`${base}/api/thruline/media/test/embedding`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${adminSessionToken}`,

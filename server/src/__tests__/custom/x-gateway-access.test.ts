@@ -231,7 +231,7 @@ describe('X Gateway Access Control (US1 / Phase 3)', () => {
 
     it('supports dedicated X Gateway API keys (sk-xgw-...) on /thruline/v1 while rejecting them on /v1', async () => {
       // Mint via console endpoint
-      const createRes = await requestX('/api/x-gateway/keys', {
+      const createRes = await requestX('/api/thruline/keys', {
         method: 'POST',
         key: adminSessionToken,
         body: { name: 'Cursor X Key' },
@@ -242,7 +242,7 @@ describe('X Gateway Access Control (US1 / Phase 3)', () => {
       const xKeyId = createRes.body.id as number;
 
       // List keys via console endpoint
-      const listRes = await requestX('/api/x-gateway/keys', {
+      const listRes = await requestX('/api/thruline/keys', {
         method: 'GET',
         key: adminSessionToken,
       });
@@ -266,7 +266,7 @@ describe('X Gateway Access Control (US1 / Phase 3)', () => {
       expect(mainRes.body.error.message).toMatch(/scoped exclusively to \/thruline\/v1/);
 
       // Revoking key immediately blocks subsequent /thruline/v1 calls
-      const delRes = await requestX(`/api/x-gateway/keys/${xKeyId}`, {
+      const delRes = await requestX(`/api/thruline/keys/${xKeyId}`, {
         method: 'DELETE',
         key: adminSessionToken,
       });
@@ -286,7 +286,7 @@ describe('X Gateway Access Control (US1 / Phase 3)', () => {
 
     it('supports gateway-wide and per-account outbound proxy configuration for X Gateway', async () => {
       // Configure gateway-wide outbound proxy via console endpoint
-      const saveProxyRes = await requestX('/api/x-gateway/proxy', {
+      const saveProxyRes = await requestX('/api/thruline/proxy', {
         method: 'PUT',
         key: adminSessionToken,
         body: { proxyUrl: 'socks5://proxyuser:proxypass@198.51.100.10:1080' },
@@ -297,7 +297,7 @@ describe('X Gateway Access Control (US1 / Phase 3)', () => {
         configured: true,
       });
 
-      const proxyGetRes = await requestX('/api/x-gateway/proxy', {
+      const proxyGetRes = await requestX('/api/thruline/proxy', {
         method: 'GET',
         key: adminSessionToken,
       });

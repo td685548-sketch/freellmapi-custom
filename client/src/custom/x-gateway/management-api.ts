@@ -1,6 +1,6 @@
 import { apiFetch } from '@/lib/api'
 
-const base = '/api/x-gateway'
+const base = '/api/thruline'
 
 export type ComboStrategy = 'fallback' | 'round-robin' | 'smart' | 'fusion'
 export interface ComboEntry { platform: string; modelId: string }

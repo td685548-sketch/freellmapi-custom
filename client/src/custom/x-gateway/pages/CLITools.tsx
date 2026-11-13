@@ -74,7 +74,7 @@ export default function CLITools() {
   // Load client keys
   const keysQuery = useQuery({
     queryKey: ['x-gateway-keys', revision],
-    queryFn: ({ signal }) => apiFetch<{ keys: XGatewayKey[] }>('/api/x-gateway/keys', { signal }),
+    queryFn: ({ signal }) => apiFetch<{ keys: XGatewayKey[] }>('/api/thruline/keys', { signal }),
     retry: false,
   });
 
@@ -85,7 +85,7 @@ export default function CLITools() {
   // Mint new key mutation
   const createKeyMutation = useMutation({
     mutationFn: () =>
-      apiFetch<CreatedKeyResponse>('/api/x-gateway/keys', {
+      apiFetch<CreatedKeyResponse>('/api/thruline/keys', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: 'CLI Tool Quick Key' }),

@@ -92,7 +92,7 @@ export class SkillsService {
 
     const builtins: SkillSummary[] = BUILTIN_SKILLS.map((b: BuiltinSkillDefinition) => {
       const replacedContent = replaceTemplateVars(b.content, baseUrl);
-      const rawUrl = `${baseUrl}/api/x-gateway/skills/${b.id}/raw`;
+      const rawUrl = `${baseUrl}/api/thruline/skills/${b.id}/raw`;
       return {
         id: b.id,
         name: b.name,
@@ -113,7 +113,7 @@ export class SkillsService {
 
     const customs: SkillSummary[] = customList.map((c) => {
       const replacedContent = replaceTemplateVars(c.content, baseUrl);
-      const rawUrl = `${baseUrl}/api/x-gateway/skills/${c.id}/raw`;
+      const rawUrl = `${baseUrl}/api/thruline/skills/${c.id}/raw`;
       return {
         id: c.id,
         name: c.name,

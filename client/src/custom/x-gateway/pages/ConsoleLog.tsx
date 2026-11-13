@@ -56,7 +56,7 @@ export default function ConsoleLog() {
   })
   const pricingQuery = useQuery({
     queryKey: ['x-gateway-pricing', revision],
-    queryFn: ({ signal }) => apiFetch<{ pricing: ProviderPricingMap }>('/api/x-gateway/pricing', { signal }),
+    queryFn: ({ signal }) => apiFetch<{ pricing: ProviderPricingMap }>('/api/thruline/pricing', { signal }),
     staleTime: 60_000,
     retry: false,
   })

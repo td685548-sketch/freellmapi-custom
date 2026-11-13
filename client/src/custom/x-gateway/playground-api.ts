@@ -6,7 +6,7 @@ import type { PlaygroundCatalog, PlaygroundRequest, PlaygroundContent } from '..
 export type { PlaygroundCatalog, PlaygroundRequest, PlaygroundContent };
 
 export const loadPlaygroundModels = (signal?: AbortSignal) =>
-  apiFetch<PlaygroundCatalog>('/api/x-gateway/playground/models', { signal });
+  apiFetch<PlaygroundCatalog>('/api/thruline/playground/models', { signal });
 
 export async function streamPlayground(body: PlaygroundRequest, signal: AbortSignal, onDelta: (text: string) => void) {
   const token = getToken();
@@ -15,7 +15,7 @@ export async function streamPlayground(body: PlaygroundRequest, signal: AbortSig
     if (revision !== getSessionRevision() || token !== getToken()) throw new DOMException('Session changed', 'AbortError');
   };
   const started = performance.now();
-  const response = await fetch(`${import.meta.env.BASE_URL.replace(/\/$/, '')}/api/x-gateway/playground/chat`, {
+  const response = await fetch(`${import.meta.env.BASE_URL.replace(/\/$/, '')}/api/thruline/playground/chat`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: JSON.stringify(body), signal,
   });

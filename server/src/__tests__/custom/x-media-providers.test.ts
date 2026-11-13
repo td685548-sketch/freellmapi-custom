@@ -39,7 +39,7 @@ describe('X Gateway Media Providers & Web Kind', () => {
   });
 
   it('retrieves media config with web search & fetch kind', async () => {
-    const res = await fetch(`${base}/api/x-gateway/media/config`, {
+    const res = await fetch(`${base}/api/thruline/media/config`, {
       headers: { Authorization: `Bearer ${adminSessionToken}` },
     });
     expect(res.status).toBe(200);
@@ -70,7 +70,7 @@ describe('X Gateway Media Providers & Web Kind', () => {
       web: { defaultModel: 'sonar-pro' },
     };
 
-    const res = await fetch(`${base}/api/x-gateway/media/config`, {
+    const res = await fetch(`${base}/api/thruline/media/config`, {
       method: 'PUT',
       headers: {
         Authorization: `Bearer ${adminSessionToken}`,
@@ -85,7 +85,7 @@ describe('X Gateway Media Providers & Web Kind', () => {
     expect(body.defaults.web?.defaultModel).toBe('sonar-pro');
 
     // Retrieve again to ensure persistence
-    const checkRes = await fetch(`${base}/api/x-gateway/media/config`, {
+    const checkRes = await fetch(`${base}/api/thruline/media/config`, {
       headers: { Authorization: `Bearer ${adminSessionToken}` },
     });
     const checkBody = (await checkRes.json()) as { defaults: { web?: { defaultModel?: string } } };
@@ -94,7 +94,7 @@ describe('X Gateway Media Providers & Web Kind', () => {
 
   it('validates web search test request payload', async () => {
     // Missing query
-    const invalidRes = await fetch(`${base}/api/x-gateway/media/test/web`, {
+    const invalidRes = await fetch(`${base}/api/thruline/media/test/web`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${adminSessionToken}`,
@@ -105,7 +105,7 @@ describe('X Gateway Media Providers & Web Kind', () => {
     expect(invalidRes.status).toBe(400);
 
     // Empty body
-    const emptyRes = await fetch(`${base}/api/x-gateway/media/test/web`, {
+    const emptyRes = await fetch(`${base}/api/thruline/media/test/web`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${adminSessionToken}`,
@@ -117,7 +117,7 @@ describe('X Gateway Media Providers & Web Kind', () => {
   });
 
   it('returns 503 or 404 when testing web search with no available accounts', async () => {
-    const res = await fetch(`${base}/api/x-gateway/media/test/web`, {
+    const res = await fetch(`${base}/api/thruline/media/test/web`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${adminSessionToken}`,
@@ -155,9 +155,9 @@ describe('X Gateway Media Providers & Web Kind', () => {
     expect(body.customPrompt).toBe('Be ultra concise.');
   });
 
-  it('retrieves, updates, validates, and resets model pricing via /api/x-gateway/pricing', async () => {
+  it('retrieves, updates, validates, and resets model pricing via /api/thruline/pricing', async () => {
     // 1. GET initial pricing
-    const getRes = await fetch(`${base}/api/x-gateway/pricing`, {
+    const getRes = await fetch(`${base}/api/thruline/pricing`, {
       headers: { Authorization: `Bearer ${adminSessionToken}` },
     });
     expect(getRes.status).toBe(200);
@@ -171,7 +171,7 @@ describe('X Gateway Media Providers & Web Kind', () => {
     expect(initial.overrides).toEqual({});
 
     // 2. Reject invalid PATCH payload (negative rate or unknown field)
-    const badRes = await fetch(`${base}/api/x-gateway/pricing`, {
+    const badRes = await fetch(`${base}/api/thruline/pricing`, {
       method: 'PATCH',
       headers: {
         Authorization: `Bearer ${adminSessionToken}`,
@@ -181,7 +181,7 @@ describe('X Gateway Media Providers & Web Kind', () => {
     });
     expect(badRes.status).toBe(400);
 
-    const badFieldRes = await fetch(`${base}/api/x-gateway/pricing`, {
+    const badFieldRes = await fetch(`${base}/api/thruline/pricing`, {
       method: 'PATCH',
       headers: {
         Authorization: `Bearer ${adminSessionToken}`,
@@ -192,7 +192,7 @@ describe('X Gateway Media Providers & Web Kind', () => {
     expect(badFieldRes.status).toBe(400);
 
     // 3. PATCH valid overrides for existing and custom models
-    const patchRes = await fetch(`${base}/api/x-gateway/pricing`, {
+    const patchRes = await fetch(`${base}/api/thruline/pricing`, {
       method: 'PATCH',
       headers: {
         Authorization: `Bearer ${adminSessionToken}`,
@@ -225,7 +225,7 @@ describe('X Gateway Media Providers & Web Kind', () => {
     expect(resolveModelPricing('custom', 'custom-llm-v1').output).toBe(6.0);
 
     // 4. DELETE specific model override
-    const delModelRes = await fetch(`${base}/api/x-gateway/pricing?provider=openai&model=gpt-4o`, {
+    const delModelRes = await fetch(`${base}/api/thruline/pricing?provider=openai&model=gpt-4o`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${adminSessionToken}` },
     });
@@ -239,7 +239,7 @@ describe('X Gateway Media Providers & Web Kind', () => {
     expect(afterModelReset.overrides.custom).toBeDefined();
 
     // 5. DELETE all remaining overrides
-    const delAllRes = await fetch(`${base}/api/x-gateway/pricing`, {
+    const delAllRes = await fetch(`${base}/api/thruline/pricing`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${adminSessionToken}` },
     });

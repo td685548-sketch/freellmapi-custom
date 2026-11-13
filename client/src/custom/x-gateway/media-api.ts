@@ -1,6 +1,6 @@
 import { apiFetch, getToken } from '@/lib/api';
 
-const base = '/api/x-gateway/media';
+const base = '/api/thruline/media';
 
 export type MediaKind = 'image' | 'tts' | 'stt' | 'embedding' | 'web';
 

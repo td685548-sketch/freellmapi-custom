@@ -6,7 +6,7 @@ import { createSession, createUser } from '../../services/auth.js';
 import { setEnabled } from '../../custom/x-gateway/config.js';
 import { permissionForAction } from '../../custom/permission-actions.js';
 
-describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /thruline/v1/support/*)', () => {
+describe('Multi-Tenant AI Support Gateway (/api/thruline/support/* & /thruline/v1/support/*)', () => {
   let server: Server;
   let base: string;
   let adminToken: string;
@@ -90,86 +90,86 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /thruline/
   describe('Permission Mapping (server/src/custom/permission-actions.ts)', () => {
     it('maps read and test/simulation endpoints to use_x_gateway', () => {
       expect(
-        permissionForAction('manage_x_gateway', 'GET', '/api/x-gateway/support/tenants'),
+        permissionForAction('manage_x_gateway', 'GET', '/api/thruline/support/tenants'),
       ).toBe('use_x_gateway');
       expect(
         permissionForAction(
           'manage_x_gateway',
           'POST',
-          '/api/x-gateway/support/tenants/1/simulate-chat',
+          '/api/thruline/support/tenants/1/simulate-chat',
         ),
       ).toBe('use_x_gateway');
       expect(
         permissionForAction(
           'manage_x_gateway',
           'POST',
-          '/api/x-gateway/support/tenants/1/mint-token',
+          '/api/thruline/support/tenants/1/mint-token',
         ),
       ).toBe('use_x_gateway');
       expect(
         permissionForAction(
           'manage_x_gateway',
           'POST',
-          '/api/x-gateway/support/tenants/1/tools/2/test',
+          '/api/thruline/support/tenants/1/tools/2/test',
         ),
       ).toBe('use_x_gateway');
       expect(
         permissionForAction(
           'manage_x_gateway',
           'POST',
-          '/api/x-gateway/support/tenants/1/db-sources/3/query-test',
+          '/api/thruline/support/tenants/1/db-sources/3/query-test',
         ),
       ).toBe('use_x_gateway');
     });
 
     it('maps configuration writes to edit_x_settings', () => {
       expect(
-        permissionForAction('manage_x_gateway', 'POST', '/api/x-gateway/support/tenants'),
+        permissionForAction('manage_x_gateway', 'POST', '/api/thruline/support/tenants'),
       ).toBe('edit_x_settings');
       expect(
-        permissionForAction('manage_x_gateway', 'PATCH', '/api/x-gateway/support/tenants/1'),
+        permissionForAction('manage_x_gateway', 'PATCH', '/api/thruline/support/tenants/1'),
       ).toBe('edit_x_settings');
       expect(
-        permissionForAction('manage_x_gateway', 'DELETE', '/api/x-gateway/support/tenants/1'),
+        permissionForAction('manage_x_gateway', 'DELETE', '/api/thruline/support/tenants/1'),
       ).toBe('edit_x_settings');
       expect(
         permissionForAction(
           'manage_x_gateway',
           'POST',
-          '/api/x-gateway/support/tenants/1/rotate-secret',
+          '/api/thruline/support/tenants/1/rotate-secret',
         ),
       ).toBe('edit_x_settings');
       expect(
-        permissionForAction('manage_x_gateway', 'POST', '/api/x-gateway/support/tenants/1/tools'),
+        permissionForAction('manage_x_gateway', 'POST', '/api/thruline/support/tenants/1/tools'),
       ).toBe('edit_x_settings');
       expect(
         permissionForAction(
           'manage_x_gateway',
           'POST',
-          '/api/x-gateway/support/tenants/1/db-sources',
+          '/api/thruline/support/tenants/1/db-sources',
         ),
       ).toBe('edit_x_settings');
     });
 
     it('enforces RBAC gates through HTTP requests', async () => {
       // Unauthenticated request is 401
-      const unauth = await apiCall('/api/x-gateway/support/tenants');
+      const unauth = await apiCall('/api/thruline/support/tenants');
       expect(unauth.status).toBe(401);
 
       // Member without gateway permissions is 403
-      const memberRes = await apiCall('/api/x-gateway/support/tenants', { token: memberToken });
+      const memberRes = await apiCall('/api/thruline/support/tenants', { token: memberToken });
       expect(memberRes.status).toBe(403);
 
       // Viewer with use_x_gateway can GET tenants
-      const viewerRes = await apiCall('/api/x-gateway/support/tenants', { token: viewerToken });
+      const viewerRes = await apiCall('/api/thruline/support/tenants', { token: viewerToken });
       expect(viewerRes.status).toBe(200);
 
       // Admin with full access can GET tenants
-      const adminRes = await apiCall('/api/x-gateway/support/tenants', { token: adminToken });
+      const adminRes = await apiCall('/api/thruline/support/tenants', { token: adminToken });
       expect(adminRes.status).toBe(200);
 
       // Viewer cannot create tenants (requires edit_x_settings)
-      const viewerCreate = await apiCall('/api/x-gateway/support/tenants', {
+      const viewerCreate = await apiCall('/api/thruline/support/tenants', {
         method: 'POST',
         token: viewerToken,
         body: { name: 'Unauthorized Store' },
@@ -181,13 +181,13 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /thruline/
   // -------------------------------------------------------------------------
   // 2. Console Management API Endpoints
   // -------------------------------------------------------------------------
-  describe('Console Management API (/api/x-gateway/support/*)', () => {
+  describe('Console Management API (/api/thruline/support/*)', () => {
     let createdTenantId: number;
     let initialSigningSecret: string;
     let sampleDbSourceId: number;
 
     it('POST /tenants creates a tenant and seeds sample E-Commerce sandbox by default', async () => {
-      const res = await apiCall('/api/x-gateway/support/tenants', {
+      const res = await apiCall('/api/thruline/support/tenants', {
         method: 'POST',
         token: editorToken,
         body: {
@@ -214,7 +214,7 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /thruline/
 
       // Verify sample DB source was auto-seeded
       const sourcesRes = await apiCall(
-        `/api/x-gateway/support/tenants/${createdTenantId}/db-sources`,
+        `/api/thruline/support/tenants/${createdTenantId}/db-sources`,
         { token: viewerToken },
       );
       expect(sourcesRes.status).toBe(200);
@@ -226,7 +226,7 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /thruline/
     });
 
     it('GET /tenants lists tenants and sample SQL schema', async () => {
-      const res = await apiCall('/api/x-gateway/support/tenants', { token: viewerToken });
+      const res = await apiCall('/api/thruline/support/tenants', { token: viewerToken });
       expect(res.status).toBe(200);
       const data = res.body as { tenants: any[]; sampleSchemaSql: string };
       expect(Array.isArray(data.tenants)).toBe(true);
@@ -235,7 +235,7 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /thruline/
     });
 
     it('GET /tenants/:id retrieves a single tenant', async () => {
-      const res = await apiCall(`/api/x-gateway/support/tenants/${createdTenantId}`, {
+      const res = await apiCall(`/api/thruline/support/tenants/${createdTenantId}`, {
         token: viewerToken,
       });
       expect(res.status).toBe(200);
@@ -245,7 +245,7 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /thruline/
     });
 
     it('PATCH /tenants/:id updates tenant settings', async () => {
-      const res = await apiCall(`/api/x-gateway/support/tenants/${createdTenantId}`, {
+      const res = await apiCall(`/api/thruline/support/tenants/${createdTenantId}`, {
         method: 'PATCH',
         token: editorToken,
         body: { defaultModel: 'custom/model-v2' },
@@ -257,7 +257,7 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /thruline/
 
     it('POST /tenants/:id/rotate-secret rotates signing secret and returns new masked secret', async () => {
       const res = await apiCall(
-        `/api/x-gateway/support/tenants/${createdTenantId}/rotate-secret`,
+        `/api/thruline/support/tenants/${createdTenantId}/rotate-secret`,
         {
           method: 'POST',
           token: editorToken,
@@ -273,7 +273,7 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /thruline/
     it('manages Webhook Tools (CRUD + test)', async () => {
       // 1. Create Webhook Tool
       const createRes = await apiCall(
-        `/api/x-gateway/support/tenants/${createdTenantId}/tools`,
+        `/api/thruline/support/tenants/${createdTenantId}/tools`,
         {
           method: 'POST',
           token: editorToken,
@@ -292,7 +292,7 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /thruline/
       const toolId = tool.id;
 
       // 2. List tools
-      const listRes = await apiCall(`/api/x-gateway/support/tenants/${createdTenantId}/tools`, {
+      const listRes = await apiCall(`/api/thruline/support/tenants/${createdTenantId}/tools`, {
         token: viewerToken,
       });
       expect(listRes.status).toBe(200);
@@ -300,7 +300,7 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /thruline/
 
       // 3. Update tool
       const patchRes = await apiCall(
-        `/api/x-gateway/support/tenants/${createdTenantId}/tools/${toolId}`,
+        `/api/thruline/support/tenants/${createdTenantId}/tools/${toolId}`,
         {
           method: 'PATCH',
           token: editorToken,
@@ -314,7 +314,7 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /thruline/
 
       // 4. Test tool permission denial for customer
       const testDeny = await apiCall(
-        `/api/x-gateway/support/tenants/${createdTenantId}/tools/${toolId}/test`,
+        `/api/thruline/support/tenants/${createdTenantId}/tools/${toolId}/test`,
         {
           method: 'POST',
           token: viewerToken,
@@ -325,7 +325,7 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /thruline/
 
       // 5. Delete tool
       const delRes = await apiCall(
-        `/api/x-gateway/support/tenants/${createdTenantId}/tools/${toolId}`,
+        `/api/thruline/support/tenants/${createdTenantId}/tools/${toolId}`,
         {
           method: 'DELETE',
           token: editorToken,
@@ -338,7 +338,7 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /thruline/
     it('POST /tenants/:id/db-sources/:sourceId/query-test enforces row-level isolation per role', async () => {
       // 1. Guest querying products succeeds
       const guestProducts = await apiCall(
-        `/api/x-gateway/support/tenants/${createdTenantId}/db-sources/${sampleDbSourceId}/query-test`,
+        `/api/thruline/support/tenants/${createdTenantId}/db-sources/${sampleDbSourceId}/query-test`,
         {
           method: 'POST',
           token: viewerToken,
@@ -351,7 +351,7 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /thruline/
 
       // 2. Guest querying orders fails with 403
       const guestOrders = await apiCall(
-        `/api/x-gateway/support/tenants/${createdTenantId}/db-sources/${sampleDbSourceId}/query-test`,
+        `/api/thruline/support/tenants/${createdTenantId}/db-sources/${sampleDbSourceId}/query-test`,
         {
           method: 'POST',
           token: viewerToken,
@@ -362,7 +362,7 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /thruline/
 
       // 3. Customer 'cust_101' querying orders sees ONLY their 2 orders
       const custOrders = await apiCall(
-        `/api/x-gateway/support/tenants/${createdTenantId}/db-sources/${sampleDbSourceId}/query-test`,
+        `/api/thruline/support/tenants/${createdTenantId}/db-sources/${sampleDbSourceId}/query-test`,
         {
           method: 'POST',
           token: viewerToken,
@@ -376,7 +376,7 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /thruline/
 
       // 4. Admin querying orders sees ALL 4 orders across all users
       const adminOrders = await apiCall(
-        `/api/x-gateway/support/tenants/${createdTenantId}/db-sources/${sampleDbSourceId}/query-test`,
+        `/api/thruline/support/tenants/${createdTenantId}/db-sources/${sampleDbSourceId}/query-test`,
         {
           method: 'POST',
           token: viewerToken,
@@ -388,7 +388,7 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /thruline/
 
       // 5. Denied columns (password_hash, secret_note) are stripped from customers table
       const custProfile = await apiCall(
-        `/api/x-gateway/support/tenants/${createdTenantId}/db-sources/${sampleDbSourceId}/query-test`,
+        `/api/thruline/support/tenants/${createdTenantId}/db-sources/${sampleDbSourceId}/query-test`,
         {
           method: 'POST',
           token: viewerToken,
@@ -405,7 +405,7 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /thruline/
 
     it('POST /tenants/:id/mint-token generates a valid signed contextToken', async () => {
       const res = await apiCall(
-        `/api/x-gateway/support/tenants/${createdTenantId}/mint-token`,
+        `/api/thruline/support/tenants/${createdTenantId}/mint-token`,
         {
           method: 'POST',
           token: viewerToken,
@@ -427,7 +427,7 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /thruline/
 
     it('POST /tenants/:id/simulate-chat runs the support pipeline and returns transparent toolTrace', async () => {
       const res = await apiCall(
-        `/api/x-gateway/support/tenants/${createdTenantId}/simulate-chat`,
+        `/api/thruline/support/tenants/${createdTenantId}/simulate-chat`,
         {
           method: 'POST',
           token: viewerToken,
@@ -456,7 +456,7 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /thruline/
 
     beforeAll(async () => {
       // Create dedicated partner tenant
-      const res = await apiCall('/api/x-gateway/support/tenants', {
+      const res = await apiCall('/api/thruline/support/tenants', {
         method: 'POST',
         token: editorToken,
         body: {

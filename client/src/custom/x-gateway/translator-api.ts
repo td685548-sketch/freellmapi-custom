@@ -11,7 +11,7 @@ export function useTranslatorTemplates() {
   return useQuery({
     queryKey: ['x-translator-templates'],
     queryFn: ({ signal }) =>
-      apiFetch<{ templates: TranslatorTemplate[] }>('/api/x-gateway/translator/templates', { signal }),
+      apiFetch<{ templates: TranslatorTemplate[] }>('/api/thruline/translator/templates', { signal }),
     staleTime: 1000 * 60 * 10,
   });
 }
@@ -23,7 +23,7 @@ export function useInspectTranslation() {
       targetProtocol: ProtocolType;
       payload: Record<string, unknown>;
     }) =>
-      apiFetch<TranslationResult>('/api/x-gateway/translator/inspect', {
+      apiFetch<TranslationResult>('/api/thruline/translator/inspect', {
         method: 'POST',
         body: JSON.stringify(vars),
       }),
@@ -37,7 +37,7 @@ export function useDispatchTranslation() {
       payload: Record<string, unknown>;
       model?: string;
     }) =>
-      apiFetch<DispatchResult>('/api/x-gateway/translator/dispatch', {
+      apiFetch<DispatchResult>('/api/thruline/translator/dispatch', {
         method: 'POST',
         body: JSON.stringify(vars),
       }),

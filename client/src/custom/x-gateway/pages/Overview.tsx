@@ -21,12 +21,12 @@ export default function Overview() {
   // Query keys match Endpoint.tsx so both pages share one cache entry.
   const status = useQuery({
     queryKey: ['x-gateway-status', revision],
-    queryFn: ({ signal }) => apiFetch<{ enabled: boolean }>('/api/x-gateway/status', { signal }),
+    queryFn: ({ signal }) => apiFetch<{ enabled: boolean }>('/api/thruline/status', { signal }),
     retry: false,
   })
   const keys = useQuery({
     queryKey: ['x-gateway-client-keys', revision],
-    queryFn: ({ signal }) => apiFetch<{ keys: unknown[] }>('/api/x-gateway/keys', { signal }),
+    queryFn: ({ signal }) => apiFetch<{ keys: unknown[] }>('/api/thruline/keys', { signal }),
     retry: false,
   })
   const accounts = useAccounts(canView)

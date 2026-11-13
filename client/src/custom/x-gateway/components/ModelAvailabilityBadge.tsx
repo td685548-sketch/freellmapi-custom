@@ -20,7 +20,7 @@ export interface AvailabilityResponse {
 
 interface ClearBody { accountId?: number; provider?: string; model?: string }
 
-const ENDPOINT = '/api/x-accounts/availability';
+const ENDPOINT = '/api/thruline-accounts/availability';
 const REFRESH_MS = 15_000;
 
 export function formatCountdown(ms: number): string {
@@ -52,7 +52,7 @@ export default function ModelAvailabilityBadge() {
   });
 
   const clear = useMutation({
-    mutationFn: (body: ClearBody) => apiFetch<unknown>('/api/x-accounts/cooldowns/clear', {
+    mutationFn: (body: ClearBody) => apiFetch<unknown>('/api/thruline-accounts/cooldowns/clear', {
       method: 'POST',
       body: JSON.stringify(body),
     }),

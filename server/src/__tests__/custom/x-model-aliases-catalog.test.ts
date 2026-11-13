@@ -44,7 +44,7 @@ describe('X model aliases, custom model caps and catalog sync', () => {
   });
   afterAll(() => { server?.close(); });
 
-  const call = (path: string, token = admin, method = 'GET', body?: unknown) => fetch(`${base}/api/x-accounts${path}`, {
+  const call = (path: string, token = admin, method = 'GET', body?: unknown) => fetch(`${base}/api/thruline-accounts${path}`, {
     method,
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),

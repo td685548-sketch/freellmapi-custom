@@ -114,7 +114,7 @@ export const PERMISSION_GATES: readonly PermissionGate[] = [
   { path: ['/api/embeddings', '/api/media', '/api/search', '/api/decisions'], permission: 'manage_keys', methods: WRITE_METHODS },
 
   // X Gateway (9Router integration): admin-only gateway console and API management.
-  { path: '/api/x-gateway', permission: 'manage_x_gateway' },
+  { path: '/api/thruline', permission: 'manage_x_gateway' },
 ];
 
 function installGate(app: Express, gate: PermissionGate): void {
@@ -170,8 +170,8 @@ export function registerCustomRoutes(app: Express): void {
   app.use('/api/cache/preferences', requireAuth, cachePreferencesRouter);
 
   // MiProxy dynamic webhook endpoint for automated proxy updates. It authenticates with its own
-  // token, so it is mounted ahead of the session gate that covers the rest of /api/x-gateway.
-  app.use(['/api/proxy-webhook', '/api/x-gateway/proxy-webhook'], proxyWebhookRouter);
+  // token, so it is mounted ahead of the session gate that covers the rest of /api/thruline.
+  app.use(['/api/proxy-webhook', '/api/thruline/proxy-webhook'], proxyWebhookRouter);
 
   // Granular route-level permission gates for upstream-mounted endpoints
   for (const gate of PERMISSION_GATES) installGate(app, gate);
@@ -202,13 +202,13 @@ export function registerCustomRoutes(app: Express): void {
   // Ollama Native API Emulation (/thruline/api/tags, /thruline/api/version, /thruline/api/show)
   app.use('/thruline', xGatewayOllamaRouter);
   // Account logins manage shared credentials with the router's granular key permissions.
-  app.use('/api/x-accounts', providerAccountsRouter);
-  app.use('/api/x-accounts', autoPingRouter);
+  app.use('/api/thruline-accounts', providerAccountsRouter);
+  app.use('/api/thruline-accounts', autoPingRouter);
   // Real-time terminal log stream for console logs
   app.use('/api/translator', consoleStreamRouter);
   // Gateway switch and default savers. The manage_x_gateway gate above maps each
   // path to its leaf (edit_x_settings for writes, use_x_gateway for reads).
-  app.use('/api/x-gateway', xGatewayConsoleRouter);
+  app.use('/api/thruline', xGatewayConsoleRouter);
   // Public skills server for AI coding agents (Claude, Cursor, Codex, OpenCode, Cline)
   app.use(['/thruline-skills', '/x-skills'], xSkillsPublicRouter);
 

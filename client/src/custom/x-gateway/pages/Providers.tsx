@@ -570,7 +570,7 @@ export function EditCompatibleModal({ isOpen, node, onClose, onUpdated }: EditCo
         models: models.length > 0 ? models : undefined,
       }
       await apiFetch<{ ok: boolean; node: CustomProviderNode }>(
-        `/api/x-accounts/nodes/${encodeURIComponent(node.id)}`,
+        `/api/thruline-accounts/nodes/${encodeURIComponent(node.id)}`,
         {
           method: 'PUT',
           body: JSON.stringify(payload),

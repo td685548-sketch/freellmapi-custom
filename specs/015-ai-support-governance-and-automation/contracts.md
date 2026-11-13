@@ -1,52 +1,52 @@
 # API Contracts: AI Support Governance, Customer Memory CRM & Outbound Partner Webhooks (`015-ai-support-governance-and-automation`)
 
-## 1. Admin Console API (`/api/x-gateway/support/*` — Mounted via `xSupportGovernanceConsoleRouter`)
+## 1. Admin Console API (`/api/thruline/support/*` — Mounted via `xSupportGovernanceConsoleRouter`)
 
 All Console endpoints require standard X-Gateway admin authentication (`requireAuth` / `x_gateway.support`).
 
 ### 1.1 Prompt Firewall, Topic Guardrails & Per-Role Quotas
-- **`GET /api/x-gateway/support/tenants/:tenantId/guardrails`**
+- **`GET /api/thruline/support/tenants/:tenantId/guardrails`**
   - Returns `{ ok: true, policy: SupportGuardrailPolicy }`
-- **`PUT /api/x-gateway/support/tenants/:tenantId/guardrails`**
+- **`PUT /api/thruline/support/tenants/:tenantId/guardrails`**
   - Body: `Partial<SupportGuardrailPolicy>`
   - Returns `{ ok: true, policy: SupportGuardrailPolicy }`
-- **`POST /api/x-gateway/support/tenants/:tenantId/guardrails/evaluate`**
+- **`POST /api/thruline/support/tenants/:tenantId/guardrails/evaluate`**
   - Body: `{ text: string, role: string, userId?: string }`
   - Runs `evaluateSupportInputGuardrails` and returns `{ ok: true, evaluation: SupportGuardrailEvaluation }`
-- **`GET /api/x-gateway/support/tenants/:tenantId/quotas/:userId`**
+- **`GET /api/thruline/support/tenants/:tenantId/quotas/:userId`**
   - Query: `?role=customer`
   - Returns `{ ok: true, quota: SupportQuotaStatus }`
-- **`POST /api/x-gateway/support/tenants/:tenantId/quotas/reset`**
+- **`POST /api/thruline/support/tenants/:tenantId/quotas/reset`**
   - Body: `{ userId?: string }`
   - Resets user or tenant quota counters and returns `{ ok: true }`
 
 ### 1.2 Customer CRM Profiles & Long-Term Memory
-- **`GET /api/x-gateway/support/tenants/:tenantId/customers`**
+- **`GET /api/thruline/support/tenants/:tenantId/customers`**
   - Query: `?role=...&tier=...&query=...`
   - Returns `{ ok: true, customers: SupportCustomerProfile[] }`
-- **`POST /api/x-gateway/support/tenants/:tenantId/customers`**
+- **`POST /api/thruline/support/tenants/:tenantId/customers`**
   - Body: `{ userId: string, name?: string, email?: string, role?: string, tier?: string, tags?: string[], customAttributes?: Record<string, string | number | boolean>, memoryFacts?: string[] }`
   - Returns `{ ok: true, customer: SupportCustomerProfile }` (HTTP 201)
-- **`GET /api/x-gateway/support/tenants/:tenantId/customers/:userId`**
+- **`GET /api/thruline/support/tenants/:tenantId/customers/:userId`**
   - Returns `{ ok: true, customer: SupportCustomerProfile | null, memoryPrompt: string }`
-- **`POST /api/x-gateway/support/tenants/:tenantId/customers/:userId/facts`**
+- **`POST /api/thruline/support/tenants/:tenantId/customers/:userId/facts`**
   - Body: `{ fact: string }`
   - Appends fact via `appendCustomerMemoryFact` and returns `{ ok: true, customer: SupportCustomerProfile, memoryPrompt: string }`
 
 ### 1.3 CSAT Ratings & Summary
-- **`GET /api/x-gateway/support/tenants/:tenantId/csat`**
+- **`GET /api/thruline/support/tenants/:tenantId/csat`**
   - Query: `?userId=...&minScore=...`
   - Returns `{ ok: true, ratings: SupportCsatRating[], summary: SupportCsatSummary }`
 
 ### 1.4 Outbound Partner Event Webhooks & Delivery Logs
-- **`GET /api/x-gateway/support/tenants/:tenantId/webhooks`**
+- **`GET /api/thruline/support/tenants/:tenantId/webhooks`**
   - Returns `{ ok: true, webhooks: SupportWebhookSubscription[], deliveries: SupportWebhookDelivery[] }`
-- **`POST /api/x-gateway/support/tenants/:tenantId/webhooks`**
+- **`POST /api/thruline/support/tenants/:tenantId/webhooks`**
   - Body: `{ id?: string, name: string, targetUrl: string, events: SupportPartnerEventType[], enabled?: boolean }`
   - Returns `{ ok: true, webhook: SupportWebhookSubscription }` (HTTP 201)
-- **`DELETE /api/x-gateway/support/tenants/:tenantId/webhooks/:webhookId`**
+- **`DELETE /api/thruline/support/tenants/:tenantId/webhooks/:webhookId`**
   - Returns `{ ok: true }`
-- **`POST /api/x-gateway/support/tenants/:tenantId/webhooks/test`**
+- **`POST /api/thruline/support/tenants/:tenantId/webhooks/test`**
   - Body: `{ event?: SupportPartnerEventType, payload?: Record<string, unknown> }`
   - Calls `dispatchSupportPartnerEvent` with `allowLocalhost: true` (for admin testing) and tenant's `signingSecret`, returning `{ ok: true, deliveries: SupportWebhookDelivery[] }`.
 

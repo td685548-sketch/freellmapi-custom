@@ -41,8 +41,8 @@ describe('X Gateway CLI Tools API', () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
-  it('GET /api/x-gateway/tools returns tools list and status', async () => {
-    const res = await fetch(`${base}/api/x-gateway/tools`, {
+  it('GET /api/thruline/tools returns tools list and status', async () => {
+    const res = await fetch(`${base}/api/thruline/tools`, {
       headers: { Authorization: `Bearer ${adminSessionToken}` },
     });
     expect(res.status).toBe(200);
@@ -55,8 +55,8 @@ describe('X Gateway CLI Tools API', () => {
     expect(data.usableAccounts).toBeGreaterThanOrEqual(1);
   });
 
-  it('POST /api/x-gateway/tools/test requires a full key and model even when accounts exist', async () => {
-    const res = await fetch(`${base}/api/x-gateway/tools/test`, {
+  it('POST /api/thruline/tools/test requires a full key and model even when accounts exist', async () => {
+    const res = await fetch(`${base}/api/thruline/tools/test`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -70,8 +70,8 @@ describe('X Gateway CLI Tools API', () => {
     expect(data.error).toContain('full API key');
   });
 
-  it('POST /api/x-gateway/tools/test validates request payload', async () => {
-    const res = await fetch(`${base}/api/x-gateway/tools/test`, {
+  it('POST /api/thruline/tools/test validates request payload', async () => {
+    const res = await fetch(`${base}/api/thruline/tools/test`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -84,8 +84,8 @@ describe('X Gateway CLI Tools API', () => {
     expect(data.ok).toBe(false);
   });
 
-  it('requires authentication to access /api/x-gateway/tools', async () => {
-    const res = await fetch(`${base}/api/x-gateway/tools`);
+  it('requires authentication to access /api/thruline/tools', async () => {
+    const res = await fetch(`${base}/api/thruline/tools`);
     expect(res.status).toBe(401);
   });
 });

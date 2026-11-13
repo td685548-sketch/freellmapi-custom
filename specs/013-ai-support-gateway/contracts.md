@@ -1,29 +1,29 @@
 # API Contracts (`013-ai-support-gateway`)
 
-## 1. Console Management API (`/api/x-gateway/support/*`)
+## 1. Console Management API (`/api/thruline/support/*`)
 Yêu cầu xác thực phiên đăng nhập Console:
 - `GET` và các thao tác test/mô phỏng (`/simulate-chat`, `/mint-token`, `/test`, `/query-test`) yêu cầu quyền `use_x_gateway`.
 - Các thao tác ghi cấu hình (`POST`, `PATCH`, `DELETE`) yêu cầu quyền `edit_x_settings`.
 
 | Method & Path | Request Body | Response JSON |
 | :--- | :--- | :--- |
-| `GET /api/x-gateway/support/tenants` | — | `{ tenants: SupportTenant[], sampleSchemaSql: string }` |
-| `POST /api/x-gateway/support/tenants` | `{ name, slug?, defaultModel?, systemPrompt?, allowedOrigins?, allowGuest?, rolesConfig?, seedSampleDb?: boolean }` | `201 { tenant: SupportTenant, signingSecret: string }` |
-| `PATCH /api/x-gateway/support/tenants/:id` | `Partial<SupportTenantInput>` | `{ tenant: SupportTenant }` |
-| `DELETE /api/x-gateway/support/tenants/:id` | — | `{ ok: true }` |
-| `POST /api/x-gateway/support/tenants/:id/rotate-secret` | `{}` | `{ tenant: SupportTenant, signingSecret: string }` |
-| `GET /api/x-gateway/support/tenants/:id/tools` | — | `{ tools: SupportWebhookTool[] }` |
-| `POST /api/x-gateway/support/tenants/:id/tools` | `{ name, description, method?, endpointUrl, headers?, parametersSchema?, allowedRoles, lockUserIdParam?, bypassUserLockRoles?, enabled? }` | `201 { tool: SupportWebhookTool }` |
-| `PATCH /api/x-gateway/support/tenants/:id/tools/:toolId` | `Partial<SupportWebhookToolInput>` | `{ tool: SupportWebhookTool }` |
-| `DELETE /api/x-gateway/support/tenants/:id/tools/:toolId` | — | `{ ok: true }` |
-| `POST /api/x-gateway/support/tenants/:id/tools/:toolId/test` | `{ userId, role, name?, args?: Record<string, unknown> }` | `{ ok: boolean, status: number, effectiveArgs: Record<string, unknown>, data: unknown }` |
-| `GET /api/x-gateway/support/tenants/:id/db-sources` | — | `{ dbSources: SupportDbSource[] }` |
-| `POST /api/x-gateway/support/tenants/:id/db-sources` | `{ name, driver, connectionUrl?, authToken?, schemaSql?, tablePolicies, maxRows?, enabled? }` | `201 { dbSource: SupportDbSource }` |
-| `PATCH /api/x-gateway/support/tenants/:id/db-sources/:sourceId` | `Partial<SupportDbSourceInput>` | `{ dbSource: SupportDbSource }` |
-| `DELETE /api/x-gateway/support/tenants/:id/db-sources/:sourceId` | — | `{ ok: true }` |
-| `POST /api/x-gateway/support/tenants/:id/db-sources/:sourceId/query-test` | `{ userId, role, name?, sql: string }` | `{ ok: true, rows: Record<string, unknown>[], rowCount: number, rewrittenSql: string, referencedTables: string[] }` |
-| `POST /api/x-gateway/support/tenants/:id/mint-token` | `{ userId, name?, email?, role, permissions?, metadata?, ttlSeconds? }` | `{ token: string, context: SupportUserContext }` |
-| `POST /api/x-gateway/support/tenants/:id/simulate-chat` | `{ userId, name?, role, permissions?, messages: Array<{role, content}>, model? }` | `{ reply: string, userContext: SupportUserContext, allowedTools: SupportAvailableToolDescriptor[], toolTrace: SupportToolTraceEntry[], modelUsed: string, usage: { prompt_tokens, completion_tokens, total_tokens } }` |
+| `GET /api/thruline/support/tenants` | — | `{ tenants: SupportTenant[], sampleSchemaSql: string }` |
+| `POST /api/thruline/support/tenants` | `{ name, slug?, defaultModel?, systemPrompt?, allowedOrigins?, allowGuest?, rolesConfig?, seedSampleDb?: boolean }` | `201 { tenant: SupportTenant, signingSecret: string }` |
+| `PATCH /api/thruline/support/tenants/:id` | `Partial<SupportTenantInput>` | `{ tenant: SupportTenant }` |
+| `DELETE /api/thruline/support/tenants/:id` | — | `{ ok: true }` |
+| `POST /api/thruline/support/tenants/:id/rotate-secret` | `{}` | `{ tenant: SupportTenant, signingSecret: string }` |
+| `GET /api/thruline/support/tenants/:id/tools` | — | `{ tools: SupportWebhookTool[] }` |
+| `POST /api/thruline/support/tenants/:id/tools` | `{ name, description, method?, endpointUrl, headers?, parametersSchema?, allowedRoles, lockUserIdParam?, bypassUserLockRoles?, enabled? }` | `201 { tool: SupportWebhookTool }` |
+| `PATCH /api/thruline/support/tenants/:id/tools/:toolId` | `Partial<SupportWebhookToolInput>` | `{ tool: SupportWebhookTool }` |
+| `DELETE /api/thruline/support/tenants/:id/tools/:toolId` | — | `{ ok: true }` |
+| `POST /api/thruline/support/tenants/:id/tools/:toolId/test` | `{ userId, role, name?, args?: Record<string, unknown> }` | `{ ok: boolean, status: number, effectiveArgs: Record<string, unknown>, data: unknown }` |
+| `GET /api/thruline/support/tenants/:id/db-sources` | — | `{ dbSources: SupportDbSource[] }` |
+| `POST /api/thruline/support/tenants/:id/db-sources` | `{ name, driver, connectionUrl?, authToken?, schemaSql?, tablePolicies, maxRows?, enabled? }` | `201 { dbSource: SupportDbSource }` |
+| `PATCH /api/thruline/support/tenants/:id/db-sources/:sourceId` | `Partial<SupportDbSourceInput>` | `{ dbSource: SupportDbSource }` |
+| `DELETE /api/thruline/support/tenants/:id/db-sources/:sourceId` | — | `{ ok: true }` |
+| `POST /api/thruline/support/tenants/:id/db-sources/:sourceId/query-test` | `{ userId, role, name?, sql: string }` | `{ ok: true, rows: Record<string, unknown>[], rowCount: number, rewrittenSql: string, referencedTables: string[] }` |
+| `POST /api/thruline/support/tenants/:id/mint-token` | `{ userId, name?, email?, role, permissions?, metadata?, ttlSeconds? }` | `{ token: string, context: SupportUserContext }` |
+| `POST /api/thruline/support/tenants/:id/simulate-chat` | `{ userId, name?, role, permissions?, messages: Array<{role, content}>, model? }` | `{ reply: string, userContext: SupportUserContext, allowedTools: SupportAvailableToolDescriptor[], toolTrace: SupportToolTraceEntry[], modelUsed: string, usage: { prompt_tokens, completion_tokens, total_tokens } }` |
 
 ---
 

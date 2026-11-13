@@ -29,7 +29,7 @@ const METHOD: Record<string, string> = { POST: 'Created / ran', PUT: 'Changed', 
 const AREA: Record<string, string> = {
   'client-profiles': 'Client keys', 'admin/users': 'Accounts', keys: 'Provider keys', invites: 'Invites', profiles: 'Routing profiles',
   'settings/usage-alerts': 'Alerts', 'settings/usage-report': 'Weekly report', settings: 'Settings', 'admin/registration-requests': 'Access requests',
-  'user/keys': 'Own personal keys', 'admin/guest-access': 'Guest access', models: 'Models', fallback: 'Fallback', backups: 'Backups', cache: 'Cache', 'x-gateway': 'Thruline',
+  'user/keys': 'Own personal keys', 'admin/guest-access': 'Guest access', models: 'Models', fallback: 'Fallback', backups: 'Backups', cache: 'Cache', 'x-gateway': 'Thruline', thruline: 'Thruline', 'x-accounts': 'Thruline accounts', 'thruline-accounts': 'Thruline accounts',
 }
 const areaLabel = (a: string) => AREA[a] ?? a
 

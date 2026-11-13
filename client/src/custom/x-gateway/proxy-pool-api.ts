@@ -1,6 +1,6 @@
 import { apiFetch } from '@/lib/api'
 
-const base = '/api/x-gateway/proxy-pool'
+const base = '/api/thruline/proxy-pool'
 
 export interface XProxyPoolEntry {
   id: number

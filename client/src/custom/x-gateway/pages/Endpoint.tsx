@@ -115,24 +115,24 @@ export default function Endpoint() {
 
   const status = useQuery({
     queryKey: ['x-gateway-status', revision],
-    queryFn: ({ signal }) => apiFetch<GatewayStatus>('/api/x-gateway/status', { signal }),
+    queryFn: ({ signal }) => apiFetch<GatewayStatus>('/api/thruline/status', { signal }),
     retry: false,
   })
   const proxyStatus = useQuery({
     queryKey: ['x-gateway-proxy', revision],
-    queryFn: ({ signal }) => apiFetch<GatewayProxyStatus>('/api/x-gateway/proxy', { signal }),
+    queryFn: ({ signal }) => apiFetch<GatewayProxyStatus>('/api/thruline/proxy', { signal }),
     retry: false,
   })
   const xKeys = useQuery({
     queryKey: ['x-gateway-client-keys', revision],
-    queryFn: ({ signal }) => apiFetch<{ keys: XGatewayClientKey[] }>('/api/x-gateway/keys', { signal }),
+    queryFn: ({ signal }) => apiFetch<{ keys: XGatewayClientKey[] }>('/api/thruline/keys', { signal }),
     retry: false,
   })
   const pricingQuery = useQuery({
     queryKey: ['x-gateway-pricing', revision],
     queryFn: ({ signal }) =>
       apiFetch<{ pricing: ProviderPricingMap; overrides: ProviderPricingMap; defaults: ProviderPricingMap }>(
-        '/api/x-gateway/pricing',
+        '/api/thruline/pricing',
         { signal },
       ),
     retry: false,
@@ -143,13 +143,13 @@ export default function Endpoint() {
 
   const toggle = useMutation({
     meta: { silenceToast: true },
-    mutationFn: (next: boolean) => apiFetch<{ enabled: boolean }>('/api/x-gateway/enabled', { method: 'PUT', body: JSON.stringify({ enabled: next }) }),
+    mutationFn: (next: boolean) => apiFetch<{ enabled: boolean }>('/api/thruline/enabled', { method: 'PUT', body: JSON.stringify({ enabled: next }) }),
     onSuccess: async () => { await client.invalidateQueries({ queryKey: ['x-gateway-status'] }) },
   })
 
   const saveProxy = useMutation({
     meta: { silenceToast: true },
-    mutationFn: (proxyUrl: string) => apiFetch<{ proxyUrl: string; configured: boolean }>('/api/x-gateway/proxy', { method: 'PUT', body: JSON.stringify({ proxyUrl }) }),
+    mutationFn: (proxyUrl: string) => apiFetch<{ proxyUrl: string; configured: boolean }>('/api/thruline/proxy', { method: 'PUT', body: JSON.stringify({ proxyUrl }) }),
     onSuccess: async () => {
       setProxyInput('')
       await client.invalidateQueries({ queryKey: ['x-gateway-proxy'] })
@@ -158,7 +158,7 @@ export default function Endpoint() {
 
   const createKey = useMutation({
     meta: { silenceToast: true },
-    mutationFn: (name: string) => apiFetch<MintedXGatewayKey>('/api/x-gateway/keys', { method: 'POST', body: JSON.stringify({ ...(name.trim() ? { name: name.trim() } : {}) }) }),
+    mutationFn: (name: string) => apiFetch<MintedXGatewayKey>('/api/thruline/keys', { method: 'POST', body: JSON.stringify({ ...(name.trim() ? { name: name.trim() } : {}) }) }),
     onSuccess: async (created) => {
       setNewlyCreatedKey(created.key)
       setKeyName('')
@@ -168,7 +168,7 @@ export default function Endpoint() {
 
   const revokeKey = useMutation({
     meta: { silenceToast: true },
-    mutationFn: (id: number) => apiFetch<{ ok: boolean }>(`/api/x-gateway/keys/${id}`, { method: 'DELETE' }),
+    mutationFn: (id: number) => apiFetch<{ ok: boolean }>(`/api/thruline/keys/${id}`, { method: 'DELETE' }),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['x-gateway-client-keys'] })
     },
@@ -177,7 +177,7 @@ export default function Endpoint() {
   const updateKeyAccess = useMutation({
     meta: { silenceToast: true },
     mutationFn: ({ id, restricted, allow }: { id: number; restricted: boolean; allow: string[] }) =>
-      apiFetch<{ ok: boolean }>(`/api/x-gateway/keys/${id}/access`, {
+      apiFetch<{ ok: boolean }>(`/api/thruline/keys/${id}/access`, {
         method: 'PATCH',
         body: JSON.stringify({ restricted, allow }),
       }),
@@ -190,7 +190,7 @@ export default function Endpoint() {
   const testProxy = useMutation({
     meta: { silenceToast: true },
     mutationFn: (proxyUrl: string) =>
-      apiFetch<ProxyTestResult>('/api/x-gateway/proxy/test', {
+      apiFetch<ProxyTestResult>('/api/thruline/proxy/test', {
         method: 'POST',
         body: JSON.stringify({ proxyUrl }),
       }),
@@ -200,7 +200,7 @@ export default function Endpoint() {
   const savePricingMutation = useMutation({
     meta: { silenceToast: true },
     mutationFn: (patch: Record<string, Record<string, Partial<ModelPricingRate>>>) =>
-      apiFetch<{ pricing: ProviderPricingMap; overrides: ProviderPricingMap }>('/api/x-gateway/pricing', {
+      apiFetch<{ pricing: ProviderPricingMap; overrides: ProviderPricingMap }>('/api/thruline/pricing', {
         method: 'PATCH',
         body: JSON.stringify(patch),
       }),
@@ -219,7 +219,7 @@ export default function Endpoint() {
       if (provider) params.set('provider', provider)
       if (model) params.set('model', model)
       const qs = params.toString() ? `?${params.toString()}` : ''
-      return apiFetch<{ pricing: ProviderPricingMap; overrides: ProviderPricingMap }>(`/api/x-gateway/pricing${qs}`, {
+      return apiFetch<{ pricing: ProviderPricingMap; overrides: ProviderPricingMap }>(`/api/thruline/pricing${qs}`, {
         method: 'DELETE',
       })
     },
@@ -236,7 +236,7 @@ export default function Endpoint() {
     meta: { silenceToast: true },
     mutationFn: (payload: unknown) =>
       apiFetch<{ ok: boolean; restored: { combosCount: number; pricingProvidersCount: number; customNodesCount: number } }>(
-        '/api/x-gateway/config-backup',
+        '/api/thruline/config-backup',
         {
           method: 'POST',
           body: JSON.stringify(payload),
@@ -262,7 +262,7 @@ export default function Endpoint() {
   const handleExportBackup = async () => {
     try {
       setIsExporting(true)
-      const data = await apiFetch<unknown>('/api/x-gateway/config-backup')
+      const data = await apiFetch<unknown>('/api/thruline/config-backup')
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')

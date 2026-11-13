@@ -22,7 +22,7 @@ beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   vi.mocked(apiFetch).mockImplementation(async (url: string) => {
-    if (url.includes('/api/x-gateway/translator/templates')) {
+    if (url.includes('/api/thruline/translator/templates')) {
       return {
         templates: [
           {
@@ -35,7 +35,7 @@ beforeEach(() => {
         ],
       };
     }
-    if (url.includes('/api/x-gateway/translator/inspect')) {
+    if (url.includes('/api/thruline/translator/inspect')) {
       return {
         success: true,
         sourceProtocol: 'openai_chat',

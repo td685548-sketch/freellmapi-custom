@@ -50,7 +50,7 @@ beforeEach(() => {
   vi.mocked(apiFetch).mockImplementation(async (path, options) => {
     const method = options?.method ?? 'GET'
     const body = options?.body ? JSON.parse(String(options.body)) : {}
-    if (path === '/api/x-gateway/support/tenants') return { tenants }
+    if (path === '/api/thruline/support/tenants') return { tenants }
     if (path.endsWith('/guardrails/evaluate')) return { evaluation: {
       allowed: body.role === 'admin', blockedReason: body.role === 'admin' ? undefined : 'prompt_injection',
       triggeredRules: body.role === 'admin' ? [] : ['ignore_instructions', 'role_spoofing'], matchedTerms: [], bypassedByRole: body.role === 'admin', sanitizedText: body.text,
@@ -308,7 +308,7 @@ describe('Support Governance & CRM Studio', () => {
     await act(async () => resolveEvaluation({ evaluation: { allowed: false, blockedReason: 'Private reason', triggeredRules: [], matchedTerms: [], bypassedByRole: false } }))
     expect(byId<HTMLTextAreaElement>('firewall-prompt').value).toBe('')
     expect(container.textContent).not.toContain('Private reason')
-    expect(vi.mocked(apiFetch).mock.calls.some(([path]) => path === '/api/x-gateway/support/tenants/2/guardrails')).toBe(true)
+    expect(vi.mocked(apiFetch).mock.calls.some(([path]) => path === '/api/thruline/support/tenants/2/guardrails')).toBe(true)
   })
 
   it('keeps drafts on API failure and supports retrying a failed policy fetch', async () => {
@@ -359,6 +359,6 @@ describe('Support Governance & CRM Studio', () => {
     await renderPage()
     await waitFor(() => expect(container.textContent).toContain('Create a tenant in AI Support Gateway'))
     expect(container.querySelector('[role="tablist"]')).toBeNull()
-    expect(vi.mocked(apiFetch).mock.calls.every(([path]) => path === '/api/x-gateway/support/tenants')).toBe(true)
+    expect(vi.mocked(apiFetch).mock.calls.every(([path]) => path === '/api/thruline/support/tenants')).toBe(true)
   })
 })

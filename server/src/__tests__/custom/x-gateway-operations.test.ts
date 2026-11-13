@@ -59,7 +59,7 @@ describe('X Gateway CLI operations over real HTTP', () => {
     await Promise.all([server, upstream].map(s => new Promise<void>(resolve => { s.closeAllConnections(); s.close(() => resolve()); })));
   });
   const test = async (toolId = 'cursor', extra: Record<string, unknown> = {}) => {
-    const response = await fetch(`${base}/api/x-gateway/tools/test`, { method: 'POST',
+    const response = await fetch(`${base}/api/thruline/tools/test`, { method: 'POST',
       headers: { Authorization: `Bearer ${session}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ toolId, key: key.key, model: 'groq/fixture-model', ...extra }) });
     return { status: response.status, data: await response.json() };
@@ -104,17 +104,17 @@ describe('X Gateway CLI operations over real HTTP', () => {
     expect(calls).toHaveLength(1);
   });
   it('requires console authentication and rejects missing key/model or unknown tools', async () => {
-    expect((await fetch(`${base}/api/x-gateway/tools/diagnostics`)).status).toBe(401);
+    expect((await fetch(`${base}/api/thruline/tools/diagnostics`)).status).toBe(401);
     expect((await test('unknown')).status).toBe(400);
     expect((await test('cursor', { model: '' })).status).toBe(400);
     expect((await test('cursor', { key: '' })).status).toBe(400);
     const member = createUser('member-ops@example.com', 'MemberPass123!');
-    expect((await fetch(`${base}/api/x-gateway/tools/diagnostics`, {
+    expect((await fetch(`${base}/api/thruline/tools/diagnostics`, {
       headers: { Authorization: `Bearer ${createSession(member.userId)}` },
     })).status).toBe(403);
   });
   it('only records dated protocol evidence for the current console session', async () => {
-    const diagnostics = async (token: string) => (await fetch(`${base}/api/x-gateway/tools/diagnostics`, {
+    const diagnostics = async (token: string) => (await fetch(`${base}/api/thruline/tools/diagnostics`, {
       headers: { Authorization: `Bearer ${token}` },
     })).json();
     expect((await diagnostics(session)).capabilities.find((c: { id: string }) => c.id === 'openai-chat').state).toBe('unverified');

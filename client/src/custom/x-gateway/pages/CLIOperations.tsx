@@ -83,7 +83,7 @@ function CLIToolsView() {
   // Load client keys
   const keysQuery = useQuery({
     queryKey: ['x-gateway-keys', revision],
-    queryFn: ({ signal }) => apiFetch<{ keys: XGatewayKey[] }>('/api/x-gateway/keys', { signal }),
+    queryFn: ({ signal }) => apiFetch<{ keys: XGatewayKey[] }>('/api/thruline/keys', { signal }),
     retry: false,
   });
 
@@ -92,14 +92,14 @@ function CLIToolsView() {
   const testMutation = useTestToolConnection();
   const modelQuery = useQuery({
     queryKey: ['x-cli-models', revision],
-    queryFn: ({ signal }) => apiFetch<{ models: Array<{ id: string; name: string }> }>('/api/x-gateway/playground/models', { signal }),
+    queryFn: ({ signal }) => apiFetch<{ models: Array<{ id: string; name: string }> }>('/api/thruline/playground/models', { signal }),
     retry: false,
   });
 
   // Mint new key mutation
   const createKeyMutation = useMutation({
     mutationFn: () =>
-      apiFetch<CreatedKeyResponse>('/api/x-gateway/keys', {
+      apiFetch<CreatedKeyResponse>('/api/thruline/keys', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: 'CLI Tool Quick Key' }),

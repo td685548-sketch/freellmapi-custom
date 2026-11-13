@@ -43,7 +43,7 @@ function seedRequest(r: {
 }
 
 const details = (qs = '', token = session) =>
-  fetch(`${base}/api/x-gateway/usage/request-details${qs ? `?${qs}` : ''}`, { headers: { Authorization: `Bearer ${token}` } });
+  fetch(`${base}/api/thruline/usage/request-details${qs ? `?${qs}` : ''}`, { headers: { Authorization: `Bearer ${token}` } });
 
 const systemone = (body: unknown) =>
   fetch(`${base}/thruline/v1/systemone`, {
@@ -75,9 +75,9 @@ beforeEach(() => {
   complete.mockReset();
 });
 
-describe('GET /api/x-gateway/usage/request-details', () => {
+describe('GET /api/thruline/usage/request-details', () => {
   it('requires authentication', async () => {
-    expect((await fetch(`${base}/api/x-gateway/usage/request-details`)).status).toBe(401);
+    expect((await fetch(`${base}/api/thruline/usage/request-details`)).status).toBe(401);
   });
 
   it('paginates newest first and reports totals', async () => {

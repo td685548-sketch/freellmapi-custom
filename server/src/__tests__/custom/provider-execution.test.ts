@@ -84,7 +84,7 @@ beforeAll(async () => {
   });
   upstream = await new Promise(resolve => { const server = app.listen(0, '127.0.0.1', () => resolve(server)); });
   upstreamUrl = `http://127.0.0.1:${(upstream.address() as { port: number }).port}`;
-  const appGateway = express(); appGateway.use(express.json()); appGateway.use('/api/x-accounts', providerAccountsRouter); appGateway.use('/thruline/v1', xGatewayRouter);
+  const appGateway = express(); appGateway.use(express.json()); appGateway.use('/api/thruline-accounts', providerAccountsRouter); appGateway.use('/thruline/v1', xGatewayRouter);
   gateway = await new Promise(resolve => { const server = appGateway.listen(0, '127.0.0.1', () => resolve(server)); });
   base = `http://127.0.0.1:${(gateway.address() as { port: number }).port}`;
 });
@@ -200,7 +200,7 @@ describe('native subscription execution through real HTTP gateway and upstream',
 
 describe('browser imports, headless OAuth and capability honesty', () => {
   it('imports full CLI JSON without losing refresh and keeps status unknown', async () => {
-    const response = await call('/api/x-accounts/subscriptions/import', { provider: 'codex', label: 'browser', credential: JSON.stringify({ tokens: { access_token: 'access', refresh_token: 'refresh', account_id: 'account' } }) });
+    const response = await call('/api/thruline-accounts/subscriptions/import', { provider: 'codex', label: 'browser', credential: JSON.stringify({ tokens: { access_token: 'access', refresh_token: 'refresh', account_id: 'account' } }) });
     const data = await response.json(); expect(response.status).toBe(200); expect(data.status).toBe('unknown'); expect(JSON.stringify(data)).not.toContain('refresh');
     const row = accountRow(data.id); const stored = parseOAuthCredential(decrypt(row.encrypted_key, row.iv, row.auth_tag)); expect(stored?.refreshToken).toBe('refresh'); expect(stored?.expiresAt).toBeLessThanOrEqual(Date.now()); expect(requests).toHaveLength(0);
   });
@@ -214,36 +214,36 @@ describe('browser imports, headless OAuth and capability honesty', () => {
     expect(JSON.parse(normalizeImportedCredential('kiro', JSON.stringify({ accessToken: 'a', refreshToken: 'r', clientId: 'id', clientSecret: 'secret' }))!)).toMatchObject({ authMethod: 'builder-id', clientId: 'id', clientSecret: 'secret' });
   });
   it('binds PKCE completion to session/state and saves encrypted rotated tokens without claiming healthy', async () => {
-    const start = await call('/api/x-accounts/subscriptions/start', { provider: 'codex', label: 'login' }); const a = await start.json(); expect(start.status).toBe(200);
+    const start = await call('/api/thruline-accounts/subscriptions/start', { provider: 'codex', label: 'login' }); const a = await start.json(); expect(start.status).toBe(200);
     expect(a.authorizationUrl).toContain('code_challenge='); expect(JSON.stringify(a)).not.toContain('code_verifier');
-    expect((await call(`/api/x-accounts/subscriptions/${a.attemptId}/complete`, { code: `http://localhost:1455/auth/callback?code=fixture&state=${a.attemptId}` }, otherSession)).status).toBe(404);
-    expect((await call(`/api/x-accounts/subscriptions/${a.attemptId}/complete`, { code: 'fixture#wrong-state' })).status).toBe(400);
-    const response = await call(`/api/x-accounts/subscriptions/${a.attemptId}/complete`, { code: `http://localhost:1455/auth/callback?code=fixture&state=${a.attemptId}` }); const data = await response.json(); expect(response.status).toBe(200); expect(data.verified).toBe(false); expect(accountRow(data.id).status).toBe('unknown');
+    expect((await call(`/api/thruline-accounts/subscriptions/${a.attemptId}/complete`, { code: `http://localhost:1455/auth/callback?code=fixture&state=${a.attemptId}` }, otherSession)).status).toBe(404);
+    expect((await call(`/api/thruline-accounts/subscriptions/${a.attemptId}/complete`, { code: 'fixture#wrong-state' })).status).toBe(400);
+    const response = await call(`/api/thruline-accounts/subscriptions/${a.attemptId}/complete`, { code: `http://localhost:1455/auth/callback?code=fixture&state=${a.attemptId}` }); const data = await response.json(); expect(response.status).toBe(200); expect(data.verified).toBe(false); expect(accountRow(data.id).status).toBe('unknown');
   });
   it('Kiro device flow never returns registration secrets and persists them encrypted', async () => {
-    const response = await call('/api/x-accounts/subscriptions/start', { provider: 'kiro', label: 'device' }); const data = await response.json(); expect(response.status).toBe(200); expect(data.userCode).toBe('ABCD-1234'); expect(JSON.stringify(data)).not.toMatch(/private|clientSecret|deviceCode/);
-    expect((await call(`/api/x-accounts/subscriptions/${data.attemptId}/poll`, {})).status).toBe(200); expect(refreshes).toBe(0);
+    const response = await call('/api/thruline-accounts/subscriptions/start', { provider: 'kiro', label: 'device' }); const data = await response.json(); expect(response.status).toBe(200); expect(data.userCode).toBe('ABCD-1234'); expect(JSON.stringify(data)).not.toMatch(/private|clientSecret|deviceCode/);
+    expect((await call(`/api/thruline-accounts/subscriptions/${data.attemptId}/poll`, {})).status).toBe(200); expect(refreshes).toBe(0);
     vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 6000);
-    const poll = await call(`/api/x-accounts/subscriptions/${data.attemptId}/poll`, {}); const saved = await poll.json(); expect(saved.status).toBe('saved'); const row = accountRow(saved.id); expect(parseOAuthCredential(decrypt(row.encrypted_key, row.iv, row.auth_tag))?.clientSecret).toBe('private-client-secret');
+    const poll = await call(`/api/thruline-accounts/subscriptions/${data.attemptId}/poll`, {}); const saved = await poll.json(); expect(saved.status).toBe('saved'); const row = accountRow(saved.id); expect(parseOAuthCredential(decrypt(row.encrypted_key, row.iv, row.auth_tag))?.clientSecret).toBe('private-client-secret');
   });
   it('uses a registered public Google callback and does not infer it from request host', async () => {
     vi.stubEnv('GEMINI_CLIENT_ID', 'configured-client'); vi.stubEnv('GEMINI_CLIENT_SECRET', 'configured-secret'); vi.stubEnv('PUBLIC_APP_URL', 'https://fixture.onrender.com');
-    const response = await call('/api/x-accounts/subscriptions/start', { provider: 'gemini-cli', label: 'google' }); const body = await response.json(); expect(response.status).toBe(200); expect(new URL(body.authorizationUrl).searchParams.get('redirect_uri')).toBe('https://fixture.onrender.com/thruline/accounts/callback'); expect(JSON.stringify(body)).not.toContain('configured-secret'); vi.unstubAllEnvs();
+    const response = await call('/api/thruline-accounts/subscriptions/start', { provider: 'gemini-cli', label: 'google' }); const body = await response.json(); expect(response.status).toBe(200); expect(new URL(body.authorizationUrl).searchParams.get('redirect_uri')).toBe('https://fixture.onrender.com/thruline/accounts/callback'); expect(JSON.stringify(body)).not.toContain('configured-secret'); vi.unstubAllEnvs();
   });
   it('completes registered Google browser OAuth and resolves project metadata through HTTP', async () => {
     vi.stubEnv('PUBLIC_APP_URL', 'https://fixture.onrender.com');
-    const start = await call('/api/x-accounts/subscriptions/start', { provider: 'gemini-cli', label: 'google-complete' });
+    const start = await call('/api/thruline-accounts/subscriptions/start', { provider: 'gemini-cli', label: 'google-complete' });
     const a = await start.json();
-    const response = await call(`/api/x-accounts/subscriptions/${a.attemptId}/complete`, { code: `https://fixture.onrender.com/thruline/accounts/callback?code=fixture&state=${a.attemptId}` });
+    const response = await call(`/api/thruline-accounts/subscriptions/${a.attemptId}/complete`, { code: `https://fixture.onrender.com/thruline/accounts/callback?code=fixture&state=${a.attemptId}` });
     const data = await response.json(); expect(response.status).toBe(200); expect(data.verified).toBe(false);
     const row = accountRow(data.id); const stored = parseOAuthCredential(decrypt(row.encrypted_key, row.iv, row.auth_tag));
     expect(stored?.projectId).toBe('google-project'); expect(stored?.email).toBe('google-fixture@test.dev');
   });
   it('permission checks apply to imports and after OAuth has started', async () => {
-    const start = await call('/api/x-accounts/subscriptions/start', { provider: 'claude', label: 'permissions' }); const a = await start.json();
+    const start = await call('/api/thruline-accounts/subscriptions/start', { provider: 'claude', label: 'permissions' }); const a = await start.json();
     getDb().prepare("UPDATE users SET role = 'member', permissions = '[]' WHERE id = ?").run(userId);
-    expect((await call('/api/x-accounts/subscriptions/import', { provider: 'codex', label: 'denied', credential: JSON.stringify(cred('codex')) })).status).toBe(403);
-    expect((await call(`/api/x-accounts/subscriptions/${a.attemptId}/complete`, { code: `fixture#${a.attemptId}` })).status).toBe(403); expect(requests).toHaveLength(0);
+    expect((await call('/api/thruline-accounts/subscriptions/import', { provider: 'codex', label: 'denied', credential: JSON.stringify(cred('codex')) })).status).toBe(403);
+    expect((await call(`/api/thruline-accounts/subscriptions/${a.attemptId}/complete`, { code: `fixture#${a.attemptId}` })).status).toBe(403); expect(requests).toHaveLength(0);
   });
   it('does not send subscription JSON to unsupported media APIs', async () => {
     account('codex'); const response = await call('/thruline/v1/embeddings', { model: 'codex/gpt-5.4', input: 'Hi' }, apiKey); expect(response.status).not.toBe(200); expect(requests).toHaveLength(0);

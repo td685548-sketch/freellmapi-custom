@@ -42,16 +42,25 @@ describe('permission gates: console logs, path case and the proxy webhook', () =
   });
 
   it('resolves the same permission whatever the letter case of the path', async () => {
-    expect(await status('/api/x-gateway/quota', 'gateway')).toBe(403);
-    expect(await status('/api/x-gateway/Quota', 'gateway')).toBe(403);
+    expect(await status('/api/thruline/quota', 'gateway')).toBe(403);
+    expect(await status('/api/thruline/Quota', 'gateway')).toBe(403);
     expect(await status('/api/X-Gateway/QUOTA', 'gateway')).toBe(403);
     expect(await status('/api/client-profiles/1/conversations/abc', 'profiles')).toBe(403);
     expect(await status('/api/client-profiles/1/Conversations/abc', 'profiles')).toBe(403);
     expect(await status('/api/Client-Profiles/1/Content-Filter/events', 'profiles')).toBe(403);
   });
 
+  it('applies the same permissions at the pre-rename addresses', async () => {
+    expect(await status('/api/x-gateway/quota', 'gateway')).toBe(403);
+    expect(await status('/api/X-Gateway/Quota', 'gateway')).toBe(403);
+    expect(await status('/api/x-gateway/keys', 'gateway')).toBe(200);
+    expect(await status('/api/x-gateway/keys')).toBe(401);
+    expect(await status('/api/x-accounts', 'gateway')).toBe(403);
+    expect(await status('/api/x-accounts', 'logs')).toBe(200);
+  });
+
   it('lets the proxy webhook reach its own token check at both addresses', async () => {
-    for (const path of ['/api/proxy-webhook', '/api/x-gateway/proxy-webhook']) {
+    for (const path of ['/api/proxy-webhook', '/api/thruline/proxy-webhook', '/api/x-gateway/proxy-webhook']) {
       const res = await fetch(`${base}${path}?token=wrong`, { method: 'POST' });
       expect(res.status).toBe(401);
       expect((await res.json() as { error: { code?: string } }).error.code).toBe('unauthorized');

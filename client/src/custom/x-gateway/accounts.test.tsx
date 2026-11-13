@@ -74,12 +74,12 @@ beforeEach(() => {
   actor.permissions = ['use_x_gateway', 'view_keys', 'add_keys', 'edit_keys', 'delete_keys', 'test_keys', 'manage_key_models', 'manage_compression']
   onClose.mockReset()
   vi.mocked(apiFetch).mockReset().mockImplementation(async (path: string, init?: RequestInit) => {
-    if (path === '/api/x-accounts' && (!init?.method || init.method === 'GET')) {
+    if (path === '/api/thruline-accounts' && (!init?.method || init.method === 'GET')) {
       if (loadError) throw new Error('offline')
       return structuredClone(data)
     }
-    if (path === '/api/x-accounts' && init?.method === 'POST') return { id: 99 }
-    if (path === '/api/x-accounts/subscriptions/import' && init?.method === 'POST') return { id: 99, status: 'unknown' }
+    if (path === '/api/thruline-accounts' && init?.method === 'POST') return { id: 99 }
+    if (path === '/api/thruline-accounts/subscriptions/import' && init?.method === 'POST') return { id: 99, status: 'unknown' }
     if (path.endsWith('/start')) {
       return path.includes('/openrouter/')
         ? { flow: 'oauth_pkce', attemptId: 'attempt-1', authorizationUrl: 'https://openrouter.ai/auth?callback_url=http%3A%2F%2Flocalhost%3A3000%2Fx%2Faccounts%2Fcallback%3FattemptId%3Dattempt-1', expiresAt: Date.now() + startExpires }
@@ -88,7 +88,7 @@ beforeEach(() => {
     if (path.endsWith('/poll')) return pollResults.shift() ?? { status: 'pending', interval: 1 }
     if (path.endsWith('/complete')) return { status: 'connected', accountId: 99 }
     if (path.endsWith('/test')) return { ok: true }
-    if (path === '/api/x-accounts/test-batch' && init?.method === 'POST') {
+    if (path === '/api/thruline-accounts/test-batch' && init?.method === 'POST') {
       return {
         results: [{ id: 1, label: 'Work', provider: 'openrouter', ok: true }],
         summary: { total: 2, passed: 2, failed: 0 },
@@ -116,27 +116,27 @@ beforeEach(() => {
         modelAliases: bodyObj.modelAliases ?? {},
       }
     }
-    if (path === '/api/x-accounts/bulk' && init?.method === 'POST') {
+    if (path === '/api/thruline-accounts/bulk' && init?.method === 'POST') {
       return { ids: [101, 102], count: 2 }
     }
     if (path.endsWith('/models/ping') && init?.method === 'POST') {
       const bodyObj = JSON.parse(String(init.body ?? '{}'))
       return { ok: true, latencyMs: 64, model: bodyObj.model, message: 'Pong' }
     }
-    if (path === '/api/x-accounts/nodes' && (!init?.method || init.method === 'GET')) {
+    if (path === '/api/thruline-accounts/nodes' && (!init?.method || init.method === 'GET')) {
       return { ok: true, nodes: [] }
     }
-    if (path === '/api/x-accounts/nodes' && init?.method === 'POST') {
+    if (path === '/api/thruline-accounts/nodes' && init?.method === 'POST') {
       const bodyObj = JSON.parse(String(init.body ?? '{}'))
       return { ok: true, node: { ...bodyObj, id: 'custom-ollama-1' } }
     }
-    if (path.startsWith('/api/x-accounts/nodes/') && init?.method === 'DELETE') {
+    if (path.startsWith('/api/thruline-accounts/nodes/') && init?.method === 'DELETE') {
       return { ok: true, nodeId: path.split('/').pop() }
     }
-    if (path === '/api/x-accounts/nodes/validate' && init?.method === 'POST') {
+    if (path === '/api/thruline-accounts/nodes/validate' && init?.method === 'POST') {
       return { ok: true, valid: true, latencyMs: 42, models: ['llama3.3', 'qwen2.5'] }
     }
-    if (path === '/api/x-gateway/proxy-pool') return { entries: [] }
+    if (path === '/api/thruline/proxy-pool') return { entries: [] }
     return undefined
   })
   container = document.createElement('div')
@@ -298,7 +298,7 @@ describe('provider catalog', () => {
     )!
     click(saveBtn)
     await flush()
-    const saveCall = vi.mocked(apiFetch).mock.calls.find(([p, i]) => p === '/api/x-accounts/nodes' && i?.method === 'POST')!
+    const saveCall = vi.mocked(apiFetch).mock.calls.find(([p, i]) => p === '/api/thruline-accounts/nodes' && i?.method === 'POST')!
     expect(saveCall).toBeDefined()
     expect(JSON.parse(String(saveCall[1]!.body))).toMatchObject({
       name: 'Local Ollama',
@@ -339,7 +339,7 @@ describe('provider accounts', () => {
     await flush()
     click(body().querySelector('[role="switch"]')!)
     await flush()
-    expect(vi.mocked(apiFetch).mock.calls.some(([p, i]) => p === '/api/x-accounts/1' && i?.method === 'PATCH' && JSON.parse(String(i.body)).enabled === false)).toBe(true)
+    expect(vi.mocked(apiFetch).mock.calls.some(([p, i]) => p === '/api/thruline-accounts/1' && i?.method === 'PATCH' && JSON.parse(String(i.body)).enabled === false)).toBe(true)
     click(button('Check connection'))
     await flush()
     expect(body().textContent).toContain('Connection is valid')
@@ -349,13 +349,13 @@ describe('provider accounts', () => {
     enter(nameInput, 'Renamed')
     submit(nameInput.closest('form')!)
     await flush()
-    expect(vi.mocked(apiFetch).mock.calls.some(([p, i]) => p === '/api/x-accounts/1' && i?.method === 'PATCH' && JSON.parse(String(i.body)).label === 'Renamed')).toBe(true)
+    expect(vi.mocked(apiFetch).mock.calls.some(([p, i]) => p === '/api/thruline-accounts/1' && i?.method === 'PATCH' && JSON.parse(String(i.body)).label === 'Renamed')).toBe(true)
     click(body().querySelector('[aria-label="Remove: Work"]')!)
     await flush()
     expect(vi.mocked(apiFetch).mock.calls.some(([, i]) => i?.method === 'DELETE')).toBe(false)
     click(body().querySelector('.x-destructive')!)
     await flush()
-    expect(vi.mocked(apiFetch).mock.calls.some(([p, i]) => p === '/api/x-accounts/1' && i?.method === 'DELETE')).toBe(true)
+    expect(vi.mocked(apiFetch).mock.calls.some(([p, i]) => p === '/api/thruline-accounts/1' && i?.method === 'DELETE')).toBe(true)
   })
 
   it('supports batch testing all accounts, toggling all provider accounts, and managing provider models', async () => {
@@ -365,7 +365,7 @@ describe('provider accounts', () => {
     // Batch test provider accounts
     click(button('Batch test (2)'))
     await flush()
-    expect(vi.mocked(apiFetch).mock.calls.some(([p, i]) => p === '/api/x-accounts/test-batch' && i?.method === 'POST')).toBe(true)
+    expect(vi.mocked(apiFetch).mock.calls.some(([p, i]) => p === '/api/thruline-accounts/test-batch' && i?.method === 'POST')).toBe(true)
     expect(body().textContent).toContain('Batch check: 2/2 healthy')
 
     // Switch to Models tab and manage models
@@ -377,7 +377,7 @@ describe('provider accounts', () => {
     expect(
       vi.mocked(apiFetch).mock.calls.some(
         ([p, i]) =>
-          p === '/api/x-accounts/providers/openrouter/models' &&
+          p === '/api/thruline-accounts/providers/openrouter/models' &&
           i?.method === 'PUT' &&
           JSON.parse(String(i.body)).disabledModels.includes('fixture-chat'),
       ),
@@ -403,7 +403,7 @@ describe('provider accounts', () => {
     expect(body().textContent).toContain('64ms')
     expect(
       vi.mocked(apiFetch).mock.calls.some(
-        ([p, i]) => p === '/api/x-accounts/providers/openrouter/models/ping' && i?.method === 'POST'
+        ([p, i]) => p === '/api/thruline-accounts/providers/openrouter/models/ping' && i?.method === 'POST'
       )
     ).toBe(true)
   })
@@ -418,7 +418,7 @@ describe('connect dialog', () => {
     enter(body().querySelector<HTMLInputElement>('input[type="password"]')!, '  gsk_fixture  ')
     submit(body().querySelector<HTMLFormElement>('.x-dialog form')!)
     await flush()
-    const call = vi.mocked(apiFetch).mock.calls.find(([p, i]) => p === '/api/x-accounts' && i?.method === 'POST')!
+    const call = vi.mocked(apiFetch).mock.calls.find(([p, i]) => p === '/api/thruline-accounts' && i?.method === 'POST')!
     expect(JSON.parse(String(call[1]!.body))).toEqual({ provider: 'groq', key: 'gsk_fixture', label: 'My Groq' })
     expect(onClose).toHaveBeenCalled()
   })
@@ -458,7 +458,7 @@ describe('connect dialog', () => {
     await flush()
     act(() => root.unmount())
     await flush()
-    expect(vi.mocked(apiFetch).mock.calls.some(([p, i]) => p === '/api/x-accounts/auth/attempt-1' && i?.method === 'DELETE')).toBe(true)
+    expect(vi.mocked(apiFetch).mock.calls.some(([p, i]) => p === '/api/thruline-accounts/auth/attempt-1' && i?.method === 'DELETE')).toBe(true)
     root = createRoot(container)
   })
 
@@ -489,9 +489,9 @@ describe('connect dialog', () => {
     })
     submit(body().querySelector<HTMLFormElement>('.x-dialog form')!)
     await flush()
-    const call = vi.mocked(apiFetch).mock.calls.find(([p, i]) => p === '/api/x-accounts/subscriptions/import' && i?.method === 'POST')!
+    const call = vi.mocked(apiFetch).mock.calls.find(([p, i]) => p === '/api/thruline-accounts/subscriptions/import' && i?.method === 'POST')!
     expect(JSON.parse(String(call[1]!.body))).toEqual({ provider: 'claude', credential, label: 'My Claude' })
-    expect(vi.mocked(apiFetch).mock.calls.some(([p, i]) => p === '/api/x-accounts' && i?.method === 'POST')).toBe(false)
+    expect(vi.mocked(apiFetch).mock.calls.some(([p, i]) => p === '/api/thruline-accounts' && i?.method === 'POST')).toBe(false)
     expect(onClose).toHaveBeenCalled()
   })
 
@@ -509,7 +509,7 @@ describe('connect dialog', () => {
     })
     submit(body().querySelector<HTMLFormElement>('.x-dialog form')!)
     await flush()
-    const call = vi.mocked(apiFetch).mock.calls.find(([p, i]) => p === '/api/x-accounts/subscriptions/import' && i?.method === 'POST')!
+    const call = vi.mocked(apiFetch).mock.calls.find(([p, i]) => p === '/api/thruline-accounts/subscriptions/import' && i?.method === 'POST')!
     expect(JSON.parse(String(call[1]!.body))).toEqual({
       provider: 'codex',
       credential,
@@ -542,7 +542,7 @@ describe('OAuth callback', () => {
     await flush()
     expect(body().textContent).toContain('Credentials saved')
     expect(body().textContent).toContain('Upstream inference is unverified')
-    expect(vi.mocked(apiFetch).mock.calls.filter(([p]) => p === '/api/x-accounts/subscriptions/sub_fixture/complete')).toHaveLength(1)
+    expect(vi.mocked(apiFetch).mock.calls.filter(([p]) => p === '/api/thruline-accounts/subscriptions/sub_fixture/complete')).toHaveLength(1)
     expect(window.location.search).toBe('')
   })
 

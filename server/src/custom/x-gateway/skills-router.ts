@@ -35,14 +35,14 @@ function getUserId(req: Request): number | undefined {
   return (req as Request & { user?: SessionUser }).user?.userId;
 }
 
-// Console API: GET /api/x-gateway/skills
+// Console API: GET /api/thruline/skills
 xSkillsRouter.get('/', (req: Request, res: Response) => {
   const origin = extractOrigin(req);
   const data = skillsService.listSkills({ origin });
   res.json(data);
 });
 
-// Console API: GET /api/x-gateway/skills/:id
+// Console API: GET /api/thruline/skills/:id
 xSkillsRouter.get('/:id', (req: Request, res: Response) => {
   const id = String(req.params.id ?? '');
   const origin = extractOrigin(req);
@@ -54,7 +54,7 @@ xSkillsRouter.get('/:id', (req: Request, res: Response) => {
   res.json({ skill });
 });
 
-// Console API: GET /api/x-gateway/skills/:id/raw (serves raw text/markdown)
+// Console API: GET /api/thruline/skills/:id/raw (serves raw text/markdown)
 xSkillsRouter.get('/:id/raw', (req: Request, res: Response) => {
   const id = String(req.params.id ?? '');
   const origin = extractOrigin(req);
@@ -68,7 +68,7 @@ xSkillsRouter.get('/:id/raw', (req: Request, res: Response) => {
   res.type('text/markdown; charset=utf-8').send(markdown);
 });
 
-// Console API: POST /api/x-gateway/skills/custom
+// Console API: POST /api/thruline/skills/custom
 xSkillsRouter.post('/custom', (req: Request, res: Response) => {
   const parsed = customSkillCreateSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -89,7 +89,7 @@ xSkillsRouter.post('/custom', (req: Request, res: Response) => {
   }
 });
 
-// Console API: PUT /api/x-gateway/skills/custom/:id
+// Console API: PUT /api/thruline/skills/custom/:id
 xSkillsRouter.put('/custom/:id', (req: Request, res: Response) => {
   const id = String(req.params.id ?? '');
   const parsed = customSkillUpdateSchema.safeParse(req.body);
@@ -110,7 +110,7 @@ xSkillsRouter.put('/custom/:id', (req: Request, res: Response) => {
   }
 });
 
-// Console API: DELETE /api/x-gateway/skills/custom/:id
+// Console API: DELETE /api/thruline/skills/custom/:id
 xSkillsRouter.delete('/custom/:id', (req: Request, res: Response) => {
   const id = String(req.params.id ?? '');
   const deleted = skillsService.deleteCustomSkill(id);

@@ -10,7 +10,7 @@ Responses streaming emits function_call items, argument delta/done events and a
 terminal response containing the same item IDs and array indices. An upstream
 disconnect after output is never retried as a new successful stream.
 
-Subscription session APIs are mounted below /api/x-accounts/subscriptions:
+Subscription session APIs are mounted below /api/thruline-accounts/subscriptions:
 capabilities, import, start, complete, poll and cancel. See
 [operator contracts and configuration](../../docs/x-gateway-subscriptions.md).
 Adding requires add_keys; reconnecting requires edit_keys. Both require a valid

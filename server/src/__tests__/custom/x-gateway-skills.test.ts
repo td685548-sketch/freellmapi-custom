@@ -15,7 +15,7 @@ describe('X Gateway Agent Skills Hub', () => {
 
     const app = express();
     app.use(express.json());
-    app.use('/api/x-gateway/skills', xSkillsRouter);
+    app.use('/api/thruline/skills', xSkillsRouter);
     app.use('/thruline-skills', xSkillsPublicRouter);
 
     await new Promise<void>((resolve) => {
@@ -138,8 +138,8 @@ describe('X Gateway Agent Skills Hub', () => {
   });
 
   describe('Skills Router API Endpoints', () => {
-    it('GET /api/x-gateway/skills returns skill collection', async () => {
-      const res = await fetch(`${base}/api/x-gateway/skills`);
+    it('GET /api/thruline/skills returns skill collection', async () => {
+      const res = await fetch(`${base}/api/thruline/skills`);
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(data.skills).toBeInstanceOf(Array);
@@ -147,8 +147,8 @@ describe('X Gateway Agent Skills Hub', () => {
       expect(data.resolvedBaseUrl).toBeDefined();
     });
 
-    it('GET /api/x-gateway/skills/:id returns single skill detail', async () => {
-      const res = await fetch(`${base}/api/x-gateway/skills/9router`);
+    it('GET /api/thruline/skills/:id returns single skill detail', async () => {
+      const res = await fetch(`${base}/api/thruline/skills/9router`);
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(data.skill).toBeDefined();
@@ -156,15 +156,15 @@ describe('X Gateway Agent Skills Hub', () => {
       expect(data.skill.content).toContain('# 9Router');
     });
 
-    it('GET /api/x-gateway/skills/:id returns 404 for unknown skill', async () => {
-      const res = await fetch(`${base}/api/x-gateway/skills/unknown-skill-xyz`);
+    it('GET /api/thruline/skills/:id returns 404 for unknown skill', async () => {
+      const res = await fetch(`${base}/api/thruline/skills/unknown-skill-xyz`);
       expect(res.status).toBe(404);
       const data = await res.json();
       expect(data.error.type).toBe('not_found');
     });
 
-    it('GET /api/x-gateway/skills/:id/raw returns text/markdown with CORS headers', async () => {
-      const res = await fetch(`${base}/api/x-gateway/skills/9router-chat/raw`);
+    it('GET /api/thruline/skills/:id/raw returns text/markdown with CORS headers', async () => {
+      const res = await fetch(`${base}/api/thruline/skills/9router-chat/raw`);
       expect(res.status).toBe(200);
       expect(res.headers.get('content-type')).toContain('text/markdown');
       expect(res.headers.get('access-control-allow-origin')).toBe('*');
@@ -185,7 +185,7 @@ describe('X Gateway Agent Skills Hub', () => {
     });
 
     it('POST, PUT, DELETE custom skills via console API', async () => {
-      const createRes = await fetch(`${base}/api/x-gateway/skills/custom`, {
+      const createRes = await fetch(`${base}/api/thruline/skills/custom`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -201,7 +201,7 @@ describe('X Gateway Agent Skills Hub', () => {
       const createData = await createRes.json();
       expect(createData.skill.id).toBe('another-test-skill');
 
-      const updateRes = await fetch(`${base}/api/x-gateway/skills/custom/another-test-skill`, {
+      const updateRes = await fetch(`${base}/api/thruline/skills/custom/another-test-skill`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -212,7 +212,7 @@ describe('X Gateway Agent Skills Hub', () => {
       const updateData = await updateRes.json();
       expect(updateData.skill.name).toBe('REST API Guidelines v2');
 
-      const deleteRes = await fetch(`${base}/api/x-gateway/skills/custom/another-test-skill`, {
+      const deleteRes = await fetch(`${base}/api/thruline/skills/custom/another-test-skill`, {
         method: 'DELETE',
       });
       expect(deleteRes.status).toBe(200);

@@ -49,7 +49,7 @@ import { xSupportRuntimeConsoleRouter } from './support-runtime-router.js';
 /** Console API for the gateway switch, outbound proxy, dedicated API keys, and default savers.
  *
  * Authentication and the per-path permission leaves are enforced by the
- * `/api/x-gateway` entry in `PERMISSION_GATES` (plus `permissionForAction`), so
+ * `/api/thruline` entry in `PERMISSION_GATES` (plus `permissionForAction`), so
  * every handler here runs for a session that already holds the mapped leaf.
  */
 export const xGatewayConsoleRouter = Router();

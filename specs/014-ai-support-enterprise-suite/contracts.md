@@ -1,58 +1,58 @@
 # API Contracts: AI Support Enterprise Suite (`014-ai-support-enterprise-suite`)
 
-## 1. Admin Console API (`/api/x-gateway/support/*` — Mounted via `xSupportEnterpriseConsoleRouter`)
+## 1. Admin Console API (`/api/thruline/support/*` — Mounted via `xSupportEnterpriseConsoleRouter`)
 
 All Console endpoints require standard X-Gateway admin authentication (`requireAuth` / `requirePermission('x_gateway.support')`).
 
 ### 1.1 Knowledge Base & Role RAG
-- **`GET /api/x-gateway/support/tenants/:tenantId/knowledge`**
+- **`GET /api/thruline/support/tenants/:tenantId/knowledge`**
   - Returns `{ ok: true, docs: SupportKnowledgeDoc[] }`
-- **`POST /api/x-gateway/support/tenants/:tenantId/knowledge`**
+- **`POST /api/thruline/support/tenants/:tenantId/knowledge`**
   - Body: `{ id?: string, title: string, category?: string, content: string, tags?: string[], allowedRoles?: string[], enabled?: boolean }`
   - Returns `{ ok: true, doc: SupportKnowledgeDoc }` (HTTP 201)
-- **`POST /api/x-gateway/support/tenants/:tenantId/knowledge/seed`**
+- **`POST /api/thruline/support/tenants/:tenantId/knowledge/seed`**
   - Seeds 4 default role-scoped knowledge documents (Public Shipping FAQ for `['*']`, Customer Loyalty Guide for `['customer', 'staff', 'admin']`, Internal Refund SOP for `['staff', 'admin']`, Executive SLA & Financial Playbook for `['admin']`).
   - Returns `{ ok: true, docs: SupportKnowledgeDoc[] }`
-- **`DELETE /api/x-gateway/support/tenants/:tenantId/knowledge/:docId`**
+- **`DELETE /api/thruline/support/tenants/:tenantId/knowledge/:docId`**
   - Returns `{ ok: true }`
-- **`POST /api/x-gateway/support/tenants/:tenantId/knowledge/search`**
+- **`POST /api/thruline/support/tenants/:tenantId/knowledge/search`**
   - Body: `{ query: string, role: string, topK?: number, category?: string }`
   - Runs `searchSupportKnowledge` and applies `maskSupportSensitiveData` for `role`.
   - Returns `{ ok: true, matches: SupportKnowledgeChunkMatch[], contextPrompt: string }`
 
 ### 1.2 PII & Data Masking Policy
-- **`GET /api/x-gateway/support/tenants/:tenantId/masking`**
+- **`GET /api/thruline/support/tenants/:tenantId/masking`**
   - Returns `{ ok: true, policy: SupportMaskingPolicy }`
-- **`PUT /api/x-gateway/support/tenants/:tenantId/masking`**
+- **`PUT /api/thruline/support/tenants/:tenantId/masking`**
   - Body: `Partial<SupportMaskingPolicy>`
   - Returns `{ ok: true, policy: SupportMaskingPolicy }`
-- **`POST /api/x-gateway/support/tenants/:tenantId/masking/test`**
+- **`POST /api/thruline/support/tenants/:tenantId/masking/test`**
   - Body: `{ text: string, role: string }`
   - Returns `{ ok: true, result: SupportMaskResult<string> }`
 
 ### 1.3 Conversations, Escalation Tickets & Action Approvals
-- **`GET /api/x-gateway/support/tenants/:tenantId/conversations`**
+- **`GET /api/thruline/support/tenants/:tenantId/conversations`**
   - Query: `?status=active|escalated|resolved|closed&userId=...`
   - Returns `{ ok: true, conversations: SupportConversation[] }`
-- **`POST /api/x-gateway/support/tenants/:tenantId/conversations/:conversationId/reply`**
+- **`POST /api/thruline/support/tenants/:tenantId/conversations/:conversationId/reply`**
   - Body: `{ agentName?: string, content: string, resolveConversation?: boolean }`
   - Appends human agent reply and returns `{ ok: true, conversation: SupportConversation }`
-- **`GET /api/x-gateway/support/tenants/:tenantId/tickets`**
+- **`GET /api/thruline/support/tenants/:tenantId/tickets`**
   - Query: `?status=...&priority=...`
   - Returns `{ ok: true, tickets: SupportEscalationTicket[] }`
-- **`PATCH /api/x-gateway/support/tenants/:tenantId/tickets/:ticketId`**
+- **`PATCH /api/thruline/support/tenants/:tenantId/tickets/:ticketId`**
   - Body: `{ status?: SupportTicketStatus, priority?: SupportTicketPriority, assignedTo?: string, resolutionNotes?: string }`
   - Returns `{ ok: true, ticket: SupportEscalationTicket }`
-- **`GET /api/x-gateway/support/tenants/:tenantId/actions`**
+- **`GET /api/thruline/support/tenants/:tenantId/actions`**
   - Query: `?status=pending|approved|rejected|failed`
   - Returns `{ ok: true, actions: SupportPendingAction[] }`
-- **`POST /api/x-gateway/support/tenants/:tenantId/actions/:actionId/approve`**
+- **`POST /api/thruline/support/tenants/:tenantId/actions/:actionId/approve`**
   - Body: `{ reviewedBy?: string, reviewNote?: string }`
   - Reviews action as `'approved'`. If matching webhook tool exists on the tenant, executes it (or records simulated execution result) and returns `{ ok: true, action: SupportPendingAction }`.
-- **`POST /api/x-gateway/support/tenants/:tenantId/actions/:actionId/reject`**
+- **`POST /api/thruline/support/tenants/:tenantId/actions/:actionId/reject`**
   - Body: `{ reviewedBy?: string, reviewNote?: string }`
   - Reviews action as `'rejected'` and returns `{ ok: true, action: SupportPendingAction }`.
-- **`GET /api/x-gateway/support/tenants/:tenantId/analytics`**
+- **`GET /api/thruline/support/tenants/:tenantId/analytics`**
   - Returns `{ ok: true, analytics: SupportAnalyticsSummary }`
 
 ---

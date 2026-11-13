@@ -36,7 +36,7 @@ description: "Task list for 013-ai-support-gateway divided across 4 concurrent a
 
 **Files**: `server/src/custom/x-gateway/support-router.ts`, `server/src/custom/x-gateway/console-router.ts`, `server/src/custom/x-gateway/router.ts`, `server/src/custom/permission-actions.ts`, `server/src/__tests__/custom/x-support-gateway.test.ts`
 
-- [ ] T011 [P] [US1] Cập nhật `server/src/custom/permission-actions.ts` ánh xạ `/api/x-gateway/support` sang `use_x_gateway` (đọc & mô phỏng) và `edit_x_settings` (ghi cấu hình).
+- [ ] T011 [P] [US1] Cập nhật `server/src/custom/permission-actions.ts` ánh xạ `/api/thruline/support` sang `use_x_gateway` (đọc & mô phỏng) và `edit_x_settings` (ghi cấu hình).
 - [ ] T012 [US1] [US2] [US3] Xây dựng `xSupportConsoleRouter` trong `server/src/custom/x-gateway/support-router.ts` cho toàn bộ endpoints quản trị (`/tenants`, `/tools`, `/db-sources`, `/query-test`, `/mint-token`, `/simulate-chat`) và gắn vào `console-router.ts`.
 - [ ] T013 [US1] [US2] [US3] Xây dựng `xSupportPublicRouter` (`/thruline/v1/support/session`, `/thruline/v1/support/chat` với vòng lặp gọi công cụ tự động + fallback thông minh trên dữ liệu sandbox/webhook, và `/thruline/v1/support/widget.js`) và gắn vào `server/src/custom/x-gateway/router.ts`.
 - [ ] T014 [US1] [US2] [US3] Viết integration tests trong `server/src/__tests__/custom/x-support-gateway.test.ts`.
