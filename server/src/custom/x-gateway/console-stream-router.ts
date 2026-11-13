@@ -1,5 +1,7 @@
 import { EventEmitter } from 'events';
 import { Router, type Request, type Response } from 'express';
+import { requireAuth } from '../../middleware/requireAuth.js';
+import { requirePermission } from '../../middleware/requirePermission.js';
 
 const MAX_BUFFERED_LINES = 1000;
 const FLUSH_INTERVAL_MS = 100;
@@ -147,6 +149,9 @@ initConsoleLogCapture();
 // ---------------------------------------------------------------------
 
 export const consoleStreamRouter = Router();
+// Server console output can carry request details: signed-in accounts that may open the
+// Thruline console's log page only (the same pair of permissions the page itself asks for).
+consoleStreamRouter.use(requireAuth, requirePermission('use_x_gateway'), requirePermission('view_keys'));
 
 // Stream SSE logs
 consoleStreamRouter.get('/console-logs/stream', (req: Request, res: Response) => {

@@ -64,7 +64,7 @@ describe('Quota view', () => {
     permissions.edit = true; await render();
     const select = container.querySelector('[aria-label="Routing tier: Work"]') as HTMLSelectElement;
     await act(async () => { select.value = 'free'; select.dispatchEvent(new Event('change', { bubbles: true })); });
-    expect(apiFetch).toHaveBeenCalledWith('/api/x-gateway/quota/1/tier', expect.objectContaining({ method: 'PUT', body: '{"tier":"free"}' }));
+    expect(apiFetch).toHaveBeenCalledWith('/api/thruline/quota/1/tier', expect.objectContaining({ method: 'PUT', body: '{"tier":"free"}' }));
   });
   it('does not query quota without permission', async () => {
     permissions.view = false; await render(); expect(apiFetch).not.toHaveBeenCalled();

@@ -39,7 +39,7 @@ const tabs = [
 const detectors: Detector[] = ['email', 'phone', 'credit_card', 'api_key']
 const split = (value: string) => [...new Set(value.split(',').map(v => v.trim()).filter(Boolean))]
 const scopeKey = (scope: Scope) => ['x-support-ops', scope.revision, scope.tenantId] as const
-const basePath = (scope: Scope) => `/api/x-gateway/support/tenants/${scope.tenantId}`
+const basePath = (scope: Scope) => `/api/thruline/support/tenants/${scope.tenantId}`
 
 function useOpsQuery<T>(scope: Scope, path: string) {
   return useQuery({ queryKey: [...scopeKey(scope), path],
@@ -88,7 +88,7 @@ function EnterprisePage({ revision }: { revision: number }) {
   const session = useUserSession()
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const tenants = useQuery({ queryKey: ['x-support-tenants', revision],
-    queryFn: ({ signal }) => apiFetch<{ tenants: { id: number; name: string }[] }>('/api/x-gateway/support/tenants', { signal }) })
+    queryFn: ({ signal }) => apiFetch<{ tenants: { id: number; name: string }[] }>('/api/thruline/support/tenants', { signal }) })
   const choices = tenants.data?.tenants ?? []
   const active = choices.find(t => t.id === selectedId) ?? choices[0]
   return <div data-testid="support-enterprise">

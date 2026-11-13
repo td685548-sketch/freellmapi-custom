@@ -46,14 +46,14 @@ describe('X Gateway console API', () => {
   }
 
   it('requires a session and refuses accounts without the gateway permission', async () => {
-    expect((await call('/api/x-gateway/status')).status).toBe(401);
-    const member = await call('/api/x-gateway/status', { token: memberToken });
+    expect((await call('/api/thruline/status')).status).toBe(401);
+    const member = await call('/api/thruline/status', { token: memberToken });
     expect(member.status).toBe(403);
-    expect((await call('/api/x-gateway/enabled', { method: 'PUT', token: memberToken, body: { enabled: true } })).status).toBe(403);
+    expect((await call('/api/thruline/enabled', { method: 'PUT', token: memberToken, body: { enabled: true } })).status).toBe(403);
   });
 
   it('reports the off state and the default savers', async () => {
-    const res = await call('/api/x-gateway/status', { token: adminToken });
+    const res = await call('/api/thruline/status', { token: adminToken });
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
       enabled: false,
@@ -63,45 +63,45 @@ describe('X Gateway console API', () => {
   });
 
   it('toggles the gateway with edit_x_settings and invalidates the snapshot', async () => {
-    const on = await call('/api/x-gateway/enabled', { method: 'PUT', token: editorToken, body: { enabled: true } });
+    const on = await call('/api/thruline/enabled', { method: 'PUT', token: editorToken, body: { enabled: true } });
     expect(on.status).toBe(200);
     expect(on.body).toEqual({ enabled: true });
     expect(getConfigSnapshot().enabled).toBe(true);
-    expect((await call('/api/x-gateway/status', { token: editorToken })).body.enabled).toBe(true);
+    expect((await call('/api/thruline/status', { token: editorToken })).body.enabled).toBe(true);
 
-    const off = await call('/api/x-gateway/enabled', { method: 'PUT', token: adminToken, body: { enabled: false } });
+    const off = await call('/api/thruline/enabled', { method: 'PUT', token: adminToken, body: { enabled: false } });
     expect(off.status).toBe(200);
     expect(getConfigSnapshot().enabled).toBe(false);
   });
 
   it('rejects an invalid enabled body without changing the switch', async () => {
-    const res = await call('/api/x-gateway/enabled', { method: 'PUT', token: adminToken, body: { enabled: 'yes' } });
+    const res = await call('/api/thruline/enabled', { method: 'PUT', token: adminToken, body: { enabled: 'yes' } });
     expect(res.status).toBe(400);
     expect(getConfigSnapshot().enabled).toBe(false);
   });
 
   it('stores strict default savers and reads them back', async () => {
-    const put = await call('/api/x-gateway/defaults', {
+    const put = await call('/api/thruline/defaults', {
       method: 'PUT', token: adminToken, body: { caveman: true, ponytail: 'lite', input: 'standard' },
     });
     expect(put.status).toBe(200);
-    expect((await call('/api/x-gateway/defaults', { token: adminToken })).body)
+    expect((await call('/api/thruline/defaults', { token: adminToken })).body)
       .toEqual({ caveman: true, ponytail: 'lite', input: 'standard' });
 
-    const bad = await call('/api/x-gateway/defaults', {
+    const bad = await call('/api/thruline/defaults', {
       method: 'PUT', token: adminToken, body: { caveman: true, ponytail: 'max', input: 'off' },
     });
     expect(bad.status).toBe(400);
-    expect((await call('/api/x-gateway/defaults', { token: adminToken })).body.ponytail).toBe('lite');
+    expect((await call('/api/thruline/defaults', { token: adminToken })).body.ponytail).toBe('lite');
 
     // Restore the documented defaults so the later suites in this process are unaffected.
-    await call('/api/x-gateway/defaults', {
+    await call('/api/thruline/defaults', {
       method: 'PUT', token: adminToken, body: { caveman: false, ponytail: 'off', input: 'off' },
     });
   });
 
   it('answers JSON 404 for an unknown console path', async () => {
-    const res = await call('/api/x-gateway/nope', { token: adminToken });
+    const res = await call('/api/thruline/nope', { token: adminToken });
     expect(res.status).toBe(404);
     expect(res.body.error.type).toBe('not_found');
   });

@@ -10,14 +10,14 @@ import type {
 export function useSkills() {
   return useQuery({
     queryKey: ['x-gateway-skills'],
-    queryFn: ({ signal }) => apiFetch<SkillsListResponse>('/api/x-gateway/skills', { signal }),
+    queryFn: ({ signal }) => apiFetch<SkillsListResponse>('/api/thruline/skills', { signal }),
   });
 }
 
 export function useSkillDetail(id: string | null) {
   return useQuery({
     queryKey: ['x-gateway-skill-detail', id],
-    queryFn: ({ signal }) => apiFetch<{ skill: SkillSummary }>(`/api/x-gateway/skills/${id}`, { signal }),
+    queryFn: ({ signal }) => apiFetch<{ skill: SkillSummary }>(`/api/thruline/skills/${id}`, { signal }),
     enabled: Boolean(id),
   });
 }
@@ -26,7 +26,7 @@ export function useCreateCustomSkill() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: CustomSkillCreateInput) =>
-      apiFetch<{ skill: SkillSummary }>('/api/x-gateway/skills/custom', {
+      apiFetch<{ skill: SkillSummary }>('/api/thruline/skills/custom', {
         method: 'POST',
         body: JSON.stringify(data),
       }),
@@ -40,7 +40,7 @@ export function useUpdateCustomSkill() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: CustomSkillUpdateInput }) =>
-      apiFetch<{ skill: SkillSummary }>(`/api/x-gateway/skills/custom/${id}`, {
+      apiFetch<{ skill: SkillSummary }>(`/api/thruline/skills/custom/${id}`, {
         method: 'PUT',
         body: JSON.stringify(patch),
       }),
@@ -55,7 +55,7 @@ export function useDeleteCustomSkill() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
-      apiFetch<{ ok: boolean; id: string }>(`/api/x-gateway/skills/custom/${id}`, {
+      apiFetch<{ ok: boolean; id: string }>(`/api/thruline/skills/custom/${id}`, {
         method: 'DELETE',
       }),
     onSuccess: () => {

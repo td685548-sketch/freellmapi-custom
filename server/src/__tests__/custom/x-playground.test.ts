@@ -33,7 +33,7 @@ describe('session-authenticated X Playground', () => {
   });
   afterAll(() => { server?.close(); vi.restoreAllMocks(); });
   const body = { model: 'combo:quick', messages: [{ role: 'user', content: 'Hello' }] };
-  const call = (path: string, auth = token, data?: unknown) => fetch(`${base}/api/x-gateway/playground/${path}`, {
+  const call = (path: string, auth = token, data?: unknown) => fetch(`${base}/api/thruline/playground/${path}`, {
     method: data ? 'POST' : 'GET', headers: { Authorization: `Bearer ${auth}`, 'Content-Type': 'application/json' },
     body: data ? JSON.stringify(data) : undefined,
   });

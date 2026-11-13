@@ -104,8 +104,8 @@ export default function SkillsHub() {
   }, [data]);
 
   const heroPromptUrl = entrySkill
-    ? `${effectiveBaseUrl}/api/x-gateway/skills/${entrySkill.id}/raw`
-    : `${effectiveBaseUrl}/api/x-gateway/skills/9router/raw`;
+    ? `${effectiveBaseUrl}/thruline-skills/${entrySkill.id}/SKILL.md`
+    : `${effectiveBaseUrl}/thruline-skills/9router/SKILL.md`;
 
   const heroPromptText = `Read this skill and use it: ${heroPromptUrl}`;
 
@@ -349,7 +349,7 @@ export default function SkillsHub() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filteredSkills.map((skill) => {
             const IconComponent = getSkillIcon(skill.category, skill.icon);
-            const rawSkillUrl = `${effectiveBaseUrl}/api/x-gateway/skills/${skill.id}/raw`;
+            const rawSkillUrl = `${effectiveBaseUrl}/thruline-skills/${skill.id}/SKILL.md`;
             const promptText = `Read this skill and use it: ${rawSkillUrl}`;
 
             return (

@@ -83,7 +83,7 @@ function CLIToolsView() {
   // Load client keys
   const keysQuery = useQuery({
     queryKey: ['x-gateway-keys', revision],
-    queryFn: ({ signal }) => apiFetch<{ keys: XGatewayKey[] }>('/api/x-gateway/keys', { signal }),
+    queryFn: ({ signal }) => apiFetch<{ keys: XGatewayKey[] }>('/api/thruline/keys', { signal }),
     retry: false,
   });
 
@@ -92,14 +92,14 @@ function CLIToolsView() {
   const testMutation = useTestToolConnection();
   const modelQuery = useQuery({
     queryKey: ['x-cli-models', revision],
-    queryFn: ({ signal }) => apiFetch<{ models: Array<{ id: string; name: string }> }>('/api/x-gateway/playground/models', { signal }),
+    queryFn: ({ signal }) => apiFetch<{ models: Array<{ id: string; name: string }> }>('/api/thruline/playground/models', { signal }),
     retry: false,
   });
 
   // Mint new key mutation
   const createKeyMutation = useMutation({
     mutationFn: () =>
-      apiFetch<CreatedKeyResponse>('/api/x-gateway/keys', {
+      apiFetch<CreatedKeyResponse>('/api/thruline/keys', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: 'CLI Tool Quick Key' }),
@@ -219,7 +219,7 @@ function CLIToolsView() {
     const blob = new Blob([localSetupDownload(selectedTool.id, activeBaseUrl, activeApiKey, selectedModel)], { type: 'text/javascript' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.href = url; link.download = 'x-gateway-setup.mjs'; link.click(); URL.revokeObjectURL(url);
+    link.href = url; link.download = 'thruline-setup.mjs'; link.click(); URL.revokeObjectURL(url);
   };
 
   return (
@@ -234,7 +234,7 @@ function CLIToolsView() {
         <datalist id="x-cli-models">{modelQuery.data?.models.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</datalist>
         {LOCAL_SETUP_TOOLS.includes(selectedTool.id) && <>
           <button className="x-button" disabled={!activeApiKey || !selectedModel.trim()} onClick={downloadSetup}>Download local setup + backup/restore</button>
-          <p>Run <code>node x-gateway-setup.mjs</code> on your own computer. Then run the generated launcher. Existing settings are preserved; the script prints a restore command. Cursor gets manual instructions. Downloaded files contain the selected key: keep them private.</p>
+          <p>Run <code>node thruline-setup.mjs</code> on your own computer. Then run the generated launcher. Existing settings are preserved; the script prints a restore command. Cursor gets manual instructions. Downloaded files contain the selected key: keep them private.</p>
         </>}
       </section>
       {/* Header */}

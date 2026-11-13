@@ -9,7 +9,7 @@
 
 ### User Story 1 - Manage a pool of proxies (Priority: P1)
 An administrator adds several named proxies (HTTP/HTTPS/SOCKS), enables/disables entries, tests them and removes them.
-**Independent Test**: Create two entries, disable one, delete the other over `/api/x-gateway/proxy-pool`.
+**Independent Test**: Create two entries, disable one, delete the other over `/api/thruline/proxy-pool`.
 **Acceptance Scenarios**:
 1. Given a valid proxy URL, when creating an entry, then it is stored encrypted and listed with a masked URL.
 2. Given an entry bound to accounts, when deleting it, then those accounts fall back to the gateway-wide proxy (never a deleted proxy).
@@ -32,7 +32,7 @@ Empty pool (auto-assign is a no-op), duplicate names (409), invalid schemes (400
 
 ## Requirements
 - **FR-001**: New `x_gateway_proxy_pool` table (encrypted URL, enabled flag) and `x_gateway_keys.proxy_pool_id` FK with ON DELETE SET NULL; new timestamped migration only.
-- **FR-002**: CRUD + test endpoints under `/api/x-gateway/proxy-pool`; reads map to `use_x_gateway`, writes to `edit_x_settings`.
+- **FR-002**: CRUD + test endpoints under `/api/thruline/proxy-pool`; reads map to `use_x_gateway`, writes to `edit_x_settings`.
 - **FR-003**: Auto-assign the least-bound enabled entry on account creation when no explicit proxy URL/binding is given; `proxyPoolId: null` opts out.
 - **FR-004**: Account PATCH accepts `proxyPoolId` (number binds, null unbinds); list responses expose `proxyPoolId`/`proxyPoolName`.
 - **FR-005**: Keep the single gateway-wide proxy and per-account URL override working unchanged as fallbacks.

@@ -31,13 +31,13 @@ beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   vi.mocked(apiFetch).mockImplementation(async (url: string) => {
-    if (url === '/api/x-gateway/tools/diagnostics') return {
+    if (url === '/api/thruline/tools/diagnostics') return {
       checkedAt: new Date().toISOString(), evidenceTtlSeconds: 300,
       capabilities: [{ id: 'providers', state: 'configured', detail: 'Live test required.' }],
       deployment: { database: 'sqlite', persistence: 'operator-verification-required', publicBaseConfigured: false, encryptionKeyConfigured: true },
     };
-    if (url === '/api/x-gateway/playground/models') return { models: [{ id: 'auto', name: 'Auto' }] };
-    if (url.includes('/api/x-gateway/keys')) {
+    if (url === '/api/thruline/playground/models') return { models: [{ id: 'auto', name: 'Auto' }] };
+    if (url.includes('/api/thruline/keys')) {
       return {
         keys: [
           {
@@ -53,7 +53,7 @@ beforeEach(() => {
         ],
       };
     }
-    if (url.includes('/api/x-gateway/tools')) {
+    if (url.includes('/api/thruline/tools')) {
       return {
         enabled: true,
         usableAccounts: 2,
@@ -126,7 +126,7 @@ describe('CLITools component', () => {
       enter(container.querySelector('[aria-label="Test model"]')!, 'combo:coding');
     });
     await act(async () => test.click());
-    const call = vi.mocked(apiFetch).mock.calls.find(([url]) => url === '/api/x-gateway/tools/test');
+    const call = vi.mocked(apiFetch).mock.calls.find(([url]) => url === '/api/thruline/tools/test');
     expect(call).toBeDefined();
     expect(JSON.parse(call![1]!.body as string)).toEqual({ toolId: 'claude', key: 'sk-xgw-real-full-test', model: 'combo:coding' });
     expect(container.textContent).not.toContain('[full-key]');

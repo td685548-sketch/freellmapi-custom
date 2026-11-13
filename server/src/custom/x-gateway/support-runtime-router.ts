@@ -226,7 +226,7 @@ function resolveTenantId(param: unknown): number {
 }
 
 // ---------------------------------------------------------------------------
-// Express Console Router (/api/x-gateway/support/*)
+// Express Console Router (/api/thruline/support/*)
 // ---------------------------------------------------------------------------
 
 export const xSupportRuntimeConsoleRouter = Router();

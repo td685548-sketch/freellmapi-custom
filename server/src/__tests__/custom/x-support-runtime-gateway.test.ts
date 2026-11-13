@@ -80,7 +80,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
     setEnabled(true);
 
     // Create a partner tenant for testing
-    const tenantRes = await apiCall('/api/x-gateway/support/tenants', {
+    const tenantRes = await apiCall('/api/thruline/support/tenants', {
       method: 'POST',
       token: editorToken,
       body: {
@@ -585,7 +585,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
     it('enqueues guardrail.blocked without allowLocalhost public override', async () => {
       enqueuedEvents.length = 0;
       // Configure strict guardrail rule
-      await apiCall(`/api/x-gateway/support/tenants/${partnerTenantId}/guardrails`, {
+      await apiCall(`/api/thruline/support/tenants/${partnerTenantId}/guardrails`, {
         method: 'PUT',
         token: editorToken,
         body: {
@@ -623,7 +623,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
         };
       });
 
-      const res = await apiCall(`/api/x-gateway/support/tenants/${partnerTenantId}/actions/${actionId}/approve`, {
+      const res = await apiCall(`/api/thruline/support/tenants/${partnerTenantId}/actions/${actionId}/approve`, {
         method: 'POST',
         token: editorToken,
         body: {
@@ -644,8 +644,8 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
   // 6. T023: Console Runtime Readiness & Outbox Management
   // -------------------------------------------------------------------------
   describe('T023: Console Runtime Policy & Outbox APIs', () => {
-    it('GET /api/x-gateway/support/tenants/:id/runtime returns honest readiness checks without secrets', async () => {
-      const res = await apiCall(`/api/x-gateway/support/tenants/${partnerTenantId}/runtime`, {
+    it('GET /api/thruline/support/tenants/:id/runtime returns honest readiness checks without secrets', async () => {
+      const res = await apiCall(`/api/thruline/support/tenants/${partnerTenantId}/runtime`, {
         token: viewerToken,
       });
 
@@ -663,9 +663,9 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
       expect(data.readiness.embedSnippet).not.toContain('Bearer ');
     });
 
-    it('PUT /api/x-gateway/support/tenants/:id/runtime validates bounds and rejects invalid properties', async () => {
+    it('PUT /api/thruline/support/tenants/:id/runtime validates bounds and rejects invalid properties', async () => {
       // 1. Unknown property rejected
-      const unknownProp = await apiCall(`/api/x-gateway/support/tenants/${partnerTenantId}/runtime`, {
+      const unknownProp = await apiCall(`/api/thruline/support/tenants/${partnerTenantId}/runtime`, {
         method: 'PUT',
         token: editorToken,
         body: {
@@ -675,7 +675,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
       expect(unknownProp.status).toBe(400);
 
       // 2. Out of bound integer rejected
-      const badTokens = await apiCall(`/api/x-gateway/support/tenants/${partnerTenantId}/runtime`, {
+      const badTokens = await apiCall(`/api/thruline/support/tenants/${partnerTenantId}/runtime`, {
         method: 'PUT',
         token: editorToken,
         body: {
@@ -685,7 +685,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
       expect(badTokens.status).toBe(400);
 
       // 3. Valid policy update succeeds
-      const valid = await apiCall(`/api/x-gateway/support/tenants/${partnerTenantId}/runtime`, {
+      const valid = await apiCall(`/api/thruline/support/tenants/${partnerTenantId}/runtime`, {
         method: 'PUT',
         token: editorToken,
         body: {
@@ -699,8 +699,8 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
       expect((valid.body as any).policy.maxModelCalls).toBe(2);
     });
 
-    it('GET /api/x-gateway/support/tenants/:id/outbox lists partner event deliveries', async () => {
-      const res = await apiCall(`/api/x-gateway/support/tenants/${partnerTenantId}/outbox?limit=50`, {
+    it('GET /api/thruline/support/tenants/:id/outbox lists partner event deliveries', async () => {
+      const res = await apiCall(`/api/thruline/support/tenants/${partnerTenantId}/outbox?limit=50`, {
         token: viewerToken,
       });
 
@@ -710,7 +710,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
       expect(Array.isArray(data.items)).toBe(true);
     });
 
-    it('POST /api/x-gateway/support/tenants/:id/outbox/:deliveryId/retry only retries dead delivery', async () => {
+    it('POST /api/thruline/support/tenants/:id/outbox/:deliveryId/retry only retries dead delivery', async () => {
       // Add a dead item to outbox
       outboxItems.push({
         id: 'del_dead_1',
@@ -725,7 +725,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
       });
 
       const res = await apiCall(
-        `/api/x-gateway/support/tenants/${partnerTenantId}/outbox/del_dead_1/retry`,
+        `/api/thruline/support/tenants/${partnerTenantId}/outbox/del_dead_1/retry`,
         {
           method: 'POST',
           token: editorToken,

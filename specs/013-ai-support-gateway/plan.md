@@ -23,7 +23,7 @@ specs/013-ai-support-gateway/
 ├── spec.md              # Đặc tả yêu cầu & User Stories (/speckit-specify)
 ├── plan.md              # Kiến trúc kỹ thuật (/speckit-plan)
 ├── data-model.md        # Schema SQLite & TypeScript Interfaces dùng chung
-├── contracts.md         # Hợp đồng API (/api/x-gateway/support/* & /thruline/v1/support/*)
+├── contracts.md         # Hợp đồng API (/api/thruline/support/* & /thruline/v1/support/*)
 ├── ownership.md         # Ma trận phân quyền file không xung đột cho 4 Agent
 ├── quickstart.md        # Hướng dẫn chạy kiểm thử & tích hợp
 └── tasks.md             # Danh sách tác vụ chia theo 4 Agent (/speckit-tasks)
@@ -40,7 +40,7 @@ server/src/custom/x-gateway/
 └── router.ts                # [Agent 3] Mount xSupportPublicRouter tại /support
 
 server/src/custom/
-└── permission-actions.ts    # [Agent 3] Phân quyền /api/x-gateway/support
+└── permission-actions.ts    # [Agent 3] Phân quyền /api/thruline/support
 
 client/src/custom/x-gateway/
 ├── support-strings.ts       # [Agent 4] Từ điển song ngữ EN/VI cho AI Support Gateway

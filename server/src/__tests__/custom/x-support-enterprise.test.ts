@@ -10,7 +10,7 @@ import {
   type SupportTenant,
 } from '../../custom/x-gateway/support-store.js';
 
-describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /thruline/v1/support/*)', () => {
+describe('AI Support Enterprise Suite (/api/thruline/support/* & /thruline/v1/support/*)', () => {
   let server: Server;
   let base: string;
   let editorToken: string;
@@ -117,16 +117,16 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /thruline/v1/s
   }
 
   // -------------------------------------------------------------------------
-  // 1. Console Management Endpoints (/api/x-gateway/support/*)
+  // 1. Console Management Endpoints (/api/thruline/support/*)
   // -------------------------------------------------------------------------
-  describe('Admin Console API (/api/x-gateway/support/*)', () => {
+  describe('Admin Console API (/api/thruline/support/*)', () => {
     let customDocId: string;
     let createdConvId: string;
     let createdTicketId: string;
     let createdActionId: string;
 
     it('1. GET /tenants/:id/knowledge returns empty docs array initially', async () => {
-      const res = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/knowledge`, {
+      const res = await apiCall(`/api/thruline/support/tenants/${tenant.id}/knowledge`, {
         token: editorToken,
       });
       expect(res.status).toBe(200);
@@ -137,7 +137,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /thruline/v1/s
     });
 
     it('2. POST /tenants/:id/knowledge creates new role-scoped knowledge doc', async () => {
-      const res = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/knowledge`, {
+      const res = await apiCall(`/api/thruline/support/tenants/${tenant.id}/knowledge`, {
         method: 'POST',
         token: editorToken,
         body: {
@@ -157,7 +157,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /thruline/v1/s
     });
 
     it('3. POST /tenants/:id/knowledge/seed seeds default 4 role-scoped knowledge docs', async () => {
-      const res = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/knowledge/seed`, {
+      const res = await apiCall(`/api/thruline/support/tenants/${tenant.id}/knowledge/seed`, {
         method: 'POST',
         token: editorToken,
       });
@@ -174,7 +174,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /thruline/v1/s
 
     it('4. DELETE /tenants/:id/knowledge/:docId deletes a document', async () => {
       const res = await apiCall(
-        `/api/x-gateway/support/tenants/${tenant.id}/knowledge/${customDocId}`,
+        `/api/thruline/support/tenants/${tenant.id}/knowledge/${customDocId}`,
         {
           method: 'DELETE',
           token: editorToken,
@@ -183,7 +183,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /thruline/v1/s
       expect(res.status).toBe(200);
       expect((res.body as { ok: boolean }).ok).toBe(true);
 
-      const listRes = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/knowledge`, {
+      const listRes = await apiCall(`/api/thruline/support/tenants/${tenant.id}/knowledge`, {
         token: editorToken,
       });
       const listData = listRes.body as { docs: Array<{ id: string }> };
@@ -192,7 +192,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /thruline/v1/s
 
     it('5. POST /tenants/:id/knowledge/search performs role-filtered RAG & builds contextPrompt', async () => {
       // Role: guest (should only see Public Shipping FAQ, not Internal Refund SOP)
-      const guestRes = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/knowledge/search`, {
+      const guestRes = await apiCall(`/api/thruline/support/tenants/${tenant.id}/knowledge/search`, {
         method: 'POST',
         token: editorToken,
         body: {
@@ -206,7 +206,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /thruline/v1/s
       expect(guestData.matches.every((m) => m.title !== 'Internal Refund & Escalation SOP')).toBe(true);
 
       // Role: admin (can see Internal Refund & Executive Margin Playbook)
-      const adminRes = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/knowledge/search`, {
+      const adminRes = await apiCall(`/api/thruline/support/tenants/${tenant.id}/knowledge/search`, {
         method: 'POST',
         token: editorToken,
         body: {
@@ -223,7 +223,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /thruline/v1/s
     });
 
     it('6. GET & PUT /tenants/:id/masking manages PII masking policy', async () => {
-      const getRes = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/masking`, {
+      const getRes = await apiCall(`/api/thruline/support/tenants/${tenant.id}/masking`, {
         token: editorToken,
       });
       expect(getRes.status).toBe(200);
@@ -231,7 +231,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /thruline/v1/s
       expect(initialPolicy.enabled).toBe(true);
       expect(initialPolicy.builtinDetectors).toContain('credit_card');
 
-      const putRes = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/masking`, {
+      const putRes = await apiCall(`/api/thruline/support/tenants/${tenant.id}/masking`, {
         method: 'PUT',
         token: editorToken,
         body: {
@@ -260,7 +260,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /thruline/v1/s
         'Contact john.doe@example.com at +1-555-123-4567, card 4111 2222 3333 4444, key sk-abcdef1234567890, badge BADGE-SECRET999';
 
       // Customer role -> masked
-      const custRes = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/masking/test`, {
+      const custRes = await apiCall(`/api/thruline/support/tenants/${tenant.id}/masking/test`, {
         method: 'POST',
         token: editorToken,
         body: {
@@ -278,7 +278,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /thruline/v1/s
       expect(custData.result.masked).toContain('[BADGE_REDACTED]');
 
       // Admin role -> unmasked / bypassed
-      const admRes = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/masking/test`, {
+      const admRes = await apiCall(`/api/thruline/support/tenants/${tenant.id}/masking/test`, {
         method: 'POST',
         token: editorToken,
         body: {
@@ -309,7 +309,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /thruline/v1/s
       createdConvId = (partnerPost.body as { conversation: { id: string } }).conversation.id;
 
       // Console agent lists conversations
-      const listRes = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/conversations`, {
+      const listRes = await apiCall(`/api/thruline/support/tenants/${tenant.id}/conversations`, {
         token: editorToken,
       });
       expect(listRes.status).toBe(200);
@@ -318,7 +318,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /thruline/v1/s
 
       // Console agent replies
       const replyRes = await apiCall(
-        `/api/x-gateway/support/tenants/${tenant.id}/conversations/${createdConvId}/reply`,
+        `/api/thruline/support/tenants/${tenant.id}/conversations/${createdConvId}/reply`,
         {
           method: 'POST',
           token: editorToken,
@@ -357,7 +357,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /thruline/v1/s
       createdTicketId = (escRes.body as { ticket: { id: string } }).ticket.id;
 
       // Console lists tickets
-      const tktListRes = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/tickets`, {
+      const tktListRes = await apiCall(`/api/thruline/support/tenants/${tenant.id}/tickets`, {
         token: editorToken,
       });
       expect(tktListRes.status).toBe(200);
@@ -366,7 +366,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /thruline/v1/s
 
       // Console updates ticket
       const patchRes = await apiCall(
-        `/api/x-gateway/support/tenants/${tenant.id}/tickets/${createdTicketId}`,
+        `/api/thruline/support/tenants/${tenant.id}/tickets/${createdTicketId}`,
         {
           method: 'PATCH',
           token: editorToken,
@@ -415,7 +415,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /thruline/v1/s
       const rejectActionId = (act2Res.body as { action: { id: string } }).action.id;
 
       // Console lists actions
-      const actionsRes = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/actions`, {
+      const actionsRes = await apiCall(`/api/thruline/support/tenants/${tenant.id}/actions`, {
         token: editorToken,
       });
       expect(actionsRes.status).toBe(200);
@@ -437,7 +437,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /thruline/v1/s
       let appRes: any;
       try {
         appRes = await apiCall(
-          `/api/x-gateway/support/tenants/${tenant.id}/actions/${createdActionId}/approve`,
+          `/api/thruline/support/tenants/${tenant.id}/actions/${createdActionId}/approve`,
           {
             method: 'POST',
             token: editorToken,
@@ -456,7 +456,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /thruline/v1/s
 
       // Reject action 2
       const rejRes = await apiCall(
-        `/api/x-gateway/support/tenants/${tenant.id}/actions/${rejectActionId}/reject`,
+        `/api/thruline/support/tenants/${tenant.id}/actions/${rejectActionId}/reject`,
         {
           method: 'POST',
           token: editorToken,
@@ -471,7 +471,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /thruline/v1/s
     });
 
     it('11. GET /tenants/:id/analytics returns deflection rate and SLA metrics', async () => {
-      const res = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/analytics`, {
+      const res = await apiCall(`/api/thruline/support/tenants/${tenant.id}/analytics`, {
         token: editorToken,
       });
       expect(res.status).toBe(200);

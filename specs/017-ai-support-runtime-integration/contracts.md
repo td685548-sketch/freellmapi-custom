@@ -42,10 +42,10 @@ All routes require existing console auth and use_x_gateway. Mutations require ed
 
 | Route | Contract |
 | --- | --- |
-| GET /api/x-gateway/support/tenants/:id/runtime | `{ ok:true, readiness:SupportIntegrationReadiness }`; no external AI/HTTP side effects |
-| PUT /api/x-gateway/support/tenants/:id/runtime | Body Partial<SupportRuntimePolicy>; reject unknown keys, duplicate tool IDs, wrong-tenant tool IDs and invalid bounds; response `{ok:true, policy}` |
-| GET /api/x-gateway/support/tenants/:id/outbox | `{ok:true, items:SupportOutboxItem[]}`; default newest100, optional validated limit 1..100 |
-| POST /api/x-gateway/support/tenants/:id/outbox/:deliveryId/retry | Empty body; only own tenant dead delivery; no entity action execution; `{ok:true}` or409 |
+| GET /api/thruline/support/tenants/:id/runtime | `{ ok:true, readiness:SupportIntegrationReadiness }`; no external AI/HTTP side effects |
+| PUT /api/thruline/support/tenants/:id/runtime | Body Partial<SupportRuntimePolicy>; reject unknown keys, duplicate tool IDs, wrong-tenant tool IDs and invalid bounds; response `{ok:true, policy}` |
+| GET /api/thruline/support/tenants/:id/outbox | `{ok:true, items:SupportOutboxItem[]}`; default newest100, optional validated limit 1..100 |
+| POST /api/thruline/support/tenants/:id/outbox/:deliveryId/retry | Empty body; only own tenant dead delivery; no entity action execution; `{ok:true}` or409 |
 | POST .../simulate-chat | Same runtime as public chat, synthetic identity authorized by console only. RequestId/conversationId supported. No production bypass switch, no hidden simulated success. |
 | POST .../actions/:actionId/approve or /reject | Existing route/body reviewNote preserved; reviewedBy body ignored. Returns `{ok:true, action:{...existingFields, executionStatus}}`. Atomic service from Agent2 handles duplicate/opposite decisions. |
 

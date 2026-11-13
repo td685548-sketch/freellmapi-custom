@@ -25,7 +25,7 @@ import {
 } from './proxy-pool.js';
 
 /**
- * Proxy pool management, mounted at /api/x-gateway/proxy-pool. The console's
+ * Proxy pool management, mounted at /api/thruline/proxy-pool. The console's
  * PERMISSION_GATES entry maps reads to use_x_gateway and writes to
  * edit_x_settings before any handler here runs.
  */

@@ -19,7 +19,7 @@ import { calculateRequestCost } from './pricing.js';
 /** Combos CRUD, request log, hourly usage and an in-console playground.
  *
  * Mounted under the console router, so every handler already runs behind the
- * `/api/x-gateway` permission gate (`permissionForAction` maps combos, usage and
+ * `/api/thruline` permission gate (`permissionForAction` maps combos, usage and
  * test paths to their dedicated leaves).
  */
 export const xGatewayManagementRouter = Router();

@@ -157,8 +157,8 @@ describe('X Gateway Translator Console Router API', () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
-  it('GET /api/x-gateway/translator/templates returns pre-built templates', async () => {
-    const res = await fetch(`${base}/api/x-gateway/translator/templates`, {
+  it('GET /api/thruline/translator/templates returns pre-built templates', async () => {
+    const res = await fetch(`${base}/api/thruline/translator/templates`, {
       headers: { Authorization: `Bearer ${adminSessionToken}` },
     });
     expect(res.status).toBe(200);
@@ -167,8 +167,8 @@ describe('X Gateway Translator Console Router API', () => {
     expect(data.templates.length).toBeGreaterThanOrEqual(4);
   });
 
-  it('POST /api/x-gateway/translator/inspect executes 7-step pipeline trace', async () => {
-    const res = await fetch(`${base}/api/x-gateway/translator/inspect`, {
+  it('POST /api/thruline/translator/inspect executes 7-step pipeline trace', async () => {
+    const res = await fetch(`${base}/api/thruline/translator/inspect`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -194,8 +194,8 @@ describe('X Gateway Translator Console Router API', () => {
     expect(body.stats.sourceTokens).toBeGreaterThan(0);
   });
 
-  it('POST /api/x-gateway/translator/dispatch tests route availability', async () => {
-    const res = await fetch(`${base}/api/x-gateway/translator/dispatch`, {
+  it('POST /api/thruline/translator/dispatch tests route availability', async () => {
+    const res = await fetch(`${base}/api/thruline/translator/dispatch`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

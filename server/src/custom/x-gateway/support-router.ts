@@ -702,7 +702,7 @@ export async function executeSupportChatPipeline(options: {
 }
 
 // ---------------------------------------------------------------------------
-// 1. Console Management Router (/api/x-gateway/support/*)
+// 1. Console Management Router (/api/thruline/support/*)
 // ---------------------------------------------------------------------------
 
 export const xSupportConsoleRouter = Router();

@@ -1,6 +1,6 @@
 import { apiFetch } from '@/lib/api'
 
-const base = '/api/x-accounts/subscriptions'
+const base = '/api/thruline-accounts/subscriptions'
 import type { SubscriptionAttempt } from '../../../../shared/x-subscriptions'
 export type { SubscriptionAttempt } from '../../../../shared/x-subscriptions'
 

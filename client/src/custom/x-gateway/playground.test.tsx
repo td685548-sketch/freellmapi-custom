@@ -39,7 +39,7 @@ beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   vi.mocked(apiFetch).mockImplementation(async (url: string) => {
-    if (url.includes('/api/x-gateway/playground/models')) {
+    if (url.includes('/api/thruline/playground/models')) {
       return {
         enabled: true,
         models: [

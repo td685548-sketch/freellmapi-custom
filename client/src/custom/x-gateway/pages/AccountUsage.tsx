@@ -184,7 +184,7 @@ export default function AccountUsage() {
 
   const pricingQuery = useQuery({
     queryKey: ['x-gateway-pricing', revision],
-    queryFn: ({ signal }) => apiFetch<PricingResponse>('/api/x-gateway/pricing', { signal }),
+    queryFn: ({ signal }) => apiFetch<PricingResponse>('/api/thruline/pricing', { signal }),
     staleTime: 60_000,
     retry: false,
   })
@@ -192,7 +192,7 @@ export default function AccountUsage() {
   const breakdownQuery = useQuery({
     queryKey: ['x-usage-breakdown', timeRange, revision],
     queryFn: ({ signal }) =>
-      apiFetch<UsageBreakdown>(`/api/x-gateway/usage/breakdown?range=${timeRange}`, { signal }),
+      apiFetch<UsageBreakdown>(`/api/thruline/usage/breakdown?range=${timeRange}`, { signal }),
     refetchInterval: 30_000,
     retry: false,
   })
@@ -203,7 +203,7 @@ export default function AccountUsage() {
   const savePricingMutation = useMutation({
     meta: { silenceToast: true },
     mutationFn: (patch: ProviderPricingMap) =>
-      apiFetch<PricingResponse>('/api/x-gateway/pricing', {
+      apiFetch<PricingResponse>('/api/thruline/pricing', {
         method: 'PATCH',
         body: JSON.stringify(patch),
       }),
@@ -220,7 +220,7 @@ export default function AccountUsage() {
       if (params?.provider) qs.set('provider', params.provider)
       if (params?.model) qs.set('model', params.model)
       const suffix = qs.toString() ? `?${qs.toString()}` : ''
-      return apiFetch<PricingResponse>(`/api/x-gateway/pricing${suffix}`, {
+      return apiFetch<PricingResponse>(`/api/thruline/pricing${suffix}`, {
         method: 'DELETE',
       })
     },
@@ -1288,7 +1288,7 @@ function RequestDetailsPanel() {
       if (filters.status) qs.set('status', filters.status)
       if (filters.startDate) qs.set('startDate', filters.startDate)
       if (filters.endDate) qs.set('endDate', filters.endDate)
-      return apiFetch<RequestDetailsResponse>(`/api/x-gateway/usage/request-details?${qs.toString()}`, { signal })
+      return apiFetch<RequestDetailsResponse>(`/api/thruline/usage/request-details?${qs.toString()}`, { signal })
     },
     placeholderData: previous => previous,
     refetchInterval: 30_000,

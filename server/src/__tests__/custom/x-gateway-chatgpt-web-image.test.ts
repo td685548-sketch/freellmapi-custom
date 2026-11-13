@@ -131,7 +131,7 @@ describe('X Gateway ChatGPT Web image routing', () => {
       { status: 429 },
     ));
 
-    const res = await realFetch(`${base}/api/x-gateway/media/test/image`, {
+    const res = await realFetch(`${base}/api/thruline/media/test/image`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${adminSessionToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: 'gpt-image-2', prompt: 'a red cube' }),

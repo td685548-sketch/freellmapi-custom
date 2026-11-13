@@ -7,7 +7,7 @@
 **Input**: Mở rộng cổng AI Support (`013-ai-support-gateway`) thành bộ giải pháp Enterprise hoàn chỉnh cho website đối tác:
 1. **Role-Scoped Knowledge Base (RAG)** & **PII/Data Masking Engine**: Tài liệu tri thức (FAQ, Chính sách nội bộ, SOP) được phân quyền theo `role` của người hỏi, kết hợp bộ lọc che giấu dữ liệu nhạy cảm (số thẻ, SĐT, email, regex tùy chỉnh) theo từng `role`.
 2. **Persistent Conversations, Human Hand-Off (Escalation Tickets) & Approval-Gated Actions**: Lưu lịch sử hội thoại theo từng khách hàng, chuyển tiếp cho nhân viên hỗ trợ thật (Human Agent) khi AI không giải quyết được, và cơ chế **Human-in-the-Loop Approval** đối với các hành động nhạy cảm (như hoàn tiền, hủy đơn, đổi địa chỉ).
-3. **Enterprise Support API & Analytics**: Cổng API public `/thruline/v1/support/*` và Console API `/api/x-gateway/support/*` kèm thống kê SLA / tỉ lệ AI tự giải quyết (Deflection Rate).
+3. **Enterprise Support API & Analytics**: Cổng API public `/thruline/v1/support/*` và Console API `/api/thruline/support/*` kèm thống kê SLA / tỉ lệ AI tự giải quyết (Deflection Rate).
 4. **Support Operations Web Center (`/thruline/support-ops`)**: Giao diện điều hành trực quan trên Web gồm 5 tab chuyên sâu.
 
 ---
@@ -44,7 +44,7 @@ Khách hàng trên web đối tác có thể tiếp tục cuộc trò chuyện c
 
 ### User Story 3 - Support Enterprise API, Public Partner Endpoints & SLA Analytics (Priority: P1)
 
-Cung cấp đầy đủ REST endpoints cho cả Admin Console (`/api/x-gateway/support/*`) và Partner Widget/Backend (`/thruline/v1/support/*`), bao gồm báo cáo chỉ số vận hành (`SupportAnalyticsSummary`: Deflection Rate, Ticket Resolution, Pending Approvals, Role Breakdown).
+Cung cấp đầy đủ REST endpoints cho cả Admin Console (`/api/thruline/support/*`) và Partner Widget/Backend (`/thruline/v1/support/*`), bao gồm báo cáo chỉ số vận hành (`SupportAnalyticsSummary`: Deflection Rate, Ticket Resolution, Pending Approvals, Role Breakdown).
 
 **Why this priority**: Kết nối tầng lưu trữ tri thức và quy trình phê duyệt với ứng dụng đối tác và giao diện quản trị.
 

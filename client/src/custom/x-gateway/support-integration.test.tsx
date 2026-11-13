@@ -235,7 +235,7 @@ describe('AI Support Integration Studio (SupportIntegration.tsx)', () => {
     vi.clearAllMocks()
 
     vi.mocked(apiFetch).mockImplementation(async (url: string) => {
-      if (url === '/api/x-gateway/support/tenants') {
+      if (url === '/api/thruline/support/tenants') {
         return { ok: true, tenants: currentTenants }
       }
       if (url.includes('/runtime') && !url.includes('/retry')) {
@@ -356,7 +356,7 @@ describe('AI Support Integration Studio (SupportIntegration.tsx)', () => {
     await waitFor(() => {
       const putCall = vi.mocked(apiFetch).mock.calls.find(c => c[1]?.method === 'PUT')
       expect(putCall).toBeTruthy()
-      expect(putCall![0]).toBe('/api/x-gateway/support/tenants/101/runtime')
+      expect(putCall![0]).toBe('/api/thruline/support/tenants/101/runtime')
       const body = JSON.parse(putCall![1]!.body as string)
       expect(body.maxCompletionTokens).toBe(1024)
       expect(body.toolPolicies).toContainEqual({ toolId: 1, mode: 'read' })

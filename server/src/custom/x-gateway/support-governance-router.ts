@@ -59,7 +59,7 @@ function resolveTenantIdParam(param: unknown): string {
 }
 
 // ===========================================================================
-// 1. Admin Console API (/api/x-gateway/support/*)
+// 1. Admin Console API (/api/thruline/support/*)
 // ===========================================================================
 
 export const xSupportGovernanceConsoleRouter = Router();

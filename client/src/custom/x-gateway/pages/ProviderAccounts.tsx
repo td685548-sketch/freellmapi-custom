@@ -135,7 +135,7 @@ export default function ProviderAccounts() {
   // Cooldown query
   const cooldownQuery = useQuery({
     queryKey: ['x-account-cooldowns', revision],
-    queryFn: ({ signal }) => apiFetch<{ cooldowns: Record<number, string> }>('/api/x-accounts/cooldowns', { signal }),
+    queryFn: ({ signal }) => apiFetch<{ cooldowns: Record<number, string> }>('/api/thruline-accounts/cooldowns', { signal }),
     refetchInterval: 5_000,
     retry: false,
   })
@@ -229,7 +229,7 @@ export default function ProviderAccounts() {
     queryKey: ['x-account-autoping', autoPingAccount?.id],
     queryFn: async ({ signal }) => {
       if (!autoPingAccount) return null
-      const res = await apiFetch<{ schedule: AutoPingSchedule }>(`/api/x-accounts/${autoPingAccount.id}/auto-ping`, { signal })
+      const res = await apiFetch<{ schedule: AutoPingSchedule }>(`/api/thruline-accounts/${autoPingAccount.id}/auto-ping`, { signal })
       if (res?.schedule) {
         setPingMode(res.schedule.mode || 'off')
         setPingAnchor(res.schedule.anchor || '08:00')
@@ -257,7 +257,7 @@ export default function ProviderAccounts() {
   const saveAutoPingMutation = useMutation({
     meta: { silenceToast: true },
     mutationFn: async (accountId: number) => {
-      return apiFetch(`/api/x-accounts/${accountId}/auto-ping`, {
+      return apiFetch(`/api/thruline-accounts/${accountId}/auto-ping`, {
         method: 'PUT',
         body: JSON.stringify({
           mode: pingMode,
@@ -279,7 +279,7 @@ export default function ProviderAccounts() {
     meta: { silenceToast: true },
     mutationFn: async (accountId: number) => {
       setPingTestStatus('pinging')
-      return apiFetch<{ ok: boolean; latencyMs: number; message?: string }>(`/api/x-accounts/${accountId}/ping`, { method: 'POST' })
+      return apiFetch<{ ok: boolean; latencyMs: number; message?: string }>(`/api/thruline-accounts/${accountId}/ping`, { method: 'POST' })
     },
     onSuccess: (res) => {
       setPingTestStatus(res.ok ? `${s.pingSuccess} (${res.latencyMs}ms)` : `${s.pingFailed}: ${res.message || ''}`)
@@ -316,7 +316,7 @@ export default function ProviderAccounts() {
       stickyLimit?: number
       thinkingMode?: ProviderThinkingMode
       customHeaders?: Record<string, string>
-    }) => apiFetch(`/api/x-accounts/providers/${encodeURIComponent(providerId!)}/models`, {
+    }) => apiFetch(`/api/thruline-accounts/providers/${encodeURIComponent(providerId!)}/models`, {
       method: 'PUT',
       body: JSON.stringify(body),
     }),
@@ -331,7 +331,7 @@ export default function ProviderAccounts() {
     meta: { silenceToast: true },
     mutationFn: async (accountIds: number[]) => {
       return apiFetch<{ ok: boolean; accountPriorities: number[] }>(
-        `/api/x-accounts/providers/${encodeURIComponent(providerId!)}/priority`,
+        `/api/thruline-accounts/providers/${encodeURIComponent(providerId!)}/priority`,
         {
           method: 'PUT',
           body: JSON.stringify({ accountIds }),
@@ -348,7 +348,7 @@ export default function ProviderAccounts() {
   const bulkDeleteMutation = useMutation({
     meta: { silenceToast: true },
     mutationFn: async (accountIds: number[]) => {
-      return apiFetch<{ ok: boolean; deleted: number }>('/api/x-accounts/bulk-delete', {
+      return apiFetch<{ ok: boolean; deleted: number }>('/api/thruline-accounts/bulk-delete', {
         method: 'POST',
         body: JSON.stringify({ accountIds }),
       })
@@ -366,7 +366,7 @@ export default function ProviderAccounts() {
   const bulkProxyMutation = useMutation({
     meta: { silenceToast: true },
     mutationFn: async (vars: { accountIds: number[]; mode: 'none' | 'one-to-one' | 'pool'; proxyPoolId?: number | null }) => {
-      return apiFetch<{ ok: boolean; updated: number }>('/api/x-accounts/bulk-proxy', {
+      return apiFetch<{ ok: boolean; updated: number }>('/api/thruline-accounts/bulk-proxy', {
         method: 'POST',
         body: JSON.stringify(vars),
       })
@@ -385,7 +385,7 @@ export default function ProviderAccounts() {
     meta: { silenceToast: true },
     mutationFn: async () => {
       return apiFetch<{ ok: boolean; providerId: string; models: Array<{ id: string; name?: string }> }>(
-        `/api/x-accounts/providers/${encodeURIComponent(providerId!)}/fetch-models`,
+        `/api/thruline-accounts/providers/${encodeURIComponent(providerId!)}/fetch-models`,
         { method: 'POST', body: '{}' },
       )
     },

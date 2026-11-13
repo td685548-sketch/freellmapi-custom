@@ -268,7 +268,7 @@ describe('combo presets and fusion over HTTP', () => {
     vi.restoreAllMocks();
   });
 
-  const call = (path: string, token = admin, method = 'GET', body?: unknown) => fetch(`${base}/api/x-gateway${path}`, {
+  const call = (path: string, token = admin, method = 'GET', body?: unknown) => fetch(`${base}/api/thruline${path}`, {
     method,
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),

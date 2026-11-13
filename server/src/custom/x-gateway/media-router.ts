@@ -810,7 +810,7 @@ xGatewayMediaRouter.post('/media/test/web', async (req: Request, res: Response) 
 });
 
 // ---------------------------------------------------------------------------
-// Model Pricing Configuration Routes (/api/x-gateway/pricing)
+// Model Pricing Configuration Routes (/api/thruline/pricing)
 // ---------------------------------------------------------------------------
 
 xGatewayMediaRouter.get('/pricing', (_req: Request, res: Response) => {

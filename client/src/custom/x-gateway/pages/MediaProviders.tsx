@@ -104,13 +104,13 @@ export default function MediaProviders() {
   // Queries
   const configQuery = useQuery({
     queryKey: ['x-media-config', revision],
-    queryFn: ({ signal }) => apiFetch<MediaConfigResponse & { defaults: MediaDefaults; kinds: Record<MediaKind, MediaKindSpec> }>('/api/x-gateway/media/config', { signal }),
+    queryFn: ({ signal }) => apiFetch<MediaConfigResponse & { defaults: MediaDefaults; kinds: Record<MediaKind, MediaKindSpec> }>('/api/thruline/media/config', { signal }),
     staleTime: 30_000,
   });
 
   const keysQuery = useQuery({
     queryKey: ['x-gateway-keys', revision],
-    queryFn: ({ signal }) => apiFetch<{ keys: Array<{ key: string }> }>('/api/x-gateway/keys', { signal }),
+    queryFn: ({ signal }) => apiFetch<{ keys: Array<{ key: string }> }>('/api/thruline/keys', { signal }),
     staleTime: 60_000,
   });
 
@@ -119,12 +119,12 @@ export default function MediaProviders() {
   const voicesQuery = useQuery({
     queryKey: ['x-media-voices', revision, voiceProvider, voiceLang],
     queryFn: ({ signal }) => apiFetch<{ data: Array<{ id: string; name: string; lang: string; gender: string; model: string }> }>(
-      `/api/x-gateway/media/voices?provider=${encodeURIComponent(voiceProvider)}&lang=${encodeURIComponent(voiceLang)}`, { signal }),
+      `/api/thruline/media/voices?provider=${encodeURIComponent(voiceProvider)}&lang=${encodeURIComponent(voiceLang)}`, { signal }),
     enabled: activeKind === 'tts',
     staleTime: 60_000,
   });
   const videoMutation = useMutation({
-    mutationFn: () => apiFetch<VideoResult>('/api/x-gateway/media/test/video', {
+    mutationFn: () => apiFetch<VideoResult>('/api/thruline/media/test/video', {
       method: 'POST', body: JSON.stringify({ prompt: videoPrompt, model: videoModel, aspect_ratio: videoAspect }),
     }),
     onMutate: () => setVideoResult(null),

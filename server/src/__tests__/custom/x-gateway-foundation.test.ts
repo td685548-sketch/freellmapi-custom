@@ -171,33 +171,33 @@ describe('X Gateway Foundation (Phase 2)', () => {
 
     it('maps actions correctly and falls through unlisted paths to parent manage_x_gateway', () => {
       // Writes to enabled and defaults -> edit_x_settings
-      expect(permissionForAction('manage_x_gateway', 'PUT', '/api/x-gateway/enabled')).toBe('edit_x_settings');
-      expect(permissionForAction('manage_x_gateway', 'PUT', '/api/x-gateway/defaults')).toBe('edit_x_settings');
+      expect(permissionForAction('manage_x_gateway', 'PUT', '/api/thruline/enabled')).toBe('edit_x_settings');
+      expect(permissionForAction('manage_x_gateway', 'PUT', '/api/thruline/defaults')).toBe('edit_x_settings');
 
       // Reads to enabled and defaults -> use_x_gateway
-      expect(permissionForAction('manage_x_gateway', 'GET', '/api/x-gateway/enabled')).toBe('use_x_gateway');
-      expect(permissionForAction('manage_x_gateway', 'GET', '/api/x-gateway/defaults')).toBe('use_x_gateway');
+      expect(permissionForAction('manage_x_gateway', 'GET', '/api/thruline/enabled')).toBe('use_x_gateway');
+      expect(permissionForAction('manage_x_gateway', 'GET', '/api/thruline/defaults')).toBe('use_x_gateway');
 
       // Combo writes -> edit_x_combos
-      expect(permissionForAction('manage_x_gateway', 'POST', '/api/x-gateway/combos')).toBe('edit_x_combos');
-      expect(permissionForAction('manage_x_gateway', 'PUT', '/api/x-gateway/combos/1')).toBe('edit_x_combos');
-      expect(permissionForAction('manage_x_gateway', 'DELETE', '/api/x-gateway/combos/1')).toBe('edit_x_combos');
+      expect(permissionForAction('manage_x_gateway', 'POST', '/api/thruline/combos')).toBe('edit_x_combos');
+      expect(permissionForAction('manage_x_gateway', 'PUT', '/api/thruline/combos/1')).toBe('edit_x_combos');
+      expect(permissionForAction('manage_x_gateway', 'DELETE', '/api/thruline/combos/1')).toBe('edit_x_combos');
 
-      // /api/x-gateway/models -> edit_x_combos
-      expect(permissionForAction('manage_x_gateway', 'GET', '/api/x-gateway/models')).toBe('edit_x_combos');
+      // /api/thruline/models -> edit_x_combos
+      expect(permissionForAction('manage_x_gateway', 'GET', '/api/thruline/models')).toBe('edit_x_combos');
 
       // Usage read -> view_x_usage
-      expect(permissionForAction('manage_x_gateway', 'GET', '/api/x-gateway/usage')).toBe('view_x_usage');
+      expect(permissionForAction('manage_x_gateway', 'GET', '/api/thruline/usage')).toBe('view_x_usage');
 
       // Test endpoint -> use_x_gateway
-      expect(permissionForAction('manage_x_gateway', 'POST', '/api/x-gateway/test')).toBe('use_x_gateway');
+      expect(permissionForAction('manage_x_gateway', 'POST', '/api/thruline/test')).toBe('use_x_gateway');
 
       // Generic reads -> use_x_gateway
-      expect(permissionForAction('manage_x_gateway', 'GET', '/api/x-gateway/status')).toBe('use_x_gateway');
-      expect(permissionForAction('manage_x_gateway', 'GET', '/api/x-gateway/other')).toBe('use_x_gateway');
+      expect(permissionForAction('manage_x_gateway', 'GET', '/api/thruline/status')).toBe('use_x_gateway');
+      expect(permissionForAction('manage_x_gateway', 'GET', '/api/thruline/other')).toBe('use_x_gateway');
 
       // Unlisted writes -> parent manage_x_gateway
-      expect(permissionForAction('manage_x_gateway', 'POST', '/api/x-gateway/unlisted')).toBe('manage_x_gateway');
+      expect(permissionForAction('manage_x_gateway', 'POST', '/api/thruline/unlisted')).toBe('manage_x_gateway');
     });
   });
 });

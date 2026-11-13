@@ -8,7 +8,9 @@ import { isGuestRequest } from '../services/guest-access.js';
 /** Resolve known operations only. New/unrecognized endpoints require the old
  * parent capability, so a leaf cannot accidentally unlock future features. */
 export function permissionForAction(parent: ParentPermission, method: string, url: string): Permission {
-  const path = url.split('?')[0]!.replace(/\/+$/, '');
+  // Express matches routes case-insensitively, so the path is compared in lower case too:
+  // `/api/thruline/Quota` must resolve to the same permission as `/api/thruline/quota`.
+  const path = url.split('?')[0]!.replace(/\/+$/, '').toLowerCase();
   const read = method === 'GET' || method === 'HEAD';
   if (parent === 'manage_keys') {
     if (/^\/api\/(health|free-tier)(\/|$)/.test(path) || path === '/api/fallback/rate-limit-usage') return read ? 'view_keys' : 'test_keys';
@@ -67,40 +69,40 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
     if (/^\/api\/usage\/(?:daily\/(?:profiles|end-users)|export\/(?:profiles|end-users)\.csv)$/.test(path)) return 'view_usage_profiles';
   }
   if (parent === 'manage_x_gateway') {
-    if (path.startsWith('/api/x-gateway/support')) {
+    if (path.startsWith('/api/thruline/support')) {
       if (read || path.endsWith('/simulate-chat') || path.endsWith('/mint-token') || path.endsWith('/test') || path.endsWith('/query-test')) {
         return 'use_x_gateway';
       }
       return 'edit_x_settings';
     }
-    if (/^\/api\/x-gateway\/quota(?:\/|$)/.test(path)) {
-      return /^\/api\/x-gateway\/quota\/\d+\/tier$/.test(path) && !read ? 'edit_x_settings' : 'view_x_usage';
+    if (/^\/api\/thruline\/quota(?:\/|$)/.test(path)) {
+      return /^\/api\/thruline\/quota\/\d+\/tier$/.test(path) && !read ? 'edit_x_settings' : 'view_x_usage';
     }
-    if (path.startsWith('/api/x-gateway/playground/')) return 'use_x_gateway';
-    if (path.startsWith('/api/x-gateway/tools')) return 'use_x_gateway';
-    if (path.startsWith('/api/x-gateway/translator')) return 'use_x_gateway';
-    if (path.startsWith('/api/x-gateway/skills')) return read ? 'use_x_gateway' : 'edit_x_settings';
-    if (path.startsWith('/api/x-gateway/media/test')) return 'use_x_gateway';
-    if (path.startsWith('/api/x-gateway/media')) return read ? 'use_x_gateway' : 'edit_x_settings';
-    if (path.startsWith('/api/x-gateway/proxy-pool')) {
+    if (path.startsWith('/api/thruline/playground/')) return 'use_x_gateway';
+    if (path.startsWith('/api/thruline/tools')) return 'use_x_gateway';
+    if (path.startsWith('/api/thruline/translator')) return 'use_x_gateway';
+    if (path.startsWith('/api/thruline/skills')) return read ? 'use_x_gateway' : 'edit_x_settings';
+    if (path.startsWith('/api/thruline/media/test')) return 'use_x_gateway';
+    if (path.startsWith('/api/thruline/media')) return read ? 'use_x_gateway' : 'edit_x_settings';
+    if (path.startsWith('/api/thruline/proxy-pool')) {
       return read ? 'use_x_gateway' : 'edit_x_settings';
     }
-    if (path === '/api/x-gateway/proxy/test') return 'edit_x_settings';
-    if (path === '/api/x-gateway/enabled' || path === '/api/x-gateway/defaults' || path === '/api/x-gateway/proxy') {
+    if (path === '/api/thruline/proxy/test') return 'edit_x_settings';
+    if (path === '/api/thruline/enabled' || path === '/api/thruline/defaults' || path === '/api/thruline/proxy') {
       return read ? 'use_x_gateway' : 'edit_x_settings';
     }
-    if (path === '/api/x-gateway/pricing' || path === '/api/x-gateway/config-backup') {
+    if (path === '/api/thruline/pricing' || path === '/api/thruline/config-backup') {
       return read ? 'use_x_gateway' : 'edit_x_settings';
     }
-    if (path === '/api/x-gateway/keys' || /^\/api\/x-gateway\/keys\/\d+(?:\/access)?$/.test(path)) {
+    if (path === '/api/thruline/keys' || /^\/api\/thruline\/keys\/\d+(?:\/access)?$/.test(path)) {
       return 'use_x_gateway';
     }
-    if (path === '/api/x-gateway/models') return 'edit_x_combos';
-    if (path.startsWith('/api/x-gateway/combos')) {
+    if (path === '/api/thruline/models') return 'edit_x_combos';
+    if (path.startsWith('/api/thruline/combos')) {
       return read ? 'use_x_gateway' : 'edit_x_combos';
     }
-    if (path.startsWith('/api/x-gateway/usage') && read) return 'view_x_usage';
-    if (path === '/api/x-gateway/test') return 'use_x_gateway';
+    if (path.startsWith('/api/thruline/usage') && read) return 'view_x_usage';
+    if (path === '/api/thruline/test') return 'use_x_gateway';
     if (read) return 'use_x_gateway';
     return parent;
   }

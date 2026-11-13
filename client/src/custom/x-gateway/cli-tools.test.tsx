@@ -29,7 +29,7 @@ beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   vi.mocked(apiFetch).mockImplementation(async (url: string) => {
-    if (url.includes('/api/x-gateway/keys')) {
+    if (url.includes('/api/thruline/keys')) {
       return {
         keys: [
           {
@@ -45,7 +45,7 @@ beforeEach(() => {
         ],
       };
     }
-    if (url.includes('/api/x-gateway/tools')) {
+    if (url.includes('/api/thruline/tools')) {
       return {
         enabled: true,
         usableAccounts: 2,

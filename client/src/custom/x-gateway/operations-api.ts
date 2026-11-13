@@ -25,7 +25,7 @@ export interface ToolsStatusResponse {
 export function useToolsStatus(revision?: number) {
   return useQuery({
     queryKey: ['x-gateway-tools-status', revision],
-    queryFn: ({ signal }) => apiFetch<ToolsStatusResponse>('/api/x-gateway/tools', { signal }),
+    queryFn: ({ signal }) => apiFetch<ToolsStatusResponse>('/api/thruline/tools', { signal }),
     staleTime: 10_000,
   });
 }
@@ -33,7 +33,7 @@ export function useToolsStatus(revision?: number) {
 export function useTestToolConnection() {
   return useMutation({
     mutationFn: (input: ToolProbeInput) =>
-      apiFetch<ToolTestResult>('/api/x-gateway/tools/test', {
+      apiFetch<ToolTestResult>('/api/thruline/tools/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(input),
@@ -44,7 +44,7 @@ export function useTestToolConnection() {
 export function useGatewayDiagnostics(revision: number) {
   return useQuery({
     queryKey: ['x-gateway-diagnostics', revision],
-    queryFn: ({ signal }) => apiFetch<GatewayDiagnostics>('/api/x-gateway/tools/diagnostics', { signal }),
+    queryFn: ({ signal }) => apiFetch<GatewayDiagnostics>('/api/thruline/tools/diagnostics', { signal }),
     refetchInterval: 30_000,
     retry: false,
   });

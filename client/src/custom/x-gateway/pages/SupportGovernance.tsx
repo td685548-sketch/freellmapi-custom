@@ -42,7 +42,7 @@ const tabs = [
 ] as const
 const split = (value: string) => [...new Set(value.split(/[,\n]/).map(s => s.trim()).filter(Boolean))]
 const scopeKey = (scope: Scope) => ['x-support-governance', scope.revision, scope.tenantId] as const
-const basePath = (scope: Scope) => `/api/x-gateway/support/tenants/${scope.tenantId}`
+const basePath = (scope: Scope) => `/api/thruline/support/tenants/${scope.tenantId}`
 const validInteger = (value: number, min: number) => Number.isSafeInteger(value) && value >= min
 
 function useGovQuery<T>(scope: Scope, path: string, enabled = true) {
@@ -95,7 +95,7 @@ function GovernancePage({ revision }: { revision: number }) {
   const session = useUserSession()
   const [selected, setSelected] = useState<number | null>(null)
   const tenants = useQuery({ queryKey: ['x-support-tenants', revision],
-    queryFn: ({ signal }) => apiFetch<{ tenants: { id: number; name: string }[] }>('/api/x-gateway/support/tenants', { signal }) })
+    queryFn: ({ signal }) => apiFetch<{ tenants: { id: number; name: string }[] }>('/api/thruline/support/tenants', { signal }) })
   const choices = tenants.data?.tenants ?? []
   const active = choices.find(t => t.id === selected) ?? choices[0]
   return <div data-testid="support-governance">

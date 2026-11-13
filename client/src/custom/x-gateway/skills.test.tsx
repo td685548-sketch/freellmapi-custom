@@ -28,7 +28,7 @@ beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   vi.mocked(apiFetch).mockImplementation(async (url: string) => {
-    if (url.includes('/api/x-gateway/skills')) {
+    if (url.includes('/api/thruline/skills')) {
       return {
         skills: [
           {
@@ -40,11 +40,11 @@ beforeEach(() => {
             icon: 'Hub',
             isEntry: true,
             isCustom: false,
-            rawUrl: 'http://localhost:3001/api/x-gateway/skills/9router/raw',
-            publicUrl: 'http://localhost:3001/x-skills/9router/SKILL.md',
+            rawUrl: 'http://localhost:3001/api/thruline/skills/9router/raw',
+            publicUrl: 'http://localhost:3001/thruline-skills/9router/SKILL.md',
             githubUrl: 'https://github.com/decolua/9router',
             tokenEstimate: 650,
-            promptSnippet: 'Read this skill and use it: http://localhost:3001/api/x-gateway/skills/9router/raw',
+            promptSnippet: 'Read this skill and use it: http://localhost:3001/thruline-skills/9router/SKILL.md',
             content: '# 9Router Entry Skill Content',
           },
           {
@@ -56,11 +56,11 @@ beforeEach(() => {
             icon: 'MessageSquare',
             isEntry: false,
             isCustom: false,
-            rawUrl: 'http://localhost:3001/api/x-gateway/skills/9router-chat/raw',
-            publicUrl: 'http://localhost:3001/x-skills/9router-chat/SKILL.md',
+            rawUrl: 'http://localhost:3001/api/thruline/skills/9router-chat/raw',
+            publicUrl: 'http://localhost:3001/thruline-skills/9router-chat/SKILL.md',
             githubUrl: 'https://github.com/decolua/9router',
             tokenEstimate: 500,
-            promptSnippet: 'Read this skill and use it: http://localhost:3001/api/x-gateway/skills/9router-chat/raw',
+            promptSnippet: 'Read this skill and use it: http://localhost:3001/thruline-skills/9router-chat/SKILL.md',
             content: '# 9Router Chat Skill Content',
           },
         ],

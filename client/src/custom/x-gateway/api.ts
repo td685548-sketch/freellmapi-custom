@@ -10,7 +10,7 @@ import type {
   ProviderAccountTestResponse,
 } from '../../../../shared/x-accounts'
 
-const base = '/api/x-accounts'
+const base = '/api/thruline-accounts'
 export function useAccounts(enabled = true) {
   const revision = useSessionRevision()
   return useQuery({

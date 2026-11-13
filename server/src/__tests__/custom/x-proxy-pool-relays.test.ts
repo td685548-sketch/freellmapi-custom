@@ -34,7 +34,7 @@ function deploy(provider: 'deno' | 'netlify', extra: Record<string, unknown> = {
   return request('/deploy-worker', { provider, apiToken: token, workerName: 'web-relay', ...extra });
 }
 function request(path: string, body?: unknown, auth = session) {
-  return realFetch(`${base}/api/x-gateway/proxy-pool${path}`, {
+  return realFetch(`${base}/api/thruline/proxy-pool${path}`, {
     method: body === undefined ? 'GET' : 'POST',
     headers: { Authorization: `Bearer ${auth}`, 'Content-Type': 'application/json' },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -78,7 +78,7 @@ beforeAll(async () => {
   memberSession = createSession(member.userId);
   const app = express();
   app.use(express.json());
-  app.use('/api/x-gateway/proxy-pool', requireAuth, requireActionPermission('manage_x_gateway'), xProxyPoolRouter);
+  app.use('/api/thruline/proxy-pool', requireAuth, requireActionPermission('manage_x_gateway'), xProxyPoolRouter);
   await new Promise<void>(resolve => {
     server = app.listen(0, '127.0.0.1', () => {
       const address = server.address() as { port: number };

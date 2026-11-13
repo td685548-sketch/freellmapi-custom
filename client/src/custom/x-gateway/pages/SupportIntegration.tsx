@@ -686,7 +686,7 @@ function TenantIntegrationContent({
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<TabId>('readiness')
 
-  const tenantBase = `/api/x-gateway/support/tenants/${tenant.id}`
+  const tenantBase = `/api/thruline/support/tenants/${tenant.id}`
   const tenantKey = ['x-support-integration', revision, tenant.id] as const
 
   // 1. Readiness query
@@ -829,7 +829,7 @@ export default function SupportIntegration() {
   const tenantsQuery = useQuery({
     queryKey: ['x-support-integration-tenants', revision],
     queryFn: ({ signal }) =>
-      apiFetch<{ ok: boolean; tenants: SupportTenant[] }>('/api/x-gateway/support/tenants', { signal }).then(
+      apiFetch<{ ok: boolean; tenants: SupportTenant[] }>('/api/thruline/support/tenants', { signal }).then(
         r => r.tenants || []
       ),
   })

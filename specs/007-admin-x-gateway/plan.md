@@ -58,7 +58,7 @@ specs/007-admin-x-gateway/
 ├── quickstart.md
 ├── contracts/
 │   ├── x-gateway-api.md      # /thruline/v1 public contract
-│   └── console-api.md        # /api/x-gateway console contract
+│   └── console-api.md        # /api/thruline console contract
 ├── checklists/requirements.md
 └── tasks.md                  # created by /speckit-tasks
 ```
@@ -74,7 +74,7 @@ server/src/
 │   ├── combos.ts            # name validation, combo -> ordered chain
 │   ├── context.ts           # AsyncLocalStorage flag (combo resolution + usage tag)
 │   ├── router.ts            # /thruline/v1/chat/completions, /thruline/v1/models, JSON 404
-│   ├── console-router.ts    # /api/x-gateway/* (status, combos, defaults, usage, test)
+│   ├── console-router.ts    # /api/thruline/* (status, combos, defaults, usage, test)
 │   └── usage.ts             # in-memory saved-token counters, 60 s hourly flush
 ├── db/migrations/20261106_000001_custom_x_gateway.ts
 └── __tests__/custom/x-gateway-*.test.ts
@@ -99,7 +99,7 @@ docs/x-gateway.md            # security considerations and operator guide
 4. **Savers** are pure functions over the parsed messages: output savers prepend one instruction block; the input saver calls the existing compression pipeline with an explicit mode and without recording its statistics, and the delegated request carries the compression-off directive so the main flow does not compress twice. Every saver fails open.
 5. **Configuration** lives in `x_gateway_config` and `x_gateway_combos`, read through an in-memory cache that is invalidated on every console write and re-read at most every 5 s, so a request normally costs no configuration query.
 6. **Usage**: requests are tagged `x-gateway` in the existing request log through the scope flag (no extra write); tokens saved are counted in memory and flushed once a minute into `x_gateway_usage_hourly`; the usage view reads both.
-7. **Console API** under `/api/x-gateway/*`, authenticated by the dashboard session (bearer, so no cookie CSRF surface) and gated by the new permission group through the existing permission-gate table.
+7. **Console API** under `/api/thruline/*`, authenticated by the dashboard session (bearer, so no cookie CSRF surface) and gated by the new permission group through the existing permission-gate table.
 8. **Console UI**: a top-level route split renders `XGatewayApp` with its own header and navigation for any path under `/thruline`; the main navigation shows a link only to permitted users. The console uses its own small string table so the 60 shared locale files stay untouched.
 
 ## Post-design Constitution Re-check

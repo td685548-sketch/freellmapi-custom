@@ -69,7 +69,7 @@ describe('X-Gateway Custom Pricing & Config Backup / Restore', () => {
 
   function api(path: string, options: { method?: string; body?: unknown; token?: string } = {}) {
     const { method = 'GET', body, token = adminToken } = options;
-    return fetch(`${base}/api/x-gateway${path}`, {
+    return fetch(`${base}/api/thruline${path}`, {
       method,
       headers: {
         Authorization: `Bearer ${token}`,
@@ -81,15 +81,15 @@ describe('X-Gateway Custom Pricing & Config Backup / Restore', () => {
 
   describe('Permission resolution in permission-actions.ts', () => {
     it('maps GET /pricing and GET /config-backup to use_x_gateway', () => {
-      expect(permissionForAction('manage_x_gateway', 'GET', '/api/x-gateway/pricing')).toBe('use_x_gateway');
-      expect(permissionForAction('manage_x_gateway', 'HEAD', '/api/x-gateway/pricing')).toBe('use_x_gateway');
-      expect(permissionForAction('manage_x_gateway', 'GET', '/api/x-gateway/config-backup')).toBe('use_x_gateway');
+      expect(permissionForAction('manage_x_gateway', 'GET', '/api/thruline/pricing')).toBe('use_x_gateway');
+      expect(permissionForAction('manage_x_gateway', 'HEAD', '/api/thruline/pricing')).toBe('use_x_gateway');
+      expect(permissionForAction('manage_x_gateway', 'GET', '/api/thruline/config-backup')).toBe('use_x_gateway');
     });
 
     it('maps write methods on /pricing and /config-backup to edit_x_settings', () => {
-      expect(permissionForAction('manage_x_gateway', 'PATCH', '/api/x-gateway/pricing')).toBe('edit_x_settings');
-      expect(permissionForAction('manage_x_gateway', 'DELETE', '/api/x-gateway/pricing')).toBe('edit_x_settings');
-      expect(permissionForAction('manage_x_gateway', 'POST', '/api/x-gateway/config-backup')).toBe('edit_x_settings');
+      expect(permissionForAction('manage_x_gateway', 'PATCH', '/api/thruline/pricing')).toBe('edit_x_settings');
+      expect(permissionForAction('manage_x_gateway', 'DELETE', '/api/thruline/pricing')).toBe('edit_x_settings');
+      expect(permissionForAction('manage_x_gateway', 'POST', '/api/thruline/config-backup')).toBe('edit_x_settings');
     });
 
     it('enforces read-only sessions cannot modify pricing or restore backup via HTTP', async () => {

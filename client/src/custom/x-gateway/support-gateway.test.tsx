@@ -96,7 +96,7 @@ beforeEach(() => {
 
   vi.mocked(apiFetch).mockImplementation(async (url: string, init?: RequestInit) => {
     // 1. Tenants list
-    if (url === '/api/x-gateway/support/tenants' && (!init || !init.method || init.method === 'GET')) {
+    if (url === '/api/thruline/support/tenants' && (!init || !init.method || init.method === 'GET')) {
       return {
         tenants: [mockTenant],
         sampleSchemaSql: 'CREATE TABLE sample ...',
@@ -104,7 +104,7 @@ beforeEach(() => {
     }
 
     // 2. Create Tenant
-    if (url === '/api/x-gateway/support/tenants' && init?.method === 'POST') {
+    if (url === '/api/thruline/support/tenants' && init?.method === 'POST') {
       const body = JSON.parse(String(init.body))
       return {
         tenant: {

@@ -42,7 +42,7 @@ curl "$GATEWAY_URL/thruline/v1/chat/completions" \
 
 Granular permissions still apply: `view_keys`, account key actions,
 `edit_x_settings`, combo permissions, `manage_compression`, usage permissions.
-The CLI operations API is under `/api/x-gateway/tools`, behind console session
+The CLI operations API is under `/api/thruline/tools`, behind console session
 authentication and `use_x_gateway`; an inference key alone is not a console session.
 
 ## CLI Tools: setup and real tests
@@ -54,7 +54,7 @@ authentication and `use_x_gateway`; an inference key alone is not a console sess
 3. Choose the tool and run **Test Connection**. This sends a small non-streaming
    inference through its actual endpoint using that key/model, including auth,
    model restrictions and rate limits. It consumes provider quota.
-4. Download **local setup + backup/restore**, run `node x-gateway-setup.mjs` on
+4. Download **local setup + backup/restore**, run `node thruline-setup.mjs` on
    your own computer, then run the generated launcher. Node.js 20+ is required.
    The script does not launch the client or edit the hosted server's home.
 
@@ -76,7 +76,7 @@ Gemini's base URL is `/thruline`, with `GOOGLE_GENAI_API_VERSION=v1beta`. OpenAI
 use `/thruline/v1`. The setup launcher carries the chosen model and key.
 
 Setup creates timestamped backups under `~/.x-gateway/backups/` and prints:
-`node x-gateway-setup.mjs --restore "<backup-directory>"`. Restore reinstates
+`node thruline-setup.mjs --restore "<backup-directory>"`. Restore reinstates
 original file bytes or removes newly created files. Invalid existing JSON is
 refused before changes. JSONC-only OpenCode configurations are refused instead
 of shadowed; merge manually. Explicitly pass `--opencode-version 1` or `2` if needed.
@@ -84,7 +84,7 @@ Downloads, launchers and backups can contain credentials: keep them private.
 
 ## Diagnostics
 
-`GET /api/x-gateway/tools/diagnostics` reports configuration without running any
+`GET /api/thruline/tools/diagnostics` reports configuration without running any
 paid inference. **Configured** means settings/accounts exist, **unverified** means
 no recent execution evidence, **ready** means a successful recent text probe for
 the displayed protocol/model/key, and **unavailable** means disabled/missing or

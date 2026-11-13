@@ -23,13 +23,13 @@ function createTestApp() {
   const app = express();
   app.use(express.json());
   app.use(
-    '/api/x-gateway/proxy-pool',
+    '/api/thruline/proxy-pool',
     requireAuth,
     requireActionPermission('manage_x_gateway'),
     xProxyPoolRouter,
   );
   app.use(
-    '/api/x-accounts',
+    '/api/thruline-accounts',
     requireAuth,
     requireActionPermission('manage_keys'),
     providerAccountsRouter,
@@ -139,7 +139,7 @@ describe('X Gateway Proxy Pool', () => {
   let entryB: number;
 
   it('creates entries with masked URLs and lists them', async () => {
-    const created = await requestX('/api/x-gateway/proxy-pool', {
+    const created = await requestX('/api/thruline/proxy-pool', {
       method: 'POST', key: adminSession, body: { name: 'Proxy A', proxyUrl: URL_A },
     });
     expect(created.status).toBe(201);
@@ -148,13 +148,13 @@ describe('X Gateway Proxy Pool', () => {
     });
     entryA = created.body.entry.id;
 
-    const second = await requestX('/api/x-gateway/proxy-pool', {
+    const second = await requestX('/api/thruline/proxy-pool', {
       method: 'POST', key: adminSession, body: { name: 'Proxy B', proxyUrl: URL_B },
     });
     expect(second.status).toBe(201);
     entryB = second.body.entry.id;
 
-    const list = await requestX('/api/x-gateway/proxy-pool', { key: adminSession });
+    const list = await requestX('/api/thruline/proxy-pool', { key: adminSession });
     expect(list.status).toBe(200);
     expect(list.body.entries).toHaveLength(2);
     expect(JSON.stringify(list.body)).not.toContain('secreta');
@@ -162,28 +162,28 @@ describe('X Gateway Proxy Pool', () => {
   });
 
   it('rejects invalid URLs, duplicate names and bad ids', async () => {
-    const badUrl = await requestX('/api/x-gateway/proxy-pool', {
+    const badUrl = await requestX('/api/thruline/proxy-pool', {
       method: 'POST', key: adminSession, body: { name: 'Bad', proxyUrl: 'ftp://198.51.100.13:21' },
     });
     expect(badUrl.status).toBe(400);
-    const dup = await requestX('/api/x-gateway/proxy-pool', {
+    const dup = await requestX('/api/thruline/proxy-pool', {
       method: 'POST', key: adminSession, body: { name: 'proxy a', proxyUrl: URL_A },
     });
     expect(dup.status).toBe(409);
-    const badId = await requestX('/api/x-gateway/proxy-pool/abc', { method: 'PATCH', key: adminSession, body: { name: 'X' } });
+    const badId = await requestX('/api/thruline/proxy-pool/abc', { method: 'PATCH', key: adminSession, body: { name: 'X' } });
     expect(badId.status).toBe(400);
-    const missing = await requestX('/api/x-gateway/proxy-pool/999999', { method: 'DELETE', key: adminSession });
+    const missing = await requestX('/api/thruline/proxy-pool/999999', { method: 'DELETE', key: adminSession });
     expect(missing.status).toBe(404);
   });
 
   it('gates reads at use_x_gateway and writes at edit_x_settings', async () => {
-    const read = await requestX('/api/x-gateway/proxy-pool', { key: memberSession });
+    const read = await requestX('/api/thruline/proxy-pool', { key: memberSession });
     expect(read.status).toBe(200);
-    const write = await requestX('/api/x-gateway/proxy-pool', {
+    const write = await requestX('/api/thruline/proxy-pool', {
       method: 'POST', key: memberSession, body: { name: 'Member', proxyUrl: URL_A },
     });
     expect(write.status).toBe(403);
-    const anonymous = await requestX('/api/x-gateway/proxy-pool');
+    const anonymous = await requestX('/api/thruline/proxy-pool');
     expect(anonymous.status).toBe(401);
   });
 
@@ -219,14 +219,14 @@ describe('X Gateway Proxy Pool', () => {
     const bound = createApiKeyAccount({ provider: 'groq', key: 'gsk_bound', proxyPoolId: entryA });
     expect(resolveXGatewayAccountProxy(accountRow(bound))).toBe(URL_A);
 
-    const disable = await requestX(`/api/x-gateway/proxy-pool/${entryA}`, {
+    const disable = await requestX(`/api/thruline/proxy-pool/${entryA}`, {
       method: 'PATCH', key: adminSession, body: { enabled: false },
     });
     expect(disable.status).toBe(200);
     expect(disable.body.entry.enabled).toBe(false);
     expect(resolveXGatewayAccountProxy(accountRow(bound))).toBe(GATEWAY);
 
-    const del = await requestX(`/api/x-gateway/proxy-pool/${entryA}`, { method: 'DELETE', key: adminSession });
+    const del = await requestX(`/api/thruline/proxy-pool/${entryA}`, { method: 'DELETE', key: adminSession });
     expect(del.status).toBe(200);
     expect(accountRow(bound).proxy_pool_id).toBeNull();
     expect(resolveXGatewayAccountProxy(accountRow(bound))).toBe(GATEWAY);
@@ -237,19 +237,19 @@ describe('X Gateway Proxy Pool', () => {
 
   it('binds and unbinds accounts over the accounts API and exposes the pool name', async () => {
     const id = createApiKeyAccount({ provider: 'groq', key: 'gsk_bind', proxyPoolId: null });
-    const bind = await requestX(`/api/x-accounts/${id}`, { method: 'PATCH', key: adminSession, body: { proxyPoolId: entryB } });
+    const bind = await requestX(`/api/thruline-accounts/${id}`, { method: 'PATCH', key: adminSession, body: { proxyPoolId: entryB } });
     expect(bind.status).toBe(200);
     expect(accountRow(id).proxy_pool_id).toBe(entryB);
 
-    const list = await requestX('/api/x-accounts', { key: adminSession });
+    const list = await requestX('/api/thruline-accounts', { key: adminSession });
     const account = list.body.providers.flatMap((p: any) => p.accounts).find((a: any) => a.id === id);
     expect(account.proxyPoolId).toBe(entryB);
     expect(account.proxyPoolName).toBe('Proxy B');
 
-    const badBind = await requestX(`/api/x-accounts/${id}`, { method: 'PATCH', key: adminSession, body: { proxyPoolId: 999999 } });
+    const badBind = await requestX(`/api/thruline-accounts/${id}`, { method: 'PATCH', key: adminSession, body: { proxyPoolId: 999999 } });
     expect(badBind.status).toBe(400);
 
-    const unbind = await requestX(`/api/x-accounts/${id}`, { method: 'PATCH', key: adminSession, body: { proxyPoolId: null } });
+    const unbind = await requestX(`/api/thruline-accounts/${id}`, { method: 'PATCH', key: adminSession, body: { proxyPoolId: null } });
     expect(unbind.status).toBe(200);
     expect(accountRow(id).proxy_pool_id).toBeNull();
   });
@@ -257,25 +257,25 @@ describe('X Gateway Proxy Pool', () => {
   it('tests an entry through the probe helper without leaking credentials', async () => {
     // HTTP entry: the probe rides global fetch (mockable); SOCKS entries use
     // http.request and would attempt a real connection.
-    const created = await requestX('/api/x-gateway/proxy-pool', {
+    const created = await requestX('/api/thruline/proxy-pool', {
       method: 'POST', key: adminSession, body: { name: 'Probe', proxyUrl: 'http://userc:secretc@198.51.100.14:8080' },
     });
     const probeId = created.body.entry.id;
-    const ok = await requestX(`/api/x-gateway/proxy-pool/${probeId}/test`, { method: 'POST', key: adminSession, body: {} });
+    const ok = await requestX(`/api/thruline/proxy-pool/${probeId}/test`, { method: 'POST', key: adminSession, body: {} });
     expect(ok.status).toBe(200);
     expect(ok.body.ok).toBe(true);
     expect(ok.body.status).toBe(204);
     expect(typeof ok.body.latencyMs).toBe('number');
 
     vi.mocked(global.fetch).mockImplementationOnce(async () => { throw new Error('connect ECONNREFUSED userc:secretc@198.51.100.14:8080'); });
-    const failed = await requestX(`/api/x-gateway/proxy-pool/${probeId}/test`, { method: 'POST', key: adminSession, body: {} });
+    const failed = await requestX(`/api/thruline/proxy-pool/${probeId}/test`, { method: 'POST', key: adminSession, body: {} });
     expect(failed.status).toBe(200);
     expect(failed.body.ok).toBe(false);
     expect(JSON.stringify(failed.body)).not.toContain('secretc');
 
     // When global proxy mode is fetch-relay, pool entries must still probe in forward mode
     applyProxyMode('fetch-relay');
-    const inRelayMode = await requestX(`/api/x-gateway/proxy-pool/${probeId}/test`, { method: 'POST', key: adminSession, body: {} });
+    const inRelayMode = await requestX(`/api/thruline/proxy-pool/${probeId}/test`, { method: 'POST', key: adminSession, body: {} });
     expect(inRelayMode.status).toBe(200);
     expect(inRelayMode.body.ok).toBe(true);
     expect(inRelayMode.body.status).toBe(204);
@@ -292,14 +292,14 @@ describe('X Gateway Proxy Pool', () => {
       'bad_proxy_line_here',
     ].join('\n');
 
-    const unauth = await requestX('/api/x-gateway/proxy-pool/batch-import', {
+    const unauth = await requestX('/api/thruline/proxy-pool/batch-import', {
       method: 'POST',
       key: memberSession,
       body: { proxies: rawProxies },
     });
     expect(unauth.status).toBe(403);
 
-    const res = await requestX('/api/x-gateway/proxy-pool/batch-import', {
+    const res = await requestX('/api/thruline/proxy-pool/batch-import', {
       method: 'POST',
       key: adminSession,
       body: { proxies: rawProxies },
@@ -319,7 +319,7 @@ describe('X Gateway Proxy Pool', () => {
   });
 
   it('tests all enabled proxies in batch with health summary', async () => {
-    const res = await requestX('/api/x-gateway/proxy-pool/test-all', {
+    const res = await requestX('/api/thruline/proxy-pool/test-all', {
       method: 'POST',
       key: adminSession,
       body: {},
@@ -341,12 +341,12 @@ describe('X Gateway Proxy Pool', () => {
   });
 
   it('performs bulk actions: enable, disable, and delete', async () => {
-    const p1 = await requestX('/api/x-gateway/proxy-pool', {
+    const p1 = await requestX('/api/thruline/proxy-pool', {
       method: 'POST',
       key: adminSession,
       body: { name: 'Bulk 1', proxyUrl: 'http://198.51.100.41:8080' },
     });
-    const p2 = await requestX('/api/x-gateway/proxy-pool', {
+    const p2 = await requestX('/api/thruline/proxy-pool', {
       method: 'POST',
       key: adminSession,
       body: { name: 'Bulk 2', proxyUrl: 'http://198.51.100.42:8080' },
@@ -355,7 +355,7 @@ describe('X Gateway Proxy Pool', () => {
     const id2 = p2.body.entry.id;
 
     // Bulk disable
-    const dis = await requestX('/api/x-gateway/proxy-pool/bulk-action', {
+    const dis = await requestX('/api/thruline/proxy-pool/bulk-action', {
       method: 'POST',
       key: adminSession,
       body: { action: 'disable', ids: [id1, id2] },
@@ -363,14 +363,14 @@ describe('X Gateway Proxy Pool', () => {
     expect(dis.status).toBe(200);
     expect(dis.body.affected).toBe(2);
 
-    const list1 = await requestX('/api/x-gateway/proxy-pool', { key: adminSession });
+    const list1 = await requestX('/api/thruline/proxy-pool', { key: adminSession });
     const entry1 = list1.body.entries.find((e: any) => e.id === id1);
     const entry2 = list1.body.entries.find((e: any) => e.id === id2);
     expect(entry1.enabled).toBe(false);
     expect(entry2.enabled).toBe(false);
 
     // Bulk enable
-    const ena = await requestX('/api/x-gateway/proxy-pool/bulk-action', {
+    const ena = await requestX('/api/thruline/proxy-pool/bulk-action', {
       method: 'POST',
       key: adminSession,
       body: { action: 'enable', ids: [id1, id2] },
@@ -379,7 +379,7 @@ describe('X Gateway Proxy Pool', () => {
     expect(ena.body.affected).toBe(2);
 
     // Bulk delete
-    const del = await requestX('/api/x-gateway/proxy-pool/bulk-action', {
+    const del = await requestX('/api/thruline/proxy-pool/bulk-action', {
       method: 'POST',
       key: adminSession,
       body: { action: 'delete', ids: [id1, id2] },
@@ -387,17 +387,17 @@ describe('X Gateway Proxy Pool', () => {
     expect(del.status).toBe(200);
     expect(del.body.affected).toBe(2);
 
-    const list2 = await requestX('/api/x-gateway/proxy-pool', { key: adminSession });
+    const list2 = await requestX('/api/thruline/proxy-pool', { key: adminSession });
     expect(list2.body.entries.some((e: any) => e.id === id1 || e.id === id2)).toBe(false);
   });
 
   it('manages proxy pool config: noProxy bypass list and strictProxy flag', async () => {
-    const initial = await requestX('/api/x-gateway/proxy-pool/config', { key: adminSession });
+    const initial = await requestX('/api/thruline/proxy-pool/config', { key: adminSession });
     expect(initial.status).toBe(200);
     expect(initial.body.config).toHaveProperty('noProxy');
     expect(initial.body.config).toHaveProperty('strictProxy');
 
-    const update = await requestX('/api/x-gateway/proxy-pool/config', {
+    const update = await requestX('/api/thruline/proxy-pool/config', {
       method: 'POST',
       key: adminSession,
       body: {
@@ -420,13 +420,13 @@ describe('X Gateway Proxy Pool', () => {
 
   it('deploys serverless relay workers to Cloudflare and Vercel and registers them in pool', async () => {
     // Check relay template endpoint
-    const tmpl = await requestX('/api/x-gateway/proxy-pool/relay-template', { key: adminSession });
+    const tmpl = await requestX('/api/thruline/proxy-pool/relay-template', { key: adminSession });
     expect(tmpl.status).toBe(200);
     expect(tmpl.body.cloudflare).toContain('fetch-relay-target');
     expect(tmpl.body.vercel).toContain('fetch-relay-target');
 
     // Deploy to Cloudflare
-    const cfDeploy = await requestX('/api/x-gateway/proxy-pool/deploy-worker', {
+    const cfDeploy = await requestX('/api/thruline/proxy-pool/deploy-worker', {
       method: 'POST',
       key: adminSession,
       body: {
@@ -444,7 +444,7 @@ describe('X Gateway Proxy Pool', () => {
     expect(cfDeploy.body.entry.proxyUrl).toBe('https://cf-unit-relay.my-team.workers.dev');
 
     // Deploy to Vercel
-    const vercelDeploy = await requestX('/api/x-gateway/proxy-pool/deploy-worker', {
+    const vercelDeploy = await requestX('/api/thruline/proxy-pool/deploy-worker', {
       method: 'POST',
       key: adminSession,
       body: {

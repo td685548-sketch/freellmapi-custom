@@ -59,11 +59,11 @@ beforeAll(async () => {
   otherToken = createSession(otherId);
   const app = express();
   app.use(express.json());
-  app.use('/api/x-accounts', providerAccountsRouter);
+  app.use('/api/thruline-accounts', providerAccountsRouter);
   server = await new Promise(resolve => {
     const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
   });
-  base = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/x-accounts`;
+  base = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/thruline-accounts`;
 });
 afterAll(() => new Promise<void>(resolve => server.close(() => resolve())));
 beforeEach(() => {
@@ -156,7 +156,7 @@ describe('provider account authorization', () => {
   });
 
   it('allows protocol+Host callback fallback, strictly validates request bodies and IDs', async () => {
-    expect((await call('POST', '/auth/openrouter/start', { label: '', callbackUrl: base.replace('/api/x-accounts', '/thruline/accounts/callback') })).status).toBe(200);
+    expect((await call('POST', '/auth/openrouter/start', { label: '', callbackUrl: base.replace('/api/thruline-accounts', '/thruline/accounts/callback') })).status).toBe(200);
     expect((await startOpenRouter({ injected: true })).status).toBe(400);
     expect((await startOpenRouter({ label: 'line\nbreak' })).status).toBe(400);
     expect((await call('PATCH', '/1garbage', { label: 'test' })).status).toBe(400);
@@ -441,7 +441,7 @@ describe('GitHub Copilot device accounts', () => {
   });
 });
 
-it('supports adding 9Router API key accounts via POST /api/x-accounts, monthly usage, action permissions, and OpenRouter reconnect', async () => {
+it('supports adding 9Router API key accounts via POST /api/thruline-accounts, monthly usage, action permissions, and OpenRouter reconnect', async () => {
   const created = await call('POST', '/', { provider: 'openrouter', key: 'ordinary-openrouter-key', label: 'Existing API key' });
   expect(created.status).toBe(201);
   const ordinary = created.body.id as number;

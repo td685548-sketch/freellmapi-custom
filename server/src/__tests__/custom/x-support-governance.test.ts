@@ -26,7 +26,7 @@ import {
 import { createOrAppendSupportConversation } from '../../custom/x-gateway/support-workflows.js';
 import { drainSupportEventOutbox } from '../../custom/x-gateway/support-event-outbox.js';
 
-describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x-gateway/support/* & /thruline/v1/support/*)', () => {
+describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/thruline/support/* & /thruline/v1/support/*)', () => {
   let server: Server;
   let base: string;
   let editorToken: string;
@@ -135,26 +135,26 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
   }
 
   // =========================================================================
-  // 1. Admin Console API Tests (/api/x-gateway/support/*)
+  // 1. Admin Console API Tests (/api/thruline/support/*)
   // =========================================================================
-  describe('Admin Console API (/api/x-gateway/support/*)', () => {
+  describe('Admin Console API (/api/thruline/support/*)', () => {
     let createdWebhookId: string;
 
     it('0. Enforces authentication and permissions on console routes', async () => {
       // Missing auth -> 401
-      const unauthRes = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/guardrails`);
+      const unauthRes = await apiCall(`/api/thruline/support/tenants/${tenant.id}/guardrails`);
       expect(unauthRes.status).toBe(401);
 
       // Plain member without permissions -> 403
       const forbiddenRes = await apiCall(
-        `/api/x-gateway/support/tenants/${tenant.id}/guardrails`,
+        `/api/thruline/support/tenants/${tenant.id}/guardrails`,
         { token: memberToken },
       );
       expect(forbiddenRes.status).toBe(403);
     });
 
     it('1. GET /guardrails returns default guardrail policy', async () => {
-      const res = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/guardrails`, {
+      const res = await apiCall(`/api/thruline/support/tenants/${tenant.id}/guardrails`, {
         token: editorToken,
       });
       expect(res.status).toBe(200);
@@ -168,7 +168,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
     });
 
     it('2. PUT /guardrails updates policy with custom detectors and competitor blocked topics', async () => {
-      const res = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/guardrails`, {
+      const res = await apiCall(`/api/thruline/support/tenants/${tenant.id}/guardrails`, {
         method: 'PUT',
         token: editorToken,
         body: {
@@ -192,7 +192,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
     it('3. POST /guardrails/evaluate tests input against injection and blocked topics', async () => {
       // Injection test
       const injRes = await apiCall(
-        `/api/x-gateway/support/tenants/${tenant.id}/guardrails/evaluate`,
+        `/api/thruline/support/tenants/${tenant.id}/guardrails/evaluate`,
         {
           method: 'POST',
           token: editorToken,
@@ -211,7 +211,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
 
       // Blocked topic test
       const topicRes = await apiCall(
-        `/api/x-gateway/support/tenants/${tenant.id}/guardrails/evaluate`,
+        `/api/thruline/support/tenants/${tenant.id}/guardrails/evaluate`,
         {
           method: 'POST',
           token: editorToken,
@@ -230,7 +230,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
 
       // Clean input test
       const cleanRes = await apiCall(
-        `/api/x-gateway/support/tenants/${tenant.id}/guardrails/evaluate`,
+        `/api/thruline/support/tenants/${tenant.id}/guardrails/evaluate`,
         {
           method: 'POST',
           token: editorToken,
@@ -249,7 +249,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
 
     it('4. GET /quotas/:userId returns quota status for customer role', async () => {
       const res = await apiCall(
-        `/api/x-gateway/support/tenants/${tenant.id}/quotas/cust_alice?role=customer`,
+        `/api/thruline/support/tenants/${tenant.id}/quotas/cust_alice?role=customer`,
         {
           token: editorToken,
         },
@@ -263,7 +263,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
     });
 
     it('5. POST /quotas/reset resets quota counters', async () => {
-      const res = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/quotas/reset`, {
+      const res = await apiCall(`/api/thruline/support/tenants/${tenant.id}/quotas/reset`, {
         method: 'POST',
         token: editorToken,
         body: { userId: 'cust_alice' },
@@ -289,7 +289,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
         tags: ['retail'],
       });
 
-      const listRes = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/customers`, {
+      const listRes = await apiCall(`/api/thruline/support/tenants/${tenant.id}/customers`, {
         token: editorToken,
       });
       expect(listRes.status).toBe(200);
@@ -299,7 +299,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
 
       // Filter by tier
       const filterRes = await apiCall(
-        `/api/x-gateway/support/tenants/${tenant.id}/customers?tier=vip`,
+        `/api/thruline/support/tenants/${tenant.id}/customers?tier=vip`,
         {
           token: editorToken,
         },
@@ -310,7 +310,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
     });
 
     it('7. POST /customers creates or updates customer CRM profile', async () => {
-      const res = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/customers`, {
+      const res = await apiCall(`/api/thruline/support/tenants/${tenant.id}/customers`, {
         method: 'POST',
         token: editorToken,
         body: {
@@ -333,7 +333,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
       expect(data.customer.memoryFacts).toEqual(['Prefers email notifications']);
 
       // Bad request test when userId is missing
-      const badRes = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/customers`, {
+      const badRes = await apiCall(`/api/thruline/support/tenants/${tenant.id}/customers`, {
         method: 'POST',
         token: editorToken,
         body: { name: 'No User ID' },
@@ -343,7 +343,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
 
     it('8. GET /customers/:userId returns profile and generated memoryPrompt', async () => {
       const res = await apiCall(
-        `/api/x-gateway/support/tenants/${tenant.id}/customers/cust_crm_bob`,
+        `/api/thruline/support/tenants/${tenant.id}/customers/cust_crm_bob`,
         {
           token: editorToken,
         },
@@ -362,7 +362,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
 
     it('9. POST /customers/:userId/facts appends a customer memory fact', async () => {
       const res = await apiCall(
-        `/api/x-gateway/support/tenants/${tenant.id}/customers/cust_crm_bob/facts`,
+        `/api/thruline/support/tenants/${tenant.id}/customers/cust_crm_bob/facts`,
         {
           method: 'POST',
           token: editorToken,
@@ -381,7 +381,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
 
       // Empty fact validation
       const emptyRes = await apiCall(
-        `/api/x-gateway/support/tenants/${tenant.id}/customers/cust_crm_bob/facts`,
+        `/api/thruline/support/tenants/${tenant.id}/customers/cust_crm_bob/facts`,
         {
           method: 'POST',
           token: editorToken,
@@ -392,7 +392,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
     });
 
     it('10. GET /csat returns ratings and summary metrics', async () => {
-      const res = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/csat`, {
+      const res = await apiCall(`/api/thruline/support/tenants/${tenant.id}/csat`, {
         token: editorToken,
       });
       expect(res.status).toBe(200);
@@ -407,7 +407,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
     });
 
     it('11. GET /webhooks lists subscriptions and deliveries', async () => {
-      const res = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/webhooks`, {
+      const res = await apiCall(`/api/thruline/support/tenants/${tenant.id}/webhooks`, {
         token: editorToken,
       });
       expect(res.status).toBe(200);
@@ -422,7 +422,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
     });
 
     it('12. POST /webhooks creates subscription and DELETE removes it', async () => {
-      const createRes = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/webhooks`, {
+      const createRes = await apiCall(`/api/thruline/support/tenants/${tenant.id}/webhooks`, {
         method: 'POST',
         token: editorToken,
         body: {
@@ -442,7 +442,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
       createdWebhookId = createData.webhook.id;
 
       // Bad request when missing required fields
-      const badRes = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/webhooks`, {
+      const badRes = await apiCall(`/api/thruline/support/tenants/${tenant.id}/webhooks`, {
         method: 'POST',
         token: editorToken,
         body: { name: 'Incomplete' },
@@ -451,7 +451,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
 
       // DELETE /webhooks/:id
       const delRes = await apiCall(
-        `/api/x-gateway/support/tenants/${tenant.id}/webhooks/${createdWebhookId}`,
+        `/api/thruline/support/tenants/${tenant.id}/webhooks/${createdWebhookId}`,
         {
           method: 'DELETE',
           token: editorToken,
@@ -482,7 +482,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
       });
 
       try {
-        const res = await apiCall(`/api/x-gateway/support/tenants/${tenant.id}/webhooks/test`, {
+        const res = await apiCall(`/api/thruline/support/tenants/${tenant.id}/webhooks/test`, {
           method: 'POST',
           token: editorToken,
           body: {
