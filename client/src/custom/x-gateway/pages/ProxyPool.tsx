@@ -27,6 +27,7 @@ import {
   type XProxyPoolTestResult,
 } from '../proxy-pool-api'
 import { usePoolStrings } from '../proxy-pool-strings'
+import { askConfirm } from '../shell/confirm'
 
 interface Draft {
   id?: number
@@ -727,9 +728,9 @@ export default function ProxyPool() {
               <button
                 className="x-button x-small x-danger"
                 disabled={bulkAction.isPending}
-                onClick={() => {
+                onClick={async () => {
                   if (
-                    window.confirm(
+                    await askConfirm(
                       s.bulkDeleteConfirm.replace('{count}', String(selectedIds.size)),
                     )
                   ) {
@@ -964,8 +965,8 @@ export default function ProxyPool() {
                           title={s.regenerateToken}
                           aria-label={s.regenerateToken}
                           disabled={regenerateToken.isPending}
-                          onClick={() => {
-                            if (window.confirm(s.regenerateTokenConfirm)) {
+                          onClick={async () => {
+                            if (await askConfirm(s.regenerateTokenConfirm)) {
                               regenerateToken.mutate(entry.id)
                             }
                           }}
@@ -1055,8 +1056,8 @@ export default function ProxyPool() {
                       aria-label={`${s.remove}: ${entry.name}`}
                       title={s.remove}
                       disabled={remove.isPending}
-                      onClick={() => {
-                        if (window.confirm(s.deleteConfirm)) remove.mutate(entry.id)
+                      onClick={async () => {
+                        if (await askConfirm(s.deleteConfirm)) remove.mutate(entry.id)
                       }}
                     >
                       <Trash2 size={15} />

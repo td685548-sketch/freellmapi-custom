@@ -1,7 +1,7 @@
 import { shader } from './shader'
 
 /** Total running time, and the point at which the wall fully hides the page. */
-export const DURATION_MS = 1700
+export const DURATION_MS = 2200
 export const COVERED_AT = 0.5
 
 const SAMPLES = 4

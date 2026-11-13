@@ -28,7 +28,7 @@ const schema = z.object({
 // contains no account/credential metadata and does not require view_keys.
 xPlaygroundRouter.get('/playground/models', (_req, res) => {
   const snapshot = getConfigSnapshot();
-  const models: PlaygroundCatalog['models'] = [{ id: 'auto', name: 'Auto', provider: 'X Gateway' }];
+  const models: PlaygroundCatalog['models'] = [{ id: 'auto', name: 'Auto', provider: 'Thruline' }];
   const seen = new Set(['auto']);
   for (const combo of snapshot.combos) models.push({ id: `combo:${combo.name}`, name: combo.name, provider: 'Combos' });
   for (const account of getUsableXGatewayKeys()) {
@@ -47,7 +47,7 @@ xPlaygroundRouter.get('/playground/models', (_req, res) => {
 
 xPlaygroundRouter.post('/playground/chat', async (req, res) => {
   if (!getConfigSnapshot().enabled) {
-    res.status(404).json({ error: { type: 'gateway_disabled', message: 'Enable X Gateway before chatting.' } });
+    res.status(404).json({ error: { type: 'gateway_disabled', message: 'Enable Thruline before chatting.' } });
     return;
   }
   const parsed = schema.safeParse(req.body);

@@ -22,7 +22,7 @@ export function gatewayDiagnostics(sessionId: string, now = Date.now()): Gateway
     && !(account.monthly_token_cap > 0 && account.tokens >= account.monthly_token_cap)).length;
   const turso = isTursoDatabase(getDb());
   const capabilities: GatewayDiagnostics['capabilities'] = [
-    { id: 'gateway', state: snapshot.enabled ? 'configured' : 'unavailable', detail: snapshot.enabled ? 'Enabled; run a connection test to verify inference.' : 'Enable X Gateway first.' },
+    { id: 'gateway', state: snapshot.enabled ? 'configured' : 'unavailable', detail: snapshot.enabled ? 'Enabled; run a connection test to verify inference.' : 'Enable Thruline first.' },
     { id: 'providers', state: available ? 'configured' : 'unavailable', detail: available ? `${available} enabled account(s) within local caps. Credentials and upstream service still require a live test.` : 'No enabled accounts within local caps.' },
     { id: 'combos', state: snapshot.combos.length ? 'configured' : 'unavailable', detail: `${snapshot.combos.length} saved combo(s). Test a combo model explicitly to verify routing.` },
     { id: 'savers', state: 'unverified', detail: 'Saver configuration is separate from execution. This diagnostic does not verify compression or savings.' },

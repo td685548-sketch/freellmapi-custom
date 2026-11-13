@@ -56,7 +56,7 @@ function gate(token: string, req: Request, res: Response, next: NextFunction): v
   if (isXGatewayClientKey(token) && !isXGateway) {
     res.status(401).json({
       error: {
-        message: 'X Gateway API keys (sk-xgw-...) are scoped exclusively to /x/v1 and /v1beta endpoints.',
+        message: 'Thruline API keys (sk-xgw-...) are scoped exclusively to /x/v1 and /v1beta endpoints.',
         type: 'invalid_request_error',
         code: 'invalid_api_key',
       },

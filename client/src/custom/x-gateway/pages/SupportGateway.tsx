@@ -30,6 +30,7 @@ import { apiFetch } from '@/lib/api'
 import { useUserSession } from '../../use-session'
 import { useSessionRevision } from '../../session-state'
 import { useSupportStrings } from '../support-strings'
+import { askConfirm } from '../shell/confirm'
 
 // ---------------------------------------------------------------------------
 // TypeScript Interfaces
@@ -1207,8 +1208,8 @@ export default function SupportGateway() {
                         type="button"
                         className="x-button x-small"
                         disabled={rotateSecretMutation.isPending}
-                        onClick={() => {
-                          if (window.confirm(s.rotateSecretConfirm)) {
+                        onClick={async () => {
+                          if (await askConfirm(s.rotateSecretConfirm)) {
                             rotateSecretMutation.mutate(activeTenant.id)
                           }
                         }}
@@ -1223,8 +1224,8 @@ export default function SupportGateway() {
                         type="button"
                         className="x-button x-destructive x-small"
                         disabled={deleteTenantMutation.isPending}
-                        onClick={() => {
-                          if (window.confirm(s.deleteTenantConfirm)) {
+                        onClick={async () => {
+                          if (await askConfirm(s.deleteTenantConfirm)) {
                             deleteTenantMutation.mutate(activeTenant.id)
                           }
                         }}
@@ -1326,8 +1327,8 @@ export default function SupportGateway() {
                                 type="button"
                                 className="x-icon-button x-danger"
                                 aria-label={`${s.delete} ${tool.name}`}
-                                onClick={() => {
-                                  if (window.confirm(s.deleteWebhookToolConfirm)) {
+                                onClick={async () => {
+                                  if (await askConfirm(s.deleteWebhookToolConfirm)) {
                                     deleteToolMutation.mutate(tool.id)
                                   }
                                 }}
@@ -1573,8 +1574,8 @@ export default function SupportGateway() {
                             type="button"
                             className="x-icon-button x-danger"
                             aria-label={`${s.delete} ${source.name}`}
-                            onClick={() => {
-                              if (window.confirm(s.deleteDbSourceConfirm)) {
+                            onClick={async () => {
+                              if (await askConfirm(s.deleteDbSourceConfirm)) {
                                 deleteDbSourceMutation.mutate(source.id)
                               }
                             }}

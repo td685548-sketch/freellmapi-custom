@@ -8,6 +8,7 @@ import { useSessionRevision } from '../../session-state'
 import { useAccounts } from '../api'
 import { mgmtApi, type ComboEntry, type ComboPayload, type ComboStrategy, type XCombo } from '../management-api'
 import { useMgmtStrings } from '../management-strings'
+import { askConfirm } from '../shell/confirm'
 
 /** Router policy fields live on the server combo but not yet in the shared
  *  management API types (owned by another track), so the console carries them
@@ -461,7 +462,7 @@ export default function Combos() {
     {combos.length > 0 && filtered.length === 0 && !draft && <div className="x-empty"><p>{s.noSearchResults}</p></div>}
     {canEdit && filtered.length > 0 && <div className="x-mgmt-actions" style={{ alignItems: 'center' }}>
       <button type="button" className="x-button" onClick={toggleAllVisible}>{allVisibleSelected ? s.clearSelection : s.selectAll}</button>
-      {selected.size > 0 && <button type="button" className="x-button" disabled={bulkRemove.isPending} onClick={() => { if (window.confirm(s.bulkDeleteConfirm)) bulkRemove.mutate([...selected]) }}>
+      {selected.size > 0 && <button type="button" className="x-button" disabled={bulkRemove.isPending} onClick={async () => { if (await askConfirm(s.bulkDeleteConfirm)) bulkRemove.mutate([...selected]) }}>
         <Trash2 size={15} />{s.bulkDelete} ({selected.size})
       </button>}
     </div>}
@@ -486,7 +487,7 @@ export default function Combos() {
               {STRATEGIES.map(option => <option key={option} value={option}>{strategyLabels[option]}</option>)}
             </select>
             <button className="x-button" aria-label={s.edit} onClick={() => startEdit(c)}><Pencil size={15} /></button>
-            <button className="x-button" aria-label={s.remove} disabled={remove.isPending} onClick={() => { if (window.confirm(s.deleteConfirm)) remove.mutate(c.id) }}><Trash2 size={15} /></button>
+            <button className="x-button" aria-label={s.remove} disabled={remove.isPending} onClick={async () => { if (await askConfirm(s.deleteConfirm)) remove.mutate(c.id) }}><Trash2 size={15} /></button>
           </div>}
         </header>
         {c.description && <p className="x-caption">{c.description}</p>}

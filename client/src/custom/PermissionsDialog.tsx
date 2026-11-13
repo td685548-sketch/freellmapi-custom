@@ -142,7 +142,7 @@ function PermissionEditor({ user, open, onOpenChange, onSuccess }: Omit<Permissi
             </div>
           </div>
 
-          {/* 2 mục phân quyền riêng: FreeLLMAPI và X Gateway */}
+          {/* 2 mục phân quyền riêng: FreeLLMAPI và Thruline */}
           <div className="flex rounded-xl bg-muted p-1 gap-1" role="tablist" aria-label="Permission categories">
             <button
               type="button"
@@ -177,7 +177,7 @@ function PermissionEditor({ user, open, onOpenChange, onSuccess }: Omit<Permissi
               }`}
             >
               <Layers className="size-3.5" />
-              <span>{tc('X Gateway (9Router)')}</span>
+              <span>{tc('Thruline (9Router)')}</span>
               {xGatewayCount > 0 && (
                 <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
                   activeTab === 'x_gateway' ? 'bg-primary/10 text-primary' : 'bg-muted-foreground/15 text-muted-foreground'
@@ -199,7 +199,7 @@ function PermissionEditor({ user, open, onOpenChange, onSuccess }: Omit<Permissi
                 onClick={selectAllInActiveTab}
                 className="text-[11px] text-primary hover:underline underline-offset-2 disabled:opacity-50 disabled:no-underline"
               >
-                {activeTab === 'freellmapi' ? tc('Select all FreeLLMAPI') : tc('Select all X Gateway')}
+                {activeTab === 'freellmapi' ? tc('Select all FreeLLMAPI') : tc('Select all Thruline')}
               </button>
               <span>•</span>
               <button
