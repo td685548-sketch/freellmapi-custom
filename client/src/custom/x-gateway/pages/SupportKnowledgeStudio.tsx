@@ -351,7 +351,7 @@ function SourcesPanel({
 
       {/* Create Source Card */}
       {canEdit && (
-        <div className="x-card" style={{ padding: 16, background: 'var(--x-alt)', border: '1px solid var(--x-border)', borderRadius: 8 }}>
+        <div className="x-card" style={{ padding: 16, background: 'var(--x-alt)', border: '1px solid var(--x-border)', borderRadius: 8, color: 'var(--x-text)' }}>
           <h3 style={{ margin: '0 0 12px 0', fontSize: 15 }}>{s.sources.newSource}</h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 12 }}>
             <div className="x-field">
@@ -1138,7 +1138,7 @@ function PolicyPanel({
         conflict={conflictOccurred}
       />
 
-      <div className="x-card" style={{ padding: 16, background: 'var(--x-panel)', border: '1px solid var(--x-border)', borderRadius: 8 }}>
+      <div className="x-card" style={{ padding: 16, background: 'var(--x-panel)', border: '1px solid var(--x-border)', borderRadius: 8, color: 'var(--x-text)' }}>
         {/* Mode selector */}
         <div className="x-field" style={{ marginBottom: 16 }}>
           <label htmlFor="policy-mode-select">
@@ -1761,7 +1761,7 @@ function EvaluationsPanel({
 
       {/* Run Results View */}
       {selectedRun && (
-        <div data-testid="evaluation-run-results" className="x-card" style={{ padding: 16, background: 'var(--x-panel)', border: '2px solid var(--x-primary)', borderRadius: 8 }}>
+        <div data-testid="evaluation-run-results" className="x-card" style={{ padding: 16, background: 'var(--x-panel)', border: '2px solid var(--x-primary)', borderRadius: 8, color: 'var(--x-text)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <h4 style={{ margin: 0, fontSize: 15 }}>Run Details ({selectedRun.id})</h4>
             <span
