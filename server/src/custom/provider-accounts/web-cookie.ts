@@ -718,7 +718,7 @@ export class AnthropicWireProvider extends BaseProvider {
     const credential = parseOAuthCredential(apiKey);
     if (credential) {
       if (credential.kind !== 'claude') throw new Error('Claude requires a matching OAuth credential.');
-      return { ...this.extraHeaders, 'Content-Type': 'application/json', Authorization: `Bearer ${credential.accessToken}`, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14', 'User-Agent': 'claude-cli/2.1.280 (external, sdk-cli)', 'x-app': 'cli' };
+      return { ...this.extraHeaders, 'Content-Type': 'application/json', Authorization: `Bearer ${credential.accessToken}`, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14', 'User-Agent': 'claude-cli/2.1.290 (external, sdk-cli)', 'x-app': 'cli' };
     }
     const token = apiKey.trim().replace(/^Bearer\s+/i, '');
     return {

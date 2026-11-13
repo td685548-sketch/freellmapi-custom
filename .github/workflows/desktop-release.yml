@@ -75,7 +75,8 @@ jobs:
               desktop/dist-electron/*.zip
               desktop/dist-electron/*.blockmap
               desktop/dist-electron/latest-mac.yml
-          # Keep the RPM packaging toolchain stable; ubuntu-latest now uses 26.04.
+          # electron-builder 25's FPM/RPM tooling is incompatible with the
+          # Ubuntu 26.04 runner. Keep all Linux package formats on the tested LTS.
           - os: ubuntu-24.04
             ebArgs: --linux --x64
             artifact: linux-installer
