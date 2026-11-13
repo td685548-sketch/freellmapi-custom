@@ -26,7 +26,7 @@ const fetchHttp = globalThis.fetch;
 let upstream: Server; let gateway: Server; let upstreamUrl: string; let base: string;
 let session: string; let otherSession: string; let apiKey: string; let userId: number;
 let requests: Array<{ path: string; target: string; headers: Record<string, any>; body: any }>;
-let behavior: 'ok' | '401' | 'refresh-error' | '429' | 'hold' | 'truncated' = 'ok';
+let behavior: 'ok' | '401' | 'refresh-error' | '429' | 'hold' | 'truncated' | 'kiro-empty-profiles' = 'ok';
 let refreshes = 0; let upstreamClosed = false;
 const fixture = mkdtempSync(join(tmpdir(), 'x-subscriptions-'));
 let database: string;
@@ -64,7 +64,9 @@ beforeAll(async () => {
     if (req.path.endsWith(':loadCodeAssist')) return json(res, { cloudaicompanionProject: 'google-project' });
     if (req.path.endsWith('/usage')) return json(res, { rate_limit: { primary_window: { used_percent: 25 } } });
     if (req.path.endsWith(':retrieveUserQuota')) return json(res, { buckets: [{ modelId: 'gemini-2.5-flash', remainingFraction: .5 }] });
-    if (req.headers['x-amz-target'] === 'AmazonCodeWhispererService.ListAvailableProfiles') return json(res, { profiles: [{ arn: 'arn:aws:codewhisperer:us-east-1:123456789012:profile/fixture-profile' }] });
+    if (req.headers['x-amz-target'] === 'AmazonCodeWhispererService.ListAvailableProfiles') {
+      return json(res, { profiles: behavior === 'kiro-empty-profiles' ? [] : [{ arn: 'arn:aws:codewhisperer:us-east-1:123456789012:profile/fixture-profile' }] });
+    }
     if (req.path.endsWith('/getUsageLimits')) return json(res, { usageBreakdownList: [{ resourceType: 'AGENTIC_REQUEST', usageLimitWithPrecision: 10, currentUsageWithPrecision: 4 }] });
     if (behavior === '401' && req.headers.authorization !== 'Bearer rotated-access') return json(res, { error: 'private-access' }, 401);
     if (behavior === '429' && target.includes('chatgpt.com')) { res.set('Retry-After', '60'); return json(res, { error: 'quota exhausted' }, 429); }
@@ -255,6 +257,22 @@ describe('browser imports, headless OAuth and capability honesty', () => {
   });
   it('distinguishes unknown quota and model buckets from account exhaustion', () => {
     expect(parseProviderQuota('kiro', {})).toEqual([]); expect(parseProviderQuota('gemini-cli', { buckets: [{ modelId: 'flash', remainingFraction: 0 }] })[0]).toMatchObject({ remaining: 0, blocking: false });
+  });
+  it('falls back to 9router default Kiro profileArn for social and builder-id when ListAvailableProfiles returns empty, but not for idc', async () => {
+    behavior = 'kiro-empty-profiles';
+    const socialId = createApiKeyAccount({ provider: 'kiro', key: JSON.stringify({ ...cred('kiro'), accessToken: 'social-access', authMethod: 'social' }), models: [{ id: 'claude-sonnet-4-5', name: 'fixture' }] });
+    const socialResponse = await resolveAccountProvider(accountRow(socialId))!.chatCompletion('', [{ role: 'user', content: 'Hi' }], 'claude-sonnet-4-5');
+    expect(socialResponse.choices[0].message.content).toBe('Xin chào');
+    expect(requests.at(-1)?.body.profileArn).toBe('arn:aws:codewhisperer:us-east-1:699475941385:profile/EHGA3GRVQMUK');
+    expect(requests.at(-1)?.headers['x-amzn-codewhisperer-profile-arn']).toBe('arn:aws:codewhisperer:us-east-1:699475941385:profile/EHGA3GRVQMUK');
+
+    const builderId = createApiKeyAccount({ provider: 'kiro', key: JSON.stringify({ ...cred('kiro'), accessToken: 'builder-access', authMethod: 'builder-id' }), models: [{ id: 'claude-sonnet-4-5', name: 'fixture' }] });
+    const builderResponse = await resolveAccountProvider(accountRow(builderId))!.chatCompletion('', [{ role: 'user', content: 'Hi' }], 'claude-sonnet-4-5');
+    expect(builderResponse.choices[0].message.content).toBe('Xin chào');
+    expect(requests.at(-1)?.body.profileArn).toBe('arn:aws:codewhisperer:us-east-1:638616132270:profile/AAAACCCCXXXX');
+
+    const idcId = createApiKeyAccount({ provider: 'kiro', key: JSON.stringify({ ...cred('kiro'), accessToken: 'idc-access', authMethod: 'idc' }), models: [{ id: 'claude-sonnet-4-5', name: 'fixture' }] });
+    await expect(resolveAccountProvider(accountRow(idcId))!.chatCompletion('', [{ role: 'user', content: 'Hi' }], 'claude-sonnet-4-5')).rejects.toThrow('profileArn is required');
   });
   it('rejects corrupt or truncated AWS EventStream frames', () => {
     expect(crc32(Buffer.from('123456789'))).toBe(0xcbf43926);

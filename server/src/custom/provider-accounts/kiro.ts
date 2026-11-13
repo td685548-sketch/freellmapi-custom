@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { ChatCompletionChunk, ChatCompletionResponse, ChatMessage, ChatToolCall, Platform, TokenUsage } from '@freellmapi/shared/types.js';
 import { BaseProvider, providerHttpError, type CompletionOptions, type KeyValidationResult } from '../../providers/base.js';
 import { parseOAuthCredential } from './oauth-credentials.js';
-import { fetchKiroProfileArn, getCachedKiroProfileArn, kiroRegion } from './kiro-auth.js';
+import { fetchKiroProfileArn, getCachedKiroProfileArn, kiroRegion, resolveDefaultKiroProfileArn } from './kiro-auth.js';
 import { kiroBody, kiroFrames } from './kiro-wire.js';
 
 const KIRO_IDE_VERSION = '1.4.178';
@@ -39,7 +39,8 @@ export class KiroProvider extends BaseProvider {
     if (!response.ok) {
       let detail = await response.text().catch(() => '');
       if (response.status === 400 && !profileArn && /profileArn/i.test(detail)) {
-        const discovered = await fetchKiroProfileArn(region, auth.accessToken, options?.signal);
+        const discovered = (await fetchKiroProfileArn(region, auth.accessToken, options?.signal))
+          ?? resolveDefaultKiroProfileArn(auth.authMethod);
         if (discovered) {
           profileArn = discovered;
           response = await sendInference(profileArn);
