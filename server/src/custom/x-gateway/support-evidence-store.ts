@@ -4,6 +4,7 @@ import { encrypt, decrypt, isEncryptionKeyInitialized, initEncryptionKey } from 
 import { up as supportEvidenceUp } from '../../db/migrations/20261113_090001_support_evidence.js';
 import { ensureSupportTables } from './support-store.js';
 import { listSupportKnowledgeDocs } from './support-knowledge.js';
+import { archiveSupportDocument } from './support-document-storage.js';
 import {
   DEFAULT_EVIDENCE_POLICY,
   EVIDENCE_POLICY_BOUNDS,
@@ -693,6 +694,19 @@ export async function importSupportEvidenceRevision(
     content: rawContent,
   });
 
+  if (options.signal?.aborted || (hasUrl && Date.now() - startedAt > effectiveDeadlineMs)) {
+    throw new SupportEvidenceError(504, 'import_timeout', 'Import timed out or was aborted before commit.');
+  }
+
+  // Reject known capacity overflow before creating a billable remote object.
+  // Keep the transactional check below to handle concurrent imports as well.
+  if (initialSource.revision_count >= SUPPORT_EVIDENCE_LIMITS.maxRevisionsPerSource
+    && !db.prepare('SELECT id FROM x_support_evidence_revisions WHERE tenant_id = ? AND source_id = ? AND content_hash = ?')
+      .get(options.tenantId, options.sourceId, normalized.contentHash)) {
+    throw new SupportEvidenceError(409, 'evidence_capacity_exceeded',
+      `Source has reached the maximum of ${SUPPORT_EVIDENCE_LIMITS.maxRevisionsPerSource} revisions.`);
+  }
+  await archiveSupportDocument(options.tenantId, options.sourceId, normalized, options.signal);
   if (options.signal?.aborted || (hasUrl && Date.now() - startedAt > effectiveDeadlineMs)) {
     throw new SupportEvidenceError(504, 'import_timeout', 'Import timed out or was aborted before commit.');
   }
