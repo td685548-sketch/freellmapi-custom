@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { ChatCompletionChunk, ChatCompletionResponse, ChatMessage, ChatToolCall, Platform, TokenUsage } from '@freellmapi/shared/types.js';
 import { BaseProvider, providerHttpError, type CompletionOptions, type KeyValidationResult } from '../../providers/base.js';
 import { parseOAuthCredential } from './oauth-credentials.js';
-import { kiroRegion } from './kiro-auth.js';
+import { fetchKiroProfileArn, kiroRegion } from './kiro-auth.js';
 import { kiroBody, kiroFrames } from './kiro-wire.js';
 
 const KIRO_IDE_VERSION = '1.4.178';
@@ -19,9 +19,10 @@ export class KiroProvider extends BaseProvider {
     const auth = parseOAuthCredential(credential);
     if (!auth || auth.kind !== 'kiro') throw new Error('Kiro requires a structured OAuth credential.');
     const region = kiroRegion(auth.region);
+    const profileArn = auth.profileArn || await fetchKiroProfileArn(region, auth.accessToken, options?.signal);
     const body = kiroBody(messages, model, options);
-    if (auth.profileArn) body.profileArn = auth.profileArn;
-    const clientSignature = kiroClientSignature(auth.profileArn || auth.accessToken);
+    if (profileArn) body.profileArn = profileArn;
+    const clientSignature = kiroClientSignature(profileArn || auth.accessToken);
     const response = await this.fetchWithTimeout(`https://codewhisperer.${region}.amazonaws.com/generateAssistantResponse`, {
       method: 'POST', redirect: 'error', headers: {
         'Content-Type': 'application/json', Accept: 'application/vnd.amazon.eventstream', Authorization: `Bearer ${auth.accessToken}`,
@@ -29,7 +30,7 @@ export class KiroProvider extends BaseProvider {
         'User-Agent': `aws-sdk-js/1.0.27 ua/2.1 os/win32#10.0.19044 lang/js md/nodejs#22.21.1 api/codewhispererstreaming#1.0.27 m/E ${clientSignature}`,
         'x-amz-user-agent': `aws-sdk-js/1.0.27 ${clientSignature}`,
         'x-amz-sso-bearer': auth.accessToken,
-        'x-amzn-kiro-agent-mode': 'spec', ...(auth.profileArn ? { 'x-amzn-codewhisperer-profile-arn': auth.profileArn } : {}),
+        'x-amzn-kiro-agent-mode': 'spec', ...(profileArn ? { 'x-amzn-codewhisperer-profile-arn': profileArn } : {}),
       }, body: JSON.stringify(body),
     }, options?.timeoutMs ?? 120_000, { signal: options?.signal });
     if (!response.ok) {

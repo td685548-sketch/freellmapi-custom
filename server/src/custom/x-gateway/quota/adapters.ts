@@ -2,7 +2,7 @@ import type { XQuotaWindow } from '@freellmapi/shared/x-quota.js';
 import { z } from 'zod';
 import { withAccountCredential } from '../../provider-accounts/oauth-lifecycle.js';
 import { parseOAuthCredential } from '../../provider-accounts/oauth-credentials.js';
-import { kiroRegion } from '../../provider-accounts/kiro-auth.js';
+import { fetchKiroProfileArn, kiroRegion } from '../../provider-accounts/kiro-auth.js';
 import { fetchGeminiProjectId } from '../../provider-accounts/oauth-providers.js';
 import { readSubscriptionJson } from '../../provider-accounts/subscription-http.js';
 import { proxyFetch, withKeyProxy } from '../../../lib/proxy.js';
@@ -166,9 +166,11 @@ export async function fetchAccountQuota(account: AccountRow): Promise<XQuotaWind
     method = 'POST'; headers['Content-Type'] = 'application/json'; body = JSON.stringify({ project });
   }
   if (account.provider === 'kiro') {
+    const region = kiroRegion(structured?.region);
+    const profileArn = structured?.profileArn || (structured?.accessToken ? await fetchKiroProfileArn(region, structured.accessToken) : undefined);
     const params = new URLSearchParams({ origin: 'AI_EDITOR', resourceType: 'AGENTIC_REQUEST', isEmailRequired: 'true' });
-    if (structured?.profileArn) params.set('profileArn', structured.profileArn);
-    url = `https://codewhisperer.${kiroRegion(structured?.region)}.amazonaws.com/getUsageLimits?${params}`;
+    if (profileArn) params.set('profileArn', profileArn);
+    url = `https://codewhisperer.${region}.amazonaws.com/getUsageLimits?${params}`;
   }
     const response = await proxyFetch(url, {
       headers, method, body, signal: AbortSignal.timeout(10_000), redirect: 'error',

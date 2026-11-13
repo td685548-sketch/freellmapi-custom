@@ -64,6 +64,7 @@ beforeAll(async () => {
     if (req.path.endsWith(':loadCodeAssist')) return json(res, { cloudaicompanionProject: 'google-project' });
     if (req.path.endsWith('/usage')) return json(res, { rate_limit: { primary_window: { used_percent: 25 } } });
     if (req.path.endsWith(':retrieveUserQuota')) return json(res, { buckets: [{ modelId: 'gemini-2.5-flash', remainingFraction: .5 }] });
+    if (req.headers['x-amz-target'] === 'AmazonCodeWhispererService.ListAvailableProfiles') return json(res, { profiles: [{ arn: 'arn:aws:codewhisperer:us-east-1:123456789012:profile/fixture-profile' }] });
     if (req.path.endsWith('/getUsageLimits')) return json(res, { usageBreakdownList: [{ resourceType: 'AGENTIC_REQUEST', usageLimitWithPrecision: 10, currentUsageWithPrecision: 4 }] });
     if (behavior === '401' && req.headers.authorization !== 'Bearer rotated-access') return json(res, { error: 'private-access' }, 401);
     if (behavior === '429' && target.includes('chatgpt.com')) { res.set('Retry-After', '60'); return json(res, { error: 'quota exhausted' }, 429); }
@@ -118,7 +119,7 @@ describe('native subscription execution through real HTTP gateway and upstream',
     if (kind === 'codex') { expect(request.target).toBe('https://chatgpt.com'); expect(request.path).toBe('/backend-api/codex/responses'); expect(request.body).toMatchObject({ model: 'gpt-5.4', stream: true, store: false }); expect(request.body.input[0].content[0].type).toBe('input_text'); }
     if (kind === 'claude') { expect(request.path).toBe('/v1/messages'); expect(request.headers['x-api-key']).toBeUndefined(); expect(request.headers['anthropic-beta']).toContain('oauth-2025'); expect(request.headers['anthropic-beta']).toContain('claude-code-20250219'); expect(request.body.system[0].text).toContain('You are Claude Code'); expect(request.body.system[1].text).toBe('Be concise.'); }
     if (kind === 'gemini-cli') { expect(request.path).toContain(':streamGenerateContent'); expect(request.body).toMatchObject({ project: 'fixture-project', model: 'gemini-2.5-flash', request: { contents: [{ role: 'user', parts: [{ text: 'Hi' }] }] } }); }
-    if (kind === 'kiro') { expect(request.target).toBe('https://codewhisperer.us-east-1.amazonaws.com'); expect(request.body.conversationState.currentMessage.userInputMessage.modelId).toBe('claude-sonnet-4.5'); }
+    if (kind === 'kiro') { expect(request.target).toBe('https://codewhisperer.us-east-1.amazonaws.com'); expect(request.body.conversationState.currentMessage.userInputMessage.modelId).toBe('claude-sonnet-4.5'); expect(request.body.profileArn).toBe('arn:aws:codewhisperer:us-east-1:123456789012:profile/fixture-profile'); expect(request.headers['x-amzn-codewhisperer-profile-arn']).toBe('arn:aws:codewhisperer:us-east-1:123456789012:profile/fixture-profile'); }
     expect(accountRow(id).encrypted_key).not.toContain('private');
   });
   it('pins Claude OAuth to Anthropic while preserving legacy API-key custom endpoints', async () => {
@@ -224,7 +225,7 @@ describe('browser imports, headless OAuth and capability honesty', () => {
     const response = await call('/api/thruline-accounts/subscriptions/start', { provider: 'kiro', label: 'device' }); const data = await response.json(); expect(response.status).toBe(200); expect(data.userCode).toBe('ABCD-1234'); expect(JSON.stringify(data)).not.toMatch(/private|clientSecret|deviceCode/);
     expect((await call(`/api/thruline-accounts/subscriptions/${data.attemptId}/poll`, {})).status).toBe(200); expect(refreshes).toBe(0);
     vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 6000);
-    const poll = await call(`/api/thruline-accounts/subscriptions/${data.attemptId}/poll`, {}); const saved = await poll.json(); expect(saved.status).toBe('saved'); const row = accountRow(saved.id); expect(parseOAuthCredential(decrypt(row.encrypted_key, row.iv, row.auth_tag))?.clientSecret).toBe('private-client-secret');
+    const poll = await call(`/api/thruline-accounts/subscriptions/${data.attemptId}/poll`, {}); const saved = await poll.json(); expect(saved.status).toBe('saved'); const row = accountRow(saved.id); const stored = parseOAuthCredential(decrypt(row.encrypted_key, row.iv, row.auth_tag)); expect(stored?.clientSecret).toBe('private-client-secret'); expect(stored?.profileArn).toBe('arn:aws:codewhisperer:us-east-1:123456789012:profile/fixture-profile');
   });
   it('uses a registered public Google callback and does not infer it from request host', async () => {
     vi.stubEnv('GEMINI_CLIENT_ID', 'configured-client'); vi.stubEnv('GEMINI_CLIENT_SECRET', 'configured-secret'); vi.stubEnv('PUBLIC_APP_URL', 'https://fixture.onrender.com');
