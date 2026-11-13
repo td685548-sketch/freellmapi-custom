@@ -41,7 +41,7 @@ userKeysRouter.post('/keys', (req: Request, res: Response) => {
   const user = (req as Request & { user?: SessionUser }).user!;
   const parsed = createKeySchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: { message: parsed.error.errors.map(e => e.message).join(', ') } });
+    res.status(400).json({ error: { message: parsed.error.issues.map(e => e.message).join(', ') } });
     return;
   }
 

@@ -27,6 +27,7 @@ import { installProcessSafetyNet } from '../../server/src/lib/process-safety-net
 import { installLogRedaction } from '../../server/src/lib/log-redaction.js';
 import { desktopSessionToken } from '../../server/src/services/auth.js';
 import { NodeScheduler } from '../../server/src/lib/scheduler.js';
+import { startWorkerLifecycle } from '../../server/src/custom/x-gateway/support-runtime-router.js';
 
 export { getDb, getUnifiedApiKey, isAutoUpdateCheckEnabled };
 
@@ -130,6 +131,7 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
   // 0.0.0.0, and a remote viewer must still enter the password.
   process.env.FREEAPI_DESKTOP = '1';
   initDb(opts.dbPath);
+  startWorkerLifecycle();
   // One sweep at boot, while the DB is quiet — expired cooldown rows are only
   // collected lazily per route and would otherwise accumulate forever.
   const expiredCooldowns = cleanupExpiredCooldowns();

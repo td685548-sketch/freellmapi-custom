@@ -28,6 +28,7 @@ import { type Theme, useTheme } from '@/theme-context'
 import { apiFetch } from '@/lib/api'
 import { CacheSettingsSection } from '@/custom/CacheSettingsSection'
 import { useUserSession } from '@/custom/use-session'
+import { useDesktopLoginItem } from '@/lib/desktop-login-item'
 
 // Small info affordance used next to labels a first-time user can't be expected
 // to understand. It's a real <button> so it reaches the tooltip by keyboard
@@ -550,6 +551,7 @@ function PreviewSection({ state }: { state: CompressionState }) {
 function GeneralSection() {
   const { t } = useI18n()
   const { theme, setTheme } = useTheme()
+  const loginItem = useDesktopLoginItem()
 
   return (
     <>
@@ -575,6 +577,19 @@ function GeneralSection() {
         )}
       />
       <CacheSettingsSection />
+      {loginItem.enabled !== null && (
+        <Row
+          label={t('settings.startAtLogin')}
+          hint={t('settings.startAtLoginHelp')}
+          control={(
+            <Switch
+              aria-label={t('settings.startAtLogin')}
+              checked={loginItem.enabled}
+              onCheckedChange={checked => void loginItem.toggle(checked)}
+            />
+          )}
+        />
+      )}
     </>
   )
 }

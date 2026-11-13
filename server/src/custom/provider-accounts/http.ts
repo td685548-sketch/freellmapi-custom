@@ -18,7 +18,7 @@ export class AccountError extends Error {
 
 export const secretSchema = z.string().min(1).max(16384).regex(/^\S+$/);
 
-export async function readProviderJson<T>(response: Response, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<T> {
+export async function readProviderJson<T>(response: Response, schema: z.ZodType<T, unknown>): Promise<T> {
   try {
     if (!response.ok) {
       await response.body?.cancel();
@@ -32,7 +32,7 @@ export async function readProviderJson<T>(response: Response, schema: z.ZodType<
   }
 }
 
-export async function providerJson<T>(url: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>, init: RequestInit = {}): Promise<T> {
+export async function providerJson<T>(url: string, schema: z.ZodType<T, unknown>, init: RequestInit = {}): Promise<T> {
   if (!URLS.has(url)) throw new AccountError(502, 'Unsupported provider endpoint.');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15_000);

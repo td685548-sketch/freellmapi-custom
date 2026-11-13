@@ -42,6 +42,10 @@ export const DEFAULT_MODEL_PRICING: ProviderPricingMap = {
     'o3-mini': { input: 1.1, output: 4.4, cached: 0.55, reasoning: 4.4, cache_creation: 1.1 },
   },
   anthropic: {
+    'claude-fable-5-2': { input: 8.0, output: 40.0, cached: 0.2, reasoning: 40.0, cache_creation: 10.0 },
+    'claude-fable-5-1': { input: 10.0, output: 50.0, cached: 1.0, reasoning: 50.0, cache_creation: 12.5 },
+    'claude-fable-5': { input: 10.0, output: 50.0, cached: 1.0, reasoning: 50.0, cache_creation: 12.5 },
+    'claude-haiku-5-5': { input: 0.1, output: 0.5, cached: 0.01, reasoning: 0.5, cache_creation: 0.125 },
     'claude-opus-4-6': { input: 5.0, output: 25.0, cached: 0.5, reasoning: 25.0, cache_creation: 6.25 },
     'claude-sonnet-4-6': { input: 3.0, output: 15.0, cached: 0.3, reasoning: 15.0, cache_creation: 3.75 },
     'claude-sonnet-4-5-20250929': { input: 3.0, output: 15.0, cached: 0.3, reasoning: 15.0, cache_creation: 3.75 },
@@ -49,6 +53,8 @@ export const DEFAULT_MODEL_PRICING: ProviderPricingMap = {
     'claude-3-5-sonnet-20241022': { input: 3.0, output: 15.0, cached: 1.5, reasoning: 15.0, cache_creation: 3.0 },
   },
   gemini: {
+    'gemini-4-carbon': { input: 2.0, output: 10.0, cached: 0.1, reasoning: 10.0, cache_creation: 0.1875 },
+    'gemini-4-argon': { input: 2.0, output: 10.0, cached: 0.1, reasoning: 10.0, cache_creation: 0.1875 },
     'gemini-2.5-pro': { input: 2.0, output: 12.0, cached: 0.25, reasoning: 18.0, cache_creation: 2.0 },
     'gemini-2.5-flash': { input: 0.3, output: 2.5, cached: 0.03, reasoning: 3.75, cache_creation: 0.3 },
     'gemini-2.5-flash-lite': { input: 0.15, output: 1.25, cached: 0.015, reasoning: 1.875, cache_creation: 0.15 },

@@ -85,6 +85,8 @@ import * as supportExecutionOutbox from '../migrations/20261112_170002_support_e
 import * as supportRuntimeFencing from '../migrations/20261112_180001_support_runtime_fencing.js';
 import * as supportEvidence from '../migrations/20261113_090001_support_evidence.js';
 import * as supportServiceDesk from '../migrations/20261113_180001_support_service_desk.js';
+import * as modelMonthlyUsage from '../migrations/20261111_000001_model_monthly_usage.js';
+import * as profileRoutingStrategy from '../migrations/20261111_000002_profile_routing_strategy.js';
 
 export interface MigrationModule {
   up(db: Db): void;
@@ -174,6 +176,8 @@ export const CUSTOM_X_GATEWAY_KEYS_FILENAME = '20261107_120000_custom_x_gateway_
 export const CUSTOM_X_GATEWAY_PROXY_AND_API_KEYS_FILENAME = '20261107_130000_custom_x_gateway_proxy_and_api_keys.ts';
 export const CUSTOM_X_GATEWAY_KEY_ACCESS_FILENAME = '20261107_160000_custom_x_gateway_key_access.ts';
 export const CUSTOM_PROXY_WEBHOOK_FILENAME = '20261111_001500_custom_proxy_webhook.ts';
+export const MODEL_MONTHLY_USAGE_FILENAME = '20261111_000001_model_monthly_usage.ts';
+export const PROFILE_ROUTING_STRATEGY_FILENAME = '20261111_000002_profile_routing_strategy.ts';
 
 export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: LEGACY_BASELINE_FILENAME, module: legacyBaseline },
@@ -253,6 +257,8 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: '20261107_140000_custom_x_gateway_quota.ts', module: customXGatewayQuota },
   { filename: '20261107_150000_custom_x_gateway_proxy_pool.ts', module: customXGatewayProxyPool },
   { filename: CUSTOM_X_GATEWAY_KEY_ACCESS_FILENAME, module: customXGatewayKeyAccess },
+  { filename: MODEL_MONTHLY_USAGE_FILENAME, module: modelMonthlyUsage },
+  { filename: PROFILE_ROUTING_STRATEGY_FILENAME, module: profileRoutingStrategy },
   { filename: CUSTOM_PROXY_WEBHOOK_FILENAME, module: customProxyWebhook },
   { filename: '20261112_170001_support_runtime_state.ts', module: supportRuntimeState },
   { filename: '20261112_170002_support_execution_outbox.ts', module: supportExecutionOutbox },

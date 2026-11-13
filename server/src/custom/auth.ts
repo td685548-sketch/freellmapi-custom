@@ -69,7 +69,7 @@ customAuthRouter.post('/request-access', (req: Request, res: Response) => {
   }
   const parsed = requestAccessSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: { message: parsed.error.errors.map(e => e.message).join(', ') } });
+    res.status(400).json({ error: { message: parsed.error.issues.map(e => e.message).join(', ') } });
     return;
   }
   const { email, password, note } = parsed.data;
@@ -107,7 +107,7 @@ customAuthRouter.post('/register', (req: Request, res: Response) => {
   }
   const parsed = registerSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: { message: parsed.error.errors.map(e => e.message).join(', ') } });
+    res.status(400).json({ error: { message: parsed.error.issues.map(e => e.message).join(', ') } });
     return;
   }
   const { email, password, inviteCode } = parsed.data;

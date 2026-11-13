@@ -83,7 +83,7 @@ const READ_CACHE_MAX_ROWS = 500;
 // Tables a write also changes through a trigger. migrations are scanned by a
 // test so a new trigger cannot be added without being listed here.
 const TRIGGER_SIDE_EFFECTS: Readonly<Record<string, readonly string[]>> = {
-  requests: ['key_monthly_usage'],
+  requests: ['key_monthly_usage', 'model_monthly_usage'],
 };
 // Results that depend on something other than table contents.
 const NOT_CACHEABLE = /\b(?:datetime|date|time|strftime|julianday|unixepoch|random|randomblob|changes|total_changes|last_insert_rowid)\s*\(|\bcurrent_(?:time|date|timestamp)\b|\bpragma_|\bsqlite_|\bRETURNING\b/i;
