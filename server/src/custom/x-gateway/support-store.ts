@@ -241,10 +241,24 @@ export function createSupportTenant(input: SupportTenantInput): { tenant: Suppor
   });
   return { tenant: getSupportTenant(id), signingSecret };
 }
+function mergePatch<T extends Record<string, unknown>>(
+  schema: z.ZodObject<any>,
+  current: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): T {
+  const validatedPatch = parse(schema.partial(), patch) as Record<string, unknown>;
+  const picked: Record<string, unknown> = {};
+  for (const key of Object.keys(patch)) {
+    if (patch[key] !== undefined && key in validatedPatch) {
+      picked[key] = validatedPatch[key];
+    }
+  }
+  return parse(schema, { ...current, ...picked }) as T;
+}
+
 export function updateSupportTenant(id: number, patch: Partial<z.input<typeof tenantSchema>>): SupportTenant {
   const current = getSupportTenant(id);
-  const validatedPatch = parse(tenantSchema.partial(), patch);
-  const data = parse(tenantSchema, { ...current, ...validatedPatch });
+  const data = mergePatch<z.output<typeof tenantSchema>>(tenantSchema, current as unknown as Record<string, unknown>, patch as Record<string, unknown>);
   write('x_support_tenants', { ...tenantColumns(data), updated_at: new Date().toISOString() }, id);
   return getSupportTenant(id);
 }
@@ -341,7 +355,7 @@ export function createSupportTool(tenantId: number, input: SupportWebhookToolInp
 }
 export function updateSupportTool(tenantId: number, toolId: number, patch: Partial<SupportWebhookToolInput>): SupportWebhookTool {
   const current = getSupportTool(tenantId, toolId);
-  const data = parse(toolSchema, { ...current, ...parse(toolSchema.partial(), patch) });
+  const data = mergePatch<z.output<typeof toolSchema>>(toolSchema, current as unknown as Record<string, unknown>, patch as Record<string, unknown>);
   write('x_support_tools', { ...toolColumns(data), updated_at: new Date().toISOString() }, toolId, tenantId);
   return getSupportTool(tenantId, toolId);
 }
@@ -379,10 +393,9 @@ export function createSupportDbSource(tenantId: number, input: SupportDbSourceIn
 }
 export function updateSupportDbSource(tenantId: number, sourceId: number, patch: Partial<SupportDbSourceInput>): SupportDbSource {
   const current = getSupportDbSource(tenantId, sourceId);
-  const validatedPatch = parse(sourceSchema.partial(), patch);
-  const data = parse(sourceSchema, { ...current, ...validatedPatch });
+  const data = mergePatch<z.output<typeof sourceSchema>>(sourceSchema, current as unknown as Record<string, unknown>, patch as Record<string, unknown>);
   write('x_support_db_sources', { ...sourceColumns(data),
-    ...(validatedPatch.authToken === undefined ? {} : encryptedColumns(validatedPatch.authToken, 'token')),
+    ...(patch.authToken === undefined ? {} : encryptedColumns(data.authToken, 'token')),
     updated_at: new Date().toISOString() }, sourceId, tenantId);
   return getSupportDbSource(tenantId, sourceId);
 }

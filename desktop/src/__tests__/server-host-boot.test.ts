@@ -134,6 +134,13 @@ vi.mock('../../../server/src/lib/scheduler.js', () => ({
   NodeScheduler: class {},
 }));
 
+vi.mock('../../../server/src/custom/x-gateway/support-runtime-router.js', () => ({
+  startWorkerLifecycle: vi.fn(() => {
+    calls.push('startWorkerLifecycle');
+    return () => {};
+  }),
+}));
+
 async function boot(): Promise<void> {
   const { startServer } = await import('../server-host.js');
   await startServer({
