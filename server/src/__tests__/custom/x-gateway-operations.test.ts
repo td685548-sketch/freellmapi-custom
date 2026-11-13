@@ -127,13 +127,13 @@ describe('X Gateway CLI operations over real HTTP', () => {
   });
   it('expires readiness and never upgrades saver/media based on text inference', () => {
     recordToolProbe('expiry', { ok: true, toolId: 'cursor', protocol: 'openai-chat', model: 'fixture-model',
-      endpoint: '/x/v1/chat/completions', latencyMs: 1, checkedAt: new Date().toISOString() });
+      endpoint: '/thruline/v1/chat/completions', latencyMs: 1, checkedAt: new Date().toISOString() });
     expect(gatewayDiagnostics('expiry', Date.now() + 301_000).capabilities.find(c => c.id === 'openai-chat')?.state).toBe('unverified');
   });
   it('bounds and cancels malformed or stalled probe responses', async () => {
     const malformed = express();
     malformed.use(express.json());
-    malformed.post('/x/v1/chat/completions', (req, res) => res.json(req.body.model === 'oversized'
+    malformed.post('/thruline/v1/chat/completions', (req, res) => res.json(req.body.model === 'oversized'
       ? { choices: [{ message: { content: 'x'.repeat(100_000) } }] } : { choices: 'wrong' }));
     const s = await new Promise<Server>(resolve => { const listener = malformed.listen(0, '127.0.0.1', () => resolve(listener)); });
     try {

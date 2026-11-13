@@ -84,7 +84,7 @@ beforeAll(async () => {
   });
   upstream = await new Promise(resolve => { const server = app.listen(0, '127.0.0.1', () => resolve(server)); });
   upstreamUrl = `http://127.0.0.1:${(upstream.address() as { port: number }).port}`;
-  const appGateway = express(); appGateway.use(express.json()); appGateway.use('/api/x-accounts', providerAccountsRouter); appGateway.use('/x/v1', xGatewayRouter);
+  const appGateway = express(); appGateway.use(express.json()); appGateway.use('/api/x-accounts', providerAccountsRouter); appGateway.use('/thruline/v1', xGatewayRouter);
   gateway = await new Promise(resolve => { const server = appGateway.listen(0, '127.0.0.1', () => resolve(server)); });
   base = `http://127.0.0.1:${(gateway.address() as { port: number }).port}`;
 });
@@ -108,7 +108,7 @@ function account(kind: OAuthCredential['kind'], expired = false): number {
   return createApiKeyAccount({ provider: kind, key: JSON.stringify(cred(kind, expired)), models: [{ id: kind === 'codex' ? 'gpt-5.4' : kind === 'gemini-cli' ? 'gemini-2.5-flash' : 'claude-sonnet-4-5', name: 'fixture' }] });
 }
 async function call(path: string, body: unknown, token = session) { return fetchHttp(base + path, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
-async function chat(provider: string, stream = false) { return call('/x/v1/chat/completions', { model: `${provider}/${provider === 'codex' ? 'gpt-5.4' : provider === 'gemini-cli' ? 'gemini-2.5-flash' : 'claude-sonnet-4-5'}`, messages: [{ role: 'system', content: 'Be concise.' }, { role: 'user', content: 'Hi' }], stream }, apiKey); }
+async function chat(provider: string, stream = false) { return call('/thruline/v1/chat/completions', { model: `${provider}/${provider === 'codex' ? 'gpt-5.4' : provider === 'gemini-cli' ? 'gemini-2.5-flash' : 'claude-sonnet-4-5'}`, messages: [{ role: 'system', content: 'Be concise.' }, { role: 'user', content: 'Hi' }], stream }, apiKey); }
 
 describe('native subscription execution through real HTTP gateway and upstream', () => {
   it.each(['codex', 'claude', 'gemini-cli', 'kiro'] as const)('%s uses native protocol, encrypted credential and selected model', async kind => {
@@ -181,7 +181,7 @@ describe('native subscription execution through real HTTP gateway and upstream',
   });
   it('fallback handles exhausted quota without sending subscription credentials to a generic endpoint', async () => {
     account('codex'); account('gemini-cli'); behavior = '429'; createCombo('subscription-fallback', [{ platform: 'codex', modelId: 'gpt-5.4' }, { platform: 'gemini-cli', modelId: 'gemini-2.5-flash' }], undefined, { strategy: 'fallback' });
-    const response = await call('/x/v1/chat/completions', { model: 'combo:subscription-fallback', messages: [{ role: 'user', content: 'Hi' }] }, apiKey);
+    const response = await call('/thruline/v1/chat/completions', { model: 'combo:subscription-fallback', messages: [{ role: 'user', content: 'Hi' }] }, apiKey);
     expect(response.status).toBe(200); expect(response.headers.get('x-routed-via')).toContain('gemini-cli'); expect(requests.some(r => r.path.includes('/chat/completions'))).toBe(false);
   });
   it('skips accounts with fresh exhausted provider quota', async () => {
@@ -190,7 +190,7 @@ describe('native subscription execution through real HTTP gateway and upstream',
   });
   it('cancels the upstream stream on client disconnect', async () => {
     account('codex'); behavior = 'hold'; const controller = new AbortController();
-    const response = await fetchHttp(base + '/x/v1/chat/completions', { method: 'POST', signal: controller.signal, headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'codex/gpt-5.4', messages: [{ role: 'user', content: 'Hi' }], stream: true }) });
+    const response = await fetchHttp(base + '/thruline/v1/chat/completions', { method: 'POST', signal: controller.signal, headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'codex/gpt-5.4', messages: [{ role: 'user', content: 'Hi' }], stream: true }) });
     await response.body!.getReader().read(); controller.abort(); await vi.waitFor(() => expect(upstreamClosed).toBe(true));
   });
   it('applies a native inference timeout', async () => {
@@ -228,13 +228,13 @@ describe('browser imports, headless OAuth and capability honesty', () => {
   });
   it('uses a registered public Google callback and does not infer it from request host', async () => {
     vi.stubEnv('GEMINI_CLIENT_ID', 'configured-client'); vi.stubEnv('GEMINI_CLIENT_SECRET', 'configured-secret'); vi.stubEnv('PUBLIC_APP_URL', 'https://fixture.onrender.com');
-    const response = await call('/api/x-accounts/subscriptions/start', { provider: 'gemini-cli', label: 'google' }); const body = await response.json(); expect(response.status).toBe(200); expect(new URL(body.authorizationUrl).searchParams.get('redirect_uri')).toBe('https://fixture.onrender.com/x/accounts/callback'); expect(JSON.stringify(body)).not.toContain('configured-secret'); vi.unstubAllEnvs();
+    const response = await call('/api/x-accounts/subscriptions/start', { provider: 'gemini-cli', label: 'google' }); const body = await response.json(); expect(response.status).toBe(200); expect(new URL(body.authorizationUrl).searchParams.get('redirect_uri')).toBe('https://fixture.onrender.com/thruline/accounts/callback'); expect(JSON.stringify(body)).not.toContain('configured-secret'); vi.unstubAllEnvs();
   });
   it('completes registered Google browser OAuth and resolves project metadata through HTTP', async () => {
     vi.stubEnv('PUBLIC_APP_URL', 'https://fixture.onrender.com');
     const start = await call('/api/x-accounts/subscriptions/start', { provider: 'gemini-cli', label: 'google-complete' });
     const a = await start.json();
-    const response = await call(`/api/x-accounts/subscriptions/${a.attemptId}/complete`, { code: `https://fixture.onrender.com/x/accounts/callback?code=fixture&state=${a.attemptId}` });
+    const response = await call(`/api/x-accounts/subscriptions/${a.attemptId}/complete`, { code: `https://fixture.onrender.com/thruline/accounts/callback?code=fixture&state=${a.attemptId}` });
     const data = await response.json(); expect(response.status).toBe(200); expect(data.verified).toBe(false);
     const row = accountRow(data.id); const stored = parseOAuthCredential(decrypt(row.encrypted_key, row.iv, row.auth_tag));
     expect(stored?.projectId).toBe('google-project'); expect(stored?.email).toBe('google-fixture@test.dev');
@@ -246,7 +246,7 @@ describe('browser imports, headless OAuth and capability honesty', () => {
     expect((await call(`/api/x-accounts/subscriptions/${a.attemptId}/complete`, { code: `fixture#${a.attemptId}` })).status).toBe(403); expect(requests).toHaveLength(0);
   });
   it('does not send subscription JSON to unsupported media APIs', async () => {
-    account('codex'); const response = await call('/x/v1/embeddings', { model: 'codex/gpt-5.4', input: 'Hi' }, apiKey); expect(response.status).not.toBe(200); expect(requests).toHaveLength(0);
+    account('codex'); const response = await call('/thruline/v1/embeddings', { model: 'codex/gpt-5.4', input: 'Hi' }, apiKey); expect(response.status).not.toBe(200); expect(requests).toHaveLength(0);
   });
   it.each(['codex', 'gemini-cli', 'kiro'] as const)('%s quota uses the native credential and provider protocol', async kind => {
     const id = account(kind); const result = await fetchAccountQuota(accountRow(id)); expect(result).toHaveLength(1); expect(requests.at(-1)?.headers.authorization).toBe('Bearer private-access'); expect(JSON.stringify(requests.at(-1))).not.toContain('private-refresh');

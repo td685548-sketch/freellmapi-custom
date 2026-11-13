@@ -55,7 +55,7 @@ describe('AI Support Runtime Widget (support-runtime-widget.ts)', () => {
   }
 
   it('determines server base from currentScript.src and does not call embedding site origin', async () => {
-    loadWidgetScript('https://remote-gateway.example.com/x/v1/support/widget.js');
+    loadWidgetScript('https://remote-gateway.example.com/thruline/v1/support/widget.js');
 
     expect(window.FreeLLMAPISupport).toBeDefined();
 
@@ -79,7 +79,7 @@ describe('AI Support Runtime Widget (support-runtime-widget.ts)', () => {
     await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
 
     const [callUrl, callInit] = mockFetch.mock.calls[0];
-    expect(callUrl).toBe('https://remote-gateway.example.com/x/v1/support/chat');
+    expect(callUrl).toBe('https://remote-gateway.example.com/thruline/v1/support/chat');
     expect(JSON.parse(callInit.body)).toMatchObject({
       tenantKey: 'tenant_remote_key',
       contextToken: 'signed_remote_tok',
@@ -88,7 +88,7 @@ describe('AI Support Runtime Widget (support-runtime-widget.ts)', () => {
   });
 
   it('honors explicit serverBase configuration over currentScript', async () => {
-    loadWidgetScript('https://script-origin.example.com/x/v1/support/widget.js');
+    loadWidgetScript('https://script-origin.example.com/thruline/v1/support/widget.js');
 
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -109,7 +109,7 @@ describe('AI Support Runtime Widget (support-runtime-widget.ts)', () => {
     await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
 
     const [callUrl] = mockFetch.mock.calls[0];
-    expect(callUrl).toBe('https://override-gateway.example.com/x/v1/support/chat');
+    expect(callUrl).toBe('https://override-gateway.example.com/thruline/v1/support/chat');
   });
 
   it('restores conversation from server via authorized GET before render', async () => {
@@ -164,7 +164,7 @@ describe('AI Support Runtime Widget (support-runtime-widget.ts)', () => {
 
     await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
     const [getUrl] = mockFetch.mock.calls[0];
-    expect(getUrl).toContain('/x/v1/support/conversations/conv-saved-99');
+    expect(getUrl).toContain('/thruline/v1/support/conversations/conv-saved-99');
 
     // Wait for authoritative messages to render in DOM
     await vi.waitFor(() => {
@@ -414,7 +414,7 @@ describe('AI Support Runtime Widget (support-runtime-widget.ts)', () => {
     });
 
     const [escUrl] = mockFetch.mock.calls[1];
-    expect(escUrl).toContain('/x/v1/support/escalate');
+    expect(escUrl).toContain('/thruline/v1/support/escalate');
 
     // Staff replies via conversation poll
     mockFetch.mockResolvedValueOnce({
@@ -455,7 +455,7 @@ describe('AI Support Runtime Widget (support-runtime-widget.ts)', () => {
     });
 
     const [csatUrl, csatInit] = mockFetch.mock.calls[3];
-    expect(csatUrl).toContain('/x/v1/support/csat');
+    expect(csatUrl).toContain('/thruline/v1/support/csat');
     expect(JSON.parse(csatInit.body)).toMatchObject({ conversationId: 'conv-esc-1', score: 5 });
 
     instance?.destroy();
@@ -492,11 +492,11 @@ describe('AI Support Runtime Widget (support-runtime-widget.ts)', () => {
     await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
 
     const [guestUrl, guestInit] = mockFetch.mock.calls[0];
-    expect(guestUrl).toContain('/x/v1/support/guest-session');
+    expect(guestUrl).toContain('/thruline/v1/support/guest-session');
     expect(JSON.parse(guestInit.body)).toMatchObject({ tenantKey: 'tenant_guest_allowed' });
 
     const [chatUrl, chatInit] = mockFetch.mock.calls[1];
-    expect(chatUrl).toContain('/x/v1/support/chat');
+    expect(chatUrl).toContain('/thruline/v1/support/chat');
     expect(chatInit.headers['X-Support-Context-Token']).toBe('guest_token_xyz');
   });
 
@@ -539,12 +539,12 @@ describe('AI Support Runtime Widget (support-runtime-widget.ts)', () => {
   });
 
   it('preserves a deployment base path inferred from the loaded script URL', async () => {
-    loadWidgetScript('https://gateway.example.com/prefix/x/v1/support/widget.js');
+    loadWidgetScript('https://gateway.example.com/prefix/thruline/v1/support/widget.js');
     mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ reply: 'Path supported' }) });
     const instance = window.FreeLLMAPISupport.init({ tenantKey: 'prefixed', contextToken: 'signed' });
     instance.sendMessage('Hello');
     await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
-    expect(mockFetch.mock.calls[0][0]).toBe('https://gateway.example.com/prefix/x/v1/support/chat');
+    expect(mockFetch.mock.calls[0][0]).toBe('https://gateway.example.com/prefix/thruline/v1/support/chat');
   });
 
 });

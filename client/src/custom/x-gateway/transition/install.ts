@@ -2,14 +2,14 @@ import { playPortal, portalSupported, warmPortal } from './portal'
 
 /**
  * Plays the WebGPU transition when a link crosses between the FreeLLMAPI
- * dashboard and Thruline (/x). Installed once as a document-level listener so
+ * dashboard and Thruline (/thruline). Installed once as a document-level listener so
  * no upstream component has to know about it. Browsers without WebGPU, and
  * people who prefer reduced motion, get the normal instant navigation.
  */
 const base = import.meta.env.BASE_URL.replace(/\/$/, '')
 const inGateway = (pathname: string) => {
   const path = pathname.startsWith(base) ? pathname.slice(base.length) : pathname
-  return path === '/x' || path.startsWith('/x/')
+  return path === '/thruline' || path.startsWith('/thruline/')
 }
 
 let running = false
@@ -19,7 +19,7 @@ function crossingLink(target: EventTarget | null) {
   const anchor = target instanceof Element ? target.closest<HTMLAnchorElement>('a[href]') : null
   if (!anchor || (anchor.target && anchor.target !== '_self') || anchor.hasAttribute('download')) return null
   const url = new URL(anchor.href, window.location.href)
-  if (url.origin !== window.location.origin || url.pathname.includes('/x/accounts/callback')) return null
+  if (url.origin !== window.location.origin || url.pathname.includes('/thruline/accounts/callback')) return null
   const entering = inGateway(url.pathname)
   return entering === inGateway(window.location.pathname) ? null : { anchor, url, entering }
 }

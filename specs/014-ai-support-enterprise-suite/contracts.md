@@ -57,31 +57,31 @@ All Console endpoints require standard X-Gateway admin authentication (`requireA
 
 ---
 
-## 2. Public Partner API (`/x/v1/support/*` — Mounted via `xSupportEnterprisePublicRouter`)
+## 2. Public Partner API (`/thruline/v1/support/*` — Mounted via `xSupportEnterprisePublicRouter`)
 
 All Public Partner endpoints authenticate the tenant via `X-Support-Tenant-Key` (or `body.tenantKey`) and verify the signed user token via `X-Support-User-Token` (or `body.userToken`) using `verifySupportUserToken`.
 
-- **`POST /x/v1/support/knowledge/query`**
+- **`POST /thruline/v1/support/knowledge/query`**
   - Body: `{ query: string, topK?: number, category?: string }`
   - Searches knowledge docs allowed for `userContext.role` and masks sensitive text according to tenant's `SupportMaskingPolicy`.
   - Returns `{ ok: true, role: string, matches: SupportKnowledgeChunkMatch[], redactionCount: number }`
-- **`GET /x/v1/support/conversations`**
+- **`GET /thruline/v1/support/conversations`**
   - Returns conversations belonging strictly to `userContext.userId` (or all if `userContext.role` is `'admin'` or `'staff'`).
   - Returns `{ ok: true, conversations: SupportConversation[] }`
-- **`POST /x/v1/support/conversations/messages`**
+- **`POST /thruline/v1/support/conversations/messages`**
   - Body: `{ conversationId?: string, subject?: string, content: string }`
   - Appends customer message to thread (locked to `userContext.userId`) and returns `{ ok: true, conversation: SupportConversation }`.
-- **`GET /x/v1/support/conversations/:conversationId`**
+- **`GET /thruline/v1/support/conversations/:conversationId`**
   - Enforces User-ID ownership check (`getSupportConversationForUser` -> 403 if another customer tries to read it).
   - Returns `{ ok: true, conversation: SupportConversation }`
-- **`POST /x/v1/support/escalate`**
+- **`POST /thruline/v1/support/escalate`**
   - Body: `{ conversationId?: string, subject: string, reason: string, priority?: SupportTicketPriority }`
   - Creates a `SupportEscalationTicket` locked to `userContext.userId` & `userContext.role`.
   - Returns `{ ok: true, ticket: SupportEscalationTicket }` (HTTP 201)
-- **`POST /x/v1/support/actions/propose`**
+- **`POST /thruline/v1/support/actions/propose`**
   - Body: `{ conversationId?: string, toolName: string, actionSummary: string, payload?: Record<string, unknown> }`
   - Creates a `SupportPendingAction` locked to `userContext.userId` & `userContext.role`.
   - Returns `{ ok: true, action: SupportPendingAction }` (HTTP 201)
-- **`GET /x/v1/support/actions`**
+- **`GET /thruline/v1/support/actions`**
   - Lists pending/reviewed actions for `userContext.userId` (or all if `admin`/`staff`).
   - Returns `{ ok: true, actions: SupportPendingAction[] }`

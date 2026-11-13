@@ -12,7 +12,7 @@ cd server && npx vitest run src/__tests__/custom/x-support-workflows.test.ts
 # Agent 3: Enterprise Support Console & Public Partner Router
 cd server && npx vitest run src/__tests__/custom/x-support-enterprise.test.ts
 
-# Agent 4: Support Operations Center Web UI (/x/support-ops)
+# Agent 4: Support Operations Center Web UI (/thruline/support-ops)
 cd client && npx vitest run src/custom/x-gateway/support-enterprise.test.tsx
 ```
 

@@ -1,6 +1,6 @@
 # X Gateway Quota
 
-Open **X Gateway → Quota** (`/x/quota`). The page requires `use_x_gateway` and `view_x_usage`. Changing routing tiers additionally requires `edit_x_settings`.
+Open **X Gateway → Quota** (`/thruline/quota`). The page requires `use_x_gateway` and `view_x_usage`. Changing routing tiers additionally requires `edit_x_settings`.
 
 Use **Refresh quota** for one account or **Refresh supported accounts** for all enabled supported accounts. Optional automatic refresh runs once per minute while the tab is visible. Repeated refreshes within 30 seconds reuse the last check; concurrent refreshes for the same account share one request. Probes use the account's configured outbound proxy and a ten-second timeout. They do not send chat requests, warm quota windows or consume reset credits.
 

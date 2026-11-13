@@ -48,7 +48,7 @@ Also lint the new client files with the installed client ESLint command: root li
 - Replay a request ID, reload widget, try another user/tenant conversation ID and send conflicting token headers. Verify cached replay or appropriate rejection, not duplicate append/execution.
 - Ask for a POST write tool. Verify pending action and no HTTP. Approve concurrently and verify one execution; reject another action and verify none. Simulate timeout after dispatch and verify unknown state without automatic re-execution.
 - Escalate, reply as staff and submit CSAT. Verify outbox events and delivery status; simulate receiver outage/restart and successful bounded retry with stable signed event bytes.
-- In /x/support-integration verify EN/VI, runtime policy validation, readiness without network calls, outbox manual retry and safe embed. Test widgets served by a different origin than the host website.
+- In /thruline/support-integration verify EN/VI, runtime policy validation, readiness without network calls, outbox manual retry and safe embed. Test widgets served by a different origin than the host website.
 
 No real refund/cancellation/webhook against an unrelated external service is required for acceptance. Use owned fixtures and deterministic network boundaries.
 

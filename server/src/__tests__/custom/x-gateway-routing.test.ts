@@ -247,7 +247,7 @@ describe('web search, fetch and HTML conversion', () => {
     upstream.mockReset();
   });
 
-  const call = (path: string, body: unknown) => fetch(`${base}/x/v1${path}`, {
+  const call = (path: string, body: unknown) => fetch(`${base}/thruline/v1${path}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

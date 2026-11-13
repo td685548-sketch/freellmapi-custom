@@ -49,7 +49,7 @@ describe('Support production HTTP runtime integration', () => {
     vi.unstubAllEnvs();
   });
 
-  const chat = (text: string, requestId = 'http-test') => fetch(`${base}/x/v1/support/chat`, {
+  const chat = (text: string, requestId = 'http-test') => fetch(`${base}/thruline/v1/support/chat`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Support-Tenant-Key': tenant.publicKey, 'X-Support-Context-Token': token },
     body: JSON.stringify({ messages: [{ role: 'user', content: text }], requestId }),
   });

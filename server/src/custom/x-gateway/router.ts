@@ -573,7 +573,7 @@ export function applyGatewaySavers(req: Request, messages: ChatMessage[]): {
   };
 }
 
-// POST /x/v1/chat/completions — dispatch exclusively over x_gateway_keys
+// POST /thruline/v1/chat/completions — dispatch exclusively over x_gateway_keys
 export async function handleXGatewayChat(req: Request, res: Response): Promise<void> {
   const startMs = Date.now();
   const body = (req.body && typeof req.body === 'object') ? req.body as Record<string, unknown> : {};
@@ -886,7 +886,7 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
 }
 
 /* ------------------------------------------------------------------ *
- * Web search  (POST /x/v1/search)
+ * Web search  (POST /thruline/v1/search)
  * ------------------------------------------------------------------ */
 
 export interface WebSearchResult {
@@ -1102,7 +1102,7 @@ async function searchViaChat(
   };
 }
 
-// POST /x/v1/search — search the web through a native adapter or the chat model
+// POST /thruline/v1/search — search the web through a native adapter or the chat model
 export async function handleXGatewaySearch(req: Request, res: Response): Promise<void> {
   const body = (req.body && typeof req.body === 'object') ? req.body as Record<string, unknown> : {};
   const query = typeof body.query === 'string' ? body.query.trim() : '';
@@ -1215,7 +1215,7 @@ export async function handleXGatewaySearch(req: Request, res: Response): Promise
 }
 
 /* ------------------------------------------------------------------ *
- * Web fetch  (POST /x/v1/fetch)
+ * Web fetch  (POST /thruline/v1/fetch)
  * ------------------------------------------------------------------ */
 
 class BlockedFetchUrlError extends Error {}
@@ -1392,7 +1392,7 @@ async function readBodyText(response: FetchResponse): Promise<string> {
 
 const MAX_FETCH_URL_LENGTH = 4_096;
 
-// POST /x/v1/fetch — SSRF-guarded page fetch with HTML → text/markdown
+// POST /thruline/v1/fetch — SSRF-guarded page fetch with HTML → text/markdown
 export async function handleXGatewayFetch(req: Request, res: Response): Promise<void> {
   const body = (req.body && typeof req.body === 'object') ? req.body as Record<string, unknown> : {};
   const rawUrl = typeof body.url === 'string' ? body.url.trim() : '';
@@ -1491,10 +1491,10 @@ xGatewayRouter.post('/fetch', xGatewayAuth, handleXGatewayFetch);
 xGatewayRouter.post('/web/fetch', xGatewayAuth, handleXGatewayFetch);
 
 const MODEL_ENDPOINTS: Record<string, string> = {
-  llm: '/x/v1/chat/completions', imageToText: '/x/v1/chat/completions',
-  image: '/x/v1/images/generations', tts: '/x/v1/audio/speech',
-  stt: '/x/v1/audio/transcriptions', embedding: '/x/v1/embeddings',
-  video: '/x/v1/videos/generations', webSearch: '/x/v1/search', webFetch: '/x/v1/fetch',
+  llm: '/thruline/v1/chat/completions', imageToText: '/thruline/v1/chat/completions',
+  image: '/thruline/v1/images/generations', tts: '/thruline/v1/audio/speech',
+  stt: '/thruline/v1/audio/transcriptions', embedding: '/thruline/v1/embeddings',
+  video: '/thruline/v1/videos/generations', webSearch: '/thruline/v1/search', webFetch: '/thruline/v1/fetch',
 };
 
 function handleModelInfo(req: Request, res: Response): void {
@@ -1535,7 +1535,7 @@ function handleModelInfo(req: Request, res: Response): void {
   res.setHeader('X-Gateway', 'x');
   res.json({ id: `${alias}/${modelId}`, name: model.name, kind, owned_by: alias,
     endpoint: MODEL_ENDPOINTS[kind],
-    ...(kind === 'tts' ? { voicesUrl: `/x/v1/audio/voices?provider=${encodeURIComponent(owner?.id ?? prefix)}` } : {}),
+    ...(kind === 'tts' ? { voicesUrl: `/thruline/v1/audio/voices?provider=${encodeURIComponent(owner?.id ?? prefix)}` } : {}),
   });
 }
 
@@ -1546,7 +1546,7 @@ xGatewayRouter.get(/^\/models\/(.+)$/, xGatewayAuth, (req: Request, res: Respons
   handleModelInfo(req, res);
 });
 
-// GET /x/v1/models — list models from enabled X Gateway accounts and combos
+// GET /thruline/v1/models — list models from enabled X Gateway accounts and combos
 xGatewayRouter.get('/models', xGatewayAuth, (req: Request, res: Response) => {
   res.setHeader('X-Gateway', 'x');
   const snapshot = getConfigSnapshot();
@@ -1607,12 +1607,12 @@ xGatewayRouter.get('/models', xGatewayAuth, (req: Request, res: Response) => {
 // Mount Anthropic Messages, OpenAI Responses, Legacy Completions, Embeddings, Image & Audio routes
 xGatewayRouter.use(xGatewayProtocolsRouter);
 
-// AI Support Partner Gateway (/x/v1/support/*)
+// AI Support Partner Gateway (/thruline/v1/support/*)
 xGatewayRouter.use('/support', xSupportPublicRouter);
 xGatewayRouter.use('/support', xSupportEnterprisePublicRouter);
 xGatewayRouter.use('/support', xSupportGovernancePublicRouter);
 
-// Catch-all: any other path under /x/v1 returns JSON 404
+// Catch-all: any other path under /thruline/v1 returns JSON 404
 xGatewayRouter.use((_req: Request, res: Response) => {
   res.status(404).json({ error: { message: 'Not found', type: 'not_found' } });
 });

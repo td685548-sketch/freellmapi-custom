@@ -19,8 +19,8 @@ Một quản trị viên đăng ký Website đối tác (Tenant) trên cổng X-
 **Independent Test**: Tạo Tenant, ký `contextToken` bằng `mintSupportUserToken`, xác thực bằng `verifySupportUserToken` và kiểm tra giả mạo chữ ký / hết hạn bị từ chối với HTTP 401.
 
 **Acceptance Scenarios**:
-1. **Given** một Tenant hợp lệ, **When** backend đối tác gọi `POST /x/v1/support/session` kèm `signingSecret` và `{ userId: "cust_101", role: "customer" }`, **Then** hệ thống trả về `contextToken` đã ký HMAC-SHA256 kèm danh sách quyền của role `customer`.
-2. **Given** một `contextToken` bị chỉnh sửa payload (ví dụ đổi `role` từ `customer` sang `admin`), **When** gửi tới `/x/v1/support/chat`, **Then** hệ thống từ chối ngay với mã `401 Unauthorized`.
+1. **Given** một Tenant hợp lệ, **When** backend đối tác gọi `POST /thruline/v1/support/session` kèm `signingSecret` và `{ userId: "cust_101", role: "customer" }`, **Then** hệ thống trả về `contextToken` đã ký HMAC-SHA256 kèm danh sách quyền của role `customer`.
+2. **Given** một `contextToken` bị chỉnh sửa payload (ví dụ đổi `role` từ `customer` sang `admin`), **When** gửi tới `/thruline/v1/support/chat`, **Then** hệ thống từ chối ngay với mã `401 Unauthorized`.
 
 ---
 
@@ -53,13 +53,13 @@ Một quản trị viên đăng ký Website đối tác (Tenant) trên cổng X-
 
 ---
 
-### User Story 4 - Web Dashboard (`/x/support`), Live Role Simulator & Embeddable Widget (Priority: P2)
+### User Story 4 - Web Dashboard (`/thruline/support`), Live Role Simulator & Embeddable Widget (Priority: P2)
 
-Quản trị viên quản lý toàn bộ Tenants, Roles, Webhook Tools, Database Sources & Table Policies ngay trên giao diện Web `/x/support`, dùng **Live Role Simulator** để đóng vai `guest` / `customer` / `admin` test trực tiếp và copy mã nhúng `<script src=".../x/v1/support/widget.js">`.
+Quản trị viên quản lý toàn bộ Tenants, Roles, Webhook Tools, Database Sources & Table Policies ngay trên giao diện Web `/thruline/support`, dùng **Live Role Simulator** để đóng vai `guest` / `customer` / `admin` test trực tiếp và copy mã nhúng `<script src=".../thruline/v1/support/widget.js">`.
 
 **Why this priority**: Đảm bảo toàn bộ tính năng khả dụng và trực quan 100% trên bản Web.
 
-**Independent Test**: Render trang `/x/support` trong Vitest, tạo Tenant có tích chọn Seed Sample DB, test SQL theo Role, chạy Simulator Chat và lấy mã nhúng Widget.
+**Independent Test**: Render trang `/thruline/support` trong Vitest, tạo Tenant có tích chọn Seed Sample DB, test SQL theo Role, chạy Simulator Chat và lấy mã nhúng Widget.
 
 ---
 
@@ -70,10 +70,10 @@ Quản trị viên quản lý toàn bộ Tenants, Roles, Webhook Tools, Database
 - **FR-002**: Hệ thống PHẢI xác thực chữ ký HMAC-SHA256 của `contextToken` bằng `crypto.timingSafeEqual` và kiểm tra thời hạn `exp`.
 - **FR-003**: Webhook Connector PHẢI khóa tham số `lockUserIdParam = context.userId` đối với các role không nằm trong `bypassUserLockRoles` và ký request gửi đi bằng header `X-Support-Signature`.
 - **FR-004**: Database Connector PHẢI chỉ cho phép câu lệnh `SELECT` đơn lẻ, kiểm tra `allowedRoles` trên mọi bảng trong `FROM`/`JOIN`, ẩn `deniedColumns`, và tự động tiêm điều kiện lọc dòng `rowOwnerColumn = context.userId` cho các role không nằm trong `bypassRowLockRoles`.
-- **FR-005**: Endpoint `/x/v1/support/chat` PHẢI hỗ trợ vòng lặp thực thi công cụ tự động (Agentic Tool-Calling Loop) và trả về `toolTrace` minh bạch.
+- **FR-005**: Endpoint `/thruline/v1/support/chat` PHẢI hỗ trợ vòng lặp thực thi công cụ tự động (Agentic Tool-Calling Loop) và trả về `toolTrace` minh bạch.
 - **FR-006**: Tuân thủ nghiêm ngặt quy tắc **Zero-Conflict Modular Design** trong `AGENTS.md`.
 
 ## Success Criteria *(mandatory)*
 - **SC-001**: 100% các bài test bảo mật phân quyền (`guest` vs `customer` vs `admin`, chống leo thang đặc quyền, chống SQL injection / ghi dữ liệu, chống xem trộm đơn hàng của `userId` khác) đều PASS.
-- **SC-002**: Giao diện `/x/support` hoạt động đầy đủ trên Web với chức năng tạo mẫu dữ liệu E-Commerce 1-click và trình giả lập Role trực tiếp.
+- **SC-002**: Giao diện `/thruline/support` hoạt động đầy đủ trên Web với chức năng tạo mẫu dữ liệu E-Commerce 1-click và trình giả lập Role trực tiếp.
 - **SC-003**: Toàn bộ workspace pass `npm run test`, `npm run lint`, và `npm run build`.

@@ -49,21 +49,21 @@ export default function Overview() {
 
   // `undefined` means the answer is not known (still loading, or no permission to read it).
   const steps: Array<{ title: string; help: string; action: string; to: string; done: boolean | undefined }> = [
-    { title: sh.stepGateway, help: sh.stepGatewayHelp, action: sh.stepGatewayAction, to: '/x/endpoint', done: status.data?.enabled },
-    ...(canView ? [{ title: sh.stepAccount, help: sh.stepAccountHelp, action: sh.stepAccountAction, to: '/x/providers', done: accounts.data ? enabled.length > 0 : undefined }] : []),
-    { title: sh.stepKey, help: sh.stepKeyHelp, action: sh.stepKeyAction, to: '/x/endpoint', done: keyCount === undefined ? undefined : keyCount > 0 },
+    { title: sh.stepGateway, help: sh.stepGatewayHelp, action: sh.stepGatewayAction, to: '/thruline/endpoint', done: status.data?.enabled },
+    ...(canView ? [{ title: sh.stepAccount, help: sh.stepAccountHelp, action: sh.stepAccountAction, to: '/thruline/providers', done: accounts.data ? enabled.length > 0 : undefined }] : []),
+    { title: sh.stepKey, help: sh.stepKeyHelp, action: sh.stepKeyAction, to: '/thruline/endpoint', done: keyCount === undefined ? undefined : keyCount > 0 },
   ]
   const doneCount = steps.filter(step => step.done).length
   const ready = doneCount === steps.length
   const next = steps.findIndex(step => step.done === false)
 
   const tasks = [
-    ...(canView ? [{ to: '/x/providers', icon: Server, title: sh.taskProviders, help: sh.taskProvidersHelp }] : []),
-    ...(canView ? [{ to: '/x/combos', icon: Layers, title: sh.taskCombos, help: sh.taskCombosHelp }] : []),
-    { to: '/x/tools', icon: Terminal, title: sh.taskTools, help: sh.taskToolsHelp },
-    { to: '/x/savers', icon: Scissors, title: sh.taskSavers, help: sh.taskSaversHelp },
-    ...(canView ? [{ to: '/x/usage', icon: BarChart3, title: sh.taskUsage, help: sh.taskUsageHelp }] : []),
-    ...(canView ? [{ to: '/x/logs', icon: ScrollText, title: sh.taskLogs, help: sh.taskLogsHelp }] : []),
+    ...(canView ? [{ to: '/thruline/providers', icon: Server, title: sh.taskProviders, help: sh.taskProvidersHelp }] : []),
+    ...(canView ? [{ to: '/thruline/combos', icon: Layers, title: sh.taskCombos, help: sh.taskCombosHelp }] : []),
+    { to: '/thruline/tools', icon: Terminal, title: sh.taskTools, help: sh.taskToolsHelp },
+    { to: '/thruline/savers', icon: Scissors, title: sh.taskSavers, help: sh.taskSaversHelp },
+    ...(canView ? [{ to: '/thruline/usage', icon: BarChart3, title: sh.taskUsage, help: sh.taskUsageHelp }] : []),
+    ...(canView ? [{ to: '/thruline/logs', icon: ScrollText, title: sh.taskLogs, help: sh.taskLogsHelp }] : []),
   ]
 
   return <div className="x-overview">
@@ -92,7 +92,7 @@ export default function Overview() {
           <li className={ready ? 'next' : ''}>
             <span className="x-step-mark" aria-hidden="true">{steps.length + 1}</span>
             <div className="x-step-body"><strong>{sh.stepTry}</strong><span className="x-muted">{sh.stepTryHelp}</span></div>
-            <Link to="/x/playground" className={`x-button x-small ${ready ? 'x-primary' : ''}`}>{sh.stepTryAction}<ArrowRight size={14} /></Link>
+            <Link to="/thruline/playground" className={`x-button x-small ${ready ? 'x-primary' : ''}`}>{sh.stepTryAction}<ArrowRight size={14} /></Link>
           </li>
         </ol>
         {ready && <p className="x-test-ok x-setup-done" role="status"><Check size={15} />{sh.setupDone}</p>}

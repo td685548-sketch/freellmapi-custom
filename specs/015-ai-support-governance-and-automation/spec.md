@@ -4,7 +4,7 @@
 **Feature Directory**: `specs/015-ai-support-governance-and-automation`  
 **Created**: 2026-11-12  
 **Status**: Approved for Implementation  
-**Input**: Mở rộng cổng AI Support (`013` & `014`) sang Chặng 3 — **Quản trị an toàn (Prompt Firewall & Role Quotas), Hồ sơ trí nhớ khách hàng dài hạn (Customer CRM Memory & CSAT), và Hệ thống Webhook sự kiện chủ động bắn ngược về Website đối tác (Outbound Partner Event Webhooks)** kèm giao diện điều khiển `/x/support-guardrails`.
+**Input**: Mở rộng cổng AI Support (`013` & `014`) sang Chặng 3 — **Quản trị an toàn (Prompt Firewall & Role Quotas), Hồ sơ trí nhớ khách hàng dài hạn (Customer CRM Memory & CSAT), và Hệ thống Webhook sự kiện chủ động bắn ngược về Website đối tác (Outbound Partner Event Webhooks)** kèm giao diện điều khiển `/thruline/support-guardrails`.
 
 ---
 
@@ -42,9 +42,9 @@ Website đối tác đăng ký URL nhận thông báo sự kiện tự động (
 
 ---
 
-### User Story 4 - Support Governance & CRM Studio Web UI (`/x/support-guardrails`) (Priority: P2)
+### User Story 4 - Support Governance & CRM Studio Web UI (`/thruline/support-guardrails`) (Priority: P2)
 
-Cung cấp trang quản trị `/x/support-guardrails` với 5 tab chuyên sâu:
+Cung cấp trang quản trị `/thruline/support-guardrails` với 5 tab chuyên sâu:
 1. **Prompt Firewall & Topic Guardrails**
 2. **Per-Role Rate & Token Quotas**
 3. **Customer CRM & Long-Term Memory**

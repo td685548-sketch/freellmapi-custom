@@ -9,10 +9,10 @@ npx vitest run server/src/__tests__/custom/x-support-store.test.ts
 # Agent 2: Webhook & Read-Only RBAC SQL Connectors
 npx vitest run server/src/__tests__/custom/x-support-connectors.test.ts
 
-# Agent 3: Console API, Public /x/v1/support/* & Widget JS
+# Agent 3: Console API, Public /thruline/v1/support/* & Widget JS
 npx vitest run server/src/__tests__/custom/x-support-gateway.test.ts
 
-# Agent 4: Frontend Web UI (/x/support)
+# Agent 4: Frontend Web UI (/thruline/support)
 cd client && npx vitest run src/custom/x-gateway/support-gateway.test.tsx
 ```
 

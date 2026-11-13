@@ -15,8 +15,8 @@ try {
     console.log(`${endpoint}: ${response.status}`);
     if (!response.ok) throw new Error('health');
   }
-  const endpoint = tool === 'claude' ? '/x/v1/messages' : tool === 'codex' ? '/x/v1/responses'
-    : tool === 'gemini' ? `/x/v1beta/models/${encodeURIComponent(model)}:generateContent` : '/x/v1/chat/completions';
+  const endpoint = tool === 'claude' ? '/thruline/v1/messages' : tool === 'codex' ? '/thruline/v1/responses'
+    : tool === 'gemini' ? `/thruline/v1beta/models/${encodeURIComponent(model)}:generateContent` : '/thruline/v1/chat/completions';
   const headers = { 'Content-Type': 'application/json', ...(tool === 'gemini' ? { 'x-goog-api-key': key } : { Authorization: `Bearer ${key}` }) };
   if (tool === 'claude') headers['anthropic-version'] = '2023-06-01';
   const body = tool === 'gemini' ? { contents: [{ role: 'user', parts: [{ text: 'Reply OK.' }] }], generationConfig: { maxOutputTokens: 16 } }

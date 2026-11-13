@@ -53,7 +53,7 @@ The existing `requests.caller` column is free-form text. Requests that run insid
 
 | Leaf | Allows |
 | --- | --- |
-| `use_x_gateway` | call `/x/v1/*` and open the console |
+| `use_x_gateway` | call `/thruline/v1/*` and open the console |
 | `edit_x_combos` | create, edit, reorder, delete combos |
 | `edit_x_settings` | switch the gateway on/off, change default savers |
 | `view_x_usage` | read the usage view |

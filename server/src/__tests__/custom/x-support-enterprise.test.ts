@@ -10,7 +10,7 @@ import {
   type SupportTenant,
 } from '../../custom/x-gateway/support-store.js';
 
-describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /x/v1/support/*)', () => {
+describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /thruline/v1/support/*)', () => {
   let server: Server;
   let base: string;
   let editorToken: string;
@@ -294,7 +294,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /x/v1/support/
 
     it('8. GET /tenants/:id/conversations & POST .../reply appends human agent reply', async () => {
       // First, create a conversation via Public Partner endpoint to reply to
-      const partnerPost = await apiCall('/x/v1/support/conversations/messages', {
+      const partnerPost = await apiCall('/thruline/v1/support/conversations/messages', {
         method: 'POST',
         headers: {
           'X-Support-Tenant-Key': tenant.publicKey,
@@ -340,7 +340,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /x/v1/support/
 
     it('9. GET /tenants/:id/tickets & PATCH .../tickets/:id updates ticket status', async () => {
       // Escalate a ticket via Partner endpoint
-      const escRes = await apiCall('/x/v1/support/escalate', {
+      const escRes = await apiCall('/thruline/v1/support/escalate', {
         method: 'POST',
         headers: {
           'X-Support-Tenant-Key': tenant.publicKey,
@@ -385,7 +385,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /x/v1/support/
 
     it('10. GET /tenants/:id/actions, POST .../approve and POST .../reject review actions', async () => {
       // Propose action 1 via partner API
-      const act1Res = await apiCall('/x/v1/support/actions/propose', {
+      const act1Res = await apiCall('/thruline/v1/support/actions/propose', {
         method: 'POST',
         headers: {
           'X-Support-Tenant-Key': tenant.publicKey,
@@ -401,7 +401,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /x/v1/support/
       createdActionId = (act1Res.body as { action: { id: string } }).action.id;
 
       // Propose action 2 to reject
-      const act2Res = await apiCall('/x/v1/support/actions/propose', {
+      const act2Res = await apiCall('/thruline/v1/support/actions/propose', {
         method: 'POST',
         headers: {
           'X-Support-Tenant-Key': tenant.publicKey,
@@ -488,14 +488,14 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /x/v1/support/
   });
 
   // -------------------------------------------------------------------------
-  // 2. Public Partner API Endpoints (/x/v1/support/*)
+  // 2. Public Partner API Endpoints (/thruline/v1/support/*)
   // -------------------------------------------------------------------------
-  describe('Public Partner API (/x/v1/support/*)', () => {
+  describe('Public Partner API (/thruline/v1/support/*)', () => {
     let aliceConvId: string;
 
     it('12. Rejects partner requests with 401 on missing or invalid tenant/user tokens', async () => {
       // Missing tenant key
-      const noTenant = await apiCall('/x/v1/support/knowledge/query', {
+      const noTenant = await apiCall('/thruline/v1/support/knowledge/query', {
         method: 'POST',
         headers: { 'X-Support-User-Token': customerAToken },
         body: { query: 'shipping' },
@@ -503,7 +503,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /x/v1/support/
       expect(noTenant.status).toBe(401);
 
       // Invalid tenant key
-      const badTenant = await apiCall('/x/v1/support/knowledge/query', {
+      const badTenant = await apiCall('/thruline/v1/support/knowledge/query', {
         method: 'POST',
         headers: {
           'X-Support-Tenant-Key': 'pk_sup_invalid_nonexistent',
@@ -514,7 +514,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /x/v1/support/
       expect(badTenant.status).toBe(401);
 
       // Missing user token
-      const noUser = await apiCall('/x/v1/support/knowledge/query', {
+      const noUser = await apiCall('/thruline/v1/support/knowledge/query', {
         method: 'POST',
         headers: { 'X-Support-Tenant-Key': tenant.publicKey },
         body: { query: 'shipping' },
@@ -522,7 +522,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /x/v1/support/
       expect(noUser.status).toBe(401);
 
       // Invalid user token
-      const badUser = await apiCall('/x/v1/support/knowledge/query', {
+      const badUser = await apiCall('/thruline/v1/support/knowledge/query', {
         method: 'POST',
         headers: {
           'X-Support-Tenant-Key': tenant.publicKey,
@@ -534,7 +534,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /x/v1/support/
     });
 
     it('13. POST /knowledge/query returns role-filtered & PII-masked results with audit logging', async () => {
-      const res = await apiCall('/x/v1/support/knowledge/query', {
+      const res = await apiCall('/thruline/v1/support/knowledge/query', {
         method: 'POST',
         headers: {
           'X-Support-Tenant-Key': tenant.publicKey,
@@ -553,7 +553,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /x/v1/support/
     });
 
     it('14. POST /conversations/messages creates customer message locked to authenticated user', async () => {
-      const res = await apiCall('/x/v1/support/conversations/messages', {
+      const res = await apiCall('/thruline/v1/support/conversations/messages', {
         method: 'POST',
         headers: {
           'X-Support-Tenant-Key': tenant.publicKey,
@@ -575,7 +575,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /x/v1/support/
 
     it('15. GET /conversations/:id enforces cross-customer 403 isolation (Customer B cannot read Customer A)', async () => {
       // Alice can read her own conversation
-      const aliceRead = await apiCall(`/x/v1/support/conversations/${aliceConvId}`, {
+      const aliceRead = await apiCall(`/thruline/v1/support/conversations/${aliceConvId}`, {
         headers: {
           'X-Support-Tenant-Key': tenant.publicKey,
           'X-Support-User-Token': customerAToken,
@@ -585,7 +585,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /x/v1/support/
       expect((aliceRead.body as any).conversation.id).toBe(aliceConvId);
 
       // Bob (different customer) tries to read Alice's conversation -> 403 Forbidden!
-      const bobRead = await apiCall(`/x/v1/support/conversations/${aliceConvId}`, {
+      const bobRead = await apiCall(`/thruline/v1/support/conversations/${aliceConvId}`, {
         headers: {
           'X-Support-Tenant-Key': tenant.publicKey,
           'X-Support-User-Token': customerBToken,
@@ -595,7 +595,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /x/v1/support/
       expect((bobRead.body as any).error.message).toContain('Forbidden');
 
       // Staff member CAN read Alice's conversation for support purposes
-      const staffRead = await apiCall(`/x/v1/support/conversations/${aliceConvId}`, {
+      const staffRead = await apiCall(`/thruline/v1/support/conversations/${aliceConvId}`, {
         headers: {
           'X-Support-Tenant-Key': tenant.publicKey,
           'X-Support-User-Token': staffToken,
@@ -606,7 +606,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /x/v1/support/
 
     it('16. GET /conversations lists only conversations belonging to authenticated customer', async () => {
       // Create conversation for Bob
-      await apiCall('/x/v1/support/conversations/messages', {
+      await apiCall('/thruline/v1/support/conversations/messages', {
         method: 'POST',
         headers: {
           'X-Support-Tenant-Key': tenant.publicKey,
@@ -619,7 +619,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /x/v1/support/
       });
 
       // Alice lists conversations -> only Alice's conversations appear
-      const aliceList = await apiCall('/x/v1/support/conversations', {
+      const aliceList = await apiCall('/thruline/v1/support/conversations', {
         headers: {
           'X-Support-Tenant-Key': tenant.publicKey,
           'X-Support-User-Token': customerAToken,
@@ -630,7 +630,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /x/v1/support/
       expect(aliceConvs.every((c) => c.userId === 'cust_alice')).toBe(true);
 
       // Staff lists conversations -> all conversations appear
-      const staffList = await apiCall('/x/v1/support/conversations', {
+      const staffList = await apiCall('/thruline/v1/support/conversations', {
         headers: {
           'X-Support-Tenant-Key': tenant.publicKey,
           'X-Support-User-Token': staffToken,
@@ -644,7 +644,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /x/v1/support/
     });
 
     it('17. POST /escalate creates escalation ticket locked to userContext', async () => {
-      const res = await apiCall('/x/v1/support/escalate', {
+      const res = await apiCall('/thruline/v1/support/escalate', {
         method: 'POST',
         headers: {
           'X-Support-Tenant-Key': tenant.publicKey,
@@ -666,7 +666,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /x/v1/support/
     });
 
     it('18. POST /actions/propose & GET /actions creates and lists customer-scoped pending actions', async () => {
-      const proposeRes = await apiCall('/x/v1/support/actions/propose', {
+      const proposeRes = await apiCall('/thruline/v1/support/actions/propose', {
         method: 'POST',
         headers: {
           'X-Support-Tenant-Key': tenant.publicKey,
@@ -684,7 +684,7 @@ describe('AI Support Enterprise Suite (/api/x-gateway/support/* & /x/v1/support/
       expect(action.status).toBe('pending');
 
       // Bob lists actions -> sees his action
-      const bobActions = await apiCall('/x/v1/support/actions', {
+      const bobActions = await apiCall('/thruline/v1/support/actions', {
         headers: {
           'X-Support-Tenant-Key': tenant.publicKey,
           'X-Support-User-Token': customerBToken,

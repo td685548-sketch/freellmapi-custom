@@ -6,7 +6,7 @@ import { createSession, createUser } from '../../services/auth.js';
 import { setEnabled } from '../../custom/x-gateway/config.js';
 import { permissionForAction } from '../../custom/permission-actions.js';
 
-describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /x/v1/support/*)', () => {
+describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /thruline/v1/support/*)', () => {
   let server: Server;
   let base: string;
   let adminToken: string;
@@ -448,9 +448,9 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /x/v1/supp
   });
 
   // -------------------------------------------------------------------------
-  // 3. Public Partner Gateway API Endpoints (/x/v1/support/*)
+  // 3. Public Partner Gateway API Endpoints (/thruline/v1/support/*)
   // -------------------------------------------------------------------------
-  describe('Public Partner Gateway (/x/v1/support/*)', () => {
+  describe('Public Partner Gateway (/thruline/v1/support/*)', () => {
     let tenantKey: string;
     let tenantSecret: string;
 
@@ -472,7 +472,7 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /x/v1/supp
     });
 
     it('supports CORS preflight for partner allowedOrigins', async () => {
-      const res = await apiCall('/x/v1/support/chat', {
+      const res = await apiCall('/thruline/v1/support/chat', {
         method: 'OPTIONS',
         headers: {
           Origin: 'https://partner.com',
@@ -484,16 +484,16 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /x/v1/supp
       expect(res.headers.get('access-control-allow-methods')).toContain('POST');
     });
 
-    it('POST /x/v1/support/session mints contextToken via partner secret authentication', async () => {
+    it('POST /thruline/v1/support/session mints contextToken via partner secret authentication', async () => {
       // 1. Missing secret returns 401
-      const noSecret = await apiCall('/x/v1/support/session', {
+      const noSecret = await apiCall('/thruline/v1/support/session', {
         method: 'POST',
         body: { tenantKey, userId: 'cust_200', role: 'customer' },
       });
       expect(noSecret.status).toBe(401);
 
       // 2. Invalid secret returns 401
-      const invalidSecret = await apiCall('/x/v1/support/session', {
+      const invalidSecret = await apiCall('/thruline/v1/support/session', {
         method: 'POST',
         headers: { 'X-Tenant-Secret': 'sk_sup_invalid_secret_value' },
         body: { tenantKey, userId: 'cust_200', role: 'customer' },
@@ -501,7 +501,7 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /x/v1/supp
       expect(invalidSecret.status).toBe(401);
 
       // 3. Valid secret mints session token
-      const valid = await apiCall('/x/v1/support/session', {
+      const valid = await apiCall('/thruline/v1/support/session', {
         method: 'POST',
         headers: { Authorization: `Bearer ${tenantSecret}` },
         body: {
@@ -527,9 +527,9 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /x/v1/supp
       expect(data.userContext.verified).toBe(true);
     });
 
-    it('POST /x/v1/support/chat handles guest access and denies restricted orders table', async () => {
+    it('POST /thruline/v1/support/chat handles guest access and denies restricted orders table', async () => {
       // Guest chat asking about orders
-      const guestChat = await apiCall('/x/v1/support/chat', {
+      const guestChat = await apiCall('/thruline/v1/support/chat', {
         method: 'POST',
         body: {
           tenantKey,
@@ -541,9 +541,9 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /x/v1/supp
       expect((guestChat.body as any).error.code).toMatch(/generation_failed|model_unavailable/);
     });
 
-    it('POST /x/v1/support/chat handles authenticated customer and executes row-level isolated DB query', async () => {
+    it('POST /thruline/v1/support/chat handles authenticated customer and executes row-level isolated DB query', async () => {
       // Mint customer token
-      const sessionRes = await apiCall('/x/v1/support/session', {
+      const sessionRes = await apiCall('/thruline/v1/support/session', {
         method: 'POST',
         headers: { 'X-Tenant-Secret': tenantSecret },
         body: { tenantKey, userId: 'cust_101', name: 'Alice', role: 'customer' },
@@ -551,7 +551,7 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /x/v1/supp
       const { contextToken } = sessionRes.body as { contextToken: string };
 
       // Send chat
-      const chatRes = await apiCall('/x/v1/support/chat', {
+      const chatRes = await apiCall('/thruline/v1/support/chat', {
         method: 'POST',
         headers: {
           'X-Support-Tenant-Key': tenantKey,
@@ -567,8 +567,8 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /x/v1/supp
       expect((chatRes.body as any).error.code).toMatch(/generation_failed|model_unavailable/);
     });
 
-    it('POST /x/v1/support/chat allows customer to browse products catalog', async () => {
-      const res = await apiCall('/x/v1/support/chat', {
+    it('POST /thruline/v1/support/chat allows customer to browse products catalog', async () => {
+      const res = await apiCall('/thruline/v1/support/chat', {
         method: 'POST',
         body: {
           tenantKey,
@@ -580,13 +580,13 @@ describe('Multi-Tenant AI Support Gateway (/api/x-gateway/support/* & /x/v1/supp
       expect((res.body as any).error.code).toMatch(/generation_failed|model_unavailable/);
     });
 
-    it('GET /x/v1/support/widget.js returns executable JavaScript defining window.FreeLLMAPISupport', async () => {
-      const res = await apiCall('/x/v1/support/widget.js');
+    it('GET /thruline/v1/support/widget.js returns executable JavaScript defining window.FreeLLMAPISupport', async () => {
+      const res = await apiCall('/thruline/v1/support/widget.js');
       expect(res.status).toBe(200);
       expect(res.headers.get('content-type')).toContain('application/javascript');
       expect(res.text).toContain('window.FreeLLMAPISupport');
       expect(res.text).toContain('init: function');
-      expect(res.text).toContain('/x/v1/support/chat');
+      expect(res.text).toContain('/thruline/v1/support/chat');
     });
   });
 });

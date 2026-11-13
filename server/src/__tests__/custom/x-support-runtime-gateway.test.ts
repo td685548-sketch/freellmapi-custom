@@ -146,7 +146,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
   // -------------------------------------------------------------------------
   describe('T009 & T010: Chat Input Validation & Unified Auth Boundary', () => {
     it('rejects conflicting tenant identity between header and body with 400 conflicting_identity', async () => {
-      const res = await apiCall('/x/v1/support/chat', {
+      const res = await apiCall('/thruline/v1/support/chat', {
         method: 'POST',
         headers: { 'X-Support-Tenant-Key': partnerTenantKey },
         body: {
@@ -159,7 +159,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
     });
 
     it('rejects conflicting user tokens with 400 conflicting_identity', async () => {
-      const res = await apiCall('/x/v1/support/chat', {
+      const res = await apiCall('/thruline/v1/support/chat', {
         method: 'POST',
         headers: {
           'X-Support-Tenant-Key': partnerTenantKey,
@@ -176,7 +176,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
 
     it('denies disallowed CORS origin with 403 origin_denied on preflight and POST', async () => {
       // OPTIONS preflight with forbidden origin
-      const preflight = await apiCall('/x/v1/support/chat', {
+      const preflight = await apiCall('/thruline/v1/support/chat', {
         method: 'OPTIONS',
         headers: {
           Origin: 'https://evil-site.com',
@@ -187,7 +187,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
       expect((preflight.body as any).error.code).toBe('origin_denied');
 
       // POST with forbidden origin
-      const postRes = await apiCall('/x/v1/support/chat', {
+      const postRes = await apiCall('/thruline/v1/support/chat', {
         method: 'POST',
         headers: {
           Origin: 'https://evil-site.com',
@@ -202,7 +202,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
     });
 
     it('allows valid configured CORS origin on preflight and POST', async () => {
-      const preflight = await apiCall('/x/v1/support/chat', {
+      const preflight = await apiCall('/thruline/v1/support/chat', {
         method: 'OPTIONS',
         headers: {
           Origin: 'https://partner.example.com',
@@ -215,7 +215,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
 
     it('rejects invalid message payloads without calling generation engine', async () => {
       // 1. Missing messages
-      const missing = await apiCall('/x/v1/support/chat', {
+      const missing = await apiCall('/thruline/v1/support/chat', {
         method: 'POST',
         body: { tenantKey: partnerTenantKey },
       });
@@ -223,7 +223,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
       expect((missing.body as any).error.code).toBe('invalid_input');
 
       // 2. Disallowed role (system / developer)
-      const systemRole = await apiCall('/x/v1/support/chat', {
+      const systemRole = await apiCall('/thruline/v1/support/chat', {
         method: 'POST',
         body: {
           tenantKey: partnerTenantKey,
@@ -237,7 +237,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
       expect((systemRole.body as any).error.code).toBe('invalid_input');
 
       // 3. Last message is not from user
-      const lastAssistant = await apiCall('/x/v1/support/chat', {
+      const lastAssistant = await apiCall('/thruline/v1/support/chat', {
         method: 'POST',
         body: {
           tenantKey: partnerTenantKey,
@@ -251,7 +251,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
       expect((lastAssistant.body as any).error.code).toBe('invalid_input');
 
       // 4. Invalid requestId format
-      const badReqId = await apiCall('/x/v1/support/chat', {
+      const badReqId = await apiCall('/thruline/v1/support/chat', {
         method: 'POST',
         body: {
           tenantKey: partnerTenantKey,
@@ -263,7 +263,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
       expect((badReqId.body as any).error.code).toBe('invalid_input');
 
       // 5. Unpermitted model override
-      const badModel = await apiCall('/x/v1/support/chat', {
+      const badModel = await apiCall('/thruline/v1/support/chat', {
         method: 'POST',
         body: {
           tenantKey: partnerTenantKey,
@@ -298,7 +298,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
       });
 
       try {
-        const res = await apiCall('/x/v1/support/chat', {
+        const res = await apiCall('/thruline/v1/support/chat', {
           method: 'POST',
           headers: {
             Origin: 'https://partner.example.com',
@@ -334,9 +334,9 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
   // -------------------------------------------------------------------------
   // 2. T012: Guest Sessions & Atomic Rate Limiting
   // -------------------------------------------------------------------------
-  describe('T012: POST /x/v1/support/guest-session', () => {
+  describe('T012: POST /thruline/v1/support/guest-session', () => {
     it('creates a guest session with UUID identity, role guest and TTL 900s', async () => {
-      const res = await apiCall('/x/v1/support/guest-session', {
+      const res = await apiCall('/thruline/v1/support/guest-session', {
         method: 'POST',
         headers: {
           Origin: 'https://partner.example.com',
@@ -357,7 +357,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
     });
 
     it('rejects caller-specified userId, role, or permissions claims in body', async () => {
-      const res = await apiCall('/x/v1/support/guest-session', {
+      const res = await apiCall('/thruline/v1/support/guest-session', {
         method: 'POST',
         body: {
           tenantKey: partnerTenantKey,
@@ -381,21 +381,21 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
       });
 
       // 1st request ok
-      const r1 = await apiCall('/x/v1/support/guest-session', {
+      const r1 = await apiCall('/thruline/v1/support/guest-session', {
         method: 'POST',
         body: { tenantKey: partnerTenantKey },
       });
       expect(r1.status).toBe(200);
 
       // 2nd request ok
-      const r2 = await apiCall('/x/v1/support/guest-session', {
+      const r2 = await apiCall('/thruline/v1/support/guest-session', {
         method: 'POST',
         body: { tenantKey: partnerTenantKey },
       });
       expect(r2.status).toBe(200);
 
       // 3rd request throttled
-      const r3 = await apiCall('/x/v1/support/guest-session', {
+      const r3 = await apiCall('/thruline/v1/support/guest-session', {
         method: 'POST',
         body: { tenantKey: partnerTenantKey },
       });
@@ -417,7 +417,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
 
     beforeAll(async () => {
       // Mint token for Customer 1
-      const s1 = await apiCall('/x/v1/support/session', {
+      const s1 = await apiCall('/thruline/v1/support/session', {
         method: 'POST',
         headers: { Authorization: `Bearer ${partnerTenantSecret}` },
         body: { tenantKey: partnerTenantKey, userId: 'user_alice', role: 'customer' },
@@ -425,7 +425,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
       customer1Token = (s1.body as any).contextToken;
 
       // Mint token for Customer 2
-      const s2 = await apiCall('/x/v1/support/session', {
+      const s2 = await apiCall('/thruline/v1/support/session', {
         method: 'POST',
         headers: { Authorization: `Bearer ${partnerTenantSecret}` },
         body: { tenantKey: partnerTenantKey, userId: 'user_bob', role: 'customer' },
@@ -433,7 +433,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
       customer2Token = (s2.body as any).contextToken;
 
       // Customer 1 creates conversation with message
-      const msgRes = await apiCall('/x/v1/support/conversations/messages', {
+      const msgRes = await apiCall('/thruline/v1/support/conversations/messages', {
         method: 'POST',
         headers: {
           'X-Support-Tenant-Key': partnerTenantKey,
@@ -447,7 +447,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
     });
 
     it('denies cross-user conversation read to another customer', async () => {
-      const res = await apiCall(`/x/v1/support/conversations/${conversationId}`, {
+      const res = await apiCall(`/thruline/v1/support/conversations/${conversationId}`, {
         headers: {
           'X-Support-Tenant-Key': partnerTenantKey,
           'X-Support-Context-Token': customer2Token,
@@ -457,7 +457,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
     });
 
     it('denies cross-user escalation on another user conversation', async () => {
-      const res = await apiCall('/x/v1/support/escalate', {
+      const res = await apiCall('/thruline/v1/support/escalate', {
         method: 'POST',
         headers: {
           'X-Support-Tenant-Key': partnerTenantKey,
@@ -473,7 +473,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
     });
 
     it('denies cross-user CSAT rating on another user conversation', async () => {
-      const res = await apiCall('/x/v1/support/csat', {
+      const res = await apiCall('/thruline/v1/support/csat', {
         method: 'POST',
         headers: {
           'X-Support-Tenant-Key': partnerTenantKey,
@@ -489,7 +489,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
     });
 
     it('returns masked conversation history for owner', async () => {
-      const res = await apiCall(`/x/v1/support/conversations/${conversationId}`, {
+      const res = await apiCall(`/thruline/v1/support/conversations/${conversationId}`, {
         headers: {
           'X-Support-Tenant-Key': partnerTenantKey,
           'X-Support-Context-Token': customer1Token,
@@ -504,9 +504,9 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
   // -------------------------------------------------------------------------
   // 4. T016: Widget Script Delivery
   // -------------------------------------------------------------------------
-  describe('T016: GET /x/v1/support/widget.js Delegation', () => {
+  describe('T016: GET /thruline/v1/support/widget.js Delegation', () => {
     it('serves JavaScript widget with public caching and CORS headers', async () => {
-      const res = await apiCall('/x/v1/support/widget.js');
+      const res = await apiCall('/thruline/v1/support/widget.js');
       expect(res.status).toBe(200);
       expect(res.headers.get('content-type')).toContain('application/javascript');
       expect(res.headers.get('access-control-allow-origin')).toBe('*');
@@ -524,7 +524,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
     let customerToken: string;
 
     beforeAll(async () => {
-      const s = await apiCall('/x/v1/support/session', {
+      const s = await apiCall('/thruline/v1/support/session', {
         method: 'POST',
         headers: { Authorization: `Bearer ${partnerTenantSecret}` },
         body: { tenantKey: partnerTenantKey, userId: 'user_alice', role: 'customer' },
@@ -532,7 +532,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
       customerToken = (s.body as any).contextToken;
 
       // Propose an action
-      const propRes = await apiCall('/x/v1/support/actions/propose', {
+      const propRes = await apiCall('/thruline/v1/support/actions/propose', {
         method: 'POST',
         headers: {
           'X-Support-Tenant-Key': partnerTenantKey,
@@ -549,7 +549,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
 
     it('enqueues ticket.created atomically on escalation', async () => {
       enqueuedEvents.length = 0;
-      const res = await apiCall('/x/v1/support/escalate', {
+      const res = await apiCall('/thruline/v1/support/escalate', {
         method: 'POST',
         headers: {
           'X-Support-Tenant-Key': partnerTenantKey,
@@ -567,7 +567,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
 
     it('enqueues csat.submitted atomically on CSAT rating', async () => {
       enqueuedEvents.length = 0;
-      const res = await apiCall('/x/v1/support/csat', {
+      const res = await apiCall('/thruline/v1/support/csat', {
         method: 'POST',
         headers: {
           'X-Support-Tenant-Key': partnerTenantKey,
@@ -593,7 +593,7 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
         },
       });
 
-      const res = await apiCall('/x/v1/support/guardrails/check', {
+      const res = await apiCall('/thruline/v1/support/guardrails/check', {
         method: 'POST',
         headers: {
           'X-Support-Tenant-Key': partnerTenantKey,

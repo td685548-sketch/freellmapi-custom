@@ -59,7 +59,7 @@ describe('X Gateway Media Providers & Web Kind', () => {
       suggestedModels: string[];
     };
     expect(webKind.label).toBe('Web Search & Fetch');
-    expect(webKind.endpoint).toBe('/x/v1/chat/completions');
+    expect(webKind.endpoint).toBe('/thruline/v1/chat/completions');
     expect(webKind.suggestedModels).toContain('sonar-pro');
     expect(webKind.suggestedModels).toContain('tavily-search');
     expect(Array.isArray(webKind.providers)).toBe(true);

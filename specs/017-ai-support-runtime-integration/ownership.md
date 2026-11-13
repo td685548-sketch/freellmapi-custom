@@ -77,7 +77,7 @@ CREATE:
 
 EDIT ONLY:
 
-- `client/src/custom/x-gateway/XGatewayApp.tsx` — imports, localized nav `/x/support-integration`, route `support-integration`; preserve 013–016 entries.
+- `client/src/custom/x-gateway/XGatewayApp.tsx` — imports, localized nav `/thruline/support-integration`, route `support-integration`; preserve 013–016 entries.
 
 Owns US2 browser experience and US4 onboarding UI. Does not edit support-router.ts; Agent3 serves the standalone script factory. No imports of @testing-library packages, no dependency/manifest/lockfile changes. Native React createRoot/act only. Widget tests may use jsdom already installed and mocked fetch; no real external traffic.
 

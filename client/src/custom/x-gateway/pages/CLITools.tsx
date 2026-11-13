@@ -60,7 +60,7 @@ export default function CLITools() {
   const [newKeyMaterial, setNewKeyMaterial] = useState<string | null>(null);
   const [urlMode, setUrlMode] = useState<'origin' | 'custom'>('origin');
   const [customUrlInput, setCustomUrlInput] = useState<string>(
-    typeof window !== 'undefined' ? `${window.location.origin}/x/v1` : 'https://your-domain.onrender.com/x/v1'
+    typeof window !== 'undefined' ? `${window.location.origin}/thruline/v1` : 'https://your-domain.onrender.com/thruline/v1'
   );
   const [shellTab, setShellTab] = useState<ShellTab>('bash');
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'cli' | 'ide' | 'agent'>('all');
@@ -99,11 +99,11 @@ export default function CLITools() {
 
   // Resolve active Base URL
   const activeBaseUrl = useMemo(() => {
-    if (urlMode === 'custom') return customUrlInput.trim() || 'https://your-domain.onrender.com/x/v1';
+    if (urlMode === 'custom') return customUrlInput.trim() || 'https://your-domain.onrender.com/thruline/v1';
     if (typeof window !== 'undefined') {
-      return `${window.location.origin}/x/v1`;
+      return `${window.location.origin}/thruline/v1`;
     }
-    return 'http://localhost:3001/x/v1';
+    return 'http://localhost:3001/thruline/v1';
   }, [urlMode, customUrlInput]);
 
   // Resolve active API Key
@@ -359,7 +359,7 @@ export default function CLITools() {
                   type="text"
                   value={customUrlInput}
                   onChange={(e) => setCustomUrlInput(e.target.value)}
-                  placeholder="https://your-domain.com/x/v1"
+                  placeholder="https://your-domain.com/thruline/v1"
                   style={{
                     flex: 1,
                     padding: '7px 10px',

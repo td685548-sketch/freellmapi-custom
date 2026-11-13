@@ -24,7 +24,7 @@ function normalizeUrl(raw) {
   const url = new URL(raw);
   if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('Use a gateway URL without credentials, query or fragment.');
   if (url.protocol !== 'https:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) throw new Error('Use HTTPS for a hosted gateway.');
-  if (!/\/x\/v1\/?$/.test(url.pathname)) throw new Error('Base URL must end with /x/v1.');
+  if (!/\/thruline\/v1\/?$/.test(url.pathname)) throw new Error('Base URL must end with /thruline/v1.');
   return url.toString().replace(/\/$/, '');
 }
 

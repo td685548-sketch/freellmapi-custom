@@ -216,7 +216,7 @@ export default function MediaProviders() {
   // Snippet generator
   const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
   const getSnippet = () => {
-    const endpointPath = currentKindSpec?.endpoint || `/x/v1/${activeKind}`;
+    const endpointPath = currentKindSpec?.endpoint || `/thruline/v1/${activeKind}`;
     const url = `${origin}${endpointPath}`;
 
     if (activeKind === 'video') {
@@ -242,7 +242,7 @@ export default function MediaProviders() {
 
 client = OpenAI(
     api_key="${activeApiKey}",
-    base_url="${origin}/x/v1"
+    base_url="${origin}/thruline/v1"
 )
 
 response = client.images.generate(
@@ -257,7 +257,7 @@ print(response.data[0].url)`;
 
 const client = new OpenAI({
   apiKey: "${activeApiKey}",
-  baseURL: "${origin}/x/v1",
+  baseURL: "${origin}/thruline/v1",
 });
 
 const response = await client.images.generate({
@@ -285,7 +285,7 @@ console.log(response.data[0].url);`;
 
 client = OpenAI(
     api_key="${activeApiKey}",
-    base_url="${origin}/x/v1"
+    base_url="${origin}/thruline/v1"
 )
 
 response = client.audio.speech.create(
@@ -300,7 +300,7 @@ import fs from "fs";
 
 const client = new OpenAI({
   apiKey: "${activeApiKey}",
-  baseURL: "${origin}/x/v1",
+  baseURL: "${origin}/thruline/v1",
 });
 
 const mp3 = await client.audio.speech.create({
@@ -324,7 +324,7 @@ await fs.promises.writeFile("output.mp3", buffer);`;
 
 client = OpenAI(
     api_key="${activeApiKey}",
-    base_url="${origin}/x/v1"
+    base_url="${origin}/thruline/v1"
 )
 
 with open("audio.mp3", "rb") as audio_file:
@@ -339,7 +339,7 @@ import fs from "fs";
 
 const client = new OpenAI({
   apiKey: "${activeApiKey}",
-  baseURL: "${origin}/x/v1",
+  baseURL: "${origin}/thruline/v1",
 });
 
 const transcript = await client.audio.transcriptions.create({
@@ -365,7 +365,7 @@ console.log(transcript.text);`;
 
 client = OpenAI(
     api_key="${activeApiKey}",
-    base_url="${origin}/x/v1"
+    base_url="${origin}/thruline/v1"
 )
 
 response = client.embeddings.create(
@@ -378,7 +378,7 @@ print("Vector length:", len(response.data[0].embedding))`;
 
 const client = new OpenAI({
   apiKey: "${activeApiKey}",
-  baseURL: "${origin}/x/v1",
+  baseURL: "${origin}/thruline/v1",
 });
 
 const response = await client.embeddings.create({
@@ -406,7 +406,7 @@ console.log("Vector length:", response.data[0].embedding.length);`;
 
 client = OpenAI(
     api_key="${activeApiKey}",
-    base_url="${origin}/x/v1"
+    base_url="${origin}/thruline/v1"
 )
 
 response = client.chat.completions.create(
@@ -421,7 +421,7 @@ print(response.choices[0].message.content)`;
 
 const client = new OpenAI({
   apiKey: "${activeApiKey}",
-  baseURL: "${origin}/x/v1",
+  baseURL: "${origin}/thruline/v1",
 });
 
 const response = await client.chat.completions.create({
@@ -1310,7 +1310,7 @@ console.log(response.choices[0].message.content);`;
                 </div>
               </div>
               <div className="x-media-provider-card-actions">
-                <Link to={`/x/providers/${encodeURIComponent(p.id)}`} className="x-button x-button-sm">
+                <Link to={`/thruline/providers/${encodeURIComponent(p.id)}`} className="x-button x-button-sm">
                   {p.isConnected ? s.ready : s.addAccount}
                 </Link>
               </div>

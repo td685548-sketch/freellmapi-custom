@@ -962,7 +962,7 @@ xSupportConsoleRouter.use(
 );
 
 // ---------------------------------------------------------------------------
-// 2. Public Partner Gateway Router (/x/v1/support/*)
+// 2. Public Partner Gateway Router (/thruline/v1/support/*)
 // ---------------------------------------------------------------------------
 
 export const xSupportPublicRouter = Router();

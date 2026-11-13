@@ -1,13 +1,13 @@
 # X Gateway operator guide
 
-X Gateway is the fork's isolated inference surface at `/x/v1`, with its console
-at `/x`. It uses `x_gateway_keys` provider accounts, dedicated configuration and
+X Gateway is the fork's isolated inference surface at `/thruline/v1`, with its console
+at `/thruline`. It uses `x_gateway_keys` provider accounts, dedicated configuration and
 client keys. Existing `/v1/*` routes remain available independently.
 
 ## Enable and connect
 
-Sign in with `use_x_gateway`; enable the gateway on `/x/endpoint` with
-`edit_x_settings`. Connect provider credentials on `/x/providers`. Client calls
+Sign in with `use_x_gateway`; enable the gateway on `/thruline/endpoint` with
+`edit_x_settings`. Connect provider credentials on `/thruline/providers`. Client calls
 use a dedicated `sk-xgw-...` key or a personal `sk-flm-...` key whose owner holds
 `use_x_gateway`. Revocation and current permissions are checked for inference.
 When disabled the inference surface returns 404.
@@ -17,7 +17,7 @@ as hashes, displayed in full only when created, and cannot be recovered later.
 Provider accounts are separate from the main dashboard pool.
 
 ```sh
-curl "$GATEWAY_URL/x/v1/chat/completions" \
+curl "$GATEWAY_URL/thruline/v1/chat/completions" \
   -H "Authorization: Bearer $X_GATEWAY_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"model":"auto","messages":[{"role":"user","content":"Reply OK"}],"max_tokens":16}'
@@ -27,18 +27,18 @@ curl "$GATEWAY_URL/x/v1/chat/completions" \
 
 | Page | Purpose |
 | --- | --- |
-| `/x/providers` | Connect, pause, test and manage provider accounts and custom nodes |
-| `/x/endpoint` | Enable gateway, create/revoke client keys and restrict model access |
-| `/x/combos` | Configure fallback, round-robin, smart and fusion routing |
-| `/x/savers` | Configure output savers and input compression options |
-| `/x/quota` | Provider quota observations, reset windows and routing tiers |
-| `/x/usage` | Account usage and local caps |
-| `/x/proxies` | Outbound proxy pool management |
-| `/x/media` | Provider-specific media configuration/tests |
-| `/x/tools` | Local client setup, actual inference tests and diagnostics |
-| `/x/translator` | Inspect protocol translation |
-| `/x/playground` | Interactive chat |
-| `/x/skills` | Discover/download client skills |
+| `/thruline/providers` | Connect, pause, test and manage provider accounts and custom nodes |
+| `/thruline/endpoint` | Enable gateway, create/revoke client keys and restrict model access |
+| `/thruline/combos` | Configure fallback, round-robin, smart and fusion routing |
+| `/thruline/savers` | Configure output savers and input compression options |
+| `/thruline/quota` | Provider quota observations, reset windows and routing tiers |
+| `/thruline/usage` | Account usage and local caps |
+| `/thruline/proxies` | Outbound proxy pool management |
+| `/thruline/media` | Provider-specific media configuration/tests |
+| `/thruline/tools` | Local client setup, actual inference tests and diagnostics |
+| `/thruline/translator` | Inspect protocol translation |
+| `/thruline/playground` | Interactive chat |
+| `/thruline/skills` | Discover/download client skills |
 
 Granular permissions still apply: `view_keys`, account key actions,
 `edit_x_settings`, combo permissions, `manage_compression`, usage permissions.
@@ -65,15 +65,15 @@ are for downloadable configuration; verify public ingress separately.
 
 | Tool | Test protocol | Local setup |
 | --- | --- | --- |
-| Claude Code | `/x/v1/messages` | Merge `~/.claude/settings.json`; preserve unrelated settings |
-| Codex | `/x/v1/responses` | Launcher supplies `-c` overrides; existing `config.toml` and `auth.json` untouched |
-| Gemini CLI | `/x/v1beta/models/...:generateContent` | API-key auth setting and launcher environment |
-| OpenCode | `/x/v1/chat/completions` | Merge existing provider map; v1 detected from `provider`, otherwise v2 |
-| Cursor | `/x/v1/chat/completions` | Private instruction file for Settings; no keychain/settings database edits |
+| Claude Code | `/thruline/v1/messages` | Merge `~/.claude/settings.json`; preserve unrelated settings |
+| Codex | `/thruline/v1/responses` | Launcher supplies `-c` overrides; existing `config.toml` and `auth.json` untouched |
+| Gemini CLI | `/thruline/v1beta/models/...:generateContent` | API-key auth setting and launcher environment |
+| OpenCode | `/thruline/v1/chat/completions` | Merge existing provider map; v1 detected from `provider`, otherwise v2 |
+| Cursor | `/thruline/v1/chat/completions` | Private instruction file for Settings; no keychain/settings database edits |
 
-Claude's base URL is the `/x` root because its SDK appends `/v1/messages`.
-Gemini's base URL is `/x`, with `GOOGLE_GENAI_API_VERSION=v1beta`. OpenAI clients
-use `/x/v1`. The setup launcher carries the chosen model and key.
+Claude's base URL is the `/thruline` root because its SDK appends `/v1/messages`.
+Gemini's base URL is `/thruline`, with `GOOGLE_GENAI_API_VERSION=v1beta`. OpenAI clients
+use `/thruline/v1`. The setup launcher carries the chosen model and key.
 
 Setup creates timestamped backups under `~/.x-gateway/backups/` and prints:
 `node x-gateway-setup.mjs --restore "<backup-directory>"`. Restore reinstates

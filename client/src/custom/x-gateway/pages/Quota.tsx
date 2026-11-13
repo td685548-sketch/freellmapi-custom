@@ -71,6 +71,6 @@ export default function Quota() {
       <details className="x-quota-local"><summary>{s.local}</summary><p>{s.localHelp}</p><dl><dt>{s.requests}</dt><dd>{a.local.requests.toLocaleString()} / {a.local.requestCap || s.noCap}</dd><dt>{s.tokens}</dt><dd>{a.local.tokens.toLocaleString()} / {a.local.tokenCap || s.noCap}</dd></dl></details>
       <footer><div><small>{s.observed}: {a.observedAt ? new Date(a.observedAt).toLocaleString() : s.never}</small><small>{s.checked}: {a.checkedAt ? new Date(a.checkedAt).toLocaleString() : s.never}</small></div><button className="x-button" disabled={!a.supported || !a.enabled || refresh.isPending} onClick={() => refresh.mutate([a.accountId])}><RefreshCw size={14} />{s.refresh}</button></footer>
     </section>)}</div>
-    {query.data && !accounts.length && <div className="x-empty"><p>{s.empty}</p><Link className="x-button" to="/x/providers">{s.connect}</Link></div>}
+    {query.data && !accounts.length && <div className="x-empty"><p>{s.empty}</p><Link className="x-button" to="/thruline/providers">{s.connect}</Link></div>}
   </>;
 }

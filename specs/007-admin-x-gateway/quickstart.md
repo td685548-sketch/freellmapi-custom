@@ -15,12 +15,12 @@ Expected: everything passes; the new server suites cover access control, combos,
 
 ## 2. Switch it on and call it (scenario for User Story 1)
 
-1. Sign in as the administrator, open `/x`, enable the gateway.
+1. Sign in as the administrator, open `/thruline`, enable the gateway.
 2. Create a personal key on the existing Keys/Users page if you do not have one.
 3. Call it:
 
 ```bash
-curl -s http://localhost:3001/x/v1/chat/completions \
+curl -s http://localhost:3001/thruline/v1/chat/completions \
   -H "Authorization: Bearer $ADMIN_PERSONAL_KEY" -H "Content-Type: application/json" \
   -d '{"model":"auto","messages":[{"role":"user","content":"Say hi"}]}'
 ```
@@ -42,11 +42,11 @@ curl -s ... -H "X-Output-Saver: pirate" -d '...'   # 400 listing valid values
 
 ## 5. Usage (User Story 5)
 
-Open `/x/usage`: requests, tokens and tokens saved match the calls above.
+Open `/thruline/usage`: requests, tokens and tokens saved match the calls above.
 
 ## 6. Isolation and safety checks
 
-- Switch the gateway off: `/x/v1/*` answers 404 within a minute, the console shows the disabled state, `/v1` unaffected.
+- Switch the gateway off: `/thruline/v1/*` answers 404 within a minute, the console shows the disabled state, `/v1` unaffected.
 - Remove `use_x_gateway` from the account: the next call returns 403; the console disappears from the navigation.
-- Send a 10 MB body without a key to `/x/v1/chat/completions`: refused before parsing (401).
+- Send a 10 MB body without a key to `/thruline/v1/chat/completions`: refused before parsing (401).
 - Run the round-trip budget test: a gateway request issues no more statements than the same request on `/v1`.

@@ -86,7 +86,7 @@ function descriptorFor(provider: OAuthKind): OAuthProviderDescriptor {
     try {
       const base = new URL(process.env.PUBLIC_APP_URL ?? '');
       if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash) throw new Error();
-      descriptor.redirectUri = new URL('x/accounts/callback', base.toString().replace(/\/?$/, '/')).toString();
+      descriptor.redirectUri = new URL('thruline/accounts/callback', base.toString().replace(/\/?$/, '/')).toString();
     } catch { throw new AccountError(409, 'Configure an HTTPS PUBLIC_APP_URL for the registered Google OAuth callback.'); }
   }
   return descriptor;

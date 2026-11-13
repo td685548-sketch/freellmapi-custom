@@ -5,7 +5,7 @@ import { getDb, initDb } from '../../db/index.js';
 import { createSession, createUser } from '../../services/auth.js';
 import { getConfigSnapshot, setEnabled } from '../../custom/x-gateway/config.js';
 
-// The console switch is the only way an operator can enable /x/v1, so it is
+// The console switch is the only way an operator can enable /thruline/v1, so it is
 // checked through the real HTTP surface with the same permission leaves the
 // gateway uses.
 describe('X Gateway console API', () => {

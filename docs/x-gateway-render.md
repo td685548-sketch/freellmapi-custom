@@ -59,7 +59,7 @@ and any durable token lifecycle state must stay in the configured database.
    client key still works. Diagnostics evidence correctly resets to unverified.
 
 For provider browser login, the console callback is
-`https://your-service.onrender.com/x/accounts/callback`; it must match the console
+`https://your-service.onrender.com/thruline/accounts/callback`; it must match the console
 origin. `PUBLIC_APP_URL` also configures application auth callbacks; Google login
 uses `/api/auth/google/callback`. Configure the correct callback for each flow.
 Device-code login does not require a localhost callback on the user's computer.

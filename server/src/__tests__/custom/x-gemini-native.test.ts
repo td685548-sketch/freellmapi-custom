@@ -190,9 +190,9 @@ describe('X Gateway Gemini Native API & Ollama Emulation', () => {
     });
   });
 
-  describe('Ollama Native API Emulation (/x/api)', () => {
-    it('returns model tags for Ollama clients at /x/api/tags', async () => {
-      const res = await realFetch(`${base}/x/api/tags`, {
+  describe('Ollama Native API Emulation (/thruline/api)', () => {
+    it('returns model tags for Ollama clients at /thruline/api/tags', async () => {
+      const res = await realFetch(`${base}/thruline/api/tags`, {
         headers: { Authorization: `Bearer ${xgwKey}` },
       });
       expect(res.status).toBe(200);
@@ -202,15 +202,23 @@ describe('X Gateway Gemini Native API & Ollama Emulation', () => {
       expect(data.models[0].details.format).toBe('gguf');
     });
 
-    it('returns Ollama version at /x/api/version', async () => {
-      const res = await realFetch(`${base}/x/api/version`);
+    it('still answers at the pre-rename /x prefix', async () => {
+      const res = await realFetch(`${base}/x/api/tags`, {
+        headers: { Authorization: `Bearer ${xgwKey}` },
+      });
+      expect(res.status).toBe(200);
+      expect(Array.isArray((await res.json() as any).models)).toBe(true);
+    });
+
+    it('returns Ollama version at /thruline/api/version', async () => {
+      const res = await realFetch(`${base}/thruline/api/version`);
       expect(res.status).toBe(200);
       const data = await res.json() as any;
       expect(data.version).toBe('0.5.1');
     });
 
-    it('returns model info at /x/api/show', async () => {
-      const res = await realFetch(`${base}/x/api/show`, {
+    it('returns model info at /thruline/api/show', async () => {
+      const res = await realFetch(`${base}/thruline/api/show`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: 'llama-3.3-70b' }),

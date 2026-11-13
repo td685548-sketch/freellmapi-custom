@@ -141,18 +141,18 @@ export function registerCustomRoutes(app: Express): void {
   app.use('/api/auth/guest', guestInfoRouter);
   // The chat signed-out visitors may try (guest permission try_playground; bounded, nothing stored).
   app.use('/api/guest', guestTrialRouter);
-  app.use(['/v1', '/x/v1'], (_req, _res, next) => withRoutingSettingsScope(next));
+  app.use(['/v1', '/thruline/v1'], (_req, _res, next) => withRoutingSettingsScope(next));
   // When the X Gateway is off, answer 404 immediately before any auth checks
   // so an inactive gateway leaks nothing about its existence.
-  app.use('/x/v1', (_req, res, next) => {
+  app.use('/thruline/v1', (_req, res, next) => {
     if (!getConfigSnapshot().enabled) {
       res.status(404).json({ error: { message: 'Not found', type: 'not_found' } });
       return;
     }
     next();
   });
-  // Rate-limiting and usage tracking gate for member personal API keys (/v1, /v1beta and /x/v1 inference)
-  app.use(['/v1', '/v1beta', '/x/v1'], userInferenceGate);
+  // Rate-limiting and usage tracking gate for member personal API keys (/v1, /v1beta and /thruline/v1 inference)
+  app.use(['/v1', '/v1beta', '/thruline/v1'], userInferenceGate);
   // Playground chats (unified key + the dashboard session) are attributed to the signed-in account.
   app.use('/v1', playgroundAttribution);
   // Roll finished days of the request log into the long-term daily table, after an inference
@@ -189,14 +189,14 @@ export function registerCustomRoutes(app: Express): void {
   // The /api/analytics gate above enforces auth + view_logs for this mount too.
   app.use('/api/analytics/provider-tiers', providerTiersRouter);
 
-  // X Gateway (9Router integration): admin-only OpenAI-compatible surface at /x/v1.
+  // X Gateway (9Router integration): admin-only OpenAI-compatible surface at /thruline/v1.
   // Mounted after the personal-key gate so auth is already resolved.
-  app.use('/x/v1', xGatewayRouter);
+  app.use('/thruline/v1', xGatewayRouter);
   // Google Gemini Native API Emulation (/v1beta/models/*:generateContent, :streamGenerateContent)
   app.use('/v1beta', geminiRouter);
-  app.use('/x/v1beta', geminiRouter);
-  // Ollama Native API Emulation (/x/api/tags, /x/api/version, /x/api/show)
-  app.use('/x', xGatewayOllamaRouter);
+  app.use('/thruline/v1beta', geminiRouter);
+  // Ollama Native API Emulation (/thruline/api/tags, /thruline/api/version, /thruline/api/show)
+  app.use('/thruline', xGatewayOllamaRouter);
   // Account logins manage shared credentials with the router's granular key permissions.
   app.use('/api/x-accounts', providerAccountsRouter);
   app.use('/api/x-accounts', autoPingRouter);

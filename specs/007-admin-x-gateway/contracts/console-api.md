@@ -14,7 +14,7 @@ Authenticated by the dashboard session (`Authorization: Bearer <session token>`)
 | `DELETE /api/x-gateway/combos/:id` | `edit_x_combos` | delete |
 | `GET /api/x-gateway/models` | `edit_x_combos` | catalogue entries the combo editor may pick from (platform, model id, display name, enabled) |
 | `GET /api/x-gateway/usage?range=24h\|7d\|30d` | `view_x_usage` | `{ requests, tokensIn, tokensOut, inputTokensSaved, byCombo[], byModel[] }` |
-| `POST /api/x-gateway/test` | `use_x_gateway` | body `{ model, messages, savers? }`; runs the request through the same edge pipeline as `/x/v1` on behalf of the signed-in administrator and returns `{ answer, servedBy, saversApplied, inputTokensSaved }`; never accepts or returns a key |
+| `POST /api/x-gateway/test` | `use_x_gateway` | body `{ model, messages, savers? }`; runs the request through the same edge pipeline as `/thruline/v1` on behalf of the signed-in administrator and returns `{ answer, servedBy, saversApplied, inputTokensSaved }`; never accepts or returns a key |
 
 Rules:
 

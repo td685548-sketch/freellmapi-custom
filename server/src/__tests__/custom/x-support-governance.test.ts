@@ -26,7 +26,7 @@ import {
 import { createOrAppendSupportConversation } from '../../custom/x-gateway/support-workflows.js';
 import { drainSupportEventOutbox } from '../../custom/x-gateway/support-event-outbox.js';
 
-describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x-gateway/support/* & /x/v1/support/*)', () => {
+describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x-gateway/support/* & /thruline/v1/support/*)', () => {
   let server: Server;
   let base: string;
   let editorToken: string;
@@ -506,18 +506,18 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
   });
 
   // =========================================================================
-  // 2. Public Partner API Tests (/x/v1/support/*)
+  // 2. Public Partner API Tests (/thruline/v1/support/*)
   // =========================================================================
-  describe('Public Partner API (/x/v1/support/*)', () => {
+  describe('Public Partner API (/thruline/v1/support/*)', () => {
     it('14. Partner Auth: Rejects with 401 when tenant key or user token is missing or invalid', async () => {
       // Missing tenant key
-      const noKeyRes = await apiCall('/x/v1/support/profile', {
+      const noKeyRes = await apiCall('/thruline/v1/support/profile', {
         headers: { 'X-Support-User-Token': customerAToken },
       });
       expect(noKeyRes.status).toBe(401);
 
       // Invalid tenant key
-      const badKeyRes = await apiCall('/x/v1/support/profile', {
+      const badKeyRes = await apiCall('/thruline/v1/support/profile', {
         headers: {
           'X-Support-Tenant-Key': 'pk_live_non_existent',
           'X-Support-User-Token': customerAToken,
@@ -526,13 +526,13 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
       expect(badKeyRes.status).toBe(401);
 
       // Missing user token
-      const noTokenRes = await apiCall('/x/v1/support/profile', {
+      const noTokenRes = await apiCall('/thruline/v1/support/profile', {
         headers: { 'X-Support-Tenant-Key': tenant.publicKey },
       });
       expect(noTokenRes.status).toBe(401);
 
       // Invalid user token
-      const badTokenRes = await apiCall('/x/v1/support/profile', {
+      const badTokenRes = await apiCall('/thruline/v1/support/profile', {
         headers: {
           'X-Support-Tenant-Key': tenant.publicKey,
           'X-Support-User-Token': 'invalid.token.signature',
@@ -563,7 +563,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
       });
 
       try {
-        const res = await apiCall('/x/v1/support/guardrails/check', {
+        const res = await apiCall('/thruline/v1/support/guardrails/check', {
           method: 'POST',
           headers: {
             'X-Support-Tenant-Key': tenant.publicKey,
@@ -593,7 +593,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
     });
 
     it('15b. POST /guardrails/check: Passes clean prompt and consumes user quota', async () => {
-      const res = await apiCall('/x/v1/support/guardrails/check', {
+      const res = await apiCall('/thruline/v1/support/guardrails/check', {
         method: 'POST',
         headers: {
           'X-Support-Tenant-Key': tenant.publicKey,
@@ -625,7 +625,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
       });
 
       // Call 1
-      await apiCall('/x/v1/support/guardrails/check', {
+      await apiCall('/thruline/v1/support/guardrails/check', {
         method: 'POST',
         headers: {
           'X-Support-Tenant-Key': tenant.publicKey,
@@ -635,7 +635,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
       });
 
       // Call 2
-      await apiCall('/x/v1/support/guardrails/check', {
+      await apiCall('/thruline/v1/support/guardrails/check', {
         method: 'POST',
         headers: {
           'X-Support-Tenant-Key': tenant.publicKey,
@@ -645,7 +645,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
       });
 
       // Call 3 -> should exceed quota!
-      const res3 = await apiCall('/x/v1/support/guardrails/check', {
+      const res3 = await apiCall('/thruline/v1/support/guardrails/check', {
         method: 'POST',
         headers: {
           'X-Support-Tenant-Key': tenant.publicKey,
@@ -678,7 +678,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
       });
 
       // Alice accesses Alice's profile (no userId param)
-      const ownRes = await apiCall('/x/v1/support/profile', {
+      const ownRes = await apiCall('/thruline/v1/support/profile', {
         headers: {
           'X-Support-Tenant-Key': tenant.publicKey,
           'X-Support-User-Token': customerAToken,
@@ -695,7 +695,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
       expect(ownData.memoryPrompt).toContain('Prefers delivery on weekends');
 
       // Bob tries to access Alice's profile -> 403 Forbidden!
-      const forbiddenRes = await apiCall('/x/v1/support/profile?userId=cust_alice', {
+      const forbiddenRes = await apiCall('/thruline/v1/support/profile?userId=cust_alice', {
         headers: {
           'X-Support-Tenant-Key': tenant.publicKey,
           'X-Support-User-Token': customerBToken,
@@ -704,7 +704,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
       expect(forbiddenRes.status).toBe(403);
 
       // Staff Charlie accesses Alice's profile -> 200 OK!
-      const staffRes = await apiCall('/x/v1/support/profile?userId=cust_alice', {
+      const staffRes = await apiCall('/thruline/v1/support/profile?userId=cust_alice', {
         headers: {
           'X-Support-Tenant-Key': tenant.publicKey,
           'X-Support-User-Token': staffToken,
@@ -719,7 +719,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
     });
 
     it("18. PATCH /profile: Updates caller's own profile attributes, tags, and memory facts", async () => {
-      const res = await apiCall('/x/v1/support/profile', {
+      const res = await apiCall('/thruline/v1/support/profile', {
         method: 'PATCH',
         headers: {
           'X-Support-Tenant-Key': tenant.publicKey,
@@ -765,7 +765,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
 
       try {
         // Invalid score 6 -> 400
-        const badRes = await apiCall('/x/v1/support/csat', {
+        const badRes = await apiCall('/thruline/v1/support/csat', {
           method: 'POST',
           headers: {
             'X-Support-Tenant-Key': tenant.publicKey,
@@ -789,7 +789,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
         });
 
         // Valid score 5 -> 201
-        const res = await apiCall('/x/v1/support/csat', {
+        const res = await apiCall('/thruline/v1/support/csat', {
           method: 'POST',
           headers: {
             'X-Support-Tenant-Key': tenant.publicKey,
@@ -823,7 +823,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/x
     });
 
     it('20. Preflight OPTIONS request responds with CORS headers', async () => {
-      const res = await apiCall('/x/v1/support/profile', {
+      const res = await apiCall('/thruline/v1/support/profile', {
         method: 'OPTIONS',
         headers: {
           Origin: 'http://localhost:3000',

@@ -1,6 +1,6 @@
 /**
  * Standalone embeddable support runtime widget script factory.
- * Served via GET /x/v1/support/widget.js.
+ * Served via GET /thruline/v1/support/widget.js.
  */
 export function getSupportRuntimeWidgetScript(): string {
   return `/** FreeLLMAPI AI Support Embeddable Widget */
@@ -13,8 +13,13 @@ export function getSupportRuntimeWidgetScript(): string {
     var cur = document.currentScript;
     if (cur && cur.src) {
       var parsed = new URL(cur.src, (window.location && window.location.href) ? window.location.href : 'http://localhost');
-      var widgetSuffix = '/x/v1/support/widget.js';
-      var basePath = parsed.pathname.slice(-widgetSuffix.length) === widgetSuffix ? parsed.pathname.slice(0, -widgetSuffix.length) : '';
+      var basePath = '';
+      // '/x/v1/...' is the pre-rename address still used by older embed snippets.
+      ['/thruline/v1/support/widget.js', '/x/v1/support/widget.js'].some(function (widgetSuffix) {
+        if (parsed.pathname.slice(-widgetSuffix.length) !== widgetSuffix) return false;
+        basePath = parsed.pathname.slice(0, -widgetSuffix.length);
+        return true;
+      });
       evaluatedScriptBase = parsed.origin + basePath;
     }
   } catch (e) {}
@@ -116,7 +121,7 @@ export function getSupportRuntimeWidgetScript(): string {
         return base + pathOrUrl;
       }
 
-      var endpoint = config.endpoint ? resolveUrl(config.endpoint) : resolveUrl('/x/v1/support/chat');
+      var endpoint = config.endpoint ? resolveUrl(config.endpoint) : resolveUrl('/thruline/v1/support/chat');
       var titleText = config.title || strings.title;
       var primaryColor = config.primaryColor || '#2563eb';
       var placeholder = config.placeholder || strings.placeholder;
@@ -393,7 +398,7 @@ export function getSupportRuntimeWidgetScript(): string {
         };
         if (activeToken) headers['X-Support-Context-Token'] = activeToken;
 
-        fetch(resolveUrl('/x/v1/support/csat'), {
+        fetch(resolveUrl('/thruline/v1/support/csat'), {
           method: 'POST',
           headers: headers,
           body: JSON.stringify({ conversationId: conversationId, score: score }),
@@ -429,7 +434,7 @@ export function getSupportRuntimeWidgetScript(): string {
         var epoch = identityEpoch;
         if (!allowGuestSession) return Promise.reject(new Error('guests_not_allowed'));
         var ctrl = trackAbortController();
-        return fetch(resolveUrl('/x/v1/support/guest-session'), {
+        return fetch(resolveUrl('/thruline/v1/support/guest-session'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tenantKey: tenantKey }),
@@ -465,7 +470,7 @@ export function getSupportRuntimeWidgetScript(): string {
         };
         if (activeToken) headers['X-Support-Context-Token'] = activeToken;
 
-        var p = fetch(resolveUrl('/x/v1/support/conversations/' + encodeURIComponent(convId)), {
+        var p = fetch(resolveUrl('/thruline/v1/support/conversations/' + encodeURIComponent(convId)), {
           method: 'GET',
           headers: headers,
           signal: ctrl.signal
@@ -562,7 +567,7 @@ export function getSupportRuntimeWidgetScript(): string {
         var headers = { 'X-Support-Tenant-Key': tenantKey };
         if (activeToken) headers['X-Support-Context-Token'] = activeToken;
 
-        var fetchPromise = fetch(resolveUrl('/x/v1/support/conversations/' + encodeURIComponent(conversationId)), {
+        var fetchPromise = fetch(resolveUrl('/thruline/v1/support/conversations/' + encodeURIComponent(conversationId)), {
           method: 'GET',
           headers: headers,
           signal: ctrl.signal
@@ -788,7 +793,7 @@ export function getSupportRuntimeWidgetScript(): string {
         };
         if (activeToken) headers['X-Support-Context-Token'] = activeToken;
 
-        fetch(resolveUrl('/x/v1/support/escalate'), {
+        fetch(resolveUrl('/thruline/v1/support/escalate'), {
           method: 'POST',
           headers: headers,
           body: JSON.stringify({ conversationId: conversationId || undefined, reason: 'user_requested' }),

@@ -16,7 +16,7 @@ CREATE:
 
 EDIT ONLY:
 
-6. `client/src/custom/x-gateway/XGatewayApp.tsx` — minimal localized nav `/x/support-integration` and `<Route path="support-integration" element={<SupportIntegration />} />`; đặt trước prefix `/x/support` trong menu để breadcrumb đúng, giữ mọi route khác.
+6. `client/src/custom/x-gateway/XGatewayApp.tsx` — minimal localized nav `/thruline/support-integration` and `<Route path="support-integration" element={<SupportIntegration />} />`; đặt trước prefix `/thruline/support` trong menu để breadcrumb đúng, giữ mọi route khác.
 
 ## Widget — T014–T015
 

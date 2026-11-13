@@ -1,6 +1,6 @@
-# Contract: X gateway (`/x/v1`)
+# Contract: X gateway (`/thruline/v1`)
 
-Base path: `/x/v1`. Wire format: OpenAI chat completions, same request and response shapes, streaming and non-streaming, as the main gateway's `/v1/chat/completions`.
+Base path: `/thruline/v1`. Wire format: OpenAI chat completions, same request and response shapes, streaming and non-streaming, as the main gateway's `/v1/chat/completions`.
 
 ## Authentication
 
@@ -14,7 +14,7 @@ Base path: `/x/v1`. Wire format: OpenAI chat completions, same request and respo
 | Per-minute limit exceeded | 429 | `rate_limit_exceeded` |
 | Body over the unauthenticated limit without a valid key | 413 (public) or 401 | existing guard |
 
-## `POST /x/v1/chat/completions`
+## `POST /thruline/v1/chat/completions`
 
 Body: as the main gateway, plus two model forms:
 
@@ -44,11 +44,11 @@ Combo errors: unknown combo → 400 `invalid_request_error`, code `combo_not_fou
 
 Saver guarantees: at most one added system message, placed first; no existing message is altered, dropped or reordered; on any saver failure or when the result would not be shorter, the original content is used and the request proceeds.
 
-## `GET /x/v1/models`
+## `GET /thruline/v1/models`
 
 Same authentication. Returns the main flow's model list for the administrator, with each combo added as `{ "id": "combo:<name>", "object": "model", "owned_by": "x-gateway" }` at the start.
 
-## Any other path under `/x/v1`
+## Any other path under `/thruline/v1`
 
 JSON 404 in the same shape as an unknown path (never the single-page-app HTML).
 

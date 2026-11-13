@@ -33,7 +33,7 @@ function extractUserKey(req: Request): string | undefined {
 }
 
 /**
- * Intercepts /v1, /v1beta, and /x/v1 inference calls using user API keys (`sk-flm-...`)
+ * Intercepts /v1, /v1beta, and /thruline/v1 inference calls using user API keys (`sk-flm-...`)
  * or dedicated X Gateway keys (`sk-xgw-...`).
  * Enforces per-user sliding window RPM limit and records monthly usage.
  * Non-user keys (Unified key, client profiles) pass through seamlessly to upstream.
@@ -49,14 +49,14 @@ export function userInferenceGate(req: Request, res: Response, next: NextFunctio
 
 function gate(token: string, req: Request, res: Response, next: NextFunction): void {
   const isXGateway =
-    req.originalUrl?.startsWith('/x/') ||
-    req.baseUrl?.startsWith('/x') ||
+    req.originalUrl?.startsWith('/thruline/') ||
+    req.baseUrl?.startsWith('/thruline') ||
     req.originalUrl?.startsWith('/v1beta') ||
     req.baseUrl === '/v1beta';
   if (isXGatewayClientKey(token) && !isXGateway) {
     res.status(401).json({
       error: {
-        message: 'Thruline API keys (sk-xgw-...) are scoped exclusively to /x/v1 and /v1beta endpoints.',
+        message: 'Thruline API keys (sk-xgw-...) are scoped exclusively to /thruline/v1 and /v1beta endpoints.',
         type: 'invalid_request_error',
         code: 'invalid_api_key',
       },

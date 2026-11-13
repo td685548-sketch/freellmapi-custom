@@ -46,7 +46,7 @@ const details = (qs = '', token = session) =>
   fetch(`${base}/api/x-gateway/usage/request-details${qs ? `?${qs}` : ''}`, { headers: { Authorization: `Bearer ${token}` } });
 
 const systemone = (body: unknown) =>
-  fetch(`${base}/x/v1/systemone`, {
+  fetch(`${base}/thruline/v1/systemone`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -155,11 +155,11 @@ describe('GET /api/x-gateway/usage/request-details', () => {
   });
 });
 
-describe('POST /x/v1/systemone', () => {
+describe('POST /thruline/v1/systemone', () => {
   const valid = { model: 'auto', state: { stock: 3 }, questions: { reorder: 'Should we reorder?' } };
 
   it('requires authentication', async () => {
-    const res = await fetch(`${base}/x/v1/systemone`, {
+    const res = await fetch(`${base}/thruline/v1/systemone`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(valid),
     });
     expect(res.status).toBe(401);

@@ -16,20 +16,20 @@ export function toolProbeRequest(input: ToolProbeInput) {
   let endpoint: string;
   let body: Record<string, unknown>;
   if (protocol === 'gemini') {
-    endpoint = `/x/v1beta/models/${encodeURIComponent(input.model)}:generateContent`;
+    endpoint = `/thruline/v1beta/models/${encodeURIComponent(input.model)}:generateContent`;
     headers['x-goog-api-key'] = input.key;
     body = { contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 16 } };
   } else {
     headers.Authorization = `Bearer ${input.key}`;
     if (protocol === 'anthropic-messages') {
-      endpoint = '/x/v1/messages';
+      endpoint = '/thruline/v1/messages';
       headers['anthropic-version'] = '2023-06-01';
       body = { model: input.model, max_tokens: 16, stream: false, messages: [{ role: 'user', content: prompt }] };
     } else if (protocol === 'openai-responses') {
-      endpoint = '/x/v1/responses';
+      endpoint = '/thruline/v1/responses';
       body = { model: input.model, max_output_tokens: 16, stream: false, input: prompt };
     } else {
-      endpoint = '/x/v1/chat/completions';
+      endpoint = '/thruline/v1/chat/completions';
       body = { model: input.model, max_tokens: 16, stream: false, messages: [{ role: 'user', content: prompt }] };
     }
   }

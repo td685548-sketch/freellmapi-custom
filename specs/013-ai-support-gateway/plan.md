@@ -23,7 +23,7 @@ specs/013-ai-support-gateway/
 ├── spec.md              # Đặc tả yêu cầu & User Stories (/speckit-specify)
 ├── plan.md              # Kiến trúc kỹ thuật (/speckit-plan)
 ├── data-model.md        # Schema SQLite & TypeScript Interfaces dùng chung
-├── contracts.md         # Hợp đồng API (/api/x-gateway/support/* & /x/v1/support/*)
+├── contracts.md         # Hợp đồng API (/api/x-gateway/support/* & /thruline/v1/support/*)
 ├── ownership.md         # Ma trận phân quyền file không xung đột cho 4 Agent
 ├── quickstart.md        # Hướng dẫn chạy kiểm thử & tích hợp
 └── tasks.md             # Danh sách tác vụ chia theo 4 Agent (/speckit-tasks)
@@ -35,7 +35,7 @@ specs/013-ai-support-gateway/
 server/src/custom/x-gateway/
 ├── support-store.ts         # [Agent 1] SQLite Store, Tenant CRUD, HMAC Context Token
 ├── support-connectors.ts    # [Agent 2] Mode A Webhook Executor & Mode B RBAC SQL Engine
-├── support-router.ts        # [Agent 3] Console API, Public /x/v1/support/* & widget.js
+├── support-router.ts        # [Agent 3] Console API, Public /thruline/v1/support/* & widget.js
 ├── console-router.ts        # [Agent 3] Mount xSupportConsoleRouter tại /support
 └── router.ts                # [Agent 3] Mount xSupportPublicRouter tại /support
 
@@ -45,6 +45,6 @@ server/src/custom/
 client/src/custom/x-gateway/
 ├── support-strings.ts       # [Agent 4] Từ điển song ngữ EN/VI cho AI Support Gateway
 ├── pages/SupportGateway.tsx # [Agent 4] Giao diện quản trị & Live Role Simulator
-├── XGatewayApp.tsx          # [Agent 4] Thêm mục menu /x/support
+├── XGatewayApp.tsx          # [Agent 4] Thêm mục menu /thruline/support
 └── support-gateway.test.tsx # [Agent 4] Kiểm thử giao diện Frontend
 ```

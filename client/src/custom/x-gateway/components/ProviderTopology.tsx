@@ -149,7 +149,7 @@ export default function ProviderTopology({
                 AI Clients
               </text>
               <text x={CLIENT_X + CLIENT_W / 2} y={layout.centerY + 16} textAnchor="middle" fontSize={10.5} fill="currentColor" opacity={0.65}>
-                /x/v1 API keys
+                /thruline/v1 API keys
               </text>
             </g>
 

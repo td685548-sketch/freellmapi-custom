@@ -1016,7 +1016,7 @@ export default function AccountUsage() {
                 return (
                   <tr key={account.id}>
                     <th>
-                      <Link to={`/x/providers/${encodeURIComponent(account.provider)}`}>
+                      <Link to={`/thruline/providers/${encodeURIComponent(account.provider)}`}>
                         {account.label || account.providerName}
                       </Link>
                     </th>
@@ -1043,7 +1043,7 @@ export default function AccountUsage() {
             <div className="x-empty">
               <p>{providerSearch ? 'Không tìm thấy tài khoản phù hợp với từ khóa.' : s.noAccounts}</p>
               {!accounts.length && (
-                <Link className="x-button" to="/x/providers">
+                <Link className="x-button" to="/thruline/providers">
                   {s.addAccount}
                 </Link>
               )}
@@ -1177,7 +1177,7 @@ function BreakdownPanel({
           <tbody>
             {data.byEndpoint.map(r => (
               <tr key={r.endpoint}>
-                <th><code>/x/v1/{r.endpoint}</code></th>
+                <th><code>/thruline/v1/{r.endpoint}</code></th>
                 {statCells(r)}
                 <td>{r.errorCount}</td>
               </tr>

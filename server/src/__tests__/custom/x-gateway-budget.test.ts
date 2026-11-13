@@ -52,7 +52,7 @@ describe('X Gateway round-trip statement budget (SC-007)', () => {
 
     setRoutingStrategy('priority');
 
-    // Seed provider key for /v1 and dedicated X Gateway key for /x/v1
+    // Seed provider key for /v1 and dedicated X Gateway key for /thruline/v1
     const key = encrypt('gsk_steady_x');
     getDb()
       .prepare(
@@ -123,7 +123,7 @@ describe('X Gateway round-trip statement budget (SC-007)', () => {
     return { status: res.status, headers: res.headers };
   };
 
-  it('consecutive successful /x/v1 chat requests issue no more statements than /v1 (SC-007)', async () => {
+  it('consecutive successful /thruline/v1 chat requests issue no more statements than /v1 (SC-007)', async () => {
     // Warm up /v1 caches
     await chat('/v1/chat/completions');
     await chat('/v1/chat/completions');
@@ -139,16 +139,16 @@ describe('X Gateway round-trip statement budget (SC-007)', () => {
       v1Counts.push(trips.length);
     }
 
-    // Warm up /x/v1 caches
-    await chat('/x/v1/chat/completions');
-    await chat('/x/v1/chat/completions');
+    // Warm up /thruline/v1 caches
+    await chat('/thruline/v1/chat/completions');
+    await chat('/thruline/v1/chat/completions');
 
-    // Measure /x/v1 steady-state statement counts
+    // Measure /thruline/v1 steady-state statement counts
     const xCounts: number[] = [];
     for (let i = 0; i < 3; i++) {
       trips.length = 0;
       counting = true;
-      const res = await chat('/x/v1/chat/completions');
+      const res = await chat('/thruline/v1/chat/completions');
       counting = false;
       expect(res.status).toBe(200);
       expect(res.headers.get('x-gateway')).toBe('x');

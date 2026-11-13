@@ -12,7 +12,7 @@ cd server && npx vitest run src/__tests__/custom/x-support-crm-webhooks.test.ts
 # Agent 3: Support Governance Console & Partner Router
 cd server && npx vitest run src/__tests__/custom/x-support-governance.test.ts
 
-# Agent 4: Support Governance & CRM Studio Web UI (/x/support-guardrails)
+# Agent 4: Support Governance & CRM Studio Web UI (/thruline/support-guardrails)
 cd client && npx vitest run src/custom/x-gateway/support-governance.test.tsx && npx tsc -b
 ```
 

@@ -27,14 +27,14 @@ Yêu cầu xác thực phiên đăng nhập Console:
 
 ---
 
-## 2. Public Partner Gateway API (`/x/v1/support/*`)
+## 2. Public Partner Gateway API (`/thruline/v1/support/*`)
 
-### `POST /x/v1/support/session`
+### `POST /thruline/v1/support/session`
 - **Headers**: `Authorization: Bearer <signingSecret>` hoặc `X-Tenant-Secret: <signingSecret>`
 - **Body**: `{ tenantKey: string, userId: string, name?: string, email?: string, role: string, permissions?: string[], metadata?: Record<string, unknown>, ttlSeconds?: number }`
 - **Response (`200 OK`)**: `{ ok: true, contextToken: string, expiresIn: number, userContext: SupportUserContext }`
 
-### `POST /x/v1/support/chat`
+### `POST /thruline/v1/support/chat`
 - **Headers**: Hỗ trợ CORS theo `tenant.allowedOrigins`. Có thể truyền `X-Support-Tenant-Key` và `X-Support-Context-Token` qua header hoặc trong JSON body.
 - **Body**: `{ tenantKey: string, contextToken?: string, messages: Array<{ role: 'user' | 'assistant' | 'system', content: string }>, model?: string }`
 - **Response (`200 OK`)**:
@@ -65,5 +65,5 @@ Yêu cầu xác thực phiên đăng nhập Console:
   }
   ```
 
-### `GET /x/v1/support/widget.js`
+### `GET /thruline/v1/support/widget.js`
 - **Response (`200 OK`, `application/javascript`)**: Script nhúng giao diện chat nổi `window.FreeLLMAPISupport.init({ tenantKey, contextToken, endpoint, title })`.

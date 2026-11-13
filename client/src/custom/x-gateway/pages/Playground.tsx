@@ -661,7 +661,7 @@ export default function Playground() {
             <AlertCircle size={16} />
             <span>{s.disabled}</span>
           </div>
-          <Link to="/x/endpoint" className="text-xs font-semibold underline">
+          <Link to="/thruline/endpoint" className="text-xs font-semibold underline">
             {s.endpoint}
           </Link>
         </div>

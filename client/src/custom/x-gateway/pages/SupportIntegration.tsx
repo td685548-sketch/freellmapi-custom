@@ -603,7 +603,7 @@ function EmbedPanel({ tenant, serverOrigin, configuredSnippet }: { tenant: Suppo
   const [copied, setCopied] = useState(false)
 
   const widgetConfig = JSON.stringify({ tenantKey: tenant.publicKey, serverBase: serverOrigin, title: tenant.name, allowGuestSession: true }).replace(/</g, '\\u003c')
-  const snippet = configuredSnippet || `<script src="${serverOrigin}/x/v1/support/widget.js"></script>\n<script>window.FreeLLMAPISupport.init(${widgetConfig});</script>`
+  const snippet = configuredSnippet || `<script src="${serverOrigin}/thruline/v1/support/widget.js"></script>\n<script>window.FreeLLMAPISupport.init(${widgetConfig});</script>`
 
 
   async function copyToClipboard() {

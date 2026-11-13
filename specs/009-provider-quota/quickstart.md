@@ -1,5 +1,5 @@
 # Quickstart
-Sign in with use_x_gateway + view_x_usage. Open /x/quota, refresh a supported account, inspect limits/source/reset countdown. Configure tiers with edit_x_settings; verify auto uses subscription then cheap then free. Exhaust a fixture account; verify skip until reset/freshness expiry. Unsupported providers show unknown and local caps separately.
+Sign in with use_x_gateway + view_x_usage. Open /thruline/quota, refresh a supported account, inspect limits/source/reset countdown. Configure tiers with edit_x_settings; verify auto uses subscription then cheap then free. Exhaust a fixture account; verify skip until reset/freshness expiry. Unsupported providers show unknown and local caps separately.
 
 ## Verification (2026-11-07)
 - Validated an isolated quota-only source snapshot; concurrent Media and Proxy Pool changes are excluded.

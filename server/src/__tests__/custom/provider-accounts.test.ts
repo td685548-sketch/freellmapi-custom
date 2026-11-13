@@ -105,7 +105,7 @@ async function call(method: string, path: string, body?: unknown, session: strin
   return { status: res.status, body: raw ? JSON.parse(raw) : null, raw };
 }
 function startOpenRouter(extra: Record<string, unknown> = {}, session = token) {
-  return call('POST', '/auth/openrouter/start', { label: 'Router account', callbackUrl: 'https://dashboard.test/base/x/accounts/callback', ...extra }, session, { Origin: 'https://dashboard.test' });
+  return call('POST', '/auth/openrouter/start', { label: 'Router account', callbackUrl: 'https://dashboard.test/base/thruline/accounts/callback', ...extra }, session, { Origin: 'https://dashboard.test' });
 }
 async function connectGithub(extra: Record<string, unknown> = {}) {
   const start = await call('POST', '/auth/github-copilot/start', { label: 'Copilot account', ...extra });
@@ -119,7 +119,7 @@ function revoke(permission: string) {
 
 describe('provider account authorization', () => {
   it('validates PKCE callback origin and returns a server-owned S256 challenge', async () => {
-    for (const callbackUrl of ['https://other.test/x/accounts/callback', 'https://u:p@dashboard.test/x/accounts/callback', 'https://dashboard.test/x/accounts/callback#fragment', 'https://dashboard.test/x/accounts/callback#', 'https://dashboard.test/wrong']) {
+    for (const callbackUrl of ['https://other.test/thruline/accounts/callback', 'https://u:p@dashboard.test/thruline/accounts/callback', 'https://dashboard.test/thruline/accounts/callback#fragment', 'https://dashboard.test/thruline/accounts/callback#', 'https://dashboard.test/wrong']) {
       expect((await startOpenRouter({ callbackUrl })).status).toBe(400);
     }
     expect((await call('POST', '/auth/unknown/start', { label: '' })).status).toBe(400);
@@ -130,7 +130,7 @@ describe('provider account authorization', () => {
     const url = new URL(start.body.authorizationUrl);
     expect(url.origin + url.pathname).toBe('https://openrouter.ai/auth');
     const callback = new URL(url.searchParams.get('callback_url')!);
-    expect(callback.pathname).toBe('/base/x/accounts/callback');
+    expect(callback.pathname).toBe('/base/thruline/accounts/callback');
     expect(callback.searchParams.get('attemptId')).toBe(start.body.attemptId);
     expect(start.body.expiresAt).toBe(now + 600_000);
     expect(calls).toHaveLength(0);
@@ -156,7 +156,7 @@ describe('provider account authorization', () => {
   });
 
   it('allows protocol+Host callback fallback, strictly validates request bodies and IDs', async () => {
-    expect((await call('POST', '/auth/openrouter/start', { label: '', callbackUrl: base.replace('/api/x-accounts', '/x/accounts/callback') })).status).toBe(200);
+    expect((await call('POST', '/auth/openrouter/start', { label: '', callbackUrl: base.replace('/api/x-accounts', '/thruline/accounts/callback') })).status).toBe(200);
     expect((await startOpenRouter({ injected: true })).status).toBe(400);
     expect((await startOpenRouter({ label: 'line\nbreak' })).status).toBe(400);
     expect((await call('PATCH', '/1garbage', { label: 'test' })).status).toBe(400);
@@ -390,7 +390,7 @@ describe('GitHub Copilot device accounts', () => {
     expect(calls.every(c => !c.url.includes('evil.invalid'))).toBe(true);
   });
 
-  it('serves saved x_gateway_keys accounts through /x/v1 while isolating them from /v1 and recording token analytics', async () => {
+  it('serves saved x_gateway_keys accounts through /thruline/v1 while isolating them from /v1 and recording token analytics', async () => {
     const first = (await connectGithub()).body.accountId;
     githubId = 22; githubSecret = 'stock-x-second';
     const second = (await connectGithub()).body.accountId;
@@ -416,10 +416,10 @@ describe('GitHub Copilot device accounts', () => {
       });
       expect(v1Res.status).not.toBe(200);
 
-      // /x/v1 routes through x_gateway_keys and records analytics in requests + x_gateway_key_monthly_usage
+      // /thruline/v1 routes through x_gateway_keys and records analytics in requests + x_gateway_key_monthly_usage
       for (const selected of [first, second]) {
         for (const id of [first, second]) expect((await call('PATCH', `/${id}`, { enabled: id === selected })).status).toBe(200);
-        const result = await nativeFetch(`${appBase}/x/v1/chat/completions`, {
+        const result = await nativeFetch(`${appBase}/thruline/v1/chat/completions`, {
           method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${personalApiKey}` },
           body: JSON.stringify({ model: 'fixture-chat', messages: [{ role: 'user', content: 'hello' }], max_tokens: 8 }),
         });

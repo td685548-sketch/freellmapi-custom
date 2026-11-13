@@ -220,7 +220,7 @@ function writeAnthropicSse(res: Response, event: string, data: unknown): void {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 1. Anthropic Messages API (/x/v1/messages & /x/v1/messages/count_tokens)
+// 1. Anthropic Messages API (/thruline/v1/messages & /thruline/v1/messages/count_tokens)
 // ─────────────────────────────────────────────────────────────────────────────
 
 xGatewayProtocolsRouter.post('/messages/count_tokens', xGatewayAuth, (req: Request, res: Response) => {
@@ -511,7 +511,7 @@ xGatewayProtocolsRouter.post('/messages', xGatewayAuth, async (req: Request, res
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 2. OpenAI Responses API (/x/v1/responses) for Codex CLI
+// 2. OpenAI Responses API (/thruline/v1/responses) for Codex CLI
 // ─────────────────────────────────────────────────────────────────────────────
 
 function convertResponsesInput(body: Record<string, any>): {
@@ -937,7 +937,7 @@ xGatewayProtocolsRouter.post('/responses/compact', xGatewayAuth, async (req: Req
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 3. Legacy OpenAI Completions (/x/v1/completions) for Continue / Autocomplete
+// 3. Legacy OpenAI Completions (/thruline/v1/completions) for Continue / Autocomplete
 // ─────────────────────────────────────────────────────────────────────────────
 
 xGatewayProtocolsRouter.post('/completions', xGatewayAuth, async (req: Request, res: Response) => {
@@ -1098,8 +1098,8 @@ xGatewayProtocolsRouter.post('/completions', xGatewayAuth, async (req: Request, 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 4. Auxiliary OpenAI Endpoints (/x/v1/embeddings, /x/v1/images/generations,
-//    /x/v1/audio/speech, /x/v1/audio/transcriptions)
+// 4. Auxiliary OpenAI Endpoints (/thruline/v1/embeddings, /thruline/v1/images/generations,
+//    /thruline/v1/audio/speech, /thruline/v1/audio/transcriptions)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function accountBaseUrl(account: { provider: string; base_url: string | null }): string | null {
@@ -1614,7 +1614,7 @@ xGatewayProtocolsRouter.post(
 );
 
 // ---------------------------------------------------------------------------
-// SystemOne decision endpoint (/x/v1/systemone)
+// SystemOne decision endpoint (/thruline/v1/systemone)
 // Given a `state` and a map of `questions`, asks the routed model for a JSON
 // object holding one answer per question key.
 // ---------------------------------------------------------------------------

@@ -36,39 +36,39 @@ export function useNavGroups(): NavGroup[] {
   const canUsage = session.hasPermission('view_x_usage')
   const groups: NavGroup[] = [
     { id: 'start', label: sh.groupStart, items: [
-      { to: '/x/home', label: sh.overview, icon: Home },
-      { to: '/x/endpoint', label: s.endpoint, icon: KeyRound },
-      { to: '/x/playground', label: m.playground, icon: MessageSquare },
+      { to: '/thruline/home', label: sh.overview, icon: Home },
+      { to: '/thruline/endpoint', label: s.endpoint, icon: KeyRound },
+      { to: '/thruline/playground', label: m.playground, icon: MessageSquare },
     ] },
     { id: 'sources', label: sh.groupSources, items: [
-      ...(canView ? [{ to: '/x/providers', label: s.providers, icon: Server }] : []),
-      ...(canView ? [{ to: '/x/media', label: med.mediaTitle, icon: Film }] : []),
-      { to: '/x/proxies', label: p.proxies, icon: Network },
+      ...(canView ? [{ to: '/thruline/providers', label: s.providers, icon: Server }] : []),
+      ...(canView ? [{ to: '/thruline/media', label: med.mediaTitle, icon: Film }] : []),
+      { to: '/thruline/proxies', label: p.proxies, icon: Network },
     ] },
     { id: 'routing', label: sh.groupRouting, items: [
-      ...(canView ? [{ to: '/x/combos', label: m.combos, icon: Layers }] : []),
-      { to: '/x/savers', label: s.savers, icon: Scissors },
-      { to: '/x/translator', label: tr.translatorNav, icon: ArrowLeftRight },
+      ...(canView ? [{ to: '/thruline/combos', label: m.combos, icon: Layers }] : []),
+      { to: '/thruline/savers', label: s.savers, icon: Scissors },
+      { to: '/thruline/translator', label: tr.translatorNav, icon: ArrowLeftRight },
     ] },
     { id: 'tools', label: sh.groupTools, items: [
-      { to: '/x/tools', label: t.cliToolsNav, icon: Terminal },
-      { to: '/x/skills', label: sk.skillsNav, icon: Sparkles },
+      { to: '/thruline/tools', label: t.cliToolsNav, icon: Terminal },
+      { to: '/thruline/skills', label: sk.skillsNav, icon: Sparkles },
     ] },
     { id: 'support', label: sh.groupSupport, items: [
-      { to: '/x/support-integration', label: integration.nav, icon: Sparkles },
-      { to: '/x/support', label: sup.supportNav, icon: Headset },
-      { to: '/x/support-ops', label: ops.nav, icon: LifeBuoy },
-      { to: '/x/support-guardrails', label: gov.nav, icon: ShieldCheck },
+      { to: '/thruline/support-integration', label: integration.nav, icon: Sparkles },
+      { to: '/thruline/support', label: sup.supportNav, icon: Headset },
+      { to: '/thruline/support-ops', label: ops.nav, icon: LifeBuoy },
+      { to: '/thruline/support-guardrails', label: gov.nav, icon: ShieldCheck },
     ] },
     { id: 'monitor', label: sh.groupMonitor, items: [
-      ...(canUsage ? [{ to: '/x/quota', label: 'Quota', icon: Gauge }] : []),
-      ...(canView ? [{ to: '/x/usage', label: s.usage, icon: BarChart3 }, { to: '/x/logs', label: m.logs, icon: ScrollText }] : []),
+      ...(canUsage ? [{ to: '/thruline/quota', label: 'Quota', icon: Gauge }] : []),
+      ...(canView ? [{ to: '/thruline/usage', label: s.usage, icon: BarChart3 }, { to: '/thruline/logs', label: m.logs, icon: ScrollText }] : []),
     ] },
   ]
   return groups.filter(group => group.items.length > 0)
 }
 
-/** The nav entry a pathname belongs to. `/x/support` must not swallow `/x/support-ops`. */
+/** The nav entry a pathname belongs to. `/thruline/support` must not swallow `/thruline/support-ops`. */
 export function matchNav(groups: NavGroup[], pathname: string) {
   for (const group of groups) {
     const item = group.items.find(entry => pathname === entry.to || pathname.startsWith(`${entry.to}/`))
