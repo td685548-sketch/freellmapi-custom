@@ -134,7 +134,7 @@ const toolSchema = z.object({
   name: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/), description: z.string().default(''),
   method: z.enum(['GET', 'POST']).default('POST'),
   endpointUrl: z.string().url().refine(url => ['http:', 'https:'].includes(new URL(url).protocol)),
-  headers: z.record(z.string()).default({}), parametersSchema: z.record(z.unknown()).default({}),
+  headers: z.record(z.string(), z.string()).default({}), parametersSchema: z.record(z.string(), z.unknown()).default({}),
   allowedRoles: strings.default([]), lockUserIdParam: text.nullable().default(null),
   bypassUserLockRoles: strings.default(['admin', 'staff']), enabled: z.boolean().default(true),
 });
@@ -265,7 +265,7 @@ export function deleteSupportTenant(id: number): boolean {
 
 const identitySchema = z.object({
   userId: text, name: z.string().optional(), email: z.string().optional(), role: text,
-  permissions: strings.default([]), metadata: z.record(z.unknown()).optional(),
+  permissions: strings.default([]), metadata: z.record(z.string(), z.unknown()).optional(),
 });
 const tokenSchema = identitySchema.extend({
   iat: z.number().int().nonnegative(), exp: z.number().int().nonnegative(), tenantId: z.number().int().positive().optional(),

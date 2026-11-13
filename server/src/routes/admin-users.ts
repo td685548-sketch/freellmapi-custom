@@ -49,7 +49,7 @@ adminUsersRouter.patch('/:id/role', (req: Request, res: Response) => {
   const parsed = roleSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({
-      error: { message: parsed.error.errors.map(e => e.message).join(', '), type: 'invalid_role' },
+      error: { message: parsed.error.issues.map(e => e.message).join(', '), type: 'invalid_role' },
     });
     return;
   }
@@ -96,7 +96,7 @@ adminUsersRouter.put('/:id/permissions', (req: Request, res: Response) => {
   const parsed = permissionsSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({
-      error: { message: parsed.error.errors.map(e => e.message).join(', '), type: 'invalid_permissions' },
+      error: { message: parsed.error.issues.map(e => e.message).join(', '), type: 'invalid_permissions' },
     });
     return;
   }
