@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { solveDeepSeekPowHeader } from '../../custom/provider-accounts/deepseek-pow.js';
-import { extractDeepSeekUserToken } from '../../custom/provider-accounts/deepseek-web-chat.js';
+import { extractDeepSeekUserToken, parseDeepSeekCredential } from '../../custom/provider-accounts/deepseek-web-chat.js';
 import { WebCookieProvider } from '../../custom/provider-accounts/web-cookie.js';
 
 function sseStream(events: string[]): ReadableStream<Uint8Array> {
@@ -33,6 +33,13 @@ describe('deepseek-web executor', () => {
       ),
     ).toBe('tok_state');
     expect(extractDeepSeekUserToken('foo=1; userToken=tok_cookie; bar=2')).toBe('tok_cookie');
+    expect(parseDeepSeekCredential('aws-waf-token=abc; ds_session_id=sess_xyz')).toEqual({
+      mode: 'cookie',
+      cookieHeader: 'aws-waf-token=abc; ds_session_id=sess_xyz',
+    });
+    expect(() =>
+      parseDeepSeekCredential('{"value":{"id":"dd9b619e-3947-46ab-9eb8-d4b336884992"},"__version":"0"}'),
+    ).toThrow(/ds_session_id/);
   });
 
   it('solves DeepSeekHashV1 PoW challenge into base64 X-Ds-Pow-Response', () => {
