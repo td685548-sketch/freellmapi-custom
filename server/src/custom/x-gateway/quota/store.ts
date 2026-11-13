@@ -80,7 +80,7 @@ export function listAccountQuotas(): XAccountQuota[] {
     };
   }));
 }
-export async function refreshAccountQuota(accountId: number): Promise<XAccountQuota> {
+export async function refreshAccountQuota(accountId: number, force = false): Promise<XAccountQuota> {
   const account = accountRow(accountId);
   const db = getDb();
   let active = pending.get(db);
@@ -88,7 +88,7 @@ export async function refreshAccountQuota(accountId: number): Promise<XAccountQu
   const inFlight = active.get(accountId);
   if (inFlight) return inFlight;
   const current = db.prepare('SELECT * FROM x_gateway_quota WHERE account_id = ?').get(accountId) as SnapshotRow | undefined;
-  if (current?.checked_at && Date.now() - Date.parse(current.checked_at) < REFRESH_COOLDOWN_MS) return listAccountQuotas().find(a => a.accountId === accountId)!;
+  if (!force && current?.checked_at && Date.now() - Date.parse(current.checked_at) < REFRESH_COOLDOWN_MS) return listAccountQuotas().find(a => a.accountId === accountId)!;
   const task = (async () => {
     try {
       const incoming = await fetchAccountQuota(account);

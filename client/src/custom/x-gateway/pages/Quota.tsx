@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Gauge, RefreshCw } from 'lucide-react';
+import { Clock, Gauge, RefreshCw, RotateCcw } from 'lucide-react';
 import type { QuotaTier, XAccountQuota } from '../../../../../shared/x-quota';
 import { useUserSession } from '../../use-session';
 import { useSessionRevision } from '../../session-state';
-import { quotaApi } from '../quota-api';
+import { quotaApi, type CodexResetCreditsResponse } from '../quota-api';
 import { quotaCountdown } from '../quota-format';
 import { useQuotaStrings } from '../quota-strings';
 import '../quota.css';
@@ -21,6 +21,9 @@ export default function Quota() {
   const [provider, setProvider] = useState('');
   const [search, setSearch] = useState('');
   const [auto, setAuto] = useState(false);
+  const [confirmResetId, setConfirmResetId] = useState<number | null>(null);
+  const [resetNotice, setResetNotice] = useState<{ id: number; ok: boolean; text: string } | null>(null);
+  const [creditDetails, setCreditDetails] = useState<Record<number, { open: boolean; loading: boolean; error?: string; data?: CodexResetCreditsResponse }>>({});
   const query = useQuery({ queryKey: ['x-quota', revision], queryFn: ({ signal }) => quotaApi.list(signal), enabled: canView, refetchInterval: 30_000, retry: false });
   const invalidate = () => client.invalidateQueries({ queryKey: ['x-quota', revision] });
   const refresh = useMutation({
@@ -28,6 +31,33 @@ export default function Quota() {
     onSettled: invalidate, meta: { silenceToast: true },
   });
   const tier = useMutation({ mutationFn: ({ id, value }: { id: number; value: QuotaTier }) => quotaApi.tier(id, value), onSuccess: invalidate, meta: { silenceToast: true } });
+  const codexReset = useMutation({
+    mutationFn: (id: number) => quotaApi.useCodexResetCredit(id),
+    onSuccess: (_res, id) => {
+      setConfirmResetId(null);
+      setResetNotice({ id, ok: true, text: s.resetSuccess });
+      void invalidate();
+    },
+    onError: (err, id) => {
+      setConfirmResetId(null);
+      setResetNotice({ id, ok: false, text: err instanceof Error ? err.message : s.resetError });
+    },
+    meta: { silenceToast: true },
+  });
+  const toggleCreditDetails = async (id: number) => {
+    const cur = creditDetails[id];
+    if (cur?.open) {
+      setCreditDetails(prev => ({ ...prev, [id]: { ...cur, open: false } }));
+      return;
+    }
+    setCreditDetails(prev => ({ ...prev, [id]: { open: true, loading: true } }));
+    try {
+      const data = await quotaApi.codexResetCredits(id);
+      setCreditDetails(prev => ({ ...prev, [id]: { open: true, loading: false, data } }));
+    } catch (err) {
+      setCreditDetails(prev => ({ ...prev, [id]: { open: true, loading: false, error: err instanceof Error ? err.message : s.resetError } }));
+    }
+  };
   const accounts = query.data?.accounts ?? [];
   const refreshRef = useRef(() => {});
   useEffect(() => { refreshRef.current = () => {
@@ -56,7 +86,7 @@ export default function Quota() {
       <header><div><h2>{a.label || a.providerName}</h2><span>{a.providerName}{!a.enabled && ` · ${s.disabled}`}</span></div><select aria-label={`${s.tier}: ${a.label || a.providerName}`} value={a.tier} disabled={!canEdit || tier.isPending} onChange={e => tier.mutate({ id: a.accountId, value: e.target.value as QuotaTier })}>{(['subscription', 'cheap', 'free'] as const).map(t => <option value={t} key={t}>{s[t]}</option>)}</select></header>
       <p className={`x-quota-state ${stale(a) ? 'stale' : ''}`}>{stale(a) ? s.stale : s.live}</p>
       {!a.windows.length && <p className="x-quota-note">{s.noWindows}</p>}
-      {a.windows.map(w => {
+      {a.windows.filter(w => w.id !== 'reset_credits').map(w => {
         const ratio = w.remaining != null && w.limit != null && w.limit > 0 ? Math.max(0, Math.min(100, w.remaining / w.limit * 100)) : null;
         const countdown = quotaCountdown(w.resetAt, now);
         return <div className="x-quota-window" key={`${w.id}:${w.modelId ?? ''}`}><div className="x-quota-window-title"><strong>{w.id}{w.modelId && ` · ${w.modelId}`}</strong><small>{w.source === 'header' ? s.header : s.api}</small></div>
@@ -66,6 +96,58 @@ export default function Quota() {
           {(!w.blocking || w.modelId) && <small className="x-quota-note">{s.modelOnly}</small>}
         </div>;
       })}
+      {a.provider === 'codex' && (() => {
+        const resetWin = a.windows.find(w => w.id === 'reset_credits');
+        const creditCount = resetWin?.remaining ?? null;
+        const detail = creditDetails[a.accountId];
+        return <div className="x-quota-window">
+          <div className="x-quota-window-title">
+            <strong>{s.resetCredits}: {creditCount == null ? s.unknown : creditCount}</strong>
+            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="x-button"
+                disabled={!canEdit || !a.enabled || creditCount == null || creditCount <= 0 || codexReset.isPending}
+                onClick={() => { setResetNotice(null); setConfirmResetId(a.accountId); }}
+              >
+                <RotateCcw size={14} />
+                {codexReset.isPending && codexReset.variables === a.accountId ? s.resetting : s.useReset}
+              </button>
+              <button
+                type="button"
+                className="x-button"
+                disabled={!a.enabled || detail?.loading}
+                onClick={() => void toggleCreditDetails(a.accountId)}
+              >
+                <Clock size={14} />
+                {detail?.loading ? s.loadingDetails : s.viewResetDetails}
+              </button>
+            </div>
+          </div>
+          {confirmResetId === a.accountId && (
+            <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <small>{s.confirmReset}</small>
+              <button type="button" className="x-button" disabled={codexReset.isPending} onClick={() => codexReset.mutate(a.accountId)}>{s.confirmBtn}</button>
+              <button type="button" className="x-button" disabled={codexReset.isPending} onClick={() => setConfirmResetId(null)}>{s.cancelBtn}</button>
+            </div>
+          )}
+          {resetNotice?.id === a.accountId && (
+            <p className={resetNotice.ok ? 'x-quota-note' : 'x-error'} role={resetNotice.ok ? 'status' : 'alert'}>{resetNotice.text}</p>
+          )}
+          {detail?.open && (
+            <div style={{ marginTop: '0.5rem' }}>
+              {detail.error && <p className="x-error" role="alert">{detail.error}</p>}
+              {!detail.loading && !detail.error && (detail.data?.credits.length ? (
+                <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.82rem' }}>
+                  {detail.data.credits.map((c, idx) => (
+                    <li key={idx}>{s.creditStatus}: {c.status}{c.expiresAt ? ` · ${s.creditExpires}: ${new Date(c.expiresAt).toLocaleString()}` : ''}</li>
+                  ))}
+                </ul>
+              ) : <small className="x-quota-note">{s.noCreditDetails}</small>)}
+            </div>
+          )}
+        </div>;
+      })()}
       {a.error && <p className="x-error" role="alert">{a.error}</p>}
       {!a.supported && <p className="x-quota-note">{s.unavailable}</p>}
       <details className="x-quota-local"><summary>{s.local}</summary><p>{s.localHelp}</p><dl><dt>{s.requests}</dt><dd>{a.local.requests.toLocaleString()} / {a.local.requestCap || s.noCap}</dd><dt>{s.tokens}</dt><dd>{a.local.tokens.toLocaleString()} / {a.local.tokenCap || s.noCap}</dd></dl></details>

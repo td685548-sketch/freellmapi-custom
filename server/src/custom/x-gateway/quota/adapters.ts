@@ -90,6 +90,11 @@ export function parseProviderQuota(provider: string, payload: unknown): XQuotaWi
         (quotaNumber(item.reset_after_seconds) != null ? quotaReset(item.reset_after_seconds) : null);
       result.push(window(id, 100, Math.max(0, 100 - used), resetAt, '%'));
     }
+    const resetCredits = object(data.rate_limit_reset_credits);
+    const resetCount = quotaNumber(resetCredits.available_count ?? resetCredits.availableCount);
+    if (resetCount != null) {
+      result.push(window('reset_credits', null, Math.max(0, Math.floor(resetCount)), null, 'credits', false));
+    }
   } else if (provider === 'gemini-cli' && Array.isArray(data.buckets)) {
     for (const raw of data.buckets) {
       const item = object(raw); const fraction = quotaNumber(item.remainingFraction);
