@@ -17,6 +17,7 @@ import { useCustomT } from '../i18n/use-custom-t';
 import { useAdministrativeAccess } from '../use-administrative-access';
 import { useUserSession } from '../use-session';
 import { McpServers } from './pages/McpServers';
+import { OutputGuard } from './pages/OutputGuard';
 import { Overview } from './pages/Overview';
 import {
   NAV_AI_PLATFORM,
@@ -48,9 +49,8 @@ const NAV_ITEMS = [
   { to: 'overview', labelKey: 'Platform overview' as const },
 ] as const;
 
-// Future screens — links shown but pages are placeholders until US3–US7 ship.
+// Future screens — links shown but pages are placeholders until US4–US7 ship.
 const FUTURE_NAV_ITEMS = [
-  { to: 'output-guard', labelKey: OUTPUT_GUARD_HEADING },
   { to: 'knowledge', labelKey: KNOWLEDGE_HEADING },
   { to: 'prompt-cache', labelKey: PROMPT_CACHE_HEADING },
   { to: 'flows', labelKey: FLOWS_HEADING },
@@ -71,9 +71,14 @@ export function AiPlatformApp() {
     can('edit_mcp_servers') ||
     can('review_mcp_tools') ||
     can('approve_ai_actions');
+  const canOutputGuard =
+    isPrimary ||
+    can('view_output_guard') ||
+    can('edit_output_guard') ||
+    can('view_guard_excerpts');
 
   // Guard: no sensitive query when user lacks access.
-  if (!canOverview && !canMcp) {
+  if (!canOverview && !canMcp && !canOutputGuard) {
     return (
       <div className="p-6">
         <p className="text-sm text-muted-foreground">{tc(NO_ACCESS)}</p>
@@ -83,14 +88,29 @@ export function AiPlatformApp() {
 
   return (
     <Routes>
-      <Route path="/ai-platform/*" element={<AiPlatformShell canOverview={canOverview} canMcp={canMcp} />} />
-      <Route path="*" element={<AiPlatformShell canOverview={canOverview} canMcp={canMcp} />} />
+      <Route
+        path="/ai-platform/*"
+        element={<AiPlatformShell canOverview={canOverview} canMcp={canMcp} canOutputGuard={canOutputGuard} />}
+      />
+      <Route
+        path="*"
+        element={<AiPlatformShell canOverview={canOverview} canMcp={canMcp} canOutputGuard={canOutputGuard} />}
+      />
     </Routes>
   );
 }
 
-function AiPlatformShell({ canOverview, canMcp }: { canOverview: boolean; canMcp: boolean }) {
+function AiPlatformShell({
+  canOverview,
+  canMcp,
+  canOutputGuard,
+}: {
+  canOverview: boolean;
+  canMcp: boolean;
+  canOutputGuard: boolean;
+}) {
   const tc = useCustomT();
+  const defaultElement = canOverview ? <Overview /> : canMcp ? <McpServers /> : <OutputGuard />;
 
   return (
     <div className="flex gap-6">
@@ -126,6 +146,20 @@ function AiPlatformShell({ canOverview, canMcp }: { canOverview: boolean; canMcp
               {tc(MCP_SERVERS_HEADING)}
             </NavLink>
           )}
+          {canOutputGuard && (
+            <NavLink
+              to="output-guard"
+              className={({ isActive }) =>
+                `block px-3 py-2 rounded-md text-sm transition-colors ${
+                  isActive
+                    ? 'bg-primary/10 text-primary font-medium'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                }`
+              }
+            >
+              {tc(OUTPUT_GUARD_HEADING)}
+            </NavLink>
+          )}
           {/* Future screens — rendered as nav links but go to placeholder pages */}
           {FUTURE_NAV_ITEMS.map(({ to, labelKey }) => (
             <NavLink
@@ -148,19 +182,19 @@ function AiPlatformShell({ canOverview, canMcp }: { canOverview: boolean; canMcp
       {/* Page content */}
       <div className="flex-1">
         <Routes>
-          <Route index element={canOverview ? <Overview /> : <McpServers />} />
+          <Route index element={defaultElement} />
           <Route path="overview" element={<Overview />} />
           <Route path="mcp" element={<McpServers />} />
+          <Route path="output-guard" element={<OutputGuard />} />
 
-          {/* Future US3–US7 screens — placeholder until implemented */}
-          <Route path="output-guard" element={<NotImplemented title={tc(OUTPUT_GUARD_HEADING)} />} />
+          {/* Future US4–US7 screens — placeholder until implemented */}
           <Route path="knowledge" element={<NotImplemented title={tc(KNOWLEDGE_HEADING)} />} />
           <Route path="prompt-cache" element={<NotImplemented title={tc(PROMPT_CACHE_HEADING)} />} />
           <Route path="flows" element={<NotImplemented title={tc(FLOWS_HEADING)} />} />
           <Route path="runs" element={<NotImplemented title={tc(RUNS_HEADING)} />} />
 
           {/* Catch-all */}
-          <Route path="*" element={canOverview ? <Overview /> : <McpServers />} />
+          <Route path="*" element={defaultElement} />
         </Routes>
       </div>
     </div>

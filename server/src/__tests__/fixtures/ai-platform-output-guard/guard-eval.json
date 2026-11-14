@@ -1,0 +1,1163 @@
+{
+  "version": 1,
+  "seed": 20261114,
+  "description": "Synthetic evaluation corpus for Output Guard T071 benchmark (220 benign + 7 violation/masking cases).",
+  "defaultPolicy": {
+    "mode": "block",
+    "failMode": "allow",
+    "holdChars": 200,
+    "maxDelayMs": 300,
+    "keywords": [
+      "secret-forbidden-phrase",
+      "cám"
+    ],
+    "systemPrompt": "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango",
+    "piiAction": "mask"
+  },
+  "benign": [
+    {
+      "id": "benign-001",
+      "category": "technical",
+      "text": "To configure automatic retries, set maxRetries to 3 in your client options and use exponential backoff. (Case #1) Let me know if you need a concrete example."
+    },
+    {
+      "id": "benign-002",
+      "category": "technical",
+      "text": "To configure automatic retries, set maxRetries to 3 in your client options and use exponential backoff. (Case #2) You can verify this in the staging environment before deploying."
+    },
+    {
+      "id": "benign-003",
+      "category": "technical",
+      "text": "To configure automatic retries, set maxRetries to 3 in your client options and use exponential backoff. (Case #3) Refer to the administration guide for additional configuration flags."
+    },
+    {
+      "id": "benign-004",
+      "category": "technical",
+      "text": "To configure automatic retries, set maxRetries to 3 in your client options and use exponential backoff. (Case #4) No further action is required on your account."
+    },
+    {
+      "id": "benign-005",
+      "category": "technical",
+      "text": "To configure automatic retries, set maxRetries to 3 in your client options and use exponential backoff. (Case #5) Always validate user-supplied inputs at the service boundary."
+    },
+    {
+      "id": "benign-006",
+      "category": "technical",
+      "text": "To configure automatic retries, set maxRetries to 3 in your client options and use exponential backoff. (Case #6) Check the audit log for timestamped operator actions."
+    },
+    {
+      "id": "benign-007",
+      "category": "technical",
+      "text": "To configure automatic retries, set maxRetries to 3 in your client options and use exponential backoff. (Case #7) Use AbortController to cancel in-flight requests when switching tabs."
+    },
+    {
+      "id": "benign-008",
+      "category": "technical",
+      "text": "To configure automatic retries, set maxRetries to 3 in your client options and use exponential backoff. (Case #8) Ensure TLS 1.3 is enabled on your reverse proxy."
+    },
+    {
+      "id": "benign-009",
+      "category": "technical",
+      "text": "To configure automatic retries, set maxRetries to 3 in your client options and use exponential backoff. (Case #9) Keep secrets encrypted at rest using AES-256-GCM."
+    },
+    {
+      "id": "benign-010",
+      "category": "technical",
+      "text": "To configure automatic retries, set maxRetries to 3 in your client options and use exponential backoff. (Case #10) Batch processing reduces round-trip latency across large datasets."
+    },
+    {
+      "id": "benign-011",
+      "category": "technical",
+      "text": "To configure automatic retries, set maxRetries to 3 in your client options and use exponential backoff. (Case #11) Pagination cursors are opaque strings; do not parse them on the client."
+    },
+    {
+      "id": "benign-012",
+      "category": "technical",
+      "text": "To configure automatic retries, set maxRetries to 3 in your client options and use exponential backoff. (Case #12) Cache invalidation happens synchronously when a document is deleted."
+    },
+    {
+      "id": "benign-013",
+      "category": "technical",
+      "text": "To configure automatic retries, set maxRetries to 3 in your client options and use exponential backoff. (Case #13) Unit tests should isolate pure logic from network I/O."
+    },
+    {
+      "id": "benign-014",
+      "category": "technical",
+      "text": "To configure automatic retries, set maxRetries to 3 in your client options and use exponential backoff. (Case #14) Integration tests verify the full HTTP middleware chain."
+    },
+    {
+      "id": "benign-015",
+      "category": "technical",
+      "text": "To configure automatic retries, set maxRetries to 3 in your client options and use exponential backoff. (Case #15) Remember to close database handles during graceful shutdown."
+    },
+    {
+      "id": "benign-016",
+      "category": "technical",
+      "text": "To configure automatic retries, set maxRetries to 3 in your client options and use exponential backoff. (Case #16) Rate limits apply per client key and reset on a sliding window."
+    },
+    {
+      "id": "benign-017",
+      "category": "technical",
+      "text": "To configure automatic retries, set maxRetries to 3 in your client options and use exponential backoff. (Case #17) Streaming responses emit incremental deltas as tokens arrive."
+    },
+    {
+      "id": "benign-018",
+      "category": "technical",
+      "text": "To configure automatic retries, set maxRetries to 3 in your client options and use exponential backoff. (Case #18) Version 2.4.18 introduces improved error diagnostics."
+    },
+    {
+      "id": "benign-019",
+      "category": "technical",
+      "text": "To configure automatic retries, set maxRetries to 3 in your client options and use exponential backoff. (Case #19) See section 4.2 for the complete schema reference."
+    },
+    {
+      "id": "benign-020",
+      "category": "technical",
+      "text": "To configure automatic retries, set maxRetries to 3 in your client options and use exponential backoff. (Case #20) Contact your workspace administrator to request elevated permissions."
+    },
+    {
+      "id": "benign-021",
+      "category": "technical",
+      "text": "To configure automatic retries, set maxRetries to 3 in your client options and use exponential backoff. (Case #21) Everything looks healthy in the latest diagnostic snapshot."
+    },
+    {
+      "id": "benign-022",
+      "category": "technical",
+      "text": "To configure automatic retries, set maxRetries to 3 in your client options and use exponential backoff. (Case #22) Review the diff carefully before merging into main."
+    },
+    {
+      "id": "benign-023",
+      "category": "support",
+      "text": "Your invoice #INV-2026-4412 was settled on November 12. Please allow 2 business days for bank reconciliation. (Case #23) Let me know if you need a concrete example."
+    },
+    {
+      "id": "benign-024",
+      "category": "support",
+      "text": "Your invoice #INV-2026-4412 was settled on November 12. Please allow 2 business days for bank reconciliation. (Case #24) You can verify this in the staging environment before deploying."
+    },
+    {
+      "id": "benign-025",
+      "category": "support",
+      "text": "Your invoice #INV-2026-4412 was settled on November 12. Please allow 2 business days for bank reconciliation. (Case #25) Refer to the administration guide for additional configuration flags."
+    },
+    {
+      "id": "benign-026",
+      "category": "support",
+      "text": "Your invoice #INV-2026-4412 was settled on November 12. Please allow 2 business days for bank reconciliation. (Case #26) No further action is required on your account."
+    },
+    {
+      "id": "benign-027",
+      "category": "support",
+      "text": "Your invoice #INV-2026-4412 was settled on November 12. Please allow 2 business days for bank reconciliation. (Case #27) Always validate user-supplied inputs at the service boundary."
+    },
+    {
+      "id": "benign-028",
+      "category": "support",
+      "text": "Your invoice #INV-2026-4412 was settled on November 12. Please allow 2 business days for bank reconciliation. (Case #28) Check the audit log for timestamped operator actions."
+    },
+    {
+      "id": "benign-029",
+      "category": "support",
+      "text": "Your invoice #INV-2026-4412 was settled on November 12. Please allow 2 business days for bank reconciliation. (Case #29) Use AbortController to cancel in-flight requests when switching tabs."
+    },
+    {
+      "id": "benign-030",
+      "category": "support",
+      "text": "Your invoice #INV-2026-4412 was settled on November 12. Please allow 2 business days for bank reconciliation. (Case #30) Ensure TLS 1.3 is enabled on your reverse proxy."
+    },
+    {
+      "id": "benign-031",
+      "category": "support",
+      "text": "Your invoice #INV-2026-4412 was settled on November 12. Please allow 2 business days for bank reconciliation. (Case #31) Keep secrets encrypted at rest using AES-256-GCM."
+    },
+    {
+      "id": "benign-032",
+      "category": "support",
+      "text": "Your invoice #INV-2026-4412 was settled on November 12. Please allow 2 business days for bank reconciliation. (Case #32) Batch processing reduces round-trip latency across large datasets."
+    },
+    {
+      "id": "benign-033",
+      "category": "support",
+      "text": "Your invoice #INV-2026-4412 was settled on November 12. Please allow 2 business days for bank reconciliation. (Case #33) Pagination cursors are opaque strings; do not parse them on the client."
+    },
+    {
+      "id": "benign-034",
+      "category": "support",
+      "text": "Your invoice #INV-2026-4412 was settled on November 12. Please allow 2 business days for bank reconciliation. (Case #34) Cache invalidation happens synchronously when a document is deleted."
+    },
+    {
+      "id": "benign-035",
+      "category": "support",
+      "text": "Your invoice #INV-2026-4412 was settled on November 12. Please allow 2 business days for bank reconciliation. (Case #35) Unit tests should isolate pure logic from network I/O."
+    },
+    {
+      "id": "benign-036",
+      "category": "support",
+      "text": "Your invoice #INV-2026-4412 was settled on November 12. Please allow 2 business days for bank reconciliation. (Case #36) Integration tests verify the full HTTP middleware chain."
+    },
+    {
+      "id": "benign-037",
+      "category": "support",
+      "text": "Your invoice #INV-2026-4412 was settled on November 12. Please allow 2 business days for bank reconciliation. (Case #37) Remember to close database handles during graceful shutdown."
+    },
+    {
+      "id": "benign-038",
+      "category": "support",
+      "text": "Your invoice #INV-2026-4412 was settled on November 12. Please allow 2 business days for bank reconciliation. (Case #38) Rate limits apply per client key and reset on a sliding window."
+    },
+    {
+      "id": "benign-039",
+      "category": "support",
+      "text": "Your invoice #INV-2026-4412 was settled on November 12. Please allow 2 business days for bank reconciliation. (Case #39) Streaming responses emit incremental deltas as tokens arrive."
+    },
+    {
+      "id": "benign-040",
+      "category": "support",
+      "text": "Your invoice #INV-2026-4412 was settled on November 12. Please allow 2 business days for bank reconciliation. (Case #40) Version 2.4.18 introduces improved error diagnostics."
+    },
+    {
+      "id": "benign-041",
+      "category": "support",
+      "text": "Your invoice #INV-2026-4412 was settled on November 12. Please allow 2 business days for bank reconciliation. (Case #41) See section 4.2 for the complete schema reference."
+    },
+    {
+      "id": "benign-042",
+      "category": "support",
+      "text": "Your invoice #INV-2026-4412 was settled on November 12. Please allow 2 business days for bank reconciliation. (Case #42) Contact your workspace administrator to request elevated permissions."
+    },
+    {
+      "id": "benign-043",
+      "category": "support",
+      "text": "Your invoice #INV-2026-4412 was settled on November 12. Please allow 2 business days for bank reconciliation. (Case #43) Everything looks healthy in the latest diagnostic snapshot."
+    },
+    {
+      "id": "benign-044",
+      "category": "support",
+      "text": "Your invoice #INV-2026-4412 was settled on November 12. Please allow 2 business days for bank reconciliation. (Case #44) Review the diff carefully before merging into main."
+    },
+    {
+      "id": "benign-045",
+      "category": "technical",
+      "text": "In TypeScript, prefer discriminated unions over optional property bags when modeling state machines. (Case #45) Let me know if you need a concrete example."
+    },
+    {
+      "id": "benign-046",
+      "category": "technical",
+      "text": "In TypeScript, prefer discriminated unions over optional property bags when modeling state machines. (Case #46) You can verify this in the staging environment before deploying."
+    },
+    {
+      "id": "benign-047",
+      "category": "technical",
+      "text": "In TypeScript, prefer discriminated unions over optional property bags when modeling state machines. (Case #47) Refer to the administration guide for additional configuration flags."
+    },
+    {
+      "id": "benign-048",
+      "category": "technical",
+      "text": "In TypeScript, prefer discriminated unions over optional property bags when modeling state machines. (Case #48) No further action is required on your account."
+    },
+    {
+      "id": "benign-049",
+      "category": "technical",
+      "text": "In TypeScript, prefer discriminated unions over optional property bags when modeling state machines. (Case #49) Always validate user-supplied inputs at the service boundary."
+    },
+    {
+      "id": "benign-050",
+      "category": "technical",
+      "text": "In TypeScript, prefer discriminated unions over optional property bags when modeling state machines. (Case #50) Check the audit log for timestamped operator actions."
+    },
+    {
+      "id": "benign-051",
+      "category": "technical",
+      "text": "In TypeScript, prefer discriminated unions over optional property bags when modeling state machines. (Case #51) Use AbortController to cancel in-flight requests when switching tabs."
+    },
+    {
+      "id": "benign-052",
+      "category": "technical",
+      "text": "In TypeScript, prefer discriminated unions over optional property bags when modeling state machines. (Case #52) Ensure TLS 1.3 is enabled on your reverse proxy."
+    },
+    {
+      "id": "benign-053",
+      "category": "technical",
+      "text": "In TypeScript, prefer discriminated unions over optional property bags when modeling state machines. (Case #53) Keep secrets encrypted at rest using AES-256-GCM."
+    },
+    {
+      "id": "benign-054",
+      "category": "technical",
+      "text": "In TypeScript, prefer discriminated unions over optional property bags when modeling state machines. (Case #54) Batch processing reduces round-trip latency across large datasets."
+    },
+    {
+      "id": "benign-055",
+      "category": "technical",
+      "text": "In TypeScript, prefer discriminated unions over optional property bags when modeling state machines. (Case #55) Pagination cursors are opaque strings; do not parse them on the client."
+    },
+    {
+      "id": "benign-056",
+      "category": "technical",
+      "text": "In TypeScript, prefer discriminated unions over optional property bags when modeling state machines. (Case #56) Cache invalidation happens synchronously when a document is deleted."
+    },
+    {
+      "id": "benign-057",
+      "category": "technical",
+      "text": "In TypeScript, prefer discriminated unions over optional property bags when modeling state machines. (Case #57) Unit tests should isolate pure logic from network I/O."
+    },
+    {
+      "id": "benign-058",
+      "category": "technical",
+      "text": "In TypeScript, prefer discriminated unions over optional property bags when modeling state machines. (Case #58) Integration tests verify the full HTTP middleware chain."
+    },
+    {
+      "id": "benign-059",
+      "category": "technical",
+      "text": "In TypeScript, prefer discriminated unions over optional property bags when modeling state machines. (Case #59) Remember to close database handles during graceful shutdown."
+    },
+    {
+      "id": "benign-060",
+      "category": "technical",
+      "text": "In TypeScript, prefer discriminated unions over optional property bags when modeling state machines. (Case #60) Rate limits apply per client key and reset on a sliding window."
+    },
+    {
+      "id": "benign-061",
+      "category": "technical",
+      "text": "In TypeScript, prefer discriminated unions over optional property bags when modeling state machines. (Case #61) Streaming responses emit incremental deltas as tokens arrive."
+    },
+    {
+      "id": "benign-062",
+      "category": "technical",
+      "text": "In TypeScript, prefer discriminated unions over optional property bags when modeling state machines. (Case #62) Version 2.4.18 introduces improved error diagnostics."
+    },
+    {
+      "id": "benign-063",
+      "category": "technical",
+      "text": "In TypeScript, prefer discriminated unions over optional property bags when modeling state machines. (Case #63) See section 4.2 for the complete schema reference."
+    },
+    {
+      "id": "benign-064",
+      "category": "technical",
+      "text": "In TypeScript, prefer discriminated unions over optional property bags when modeling state machines. (Case #64) Contact your workspace administrator to request elevated permissions."
+    },
+    {
+      "id": "benign-065",
+      "category": "technical",
+      "text": "In TypeScript, prefer discriminated unions over optional property bags when modeling state machines. (Case #65) Everything looks healthy in the latest diagnostic snapshot."
+    },
+    {
+      "id": "benign-066",
+      "category": "technical",
+      "text": "In TypeScript, prefer discriminated unions over optional property bags when modeling state machines. (Case #66) Review the diff carefully before merging into main."
+    },
+    {
+      "id": "benign-067",
+      "category": "support",
+      "text": "Để kiểm tra trạng thái dịch vụ, hãy gọi GET /livez hoặc /readyz từ mạng nội bộ. (Case #67) Let me know if you need a concrete example."
+    },
+    {
+      "id": "benign-068",
+      "category": "support",
+      "text": "Để kiểm tra trạng thái dịch vụ, hãy gọi GET /livez hoặc /readyz từ mạng nội bộ. (Case #68) You can verify this in the staging environment before deploying."
+    },
+    {
+      "id": "benign-069",
+      "category": "support",
+      "text": "Để kiểm tra trạng thái dịch vụ, hãy gọi GET /livez hoặc /readyz từ mạng nội bộ. (Case #69) Refer to the administration guide for additional configuration flags."
+    },
+    {
+      "id": "benign-070",
+      "category": "support",
+      "text": "Để kiểm tra trạng thái dịch vụ, hãy gọi GET /livez hoặc /readyz từ mạng nội bộ. (Case #70) No further action is required on your account."
+    },
+    {
+      "id": "benign-071",
+      "category": "support",
+      "text": "Để kiểm tra trạng thái dịch vụ, hãy gọi GET /livez hoặc /readyz từ mạng nội bộ. (Case #71) Always validate user-supplied inputs at the service boundary."
+    },
+    {
+      "id": "benign-072",
+      "category": "support",
+      "text": "Để kiểm tra trạng thái dịch vụ, hãy gọi GET /livez hoặc /readyz từ mạng nội bộ. (Case #72) Check the audit log for timestamped operator actions."
+    },
+    {
+      "id": "benign-073",
+      "category": "support",
+      "text": "Để kiểm tra trạng thái dịch vụ, hãy gọi GET /livez hoặc /readyz từ mạng nội bộ. (Case #73) Use AbortController to cancel in-flight requests when switching tabs."
+    },
+    {
+      "id": "benign-074",
+      "category": "support",
+      "text": "Để kiểm tra trạng thái dịch vụ, hãy gọi GET /livez hoặc /readyz từ mạng nội bộ. (Case #74) Ensure TLS 1.3 is enabled on your reverse proxy."
+    },
+    {
+      "id": "benign-075",
+      "category": "support",
+      "text": "Để kiểm tra trạng thái dịch vụ, hãy gọi GET /livez hoặc /readyz từ mạng nội bộ. (Case #75) Keep secrets encrypted at rest using AES-256-GCM."
+    },
+    {
+      "id": "benign-076",
+      "category": "support",
+      "text": "Để kiểm tra trạng thái dịch vụ, hãy gọi GET /livez hoặc /readyz từ mạng nội bộ. (Case #76) Batch processing reduces round-trip latency across large datasets."
+    },
+    {
+      "id": "benign-077",
+      "category": "support",
+      "text": "Để kiểm tra trạng thái dịch vụ, hãy gọi GET /livez hoặc /readyz từ mạng nội bộ. (Case #77) Pagination cursors are opaque strings; do not parse them on the client."
+    },
+    {
+      "id": "benign-078",
+      "category": "support",
+      "text": "Để kiểm tra trạng thái dịch vụ, hãy gọi GET /livez hoặc /readyz từ mạng nội bộ. (Case #78) Cache invalidation happens synchronously when a document is deleted."
+    },
+    {
+      "id": "benign-079",
+      "category": "support",
+      "text": "Để kiểm tra trạng thái dịch vụ, hãy gọi GET /livez hoặc /readyz từ mạng nội bộ. (Case #79) Unit tests should isolate pure logic from network I/O."
+    },
+    {
+      "id": "benign-080",
+      "category": "support",
+      "text": "Để kiểm tra trạng thái dịch vụ, hãy gọi GET /livez hoặc /readyz từ mạng nội bộ. (Case #80) Integration tests verify the full HTTP middleware chain."
+    },
+    {
+      "id": "benign-081",
+      "category": "support",
+      "text": "Để kiểm tra trạng thái dịch vụ, hãy gọi GET /livez hoặc /readyz từ mạng nội bộ. (Case #81) Remember to close database handles during graceful shutdown."
+    },
+    {
+      "id": "benign-082",
+      "category": "support",
+      "text": "Để kiểm tra trạng thái dịch vụ, hãy gọi GET /livez hoặc /readyz từ mạng nội bộ. (Case #82) Rate limits apply per client key and reset on a sliding window."
+    },
+    {
+      "id": "benign-083",
+      "category": "support",
+      "text": "Để kiểm tra trạng thái dịch vụ, hãy gọi GET /livez hoặc /readyz từ mạng nội bộ. (Case #83) Streaming responses emit incremental deltas as tokens arrive."
+    },
+    {
+      "id": "benign-084",
+      "category": "support",
+      "text": "Để kiểm tra trạng thái dịch vụ, hãy gọi GET /livez hoặc /readyz từ mạng nội bộ. (Case #84) Version 2.4.18 introduces improved error diagnostics."
+    },
+    {
+      "id": "benign-085",
+      "category": "support",
+      "text": "Để kiểm tra trạng thái dịch vụ, hãy gọi GET /livez hoặc /readyz từ mạng nội bộ. (Case #85) See section 4.2 for the complete schema reference."
+    },
+    {
+      "id": "benign-086",
+      "category": "support",
+      "text": "Để kiểm tra trạng thái dịch vụ, hãy gọi GET /livez hoặc /readyz từ mạng nội bộ. (Case #86) Contact your workspace administrator to request elevated permissions."
+    },
+    {
+      "id": "benign-087",
+      "category": "support",
+      "text": "Để kiểm tra trạng thái dịch vụ, hãy gọi GET /livez hoặc /readyz từ mạng nội bộ. (Case #87) Everything looks healthy in the latest diagnostic snapshot."
+    },
+    {
+      "id": "benign-088",
+      "category": "support",
+      "text": "Để kiểm tra trạng thái dịch vụ, hãy gọi GET /livez hoặc /readyz từ mạng nội bộ. (Case #88) Review the diff carefully before merging into main."
+    },
+    {
+      "id": "benign-089",
+      "category": "technical",
+      "text": "SQLite WAL mode allows concurrent readers while a single writer appends frames to the write-ahead log. (Case #89) Let me know if you need a concrete example."
+    },
+    {
+      "id": "benign-090",
+      "category": "technical",
+      "text": "SQLite WAL mode allows concurrent readers while a single writer appends frames to the write-ahead log. (Case #90) You can verify this in the staging environment before deploying."
+    },
+    {
+      "id": "benign-091",
+      "category": "technical",
+      "text": "SQLite WAL mode allows concurrent readers while a single writer appends frames to the write-ahead log. (Case #91) Refer to the administration guide for additional configuration flags."
+    },
+    {
+      "id": "benign-092",
+      "category": "technical",
+      "text": "SQLite WAL mode allows concurrent readers while a single writer appends frames to the write-ahead log. (Case #92) No further action is required on your account."
+    },
+    {
+      "id": "benign-093",
+      "category": "technical",
+      "text": "SQLite WAL mode allows concurrent readers while a single writer appends frames to the write-ahead log. (Case #93) Always validate user-supplied inputs at the service boundary."
+    },
+    {
+      "id": "benign-094",
+      "category": "technical",
+      "text": "SQLite WAL mode allows concurrent readers while a single writer appends frames to the write-ahead log. (Case #94) Check the audit log for timestamped operator actions."
+    },
+    {
+      "id": "benign-095",
+      "category": "technical",
+      "text": "SQLite WAL mode allows concurrent readers while a single writer appends frames to the write-ahead log. (Case #95) Use AbortController to cancel in-flight requests when switching tabs."
+    },
+    {
+      "id": "benign-096",
+      "category": "technical",
+      "text": "SQLite WAL mode allows concurrent readers while a single writer appends frames to the write-ahead log. (Case #96) Ensure TLS 1.3 is enabled on your reverse proxy."
+    },
+    {
+      "id": "benign-097",
+      "category": "technical",
+      "text": "SQLite WAL mode allows concurrent readers while a single writer appends frames to the write-ahead log. (Case #97) Keep secrets encrypted at rest using AES-256-GCM."
+    },
+    {
+      "id": "benign-098",
+      "category": "technical",
+      "text": "SQLite WAL mode allows concurrent readers while a single writer appends frames to the write-ahead log. (Case #98) Batch processing reduces round-trip latency across large datasets."
+    },
+    {
+      "id": "benign-099",
+      "category": "technical",
+      "text": "SQLite WAL mode allows concurrent readers while a single writer appends frames to the write-ahead log. (Case #99) Pagination cursors are opaque strings; do not parse them on the client."
+    },
+    {
+      "id": "benign-100",
+      "category": "technical",
+      "text": "SQLite WAL mode allows concurrent readers while a single writer appends frames to the write-ahead log. (Case #100) Cache invalidation happens synchronously when a document is deleted."
+    },
+    {
+      "id": "benign-101",
+      "category": "technical",
+      "text": "SQLite WAL mode allows concurrent readers while a single writer appends frames to the write-ahead log. (Case #101) Unit tests should isolate pure logic from network I/O."
+    },
+    {
+      "id": "benign-102",
+      "category": "technical",
+      "text": "SQLite WAL mode allows concurrent readers while a single writer appends frames to the write-ahead log. (Case #102) Integration tests verify the full HTTP middleware chain."
+    },
+    {
+      "id": "benign-103",
+      "category": "technical",
+      "text": "SQLite WAL mode allows concurrent readers while a single writer appends frames to the write-ahead log. (Case #103) Remember to close database handles during graceful shutdown."
+    },
+    {
+      "id": "benign-104",
+      "category": "technical",
+      "text": "SQLite WAL mode allows concurrent readers while a single writer appends frames to the write-ahead log. (Case #104) Rate limits apply per client key and reset on a sliding window."
+    },
+    {
+      "id": "benign-105",
+      "category": "technical",
+      "text": "SQLite WAL mode allows concurrent readers while a single writer appends frames to the write-ahead log. (Case #105) Streaming responses emit incremental deltas as tokens arrive."
+    },
+    {
+      "id": "benign-106",
+      "category": "technical",
+      "text": "SQLite WAL mode allows concurrent readers while a single writer appends frames to the write-ahead log. (Case #106) Version 2.4.18 introduces improved error diagnostics."
+    },
+    {
+      "id": "benign-107",
+      "category": "technical",
+      "text": "SQLite WAL mode allows concurrent readers while a single writer appends frames to the write-ahead log. (Case #107) See section 4.2 for the complete schema reference."
+    },
+    {
+      "id": "benign-108",
+      "category": "technical",
+      "text": "SQLite WAL mode allows concurrent readers while a single writer appends frames to the write-ahead log. (Case #108) Contact your workspace administrator to request elevated permissions."
+    },
+    {
+      "id": "benign-109",
+      "category": "technical",
+      "text": "SQLite WAL mode allows concurrent readers while a single writer appends frames to the write-ahead log. (Case #109) Everything looks healthy in the latest diagnostic snapshot."
+    },
+    {
+      "id": "benign-110",
+      "category": "technical",
+      "text": "SQLite WAL mode allows concurrent readers while a single writer appends frames to the write-ahead log. (Case #110) Review the diff carefully before merging into main."
+    },
+    {
+      "id": "benign-111",
+      "category": "support",
+      "text": "When streaming Server-Sent Events, flush headers early and send keep-alive comments every 15 seconds. (Case #111) Let me know if you need a concrete example."
+    },
+    {
+      "id": "benign-112",
+      "category": "support",
+      "text": "When streaming Server-Sent Events, flush headers early and send keep-alive comments every 15 seconds. (Case #112) You can verify this in the staging environment before deploying."
+    },
+    {
+      "id": "benign-113",
+      "category": "support",
+      "text": "When streaming Server-Sent Events, flush headers early and send keep-alive comments every 15 seconds. (Case #113) Refer to the administration guide for additional configuration flags."
+    },
+    {
+      "id": "benign-114",
+      "category": "support",
+      "text": "When streaming Server-Sent Events, flush headers early and send keep-alive comments every 15 seconds. (Case #114) No further action is required on your account."
+    },
+    {
+      "id": "benign-115",
+      "category": "support",
+      "text": "When streaming Server-Sent Events, flush headers early and send keep-alive comments every 15 seconds. (Case #115) Always validate user-supplied inputs at the service boundary."
+    },
+    {
+      "id": "benign-116",
+      "category": "support",
+      "text": "When streaming Server-Sent Events, flush headers early and send keep-alive comments every 15 seconds. (Case #116) Check the audit log for timestamped operator actions."
+    },
+    {
+      "id": "benign-117",
+      "category": "support",
+      "text": "When streaming Server-Sent Events, flush headers early and send keep-alive comments every 15 seconds. (Case #117) Use AbortController to cancel in-flight requests when switching tabs."
+    },
+    {
+      "id": "benign-118",
+      "category": "support",
+      "text": "When streaming Server-Sent Events, flush headers early and send keep-alive comments every 15 seconds. (Case #118) Ensure TLS 1.3 is enabled on your reverse proxy."
+    },
+    {
+      "id": "benign-119",
+      "category": "support",
+      "text": "When streaming Server-Sent Events, flush headers early and send keep-alive comments every 15 seconds. (Case #119) Keep secrets encrypted at rest using AES-256-GCM."
+    },
+    {
+      "id": "benign-120",
+      "category": "support",
+      "text": "When streaming Server-Sent Events, flush headers early and send keep-alive comments every 15 seconds. (Case #120) Batch processing reduces round-trip latency across large datasets."
+    },
+    {
+      "id": "benign-121",
+      "category": "support",
+      "text": "When streaming Server-Sent Events, flush headers early and send keep-alive comments every 15 seconds. (Case #121) Pagination cursors are opaque strings; do not parse them on the client."
+    },
+    {
+      "id": "benign-122",
+      "category": "support",
+      "text": "When streaming Server-Sent Events, flush headers early and send keep-alive comments every 15 seconds. (Case #122) Cache invalidation happens synchronously when a document is deleted."
+    },
+    {
+      "id": "benign-123",
+      "category": "support",
+      "text": "When streaming Server-Sent Events, flush headers early and send keep-alive comments every 15 seconds. (Case #123) Unit tests should isolate pure logic from network I/O."
+    },
+    {
+      "id": "benign-124",
+      "category": "support",
+      "text": "When streaming Server-Sent Events, flush headers early and send keep-alive comments every 15 seconds. (Case #124) Integration tests verify the full HTTP middleware chain."
+    },
+    {
+      "id": "benign-125",
+      "category": "support",
+      "text": "When streaming Server-Sent Events, flush headers early and send keep-alive comments every 15 seconds. (Case #125) Remember to close database handles during graceful shutdown."
+    },
+    {
+      "id": "benign-126",
+      "category": "support",
+      "text": "When streaming Server-Sent Events, flush headers early and send keep-alive comments every 15 seconds. (Case #126) Rate limits apply per client key and reset on a sliding window."
+    },
+    {
+      "id": "benign-127",
+      "category": "support",
+      "text": "When streaming Server-Sent Events, flush headers early and send keep-alive comments every 15 seconds. (Case #127) Streaming responses emit incremental deltas as tokens arrive."
+    },
+    {
+      "id": "benign-128",
+      "category": "support",
+      "text": "When streaming Server-Sent Events, flush headers early and send keep-alive comments every 15 seconds. (Case #128) Version 2.4.18 introduces improved error diagnostics."
+    },
+    {
+      "id": "benign-129",
+      "category": "support",
+      "text": "When streaming Server-Sent Events, flush headers early and send keep-alive comments every 15 seconds. (Case #129) See section 4.2 for the complete schema reference."
+    },
+    {
+      "id": "benign-130",
+      "category": "support",
+      "text": "When streaming Server-Sent Events, flush headers early and send keep-alive comments every 15 seconds. (Case #130) Contact your workspace administrator to request elevated permissions."
+    },
+    {
+      "id": "benign-131",
+      "category": "support",
+      "text": "When streaming Server-Sent Events, flush headers early and send keep-alive comments every 15 seconds. (Case #131) Everything looks healthy in the latest diagnostic snapshot."
+    },
+    {
+      "id": "benign-132",
+      "category": "support",
+      "text": "When streaming Server-Sent Events, flush headers early and send keep-alive comments every 15 seconds. (Case #132) Review the diff carefully before merging into main."
+    },
+    {
+      "id": "benign-133",
+      "category": "technical",
+      "text": "Here is a sample SQL query: SELECT id, name, created_at FROM profiles WHERE enabled = 1 ORDER BY id DESC LIMIT 20; (Case #133) Let me know if you need a concrete example."
+    },
+    {
+      "id": "benign-134",
+      "category": "technical",
+      "text": "Here is a sample SQL query: SELECT id, name, created_at FROM profiles WHERE enabled = 1 ORDER BY id DESC LIMIT 20; (Case #134) You can verify this in the staging environment before deploying."
+    },
+    {
+      "id": "benign-135",
+      "category": "technical",
+      "text": "Here is a sample SQL query: SELECT id, name, created_at FROM profiles WHERE enabled = 1 ORDER BY id DESC LIMIT 20; (Case #135) Refer to the administration guide for additional configuration flags."
+    },
+    {
+      "id": "benign-136",
+      "category": "technical",
+      "text": "Here is a sample SQL query: SELECT id, name, created_at FROM profiles WHERE enabled = 1 ORDER BY id DESC LIMIT 20; (Case #136) No further action is required on your account."
+    },
+    {
+      "id": "benign-137",
+      "category": "technical",
+      "text": "Here is a sample SQL query: SELECT id, name, created_at FROM profiles WHERE enabled = 1 ORDER BY id DESC LIMIT 20; (Case #137) Always validate user-supplied inputs at the service boundary."
+    },
+    {
+      "id": "benign-138",
+      "category": "technical",
+      "text": "Here is a sample SQL query: SELECT id, name, created_at FROM profiles WHERE enabled = 1 ORDER BY id DESC LIMIT 20; (Case #138) Check the audit log for timestamped operator actions."
+    },
+    {
+      "id": "benign-139",
+      "category": "technical",
+      "text": "Here is a sample SQL query: SELECT id, name, created_at FROM profiles WHERE enabled = 1 ORDER BY id DESC LIMIT 20; (Case #139) Use AbortController to cancel in-flight requests when switching tabs."
+    },
+    {
+      "id": "benign-140",
+      "category": "technical",
+      "text": "Here is a sample SQL query: SELECT id, name, created_at FROM profiles WHERE enabled = 1 ORDER BY id DESC LIMIT 20; (Case #140) Ensure TLS 1.3 is enabled on your reverse proxy."
+    },
+    {
+      "id": "benign-141",
+      "category": "technical",
+      "text": "Here is a sample SQL query: SELECT id, name, created_at FROM profiles WHERE enabled = 1 ORDER BY id DESC LIMIT 20; (Case #141) Keep secrets encrypted at rest using AES-256-GCM."
+    },
+    {
+      "id": "benign-142",
+      "category": "technical",
+      "text": "Here is a sample SQL query: SELECT id, name, created_at FROM profiles WHERE enabled = 1 ORDER BY id DESC LIMIT 20; (Case #142) Batch processing reduces round-trip latency across large datasets."
+    },
+    {
+      "id": "benign-143",
+      "category": "technical",
+      "text": "Here is a sample SQL query: SELECT id, name, created_at FROM profiles WHERE enabled = 1 ORDER BY id DESC LIMIT 20; (Case #143) Pagination cursors are opaque strings; do not parse them on the client."
+    },
+    {
+      "id": "benign-144",
+      "category": "technical",
+      "text": "Here is a sample SQL query: SELECT id, name, created_at FROM profiles WHERE enabled = 1 ORDER BY id DESC LIMIT 20; (Case #144) Cache invalidation happens synchronously when a document is deleted."
+    },
+    {
+      "id": "benign-145",
+      "category": "technical",
+      "text": "Here is a sample SQL query: SELECT id, name, created_at FROM profiles WHERE enabled = 1 ORDER BY id DESC LIMIT 20; (Case #145) Unit tests should isolate pure logic from network I/O."
+    },
+    {
+      "id": "benign-146",
+      "category": "technical",
+      "text": "Here is a sample SQL query: SELECT id, name, created_at FROM profiles WHERE enabled = 1 ORDER BY id DESC LIMIT 20; (Case #146) Integration tests verify the full HTTP middleware chain."
+    },
+    {
+      "id": "benign-147",
+      "category": "technical",
+      "text": "Here is a sample SQL query: SELECT id, name, created_at FROM profiles WHERE enabled = 1 ORDER BY id DESC LIMIT 20; (Case #147) Remember to close database handles during graceful shutdown."
+    },
+    {
+      "id": "benign-148",
+      "category": "technical",
+      "text": "Here is a sample SQL query: SELECT id, name, created_at FROM profiles WHERE enabled = 1 ORDER BY id DESC LIMIT 20; (Case #148) Rate limits apply per client key and reset on a sliding window."
+    },
+    {
+      "id": "benign-149",
+      "category": "technical",
+      "text": "Here is a sample SQL query: SELECT id, name, created_at FROM profiles WHERE enabled = 1 ORDER BY id DESC LIMIT 20; (Case #149) Streaming responses emit incremental deltas as tokens arrive."
+    },
+    {
+      "id": "benign-150",
+      "category": "technical",
+      "text": "Here is a sample SQL query: SELECT id, name, created_at FROM profiles WHERE enabled = 1 ORDER BY id DESC LIMIT 20; (Case #150) Version 2.4.18 introduces improved error diagnostics."
+    },
+    {
+      "id": "benign-151",
+      "category": "technical",
+      "text": "Here is a sample SQL query: SELECT id, name, created_at FROM profiles WHERE enabled = 1 ORDER BY id DESC LIMIT 20; (Case #151) See section 4.2 for the complete schema reference."
+    },
+    {
+      "id": "benign-152",
+      "category": "technical",
+      "text": "Here is a sample SQL query: SELECT id, name, created_at FROM profiles WHERE enabled = 1 ORDER BY id DESC LIMIT 20; (Case #152) Contact your workspace administrator to request elevated permissions."
+    },
+    {
+      "id": "benign-153",
+      "category": "technical",
+      "text": "Here is a sample SQL query: SELECT id, name, created_at FROM profiles WHERE enabled = 1 ORDER BY id DESC LIMIT 20; (Case #153) Everything looks healthy in the latest diagnostic snapshot."
+    },
+    {
+      "id": "benign-154",
+      "category": "technical",
+      "text": "Here is a sample SQL query: SELECT id, name, created_at FROM profiles WHERE enabled = 1 ORDER BY id DESC LIMIT 20; (Case #154) Review the diff carefully before merging into main."
+    },
+    {
+      "id": "benign-155",
+      "category": "support",
+      "text": "The HTTP 409 Conflict status indicates that the request could not be completed due to a revision mismatch. (Case #155) Let me know if you need a concrete example."
+    },
+    {
+      "id": "benign-156",
+      "category": "support",
+      "text": "The HTTP 409 Conflict status indicates that the request could not be completed due to a revision mismatch. (Case #156) You can verify this in the staging environment before deploying."
+    },
+    {
+      "id": "benign-157",
+      "category": "support",
+      "text": "The HTTP 409 Conflict status indicates that the request could not be completed due to a revision mismatch. (Case #157) Refer to the administration guide for additional configuration flags."
+    },
+    {
+      "id": "benign-158",
+      "category": "support",
+      "text": "The HTTP 409 Conflict status indicates that the request could not be completed due to a revision mismatch. (Case #158) No further action is required on your account."
+    },
+    {
+      "id": "benign-159",
+      "category": "support",
+      "text": "The HTTP 409 Conflict status indicates that the request could not be completed due to a revision mismatch. (Case #159) Always validate user-supplied inputs at the service boundary."
+    },
+    {
+      "id": "benign-160",
+      "category": "support",
+      "text": "The HTTP 409 Conflict status indicates that the request could not be completed due to a revision mismatch. (Case #160) Check the audit log for timestamped operator actions."
+    },
+    {
+      "id": "benign-161",
+      "category": "support",
+      "text": "The HTTP 409 Conflict status indicates that the request could not be completed due to a revision mismatch. (Case #161) Use AbortController to cancel in-flight requests when switching tabs."
+    },
+    {
+      "id": "benign-162",
+      "category": "support",
+      "text": "The HTTP 409 Conflict status indicates that the request could not be completed due to a revision mismatch. (Case #162) Ensure TLS 1.3 is enabled on your reverse proxy."
+    },
+    {
+      "id": "benign-163",
+      "category": "support",
+      "text": "The HTTP 409 Conflict status indicates that the request could not be completed due to a revision mismatch. (Case #163) Keep secrets encrypted at rest using AES-256-GCM."
+    },
+    {
+      "id": "benign-164",
+      "category": "support",
+      "text": "The HTTP 409 Conflict status indicates that the request could not be completed due to a revision mismatch. (Case #164) Batch processing reduces round-trip latency across large datasets."
+    },
+    {
+      "id": "benign-165",
+      "category": "support",
+      "text": "The HTTP 409 Conflict status indicates that the request could not be completed due to a revision mismatch. (Case #165) Pagination cursors are opaque strings; do not parse them on the client."
+    },
+    {
+      "id": "benign-166",
+      "category": "support",
+      "text": "The HTTP 409 Conflict status indicates that the request could not be completed due to a revision mismatch. (Case #166) Cache invalidation happens synchronously when a document is deleted."
+    },
+    {
+      "id": "benign-167",
+      "category": "support",
+      "text": "The HTTP 409 Conflict status indicates that the request could not be completed due to a revision mismatch. (Case #167) Unit tests should isolate pure logic from network I/O."
+    },
+    {
+      "id": "benign-168",
+      "category": "support",
+      "text": "The HTTP 409 Conflict status indicates that the request could not be completed due to a revision mismatch. (Case #168) Integration tests verify the full HTTP middleware chain."
+    },
+    {
+      "id": "benign-169",
+      "category": "support",
+      "text": "The HTTP 409 Conflict status indicates that the request could not be completed due to a revision mismatch. (Case #169) Remember to close database handles during graceful shutdown."
+    },
+    {
+      "id": "benign-170",
+      "category": "support",
+      "text": "The HTTP 409 Conflict status indicates that the request could not be completed due to a revision mismatch. (Case #170) Rate limits apply per client key and reset on a sliding window."
+    },
+    {
+      "id": "benign-171",
+      "category": "support",
+      "text": "The HTTP 409 Conflict status indicates that the request could not be completed due to a revision mismatch. (Case #171) Streaming responses emit incremental deltas as tokens arrive."
+    },
+    {
+      "id": "benign-172",
+      "category": "support",
+      "text": "The HTTP 409 Conflict status indicates that the request could not be completed due to a revision mismatch. (Case #172) Version 2.4.18 introduces improved error diagnostics."
+    },
+    {
+      "id": "benign-173",
+      "category": "support",
+      "text": "The HTTP 409 Conflict status indicates that the request could not be completed due to a revision mismatch. (Case #173) See section 4.2 for the complete schema reference."
+    },
+    {
+      "id": "benign-174",
+      "category": "support",
+      "text": "The HTTP 409 Conflict status indicates that the request could not be completed due to a revision mismatch. (Case #174) Contact your workspace administrator to request elevated permissions."
+    },
+    {
+      "id": "benign-175",
+      "category": "support",
+      "text": "The HTTP 409 Conflict status indicates that the request could not be completed due to a revision mismatch. (Case #175) Everything looks healthy in the latest diagnostic snapshot."
+    },
+    {
+      "id": "benign-176",
+      "category": "support",
+      "text": "The HTTP 409 Conflict status indicates that the request could not be completed due to a revision mismatch. (Case #176) Review the diff carefully before merging into main."
+    },
+    {
+      "id": "benign-177",
+      "category": "technical",
+      "text": "For deterministic benchmarks, seed the pseudo-random generator and keep chunk boundaries reproducible. (Case #177) Let me know if you need a concrete example."
+    },
+    {
+      "id": "benign-178",
+      "category": "technical",
+      "text": "For deterministic benchmarks, seed the pseudo-random generator and keep chunk boundaries reproducible. (Case #178) You can verify this in the staging environment before deploying."
+    },
+    {
+      "id": "benign-179",
+      "category": "technical",
+      "text": "For deterministic benchmarks, seed the pseudo-random generator and keep chunk boundaries reproducible. (Case #179) Refer to the administration guide for additional configuration flags."
+    },
+    {
+      "id": "benign-180",
+      "category": "technical",
+      "text": "For deterministic benchmarks, seed the pseudo-random generator and keep chunk boundaries reproducible. (Case #180) No further action is required on your account."
+    },
+    {
+      "id": "benign-181",
+      "category": "technical",
+      "text": "For deterministic benchmarks, seed the pseudo-random generator and keep chunk boundaries reproducible. (Case #181) Always validate user-supplied inputs at the service boundary."
+    },
+    {
+      "id": "benign-182",
+      "category": "technical",
+      "text": "For deterministic benchmarks, seed the pseudo-random generator and keep chunk boundaries reproducible. (Case #182) Check the audit log for timestamped operator actions."
+    },
+    {
+      "id": "benign-183",
+      "category": "technical",
+      "text": "For deterministic benchmarks, seed the pseudo-random generator and keep chunk boundaries reproducible. (Case #183) Use AbortController to cancel in-flight requests when switching tabs."
+    },
+    {
+      "id": "benign-184",
+      "category": "technical",
+      "text": "For deterministic benchmarks, seed the pseudo-random generator and keep chunk boundaries reproducible. (Case #184) Ensure TLS 1.3 is enabled on your reverse proxy."
+    },
+    {
+      "id": "benign-185",
+      "category": "technical",
+      "text": "For deterministic benchmarks, seed the pseudo-random generator and keep chunk boundaries reproducible. (Case #185) Keep secrets encrypted at rest using AES-256-GCM."
+    },
+    {
+      "id": "benign-186",
+      "category": "technical",
+      "text": "For deterministic benchmarks, seed the pseudo-random generator and keep chunk boundaries reproducible. (Case #186) Batch processing reduces round-trip latency across large datasets."
+    },
+    {
+      "id": "benign-187",
+      "category": "technical",
+      "text": "For deterministic benchmarks, seed the pseudo-random generator and keep chunk boundaries reproducible. (Case #187) Pagination cursors are opaque strings; do not parse them on the client."
+    },
+    {
+      "id": "benign-188",
+      "category": "technical",
+      "text": "For deterministic benchmarks, seed the pseudo-random generator and keep chunk boundaries reproducible. (Case #188) Cache invalidation happens synchronously when a document is deleted."
+    },
+    {
+      "id": "benign-189",
+      "category": "technical",
+      "text": "For deterministic benchmarks, seed the pseudo-random generator and keep chunk boundaries reproducible. (Case #189) Unit tests should isolate pure logic from network I/O."
+    },
+    {
+      "id": "benign-190",
+      "category": "technical",
+      "text": "For deterministic benchmarks, seed the pseudo-random generator and keep chunk boundaries reproducible. (Case #190) Integration tests verify the full HTTP middleware chain."
+    },
+    {
+      "id": "benign-191",
+      "category": "technical",
+      "text": "For deterministic benchmarks, seed the pseudo-random generator and keep chunk boundaries reproducible. (Case #191) Remember to close database handles during graceful shutdown."
+    },
+    {
+      "id": "benign-192",
+      "category": "technical",
+      "text": "For deterministic benchmarks, seed the pseudo-random generator and keep chunk boundaries reproducible. (Case #192) Rate limits apply per client key and reset on a sliding window."
+    },
+    {
+      "id": "benign-193",
+      "category": "technical",
+      "text": "For deterministic benchmarks, seed the pseudo-random generator and keep chunk boundaries reproducible. (Case #193) Streaming responses emit incremental deltas as tokens arrive."
+    },
+    {
+      "id": "benign-194",
+      "category": "technical",
+      "text": "For deterministic benchmarks, seed the pseudo-random generator and keep chunk boundaries reproducible. (Case #194) Version 2.4.18 introduces improved error diagnostics."
+    },
+    {
+      "id": "benign-195",
+      "category": "technical",
+      "text": "For deterministic benchmarks, seed the pseudo-random generator and keep chunk boundaries reproducible. (Case #195) See section 4.2 for the complete schema reference."
+    },
+    {
+      "id": "benign-196",
+      "category": "technical",
+      "text": "For deterministic benchmarks, seed the pseudo-random generator and keep chunk boundaries reproducible. (Case #196) Contact your workspace administrator to request elevated permissions."
+    },
+    {
+      "id": "benign-197",
+      "category": "technical",
+      "text": "For deterministic benchmarks, seed the pseudo-random generator and keep chunk boundaries reproducible. (Case #197) Everything looks healthy in the latest diagnostic snapshot."
+    },
+    {
+      "id": "benign-198",
+      "category": "technical",
+      "text": "For deterministic benchmarks, seed the pseudo-random generator and keep chunk boundaries reproducible. (Case #198) Review the diff carefully before merging into main."
+    },
+    {
+      "id": "benign-199",
+      "category": "support",
+      "text": "Support hours are Monday through Friday, 08:00 to 18:00 UTC+7, excluding public holidays. (Case #199) Let me know if you need a concrete example."
+    },
+    {
+      "id": "benign-200",
+      "category": "support",
+      "text": "Support hours are Monday through Friday, 08:00 to 18:00 UTC+7, excluding public holidays. (Case #200) You can verify this in the staging environment before deploying."
+    },
+    {
+      "id": "benign-201",
+      "category": "support",
+      "text": "Support hours are Monday through Friday, 08:00 to 18:00 UTC+7, excluding public holidays. (Case #201) Refer to the administration guide for additional configuration flags."
+    },
+    {
+      "id": "benign-202",
+      "category": "support",
+      "text": "Support hours are Monday through Friday, 08:00 to 18:00 UTC+7, excluding public holidays. (Case #202) No further action is required on your account."
+    },
+    {
+      "id": "benign-203",
+      "category": "support",
+      "text": "Support hours are Monday through Friday, 08:00 to 18:00 UTC+7, excluding public holidays. (Case #203) Always validate user-supplied inputs at the service boundary."
+    },
+    {
+      "id": "benign-204",
+      "category": "support",
+      "text": "Support hours are Monday through Friday, 08:00 to 18:00 UTC+7, excluding public holidays. (Case #204) Check the audit log for timestamped operator actions."
+    },
+    {
+      "id": "benign-205",
+      "category": "support",
+      "text": "Support hours are Monday through Friday, 08:00 to 18:00 UTC+7, excluding public holidays. (Case #205) Use AbortController to cancel in-flight requests when switching tabs."
+    },
+    {
+      "id": "benign-206",
+      "category": "support",
+      "text": "Support hours are Monday through Friday, 08:00 to 18:00 UTC+7, excluding public holidays. (Case #206) Ensure TLS 1.3 is enabled on your reverse proxy."
+    },
+    {
+      "id": "benign-207",
+      "category": "support",
+      "text": "Support hours are Monday through Friday, 08:00 to 18:00 UTC+7, excluding public holidays. (Case #207) Keep secrets encrypted at rest using AES-256-GCM."
+    },
+    {
+      "id": "benign-208",
+      "category": "support",
+      "text": "Support hours are Monday through Friday, 08:00 to 18:00 UTC+7, excluding public holidays. (Case #208) Batch processing reduces round-trip latency across large datasets."
+    },
+    {
+      "id": "benign-209",
+      "category": "support",
+      "text": "Support hours are Monday through Friday, 08:00 to 18:00 UTC+7, excluding public holidays. (Case #209) Pagination cursors are opaque strings; do not parse them on the client."
+    },
+    {
+      "id": "benign-210",
+      "category": "support",
+      "text": "Support hours are Monday through Friday, 08:00 to 18:00 UTC+7, excluding public holidays. (Case #210) Cache invalidation happens synchronously when a document is deleted."
+    },
+    {
+      "id": "benign-211",
+      "category": "support",
+      "text": "Support hours are Monday through Friday, 08:00 to 18:00 UTC+7, excluding public holidays. (Case #211) Unit tests should isolate pure logic from network I/O."
+    },
+    {
+      "id": "benign-212",
+      "category": "support",
+      "text": "Support hours are Monday through Friday, 08:00 to 18:00 UTC+7, excluding public holidays. (Case #212) Integration tests verify the full HTTP middleware chain."
+    },
+    {
+      "id": "benign-213",
+      "category": "support",
+      "text": "Support hours are Monday through Friday, 08:00 to 18:00 UTC+7, excluding public holidays. (Case #213) Remember to close database handles during graceful shutdown."
+    },
+    {
+      "id": "benign-214",
+      "category": "support",
+      "text": "Support hours are Monday through Friday, 08:00 to 18:00 UTC+7, excluding public holidays. (Case #214) Rate limits apply per client key and reset on a sliding window."
+    },
+    {
+      "id": "benign-215",
+      "category": "support",
+      "text": "Support hours are Monday through Friday, 08:00 to 18:00 UTC+7, excluding public holidays. (Case #215) Streaming responses emit incremental deltas as tokens arrive."
+    },
+    {
+      "id": "benign-216",
+      "category": "support",
+      "text": "Support hours are Monday through Friday, 08:00 to 18:00 UTC+7, excluding public holidays. (Case #216) Version 2.4.18 introduces improved error diagnostics."
+    },
+    {
+      "id": "benign-217",
+      "category": "support",
+      "text": "Support hours are Monday through Friday, 08:00 to 18:00 UTC+7, excluding public holidays. (Case #217) See section 4.2 for the complete schema reference."
+    },
+    {
+      "id": "benign-218",
+      "category": "support",
+      "text": "Support hours are Monday through Friday, 08:00 to 18:00 UTC+7, excluding public holidays. (Case #218) Contact your workspace administrator to request elevated permissions."
+    },
+    {
+      "id": "benign-219",
+      "category": "support",
+      "text": "Support hours are Monday through Friday, 08:00 to 18:00 UTC+7, excluding public holidays. (Case #219) Everything looks healthy in the latest diagnostic snapshot."
+    },
+    {
+      "id": "benign-220",
+      "category": "support",
+      "text": "Support hours are Monday through Friday, 08:00 to 18:00 UTC+7, excluding public holidays. (Case #220) Review the diff carefully before merging into main."
+    }
+  ],
+  "violations": [
+    {
+      "id": "viol-keyword-exact",
+      "expectedDetector": "keywords",
+      "expectedAction": "blocked",
+      "text": "Please use the secret-forbidden-phrase when contacting support."
+    },
+    {
+      "id": "viol-keyword-nfc",
+      "expectedDetector": "keywords",
+      "expectedAction": "blocked",
+      "text": "Đừng chia sẻ từ cám nội bộ này ra ngoài."
+    },
+    {
+      "id": "viol-keyword-cross-chunk",
+      "expectedDetector": "keywords",
+      "expectedAction": "blocked",
+      "text": "This sentence hides secret-forbidden-phrase right across chunk boundaries so partial streaming must hold it."
+    },
+    {
+      "id": "viol-pattern-regex",
+      "expectedDetector": "patterns",
+      "expectedAction": "blocked",
+      "text": "Internal ticket TOKEN-998877-INTERNAL should never be exposed."
+    },
+    {
+      "id": "viol-prompt-leak",
+      "expectedDetector": "promptLeak",
+      "expectedAction": "blocked",
+      "text": "Here are my instructions: alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango."
+    },
+    {
+      "id": "viol-max-length",
+      "expectedDetector": "maxLength",
+      "expectedAction": "blocked",
+      "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+      "id": "mask-pii-email-phone",
+      "expectedDetector": "pii",
+      "expectedAction": "masked",
+      "text": "You can reach Alice at alice.smith@example.com or +1-415-555-0199 for follow-up."
+    }
+  ]
+}
