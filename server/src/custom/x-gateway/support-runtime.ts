@@ -49,6 +49,12 @@ import { buildCustomerMemoryPrompt } from './support-crm-webhooks.js';
 import { listSupportTools, listSupportDbSources } from './support-store.js';
 import { buildAllowedToolsForContext } from './support-connectors.js';
 import {
+  buildSupportGuardContext,
+  guardSupportReply,
+  type SupportOutputGuardEvaluator,
+  type SupportOutputGuardResult,
+} from '../ai-platform/output-guard/support-adapter.js';
+import {
   getSupportRuntimePolicy,
   claimSupportTurn,
   assertSupportTurnActive,
@@ -145,6 +151,8 @@ export async function executeSupportTurn(options: {
   tenant: SupportTenant;
   userContext: SupportUserContext;
   input: SupportRuntimeChatInput;
+  outputGuard?: SupportOutputGuardEvaluator;
+  hasInferenceCapability?: boolean;
   generate: (
     context: SupportGenerationContext,
   ) => Promise<SupportChatCompletionResult & { usedFallback?: boolean }>;
@@ -302,8 +310,43 @@ export async function executeSupportTurn(options: {
       role: userContext.role,
       cachedResponse: claim.cachedResponse as SupportChatCompletionResult & { runtime: SupportRuntimeMetadata },
     });
+    const replayGuardCtx = buildSupportGuardContext({
+      tenantId: tenant.id,
+      verified: isSigned,
+      role: userContext.role,
+      userId: userContext.userId,
+      systemPrompt: tenant.systemPrompt,
+      hasInferenceCapability: options.hasInferenceCapability,
+    });
+    const replayGuard = await guardSupportReply({
+      text: cached.reply || '',
+      context: replayGuardCtx,
+      evaluator: options.outputGuard,
+    });
+    const guardedReplayText =
+      replayGuard.action === 'blocked' || replayGuard.action === 'masked'
+        ? maskSupportSensitiveText(String(tenant.id), replayGuard.text, userContext.role).masked
+        : cached.reply;
+    const guardedChoices =
+      replayGuard.action === 'blocked' || replayGuard.action === 'masked'
+        ? (cached.choices ?? []).map((c, idx) =>
+            idx === 0
+              ? {
+                  ...c,
+                  message: { ...c.message, content: guardedReplayText },
+                  ...(replayGuard.action === 'blocked' ? { finish_reason: 'content_filter' } : {}),
+                }
+              : {
+                  ...c,
+                  message: { ...c.message, content: '' },
+                  ...(replayGuard.action === 'blocked' ? { finish_reason: 'content_filter' } : {}),
+                },
+          )
+        : cached.choices;
     return {
       ...cached,
+      reply: guardedReplayText,
+      choices: guardedChoices,
       runtime: {
         ...cached.runtime,
         replayed: true,
@@ -389,6 +432,25 @@ export async function executeSupportTurn(options: {
 
     // 10. Zero-model abstention short-circuit when required mode has no matches
     if (evidencePrep.mode === 'required' && evidencePrep.shouldAbstain) {
+      const abstentionGuardCtx = buildSupportGuardContext({
+        tenantId: tenant.id,
+        verified: isSigned,
+        role: userContext.role,
+        userId: userContext.userId,
+        systemPrompt: tenant.systemPrompt,
+        hasInferenceCapability: options.hasInferenceCapability,
+      });
+      const abstentionGuard = await guardSupportReply({
+        text: SAFE_EVIDENCE_NOTICES.no_matches,
+        context: abstentionGuardCtx,
+        evaluator: options.outputGuard,
+      });
+      const guardedAbstentionText =
+        abstentionGuard.action === 'blocked' || abstentionGuard.action === 'masked'
+          ? maskSupportSensitiveText(String(tenant.id), abstentionGuard.text, userContext.role).masked
+          : SAFE_EVIDENCE_NOTICES.no_matches;
+      const abstentionFinishReason = abstentionGuard.action === 'blocked' ? 'content_filter' : 'stop';
+
       return getDb().transaction(() => {
         assertSupportTurnActive(turnId, tenant.id, input.conversationId);
         const quotaStatus = applySupportQuotaDelta(String(tenant.id), {
@@ -463,7 +525,7 @@ export async function executeSupportTurn(options: {
           userRole: userContext.role,
         });
 
-        const safeNotice = SAFE_EVIDENCE_NOTICES.no_matches;
+        const safeNotice = guardedAbstentionText;
         const runtimeMetadata: SupportRuntimeMetadata = {
           requestId,
           ...(conversationId ? { conversationId } : {}),
@@ -493,7 +555,7 @@ export async function executeSupportTurn(options: {
             {
               index: 0,
               message: { role: 'assistant', content: safeNotice },
-              finish_reason: 'stop',
+              finish_reason: abstentionFinishReason,
             },
           ],
           runtime: runtimeMetadata,
@@ -715,7 +777,34 @@ export async function executeSupportTurn(options: {
         : null;
 
     const rawOutputReply = evidenceFinal ? evidenceFinal.canonicalReply : genResult.reply || '';
-    const maskedReplyRes = maskSupportSensitiveText(String(tenant.id), rawOutputReply, userContext.role);
+    const outputGuardCtx = buildSupportGuardContext({
+      tenantId: tenant.id,
+      verified: isSigned,
+      role: userContext.role,
+      userId: userContext.userId,
+      systemPrompt: tenant.systemPrompt,
+      trustedContext,
+      hasInferenceCapability: options.hasInferenceCapability,
+      signal: abortController.signal,
+    });
+    const outputGuardRes: SupportOutputGuardResult = await guardSupportReply({
+      text: rawOutputReply,
+      context: outputGuardCtx,
+      evaluator: options.outputGuard,
+    });
+    const guardedRawReply =
+      outputGuardRes.action === 'blocked' || outputGuardRes.action === 'masked'
+        ? outputGuardRes.text
+        : rawOutputReply;
+    const sourcesChangedGuardRes =
+      evidencePrep.mode === 'required'
+        ? await guardSupportReply({
+            text: SAFE_EVIDENCE_NOTICES.sources_changed,
+            context: outputGuardCtx,
+            evaluator: options.outputGuard,
+          })
+        : null;
+    const maskedReplyRes = maskSupportSensitiveText(String(tenant.id), guardedRawReply, userContext.role);
     totalRedactions += maskedReplyRes.redactionCount;
     const finalReply = maskedReplyRes.masked;
 
@@ -756,6 +845,9 @@ export async function executeSupportTurn(options: {
     let rejectedReason: 'invalid_citations' | 'sources_changed' | undefined;
     let commitReply = finalReply;
 
+    let guardBlocked = outputGuardRes.action === 'blocked';
+    const guardModified = outputGuardRes.action === 'blocked' || outputGuardRes.action === 'masked';
+
     if (evidencePrep.mode === 'required' && evidenceFinal) {
       const freshPolicy = getSupportEvidencePolicy(tenant.id);
       const freshSnapshotId = getSupportEvidenceSnapshotId({
@@ -771,9 +863,15 @@ export async function executeSupportTurn(options: {
       if (snapshotOrPolicyChanged) {
         isRejectedRequired = true;
         rejectedReason = 'sources_changed';
+        guardBlocked = sourcesChangedGuardRes?.action === 'blocked';
+        const fallbackRaw =
+          sourcesChangedGuardRes &&
+          (sourcesChangedGuardRes.action === 'blocked' || sourcesChangedGuardRes.action === 'masked')
+            ? sourcesChangedGuardRes.text
+            : SAFE_EVIDENCE_NOTICES.sources_changed;
         commitReply = maskSupportSensitiveText(
           String(tenant.id),
-          SAFE_EVIDENCE_NOTICES.sources_changed,
+          fallbackRaw,
           userContext.role,
         ).masked;
         evidenceObj = {
@@ -923,6 +1021,7 @@ export async function executeSupportTurn(options: {
       ...(intakeMetadata ? { intake: intakeMetadata } : {}),
     };
 
+    const guardFinishReason = guardBlocked ? 'content_filter' : 'stop';
     const maskedGenBase = isRejectedRequired
       ? {
           userContext: maskSupportSensitiveData(String(tenant.id), genResult.userContext, userContext.role).masked,
@@ -933,20 +1032,20 @@ export async function executeSupportTurn(options: {
             {
               index: 0,
               message: { role: 'assistant' as const, content: commitReply },
-              finish_reason: 'stop',
+              finish_reason: guardFinishReason,
             },
           ],
         }
       : {
           ...maskSupportSensitiveData(String(tenant.id), genResult, userContext.role).masked,
-          ...(isRequiredMode
+          ...(isRequiredMode || guardModified
             ? {
-                allowedTools: [] as typeof genResult.allowedTools,
+                ...(isRequiredMode ? { allowedTools: [] as typeof genResult.allowedTools } : {}),
                 choices: [
                   {
                     index: 0,
                     message: { role: 'assistant' as const, content: commitReply },
-                    finish_reason: 'stop',
+                    finish_reason: guardFinishReason,
                   },
                 ],
               }

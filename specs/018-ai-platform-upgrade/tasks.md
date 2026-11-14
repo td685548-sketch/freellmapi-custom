@@ -138,27 +138,27 @@ description: "Task list for AI Platform Upgrade"
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T054 [P] [US3] Viết test roundtrip migration trong `server/src/__tests__/db/migrate/ai-platform-output-guard.test.ts`
-- [ ] T055 [P] [US3] Viết test bộ kiểm tra cục bộ: từ khóa chuẩn hóa NFC và chữ thường; mẫu tùy chỉnh; từ chối mẫu chạy quá 5 ms trên chuỗi 10.000 ký tự; `promptLeak` với 2 đoạn 12 từ trùng; PII hành động `mask`; `maxLength`; trong `T/guard-detectors.test.ts`
-- [ ] T056 [P] [US3] Viết test bộ lọc luồng: từ cấm vắt qua hai mảnh không lọt; giữ `hold_chars` = 200; nhả sau `max_delay_ms` = 300; chế độ `log` không đổi văn bản; trong `T/guard-stream.test.ts`
-- [ ] T057 [P] [US3] Viết test bộ kiểm tra ngoài: kiểm duyệt và mô hình đánh giá; lỗi/quá hạn với `fail_mode` `allow` và `block`; mô hình đánh giá trả JSON sai được coi là lỗi kiểm tra; trong `T/guard-external.test.ts`
-- [ ] T058 [P] [US3] Viết test sự kiện: trích đoạn mã hóa, tối đa 500 ký tự, hết hạn 7 ngày trả 410; cần `view_guard_excerpts`; vai trò miễn tạo sự kiện `bypassed`; giới hạn tần suất ghi; trong `T/guard-events.test.ts`
-- [ ] T059 [P] [US3] Viết test HTTP đầu-cuối trên 4 giao thức: `log`, `block` một lần, `block` luồng, câu trả lời từ cache khớp chính xác, câu trả lời sau vòng lặp công cụ; trong `T/guard-e2e.test.ts`
+- [x] T054 [P] [US3] Viết test roundtrip migration trong `server/src/__tests__/db/migrate/ai-platform-output-guard.test.ts`
+- [x] T055 [P] [US3] Viết test bộ kiểm tra cục bộ: từ khóa chuẩn hóa NFC và chữ thường; mẫu tùy chỉnh; từ chối mẫu chạy quá 5 ms trên chuỗi 10.000 ký tự; `promptLeak` với 2 đoạn 12 từ trùng; PII hành động `mask`; `maxLength`; trong `T/guard-detectors.test.ts`
+- [x] T056 [P] [US3] Viết test bộ lọc luồng: từ cấm vắt qua hai mảnh không lọt; giữ `hold_chars` = 200; nhả sau `max_delay_ms` = 300; chế độ `log` không đổi văn bản; trong `T/guard-stream.test.ts`
+- [x] T057 [P] [US3] Viết test bộ kiểm tra ngoài: kiểm duyệt và mô hình đánh giá; lỗi/quá hạn với `fail_mode` `allow` và `block`; mô hình đánh giá trả JSON sai được coi là lỗi kiểm tra; trong `T/guard-external.test.ts`
+- [x] T058 [P] [US3] Viết test sự kiện: trích đoạn mã hóa, tối đa 500 ký tự, hết hạn 7 ngày trả 410; cần `view_guard_excerpts`; vai trò miễn tạo sự kiện `bypassed`; giới hạn tần suất ghi; trong `T/guard-events.test.ts`
+- [x] T059 [P] [US3] Viết test HTTP đầu-cuối trên 4 giao thức: `log`, `block` một lần, `block` luồng, câu trả lời từ cache khớp chính xác, câu trả lời sau vòng lặp công cụ; trong `T/guard-e2e.test.ts`
 
 ### Implementation for User Story 3
 
-- [ ] T060 [US3] Tạo `M/20261113_120000_custom_ai_output_guard.ts` với `custom_ai_output_policies` (`mode` thuộc `off|log|block`, `fail_mode` thuộc `allow|block`, `hold_chars` mặc định 200 trần 2000, `max_delay_ms` mặc định 300 trần 2000, `replacement_text` tối đa 1000 ký tự) và `custom_ai_guard_events`
-- [ ] T061 [US3] Cài `S/output-guard/detectors.ts` (giới hạn: 200 từ khóa × 80 ký tự; 20 mẫu × 200 ký tự)
-- [ ] T062 [US3] Cài `S/output-guard/stream-guard.ts` (cửa sổ giữ lại, nhả theo thời gian)
-- [ ] T063 [US3] Cài `S/output-guard/external.ts` (gọi `server/src/services/moderation.ts`; mô hình đánh giá qua `callGateway` với đầu ra JSON `{ violation, reason }`)
-- [ ] T064 [US3] Cài `S/output-guard/events.ts` (ghi, liệt kê, giải mã trích đoạn, dọn)
-- [ ] T065 [US3] Cài `S/output-guard/policy.ts` (`outputFilterFor`, `evaluateOutput`, CRUD chính sách có `revision`)
-- [ ] T066 [US3] Nối bước 10 trong `S/pipeline.ts`: cài bộ chặn với `outputFilterFor` khi `mode` khác `off`; đặt header `x-freellm-guard`
-- [ ] T067 [US3] Gọi `evaluateOutput` cho phạm vi `support_tenant` trong `server/src/custom/x-gateway/support-runtime.ts` ngay trước bước che câu trả lời; thêm ca test vào `server/src/__tests__/custom/x-support-runtime.test.ts`
-- [ ] T068 [US3] Cài `S/output-guard/router.ts` (mọi tuyến `/output-guard/*`, kể cả `/test`) và gắn vào `S/router.ts`
-- [ ] T069 [P] [US3] Viết test giao diện cho trình sửa chính sách, công cụ thử, danh sách sự kiện trong `C/output-guard.test.tsx`
-- [ ] T070 [US3] Cài `C/pages/OutputGuard.tsx`, `C/components/PolicyTester.tsx` (nêu rõ độ trễ thêm và việc bộ kiểm tra ngoài làm mất trả lời tăng dần), chuỗi tiếng Việt
-- [ ] T071 [US3] Viết bộ đo độ trễ tới ký tự đầu tiên (ngưỡng 300 ms) và tỷ lệ chặn nhầm trên bộ câu trả lời hợp lệ (ngưỡng 2%) trong `T/guard-bench.test.ts`; chạy `T/regression.test.ts`
+- [x] T060 [US3] Tạo `M/20261113_120000_custom_ai_output_guard.ts` với `custom_ai_output_policies` (`mode` thuộc `off|log|block`, `fail_mode` thuộc `allow|block`, `hold_chars` mặc định 200 trần 2000, `max_delay_ms` mặc định 300 trần 2000, `replacement_text` tối đa 1000 ký tự) và `custom_ai_guard_events`
+- [x] T061 [US3] Cài `S/output-guard/detectors.ts` (giới hạn: 200 từ khóa × 80 ký tự; 20 mẫu × 200 ký tự)
+- [x] T062 [US3] Cài `S/output-guard/stream-guard.ts` (cửa sổ giữ lại, nhả theo thời gian)
+- [x] T063 [US3] Cài `S/output-guard/external.ts` (gọi `server/src/services/moderation.ts`; mô hình đánh giá qua `callGateway` với đầu ra JSON `{ violation, reason }`)
+- [x] T064 [US3] Cài `S/output-guard/events.ts` (ghi, liệt kê, giải mã trích đoạn, dọn)
+- [x] T065 [US3] Cài `S/output-guard/policy.ts` (`outputFilterFor`, `evaluateOutput`, CRUD chính sách có `revision`)
+- [x] T066 [US3] Nối bước 10 trong `S/pipeline.ts`: cài bộ chặn với `outputFilterFor` khi `mode` khác `off`; đặt header `x-freellm-guard`
+- [x] T067 [US3] Gọi `evaluateOutput` cho phạm vi `support_tenant` trong `server/src/custom/x-gateway/support-runtime.ts` ngay trước bước che câu trả lời; thêm ca test vào `server/src/__tests__/custom/x-support-runtime.test.ts`
+- [x] T068 [US3] Cài `S/output-guard/router.ts` (mọi tuyến `/output-guard/*`, kể cả `/test`) và gắn vào `S/router.ts`
+- [x] T069 [P] [US3] Viết test giao diện cho trình sửa chính sách, công cụ thử, danh sách sự kiện trong `C/output-guard.test.tsx`
+- [x] T070 [US3] Cài `C/pages/OutputGuard.tsx`, `C/components/PolicyTester.tsx` (nêu rõ độ trễ thêm và việc bộ kiểm tra ngoài làm mất trả lời tăng dần), chuỗi tiếng Việt
+- [x] T071 [US3] Viết bộ đo độ trễ tới ký tự đầu tiên (ngưỡng 300 ms) và tỷ lệ chặn nhầm trên bộ câu trả lời hợp lệ (ngưỡng 2%) trong `T/guard-bench.test.ts`; chạy `T/regression.test.ts`
 
 **Checkpoint**: US3 đạt và tự kiểm chứng được.
 

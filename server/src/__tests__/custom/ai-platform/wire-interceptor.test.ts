@@ -45,6 +45,9 @@ function makeHarness(originalUrl = '/v1/chat/completions'): Harness {
     getHeader(name: string) {
       return headers[name.toLowerCase()];
     },
+    removeHeader(name: string) {
+      delete headers[name.toLowerCase()];
+    },
     write(chunk: string | Uint8Array, encOrCb?: BufferEncoding | (() => void), cb?: () => void) {
       const encoding = typeof encOrCb === 'string' ? encOrCb : 'utf8';
       const callback = typeof encOrCb === 'function' ? encOrCb : cb;
@@ -286,5 +289,108 @@ describe('wire/interceptor', () => {
     gem.res.end();
 
     expect(usages).toHaveLength(3);
+  });
+
+  it('is idempotent when installInterceptor is called more than once on the same response', () => {
+    const h = makeHarness();
+    let deltaCalls = 0;
+    const filter: OutputFilter = {
+      name: 'count',
+      onDelta(t) {
+        deltaCalls++;
+        return { emit: t };
+      },
+    };
+    installInterceptor(h.req, h.res, 'openai-chat', [filter]);
+    const writeAfterFirst = h.res.write;
+    installInterceptor(h.req, h.res, 'openai-chat', [filter]);
+    expect(h.res.write).toBe(writeAfterFirst);
+
+    h.res.write('data: {"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}\n\n');
+    h.res.end();
+    expect(deltaCalls).toBe(1);
+  });
+
+  it('preserves original finish_reason when action is masked and sets x-freellm-guard header', async () => {
+    const h = makeHarness('/v1/chat/completions');
+    h.headers['content-length'] = '999';
+    h.headers['etag'] = '"stale"';
+    const filter: OutputFilter = {
+      name: 'output-guard',
+      buffering: true,
+      async onComplete(full) {
+        return { replaceWith: full.replace('1234', '[MASKED]'), action: 'masked', reason: 'pii' };
+      },
+    };
+    installInterceptor(h.req, h.res, 'openai-chat', [filter]);
+    h.res.json({
+      id: 'chatcmpl-1',
+      object: 'chat.completion',
+      model: 'gpt-4o',
+      choices: [{ index: 0, message: { role: 'assistant', content: 'code 1234' }, finish_reason: 'stop' }],
+    });
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(h.jsonOut[0]).toMatchObject({
+      choices: [{ index: 0, message: { content: 'code [MASKED]' }, finish_reason: 'stop' }],
+    });
+    expect(h.headers['x-freellm-guard']).toBe('masked;reason=pii');
+    expect(h.headers['content-length']).toBeUndefined();
+    expect(h.headers['etag']).toBeUndefined();
+  });
+
+  it('guards non-stream res.end(JSON) and multiple choices/candidates', async () => {
+    const h = makeHarness('/v1/chat/completions');
+    const filter: OutputFilter = {
+      name: 'output-guard',
+      onDelta(text) {
+        if (text.includes('FORBIDDEN')) {
+          return { emit: '', stop: { replacement: '[BLOCKED]', reason: 'keywords', action: 'blocked' } };
+        }
+        return { emit: text };
+      },
+    };
+    installInterceptor(h.req, h.res, 'openai-chat', [filter]);
+    h.res.setHeader('Content-Type', 'application/json');
+    h.res.end(
+      JSON.stringify({
+        id: 'chatcmpl-2',
+        object: 'chat.completion',
+        model: 'gpt-4o',
+        choices: [
+          { index: 0, message: { role: 'assistant', content: 'safe choice' }, finish_reason: 'stop' },
+          { index: 1, message: { role: 'assistant', content: 'second FORBIDDEN choice' }, finish_reason: 'stop' },
+        ],
+      }),
+    );
+
+    const body = JSON.parse(Buffer.concat(h.written).toString('utf8')) as {
+      choices: Array<{ message: { content: string }; finish_reason: string }>;
+    };
+    expect(body.choices.every((c) => !c.message.content.includes('FORBIDDEN'))).toBe(true);
+    expect(body.choices.some((c) => c.message.content === '[BLOCKED]' && c.finish_reason === 'content_filter')).toBe(true);
+    expect(h.headers['x-freellm-guard']).toBe('blocked;reason=keywords');
+  });
+
+  it('sets x-freellm-guard: active on streaming responses and attaches terminal guard metadata', async () => {
+    const h = makeHarness('/v1/chat/completions');
+    const filter: OutputFilter = {
+      name: 'output-guard',
+      onDelta(text) {
+        return { emit: text };
+      },
+      onComplete() {
+        return { action: 'pass' };
+      },
+    };
+    installInterceptor(h.req, h.res, 'openai-chat', [filter]);
+    h.res.write('data: {"id":"1","model":"gpt-4o","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":null}]}\n\n');
+    h.res.write('data: {"id":"1","model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n');
+    h.res.end('data: [DONE]\n\n');
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(h.headers['x-freellm-guard']).toBe('active');
+    const out = Buffer.concat(h.written).toString('utf8');
+    expect(out).toContain('"guard":{"action":"pass"}');
   });
 });

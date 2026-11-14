@@ -50,7 +50,7 @@ describe('chat completion round trips on a failover', () => {
       return new Response(JSON.stringify({ id: 'x', object: 'chat.completion', created: 1, model: 'm', choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }], usage: { prompt_tokens: 12, completion_tokens: 2, total_tokens: 14 } }), { status: 200, headers: { 'content-type': 'application/json' } });
     });
   });
-  afterAll(() => { server?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); setKeyCacheTestOverride(null); setUsageMemoTestOverride(null); });
+  afterAll(() => { vi.useRealTimers(); server?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); setKeyCacheTestOverride(null); setUsageMemoTestOverride(null); });
 
   const chat = async () => {
     const res = await realFetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
@@ -64,6 +64,10 @@ describe('chat completion round trips on a failover', () => {
   };
 
   it('keeps a six-attempt groq-to-cerebras failover within its round-trip budget', async () => {
+    // Count database trips rather than scheduler delays: keep the usage memo's
+    // 5ms window stable while preserving real network/timer scheduling. Usage
+    // writes still invalidate the memo between attempts and requests.
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() });
     await chat(); await chat(); // warm: groq answers, caches fill
     groqDown = true;
     trips.length = 0; counting = true;

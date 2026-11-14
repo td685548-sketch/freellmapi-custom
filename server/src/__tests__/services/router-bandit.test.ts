@@ -7,6 +7,7 @@ import {
   setMinReliabilityFloor, applyReliabilityFloor,
 } from '../../services/router.js';
 import { BANDIT_PRESETS, DEFAULT_PEAK_HOURS } from '../../services/scoring.js';
+import * as scoring from '../../services/scoring.js';
 import { resetModelWeightOverrides } from '../../services/model-weight-overrides.js';
 import * as ratelimit from '../../services/ratelimit.js';
 import { getDb, initDb } from '../../db/index.js';
@@ -138,13 +139,11 @@ describe('bandit router', () => {
   });
 
   it('exploration draws are never wasted on a model that cannot serve the request', () => {
-    // vision-a is measured and wins every ordinary bandit draw. text-b and
-    // vision-c are both unmeasured, but only vision-c can serve a vision
-    // request. The pre-fix router put BOTH in the explore pool, so ~half the
-    // explore draws promoted text-b, which the main loop's vision gate then
-    // skipped — a wasted draw. With the pool filtered, vision-c receives
-    // every explore draw (~10% of requests); unfixed it got only ~5%, far
-    // below the 150/2000 bound asserted here.
+    // Fix Thompson scores at their posterior means and force the first probe
+    // bucket. If an ineligible text-only entry enters that bucket, the router
+    // skips it and falls back to vision-a instead of exploring vision-c.
+    vi.spyOn(scoring, 'sampleBeta').mockImplementation((alpha, beta) => alpha / (alpha + beta));
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0.01);
     setExploreEnabled(true);
     addModel({ platform: 'google', modelId: 'vision-a', name: 'Vision A', intelligenceRank: 1, sizeLabel: 'Frontier', budget: '~50M', priority: 1, vision: true });
     addModel({ platform: 'groq', modelId: 'text-b', name: 'Text B', intelligenceRank: 2, sizeLabel: 'Frontier', budget: '~50M', priority: 2 });
@@ -153,15 +152,14 @@ describe('bandit router', () => {
     setRoutingStrategy('balanced');
     refreshStatsCache(getDb(), true);
 
-    const counts: Record<string, number> = {};
-    for (let i = 0; i < 2000; i++) {
-      const r = routeRequest(100, undefined, undefined, /*requireVision=*/ true);
-      counts[r.modelId] = (counts[r.modelId] ?? 0) + 1;
+    try {
+      expect(routeRequest(100, undefined, undefined, true).modelId).toBe('vision-c');
+      random.mockReturnValue(0.9); // ordinary draw: measured model wins
+      expect(routeRequest(100, undefined, undefined, true).modelId).toBe('vision-a');
+    } finally {
+      random.mockRestore();
+      vi.mocked(scoring.sampleBeta).mockRestore();
     }
-    // The loop gate already guarantees this half; the pool filter is what the
-    // vision-c bound below actually pins down.
-    expect(counts['text-b'] ?? 0).toBe(0);
-    expect(counts['vision-c'] ?? 0).toBeGreaterThan(150);
   });
 
   it('smartest vs fastest flips which model wins, at equal reliability', () => {
@@ -337,24 +335,25 @@ describe('bandit router', () => {
   });
 
   it('exploration toggle gives an unmeasured model a chance to be tried', () => {
-    // A measured model that wins every bandit draw, plus a brand-new model with
-    // no reliability/speed samples. With the toggle off the new model is never
-    // routed; with it on it must appear within a bounded number of requests.
+    // Fix scoring and the exploration draw independently so the toggle is
+    // tested directly, without a probabilistic search over hundreds of calls.
+    const beta = vi.spyOn(scoring, 'sampleBeta').mockImplementation((alpha, beta) => alpha / (alpha + beta));
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0.01);
     addModel({ platform: 'google', modelId: 'old', name: 'Old', intelligenceRank: 1, sizeLabel: 'Frontier', budget: '~50M', priority: 1 });
     addModel({ platform: 'groq', modelId: 'new', name: 'New', intelligenceRank: 1, sizeLabel: 'Frontier', budget: '~50M', priority: 2 });
     addHistory('google', 'old', { successes: 500, failures: 0, outTokens: 1000, latencyMs: 300, ttfbMs: 100 });
     setRoutingStrategy('balanced');
     refreshStatsCache(getDb(), true);
 
-    // Toggle off: the unmeasured model loses every draw.
-    setExploreEnabled(false);
-    const without = pickCounts(200);
-    expect(without['new'] ?? 0).toBe(0);
-
-    // Toggle on: 10% per request → over 500 requests the new model must appear.
-    setExploreEnabled(true);
-    const withExplore = pickCounts(500);
-    expect(withExplore['new'] ?? 0).toBeGreaterThan(0);
+    try {
+      setExploreEnabled(false);
+      expect(routeRequest(100).modelId).toBe('old');
+      setExploreEnabled(true);
+      expect(routeRequest(100).modelId).toBe('new');
+    } finally {
+      random.mockRestore();
+      beta.mockRestore();
+    }
   });
 
   it('exploration never probes a model zeroed out via MODEL_ROUTING_OVERRIDES (#738)', () => {
