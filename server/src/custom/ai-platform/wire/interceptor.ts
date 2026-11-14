@@ -727,7 +727,9 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
           noteOutcome('blocked', deltaRes.stop.reason);
           break;
         }
-        currentText = deltaRes.emit;
+        if (!f.onComplete || deltaRes.emit.length > 0) {
+          currentText = deltaRes.emit;
+        }
       }
 
       const hasComplete = !blocked && filters.some((f) => Boolean(f.onComplete));
@@ -784,6 +786,20 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
 
   res.json = ((body: unknown): Response => {
     if (sendingRaw) return origJson(body);
+    if (wire === 'gemini' && Array.isArray(body)) {
+      const items = body.filter((item): item is Record<string, unknown> => Boolean(asRecord(item)));
+      if (items.length === body.length) {
+        void finishGeminiJson(items, () => sendJsonRaw(body), (rewritten) => {
+          sendJsonRaw(JSON.parse(rewritten));
+        }).catch(() => {
+          if (!closed) {
+            sendJsonRaw(anyFailClosed ? JSON.parse(rewriteGeminiArray([], '', true)) : body);
+          }
+          disposeAll();
+        });
+        return res;
+      }
+    }
     const obj = asRecord(body);
     if (!obj) {
       if (anyFailClosed) {
@@ -808,20 +824,40 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
   if (origSend) {
     res.send = ((body?: unknown): Response => {
       if (sendingRaw) return origSend(body);
-      let obj = asRecord(body);
-      if (!obj && typeof body === 'string') {
+      let parsed: unknown = body;
+      if (typeof body === 'string') {
         try {
-          obj = asRecord(JSON.parse(body));
+          parsed = JSON.parse(body);
         } catch {
-          obj = null;
+          parsed = null;
         }
-      } else if (!obj && Buffer.isBuffer(body)) {
+      } else if (Buffer.isBuffer(body)) {
         try {
-          obj = asRecord(JSON.parse(body.toString('utf8')));
+          parsed = JSON.parse(body.toString('utf8'));
         } catch {
-          obj = null;
+          parsed = null;
         }
       }
+      if (wire === 'gemini' && Array.isArray(parsed)) {
+        const items = parsed.filter((item): item is Record<string, unknown> => Boolean(asRecord(item)));
+        if (items.length === parsed.length) {
+          void finishGeminiJson(items, () => sendRaw(body), (rewritten) => {
+            sendRaw(typeof body === 'string' || Buffer.isBuffer(body) ? rewritten : JSON.parse(rewritten));
+          }).catch(() => {
+            if (!closed) {
+              const fallback = rewriteGeminiArray([], '', true);
+              sendRaw(
+                anyFailClosed
+                  ? (typeof body === 'string' || Buffer.isBuffer(body) ? fallback : JSON.parse(fallback))
+                  : body,
+              );
+            }
+            disposeAll();
+          });
+          return res;
+        }
+      }
+      const obj = asRecord(parsed);
       if (!obj) return sendRaw(body);
       guardNonStreamObject(
         obj,
@@ -852,8 +888,13 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
     return geminiJson;
   };
 
-  const finishGeminiJson = async (): Promise<void> => {
-    const items = geminiArrayItems(sseBuffer);
+  const finishGeminiJson = async (
+    preParsedItems?: Record<string, unknown>[],
+    onPassThrough?: () => void,
+    onDeliver?: (rewritten: string) => void,
+  ): Promise<void> => {
+    const items = preParsedItems ?? geminiArrayItems(sseBuffer);
+    let rawText = '';
     let text = '';
     let textBytes = 0;
     let blocked = false;
@@ -861,7 +902,9 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
       const usage = extractUsageFromJson('gemini', item);
       if (usage !== undefined) for (const filter of filters) filter.onUsage?.(usage);
       if (blocked) continue;
-      let emitted = geminiItemText(item);
+      const itemText = geminiItemText(item);
+      rawText += itemText;
+      let emitted = itemText;
       for (const filter of filters) {
         if (!filter.onDelta) continue;
         const result = filter.onDelta(emitted);
@@ -873,7 +916,13 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
           noteOutcome('blocked', result.stop.reason);
           break;
         }
-        emitted = result.emit;
+        if (!filter.onComplete && !filter.onBeforeTerminal) {
+          emitted = result.emit;
+        } else if (result.emit.length > 0) {
+          emitted = result.emit;
+        } else {
+          emitted = '';
+        }
       }
       if (!blocked) {
         text += emitted;
@@ -882,7 +931,23 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
       if (textBytes > MAX_BUFFER_BYTES) throw new Error('Filtered stream exceeds buffer limit');
     }
     if (!blocked) {
-      const result = await runOnCompleteChain(text);
+      for (const filter of filters) {
+        if (!filter.onBeforeTerminal) continue;
+        const termRes = filter.onBeforeTerminal();
+        if (termRes.action) noteOutcome(termRes.action, termRes.reason);
+        if (termRes.stop) {
+          text = termRes.stop.replacement;
+          blocked = true;
+          noteOutcome('blocked', termRes.stop.reason);
+          break;
+        }
+        if (termRes.emit.length > 0) {
+          text += termRes.emit;
+        }
+      }
+    }
+    if (!blocked) {
+      const result = await runOnCompleteChain(text || rawText);
       text = result.text;
       blocked = result.blocked;
     }
@@ -891,8 +956,19 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
       setGuardHeader(res, 'active');
     }
     if (!closed) {
-      stripStaleBodyHeaders(res);
-      endRaw(rewriteGeminiArray(items, text, blocked));
+      if (!blocked && text === rawText && onPassThrough) {
+        onPassThrough();
+      } else {
+        stripStaleBodyHeaders(res);
+        const rewritten = !blocked && text === rawText && !preParsedItems
+          ? sseBuffer
+          : rewriteGeminiArray(items, text, blocked);
+        if (onDeliver) {
+          onDeliver(rewritten);
+        } else {
+          endRaw(rewritten);
+        }
+      }
     }
     disposeAll();
   };

@@ -217,4 +217,160 @@ describe('output-guard integration with real policy.ts (T066/T067)', () => {
       reason: 'keywords',
     });
   });
+
+  it('preserves full original text in non-stream mode: log without blanking content', async () => {
+    await setPolicy(
+      { kind: 'profile', id: '42' },
+      makePolicyInput({
+        mode: 'log',
+        detectors: {
+          ...structuredClone(DEFAULT_GUARD_DETECTORS),
+          keywords: { enabled: true, terms: ['forbidden-secret'] },
+        },
+      }),
+      null,
+    );
+
+    const { res, headers, jsonOut } = makeMockRes();
+    const req = {
+      method: 'POST',
+      originalUrl: '/v1/chat/completions',
+      url: '/v1/chat/completions',
+      headers: {},
+      socket: { remoteAddress: '203.0.113.5' },
+      body: {
+        model: 'gpt-4o',
+        stream: false,
+        messages: [{ role: 'user', content: 'hi' }],
+      },
+    } as unknown as Request;
+
+    installOutputGuardIfNeeded(req, res, dummyProfile, 'eu-1');
+
+    res.json({
+      id: 'chatcmpl-log',
+      object: 'chat.completion',
+      model: 'gpt-4o',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: 'This has forbidden-secret inside' },
+          finish_reason: 'stop',
+        },
+      ],
+    });
+
+    await new Promise((r) => setTimeout(r, 25));
+    expect(headers['x-freellm-guard']).toBe('logged');
+    expect(jsonOut[0]).toMatchObject({
+      choices: [
+        {
+          index: 0,
+          message: { content: 'This has forbidden-secret inside' },
+          finish_reason: 'stop',
+        },
+      ],
+    });
+  });
+
+  it('blocks Gemini JSON-array stream (:streamGenerateContent without ?alt=sse) with SAFETY finishReason', async () => {
+    await setPolicy(
+      { kind: 'profile', id: '42' },
+      makePolicyInput({
+        mode: 'block',
+        replacementText: '[GEMINI_STREAM_BLOCKED]',
+        detectors: {
+          ...structuredClone(DEFAULT_GUARD_DETECTORS),
+          keywords: { enabled: true, terms: ['forbidden-secret'] },
+        },
+      }),
+      null,
+    );
+
+    const { res, headers, written } = makeMockRes();
+    const req = {
+      method: 'POST',
+      originalUrl: '/v1beta/models/gemini-2.0-flash:streamGenerateContent',
+      url: '/v1beta/models/gemini-2.0-flash:streamGenerateContent',
+      query: {},
+      headers: {},
+      socket: { remoteAddress: '203.0.113.5' },
+      body: {
+        contents: [{ role: 'user', parts: [{ text: 'hi' }] }],
+      },
+    } as unknown as Request;
+
+    installOutputGuardIfNeeded(req, res, dummyProfile, 'eu-1');
+
+    res.setHeader('Content-Type', 'application/json');
+    res.write('[');
+    res.write(
+      `\n${JSON.stringify({
+        candidates: [{ content: { role: 'model', parts: [{ text: 'Here is forbidden-secret' }] }, index: 0 }],
+      })}`,
+    );
+    res.write(
+      `,\n${JSON.stringify({
+        candidates: [{ content: { role: 'model', parts: [] }, finishReason: 'STOP', index: 0 }],
+        usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 3, totalTokenCount: 8 },
+      })}`,
+    );
+    res.write('\n]');
+    res.end();
+
+    await new Promise((r) => setTimeout(r, 25));
+    expect(headers['x-freellm-guard']).toBe('active');
+    const parsed = JSON.parse(written.join('')) as Array<{
+      candidates: Array<{ content: { parts: Array<{ text: string }> }; finishReason?: string }>;
+    }>;
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]!.candidates[0]!.content.parts[0]!.text).toBe('[GEMINI_STREAM_BLOCKED]');
+    expect(parsed[0]!.candidates[0]!.finishReason).toBe('SAFETY');
+  });
+
+  it('blocks Gemini multi-candidate non-stream (:generateContent) when candidate[1] matches', async () => {
+    await setPolicy(
+      { kind: 'profile', id: '42' },
+      makePolicyInput({
+        mode: 'block',
+        replacementText: '[GEMINI_MULTI_BLOCKED]',
+        detectors: {
+          ...structuredClone(DEFAULT_GUARD_DETECTORS),
+          keywords: { enabled: true, terms: ['forbidden-secret'] },
+        },
+      }),
+      null,
+    );
+
+    const { res, headers, jsonOut } = makeMockRes();
+    const req = {
+      method: 'POST',
+      originalUrl: '/v1beta/models/gemini-2.0-flash:generateContent',
+      url: '/v1beta/models/gemini-2.0-flash:generateContent',
+      query: {},
+      headers: {},
+      socket: { remoteAddress: '203.0.113.5' },
+      body: {
+        contents: [{ role: 'user', parts: [{ text: 'hi' }] }],
+      },
+    } as unknown as Request;
+
+    installOutputGuardIfNeeded(req, res, dummyProfile, 'eu-1');
+
+    res.json({
+      candidates: [
+        { index: 0, content: { role: 'model', parts: [{ text: 'Safe candidate 0' }] }, finishReason: 'STOP' },
+        { index: 1, content: { role: 'model', parts: [{ text: 'Unsafe forbidden-secret' }] }, finishReason: 'STOP' },
+      ],
+    });
+
+    await new Promise((r) => setTimeout(r, 25));
+    expect(headers['x-freellm-guard']).toBe('blocked;reason=keywords');
+    expect(jsonOut[0]).toMatchObject({
+      candidates: [
+        { index: 0, content: { parts: [{ text: '[GEMINI_MULTI_BLOCKED]' }] }, finishReason: 'SAFETY' },
+        { index: 1, content: { parts: [{ text: '[GEMINI_MULTI_BLOCKED]' }] }, finishReason: 'SAFETY' },
+      ],
+    });
+  });
 });
