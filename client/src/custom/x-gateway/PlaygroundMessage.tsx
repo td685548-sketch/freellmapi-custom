@@ -1,11 +1,14 @@
-import React, { memo, useState } from 'react';
+import React, { memo, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Check, Copy } from 'lucide-react';
+import { Check, Code2, Copy, Eye, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { copyText } from '@/lib/clipboard';
+import { ARTIFACT_SANDBOX, artifactKindOf, artifactSrcDoc } from '@/lib/artifacts';
 import { CodeBlock } from '@/components/code-block';
 import { CopyButton } from '@/components/copy-button';
+import { usePlaygroundStrings } from './playground-strings';
 
 function nodeText(node: React.ReactNode): string {
   if (node == null || typeof node === 'boolean') return '';
@@ -237,6 +240,116 @@ function CustomButton({ children, className, title, onClick, ...props }: CustomB
   );
 }
 
+function extractHtmlTitle(code: string): string | null {
+  const match = /<title[^>]*>([^<]{1,120})<\/title>/i.exec(code);
+  const title = match?.[1]?.trim();
+  return title || null;
+}
+
+function PlaygroundCodePre({ children }: { children?: React.ReactNode }) {
+  const s = usePlaygroundStrings();
+  const [previewOpen, setPreviewOpen] = useState(false);
+
+  const childProps = React.isValidElement(children)
+    ? (children.props as { className?: string; language?: string })
+    : undefined;
+  const langMatch = /language-([^\s]+)/.exec(childProps?.className || '');
+  const language = (langMatch?.[1] || childProps?.language || '').toLowerCase();
+  const codeText = nodeText(children).trimEnd();
+  const artifactKind = artifactKindOf(language, codeText);
+
+  useEffect(() => {
+    if (!previewOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPreviewOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [previewOpen]);
+
+  const previewTitle = artifactKind ? extractHtmlTitle(codeText) || s.htmlPreviewTitle : s.htmlPreviewTitle;
+  const srcDoc = artifactKind
+    ? artifactSrcDoc({
+        id: 'preview',
+        kind: artifactKind,
+        language,
+        code: codeText,
+        title: previewTitle,
+        filename: artifactKind === 'svg' ? 'preview.svg' : 'preview.html',
+      })
+    : '';
+
+  return (
+    <div className="relative group my-2.5">
+      <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5">
+        {artifactKind && (
+          <button
+            type="button"
+            onClick={() => setPreviewOpen(true)}
+            aria-label={s.previewHtml}
+            title={s.previewHtml}
+            className="inline-flex items-center gap-1 rounded-md border bg-background/80 px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
+          >
+            <Eye className="size-3.5" />
+            <span>{s.previewHtml}</span>
+          </button>
+        )}
+        <CopyButton text={codeText} className="size-7" />
+      </div>
+      <div className="rounded-xl overflow-hidden border border-border bg-muted/40 text-foreground font-mono text-xs">
+        {children}
+      </div>
+      {previewOpen &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={previewTitle}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 sm:p-6"
+            onClick={event => {
+              if (event.target === event.currentTarget) setPreviewOpen(false);
+            }}
+          >
+            <div className="flex h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl">
+              <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/40 px-4 py-2.5">
+                <span className="truncate text-sm font-semibold text-foreground">{previewTitle}</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewOpen(false)}
+                    aria-label={s.backToCode}
+                    title={s.backToCode}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted cursor-pointer"
+                  >
+                    <Code2 className="size-3.5" />
+                    <span>{s.backToCode}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewOpen(false)}
+                    aria-label={s.closePreview}
+                    title={s.closePreview}
+                    className="inline-flex size-7 items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
+              </div>
+              <iframe
+                title={previewTitle}
+                sandbox={ARTIFACT_SANDBOX}
+                srcDoc={srcDoc}
+                className="w-full flex-1 border-0 bg-white"
+              />
+            </div>
+          </div>,
+          document.body,
+        )}
+    </div>
+  );
+}
+
 const baseComponents: Components = {
   p: ({ children }) => (
     <p className="my-2 first:mt-0 last:mb-0 leading-relaxed wrap-break-word">
@@ -330,16 +443,7 @@ const baseComponents: Components = {
       <CodeBlock language={match ? match[1] : 'text'} code={nodeText(children).trimEnd()} />
     );
   },
-  pre: ({ children }) => (
-    <div className="relative group my-2.5">
-      <div className="absolute top-2 right-2 z-10">
-        <CopyButton text={nodeText(children)} />
-      </div>
-      <div className="rounded-xl overflow-hidden border border-border bg-muted/40 text-foreground font-mono text-xs">
-        {children}
-      </div>
-    </div>
-  ),
+  pre: ({ children }) => <PlaygroundCodePre>{children}</PlaygroundCodePre>,
   details: ({ children }) => (
     <details className="my-2 rounded-lg border border-border p-2 bg-muted/20 text-xs">
       {children}

@@ -268,4 +268,55 @@ describe('Playground component', () => {
       expect(textarea?.style.height).toBe('180px');
     });
   });
+
+  it('opens an HTML preview popup from HTML code blocks and returns to code via the Code button', () => {
+    const htmlReply = [
+      'Here is your page:',
+      '',
+      '```html',
+      '<!DOCTYPE html>',
+      '<html><head><title>Cafe Nha Go</title></head><body><h1>Xin chao</h1></body></html>',
+      '```',
+    ].join('\n');
+
+    act(() => {
+      root.render(<PlaygroundMessageContent content={htmlReply} />);
+    });
+
+    const previewBtn = container.querySelector('button[aria-label="Preview"]') as HTMLButtonElement | null;
+    expect(previewBtn).not.toBeNull();
+
+    act(() => {
+      previewBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const dialog = document.body.querySelector('div[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog?.textContent).toContain('Cafe Nha Go');
+
+    const iframe = dialog?.querySelector('iframe') as HTMLIFrameElement | null;
+    expect(iframe).not.toBeNull();
+    expect(iframe?.getAttribute('sandbox')).toContain('allow-scripts');
+    expect(iframe?.getAttribute('srcdoc')).toContain('<h1>Xin chao</h1>');
+
+    const backToCodeBtn = dialog?.querySelector('button[aria-label="Code"]') as HTMLButtonElement | null;
+    expect(backToCodeBtn).not.toBeNull();
+
+    act(() => {
+      backToCodeBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(document.body.querySelector('div[role="dialog"]')).toBeNull();
+  });
+
+  it('does not show the Preview button for non-HTML code blocks', () => {
+    const jsReply = ['```javascript', 'console.log("hello");', '```'].join('\n');
+
+    act(() => {
+      root.render(<PlaygroundMessageContent content={jsReply} />);
+    });
+
+    expect(container.querySelector('button[aria-label="Preview"]')).toBeNull();
+    expect(container.querySelector('button[aria-label="Copy"]')).not.toBeNull();
+  });
 });
