@@ -188,7 +188,15 @@ export default function TokenSavers() {
 
   const mutation = useMutation({
     meta: { silenceToast: true },
-    mutationFn: (value: Settings) => apiFetch<Settings>('/api/savers', { method: 'PUT', body: JSON.stringify(value) }),
+    mutationFn: (value: Settings) =>
+      apiFetch<Settings>('/api/savers', {
+        method: 'PUT',
+        body: JSON.stringify({
+          caveman: value.caveman,
+          ponytail: value.ponytail,
+          customPrompt: value.customPrompt ?? '',
+        }),
+      }),
     onSuccess: async () => {
       setDraft(null)
       await client.invalidateQueries({ queryKey: ['x-output-savers'] })
