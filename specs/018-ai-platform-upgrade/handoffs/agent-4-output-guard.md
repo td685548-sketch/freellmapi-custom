@@ -3,11 +3,19 @@
 - **Branch**: `codex/ai-platform-output-guard-ui`
 - **Base SHA**: `92a4f520cd01cc33f403d5f1bbd30ec98a6d569d` (verified ancestor: PR52 MCP merge `d1e0a03badea3c19fc60200a13155a1eb420b12e`)
 - **C0 Contract SHA**: `3abe64b6fcef0586fb3424d51e895a2beb0ec92b` (from Agent 1 C0 `a2e8aa933f3a585445def0d44b08106677d9f5a0`)
-- **Code Commit SHA**: `cdc5ae1cf1153bc9a11d985e3e425c651eadda66`
+- **Imported Prerequisites** (cherry-picked cleanly from `codex/ai-platform-output-guard-runtime`):
+  - `be11bcfe` (Agent 3 S0 `5860591e`)
+  - `53b807e8` (Agent 1 migration/store/events/router `9ca92dd2`)
+  - `ee6eab98` (Agent 2 D0 `a0517018`)
+  - `2664b9a3` (Agent 1 policy/stream wiring `bc48dc8a`)
+  - `2688e33f` (Agent 3 `policy.ts` runtime wiring `3442f0e8`)
+- **Code Commit SHAs**: `cdc5ae1cf1153bc9a11d985e3e425c651eadda66`, `8dd41052e816fdf943cbd85813d063523977e622`
 - **Owned Tasks**: `T059`, `T069`, `T070`, `T071`
 - **Overall Status**:
-  - `T069` / `T070` (Native EN/VI UI, RBAC routing, PolicyEditor, PolicyTester, GuardEvents, unit/UI tests, `check:i18n`, ESLint, `tsc -b && vite build`): **GREEN**
-  - `T059` / `T071` (Server HTTP E2E, RBAC HTTP, Secret-Leak/Backup/410, Benchmark): **PARTIAL / RED** (awaiting Agent 1 `store/policy/events/router/migration` + Agent 3 `stream-guard/interceptor/pipeline/support` integration onto a shared review branch).
+  - `T069` / `T070` (UI, RBAC, i18n, `output-guard.test.tsx`, `check:i18n`, ESLint, build): **GREEN**
+  - `T071` (`guard-bench.test.ts` 2/2, `regression.test.ts` 14/14): **GREEN**
+  - `guard-secret-leak.test.ts` (1/1): **GREEN**
+  - `guard-permissions.test.ts` (4/5) & `guard-e2e.test.ts` (11/17): **PARTIAL** — uncovered 4 real peer integration findings (listed below in Section 6).
 
 ---
 
@@ -73,12 +81,21 @@
 - `npm run test -w client`: **121/122 files, 904/905 tests PASS**; `src/custom/granular-permissions.test.tsx` hit its 5000ms timeout under 122-worker parallel load.
 - Sequential rerun `npx -w client vitest run src/custom/granular-permissions.test.tsx`: **1 file, 11/11 tests PASS**.
 
-### Server Output Guard Acceptance / Bench / RBAC / Secret-Leak (RED before integration)
-- `npx -w server vitest run src/__tests__/custom/ai-platform/guard-e2e.test.ts src/__tests__/custom/ai-platform/guard-bench.test.ts src/__tests__/custom/ai-platform/guard-permissions.test.ts src/__tests__/custom/ai-platform/guard-secret-leak.test.ts`:
-  - `guard-e2e.test.ts`: **1 passed / 16 failed** (caller-owned `tool_calls` passes; 16 guard/E2E assertions fail with 404 because `/api/ai-platform/output-guard/*` and runtime hooks are not yet integrated on this branch).
-  - `guard-permissions.test.ts`: **1 passed / 4 failed** (`401` unauthenticated passes; RBAC/flag-off/409/422 fail with 404 until Agent 1 router is integrated).
-  - `guard-secret-leak.test.ts`: **0 passed / 1 failed** (fails at `PUT /api/ai-platform/output-guard/profile/:id` returning 404).
-  - `guard-bench.test.ts`: **0 passed / 2 failed** (fails at `GET /api/ai-platform/output-guard/profile/:id` returning 404).
+### Server Output Guard Acceptance / Bench / RBAC / Secret-Leak (Post-Integration)
+- `npx -w server vitest run src/__tests__/custom/ai-platform/guard-secret-leak.test.ts src/__tests__/custom/ai-platform/guard-bench.test.ts src/__tests__/custom/ai-platform/guard-permissions.test.ts src/__tests__/custom/ai-platform/guard-e2e.test.ts`:
+  - `guard-bench.test.ts`: **2/2 PASS** (`<2%` false-block rate across 220 benign + violation fixtures; `<=300ms` added streaming TTFC)
+  - `guard-secret-leak.test.ts`: **1/1 PASS** (non-empty event, encrypted excerpt, 403 without `view_guard_excerpts`, 200 with it + `custom_audit_log` without plaintext, gzipped backup decoded without plaintext excerpt/credentials, 410 after 7-day fake clock)
+  - `guard-permissions.test.ts`: **4/5 PASS** (1 peer finding: `manage_ai_platform` parent-only user returned `200` instead of `403`)
+  - `guard-e2e.test.ts`: **11/17 PASS** (4 wires non-stream block, 4 wires SSE stream cross-chunk split, `mode: 'off'`, exact-cache hit with 0 second provider call + spoofed headers rejected, provider pause `>300ms`; 6 failures from peer bugs/rate-limit cascade).
+
+---
+
+## 6. Peer Integration Findings (for Reviewer / Agent 1 / Agent 3)
+
+1. **Agent 1 RBAC (`permission-actions.ts` / `hasPermission`)**: A user with only `manage_ai_platform` receives `200` instead of `403` on `/api/ai-platform/output-guard/*` (`guard-permissions.test.ts`). Per `contracts.md` §2, `manage_ai_platform` must NOT substitute for child permissions (`view_output_guard`, `edit_output_guard`, `view_guard_excerpts`).
+2. **Agent 3 `mode: 'log'` non-stream (`interceptor.ts`)**: `POST /v1/chat/completions` with `mode: 'log'` returned empty string `""` in `choices[0].message.content` instead of preserving `'This has forbidden-secret inside'` (`guard-e2e.test.ts`).
+3. **Agent 3 Gemini JSON-array stream (`interceptor.ts` / `stream-payload.ts`)**: `POST /v1beta/models/gemini-2.0-flash:streamGenerateContent` (without `?alt=sse`) in `mode: 'block'` emitted raw JSON array without `'Blocked by output guard.'` (`guard-e2e.test.ts`).
+4. **Agent 3 Gemini multi-candidate non-stream (`stream-payload.ts` / `interceptor.ts`)**: `POST /v1beta/models/gemini-2.0-flash:generateContent` with 2 candidates returned empty text `""` instead of `'Blocked by output guard.'` (`guard-e2e.test.ts`).
 
 ---
 
