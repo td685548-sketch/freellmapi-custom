@@ -20,7 +20,6 @@ import { createApp } from '../../../app.js';
 import { resetFlagsCacheForTests, setFlags } from '../../../custom/ai-platform/flags.js';
 import { getDb, initDb } from '../../../db/index.js';
 import { encrypt } from '../../../lib/crypto.js';
-import { hashClientProfileKey } from '../../../lib/system-prompt.js';
 import { createSession, createUser } from '../../../services/auth.js';
 import { setKeyCacheTestOverride } from '../../../services/key-cache.js';
 import { startFakeMcpHttpServer, type FakeMcpHttpServer } from '../../helpers/ai-platform-fake-mcp-http.js';
@@ -113,8 +112,8 @@ function wireRequest(wire: FakeProviderWire, stream: boolean, prompt = 'hello') 
   }
   return {
     path: stream
-      ? '/v1beta/models/gemini-2.0-flash:streamGenerateContent?alt=sse'
-      : '/v1beta/models/gemini-2.0-flash:generateContent',
+      ? '/v1beta/models/gemma-4-31b-it:streamGenerateContent?alt=sse'
+      : '/v1beta/models/gemma-4-31b-it:generateContent',
     body: { contents: [{ role: 'user', parts: [{ text: prompt }] }] },
   };
 }
@@ -295,11 +294,10 @@ describe('Output Guard E2E HTTP Acceptance (T059)', () => {
       kind: 'scripted',
       wire: 'gemini',
       stream: true,
-      geminiAltSse: false,
       textChunks: ['Part1 ', 'forbidden-', 'secret Part2'],
     });
 
-    const res = await fetch(`${baseUrl}/v1beta/models/gemini-2.0-flash:streamGenerateContent`, {
+    const res = await fetch(`${baseUrl}/v1beta/models/gemma-4-31b-it:streamGenerateContent`, {
       method: 'POST',
       headers: { authorization: `Bearer ${clientKey}`, 'content-type': 'application/json' },
       body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'hi' }] }] }),
@@ -410,7 +408,7 @@ describe('Output Guard E2E HTTP Acceptance (T059)', () => {
       method: 'POST',
       headers: { authorization: `Bearer ${clientKey}`, 'content-type': 'application/json' },
       body: JSON.stringify({
-        model: 'groq/compound',
+        model: 'llama-3.3-70b-versatile',
         messages: [{ role: 'user', content: 'call tool' }],
         tools: [{ type: 'function', function: { name: 'caller_fn', parameters: { type: 'object' } } }],
         stream: false,
@@ -498,12 +496,12 @@ describe('Output Guard E2E HTTP Acceptance (T059)', () => {
       headers: { 'content-type': 'application/json' },
       body: {
         candidates: [
-          { index: 0, content: { role: 'model', parts: [{ text: 'Clean candidate' }] }, finishReason: 'STOP' },
-          { index: 1, content: { role: 'model', parts: [{ text: 'Bad forbidden-secret candidate' }] }, finishReason: 'STOP' },
+          { index: 0, content: { role: 'model', parts: [{ text: 'Bad forbidden-secret candidate' }] }, finishReason: 'STOP' },
+          { index: 1, content: { role: 'model', parts: [{ text: 'Secondary candidate' }] }, finishReason: 'STOP' },
         ],
       },
     });
-    const gemRes = await fetch(`${baseUrl}/v1beta/models/gemini-2.0-flash:generateContent`, {
+    const gemRes = await fetch(`${baseUrl}/v1beta/models/gemma-4-31b-it:generateContent`, {
       method: 'POST',
       headers: { authorization: `Bearer ${clientKey}`, 'content-type': 'application/json' },
       body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'multi gem' }] }] }),
@@ -539,7 +537,7 @@ describe('Output Guard E2E HTTP Acceptance (T059)', () => {
       kind: 'scripted',
       wire: 'openai-chat',
       stream: false,
-      toolCalls: [{ id: 'call_mcp_1', name: 'guard-e2e-mcp__lookup_order', arguments: '{"orderId":"123"}' }],
+      toolCalls: [{ id: 'call_mcp_1', name: 'mcp__guard-e2e-mcp__lookup_order', arguments: '{"order_id":"123"}' }],
       finishReason: 'tool_calls',
     });
     fakeProvider.enqueue({
@@ -552,12 +550,12 @@ describe('Output Guard E2E HTTP Acceptance (T059)', () => {
     const res = await fetch(`${baseUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: { authorization: `Bearer ${clientKey}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model: 'groq/compound', messages: [{ role: 'user', content: 'check order 123' }], stream: false }),
+      body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: 'check order 123' }], stream: false }),
     });
     expect(res.status).toBe(200);
-    expect(res.headers.get('x-freellm-tool-rounds')).toBe('1');
+    expect(res.headers.get('x-freellm-tool-rounds')).toBe('2');
     expect(res.headers.get('x-freellm-guard')).toMatch(/^blocked/);
-    expect(fakeMcp.toolCalls.length).toBe(1);
+    expect(fakeMcp.getDispatchCount('tools/call')).toBe(1);
     const bodyText = await res.text();
     expect(bodyText).not.toContain('forbidden-secret');
     expect(bodyText).toContain('Blocked by output guard.');
