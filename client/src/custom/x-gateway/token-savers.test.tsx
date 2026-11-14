@@ -91,15 +91,13 @@ describe('TokenSavers save payload', () => {
       );
     });
 
-    // Wait for initial GET /api/savers to resolve
-    await act(async () => {
-      await Promise.resolve();
+    // Wait for initial GET /api/savers to resolve and render the form
+    await vi.waitFor(() => {
+      const radios = container.querySelectorAll<HTMLInputElement>('input[type="radio"][name="caveman"]');
+      expect(radios.length).toBeGreaterThanOrEqual(3);
     });
 
-    const cavemanFullRadio = container.querySelector<HTMLInputElement>('input[type="radio"][name="caveman"]');
     const radios = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="radio"][name="caveman"]'));
-    expect(cavemanFullRadio).not.toBeNull();
-    expect(radios.length).toBeGreaterThanOrEqual(3);
 
     // Select 'full' (index 2: off=0, lite=1, full=2)
     await act(async () => {
@@ -113,14 +111,16 @@ describe('TokenSavers save payload', () => {
       form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     });
 
-    const putCall = vi.mocked(apiFetch).mock.calls.find(
-      ([url, init]) => url === '/api/savers' && init?.method === 'PUT',
-    );
-    expect(putCall).toBeDefined();
-    expect(JSON.parse(String(putCall![1]!.body))).toEqual({
-      caveman: 'full',
-      ponytail: 'off',
-      customPrompt: '',
+    await vi.waitFor(() => {
+      const putCall = vi.mocked(apiFetch).mock.calls.find(
+        ([url, init]) => url === '/api/savers' && init?.method === 'PUT',
+      );
+      expect(putCall).toBeDefined();
+      expect(JSON.parse(String(putCall![1]!.body))).toEqual({
+        caveman: 'full',
+        ponytail: 'off',
+        customPrompt: '',
+      });
     });
   });
 });
