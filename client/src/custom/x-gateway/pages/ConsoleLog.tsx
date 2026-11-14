@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Coins, Copy, ScrollText, Search, Terminal, Trash2, X } from 'lucide-react'
 import { apiFetch, getToken } from '@/lib/api'
 import { useSessionRevision } from '../../session-state'
@@ -36,9 +36,8 @@ export default function ConsoleLog() {
   const s = useMgmtStrings()
   const xs = useXStrings()
   const revision = useSessionRevision()
-  const session = useUserSession()
-  const canReadTerminal = session.hasPermission('view_server_logs')
-  const canClearTerminal = session.hasPermission('clear_server_logs')
+  const { isPrimary } = useUserSession()
+  const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<'requests' | 'terminal'>('requests')
 
   // Request logs state
@@ -162,10 +161,22 @@ export default function ConsoleLog() {
     }
   }, [terminalLogs, activeTab])
 
+  const clearRequestLogs = useMutation({
+    mutationFn: () => mgmtApi.clearLogs(),
+    onSuccess: async () => {
+      setSelectedLog(null)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['x-logs'] }),
+        queryClient.invalidateQueries({ queryKey: ['x-hourly'] }),
+      ])
+    },
+  })
+
   const handleClearLogs = async () => {
     try {
       const token = getToken()
-      await fetch(CONSOLE_LOGS_URL, { method: 'DELETE', headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      const res = await fetch(CONSOLE_LOGS_URL, { method: 'DELETE', headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      if (!res.ok) return
       setTerminalLogs([])
     } catch (err) {
       console.error('Failed to clear console logs:', err)
@@ -201,7 +212,7 @@ export default function ConsoleLog() {
           <ScrollText size={16} />
           {xs.requestLogs}
         </button>
-        {canReadTerminal && <button
+        <button
           className={`x-button ${activeTab === 'terminal' ? 'x-primary' : ''}`}
           onClick={() => setActiveTab('terminal')}
           style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
@@ -209,7 +220,7 @@ export default function ConsoleLog() {
           <Terminal size={16} />
           {xs.terminalLiveLog}
           {connected && <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', display: 'inline-block' }} />}
-        </button>}
+        </button>
       </div>
 
       {activeTab === 'requests' ? (
@@ -288,6 +299,17 @@ export default function ConsoleLog() {
               <button className="x-button" onClick={() => { void logs.refetch(); void hourly.refetch() }}>
                 {s.refresh}
               </button>
+              {isPrimary && (
+                <button
+                  className="x-button"
+                  onClick={() => clearRequestLogs.mutate()}
+                  disabled={clearRequestLogs.isPending}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                >
+                  <Trash2 size={14} />
+                  {xs.clearLogs}
+                </button>
+              )}
             </div>
           </div>
 
@@ -573,16 +595,18 @@ export default function ConsoleLog() {
               </span>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              {canClearTerminal && <button
-                className="x-button"
-                onClick={handleClearLogs}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8125rem' }}
-              >
-                <Trash2 size={14} />
-                {xs.clearLogs}
-              </button>}
-            </div>
+            {isPrimary && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <button
+                  className="x-button"
+                  onClick={handleClearLogs}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8125rem' }}
+                >
+                  <Trash2 size={14} />
+                  {xs.clearLogs}
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Terminal Output Area */}

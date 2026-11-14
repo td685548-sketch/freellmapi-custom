@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import { Router, type Request, type Response } from 'express';
 import { requireAuth } from '../../middleware/requireAuth.js';
 import { requirePermission } from '../../middleware/requirePermission.js';
+import type { SessionUser } from '../../services/auth.js';
 
 const MAX_BUFFERED_LINES = 1000;
 const FLUSH_INTERVAL_MS = 100;
@@ -149,14 +150,12 @@ initConsoleLogCapture();
 // ---------------------------------------------------------------------
 
 export const consoleStreamRouter = Router();
-// Server console output can carry request details, so it takes the same permissions as the
-// dashboard's own server log (/api/logs): one to read, a separate one to clear.
-consoleStreamRouter.use(requireAuth, requirePermission('use_x_gateway'));
-const canReadLogs = requirePermission('view_server_logs');
-const canClearLogs = requirePermission('clear_server_logs');
+// Server console output can carry request details: signed-in accounts that may open the
+// Thruline console's log page only (the same pair of permissions the page itself asks for).
+consoleStreamRouter.use(requireAuth, requirePermission('use_x_gateway'), requirePermission('view_keys'));
 
 // Stream SSE logs
-consoleStreamRouter.get('/console-logs/stream', canReadLogs, (req: Request, res: Response) => {
+consoleStreamRouter.get('/console-logs/stream', (req: Request, res: Response) => {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache, no-transform',
@@ -236,12 +235,17 @@ consoleStreamRouter.get('/console-logs/stream', canReadLogs, (req: Request, res:
 });
 
 // JSON snapshot of console logs
-consoleStreamRouter.get('/console-logs', canReadLogs, (_req: Request, res: Response) => {
+consoleStreamRouter.get('/console-logs', (_req: Request, res: Response) => {
   res.json({ logs: getConsoleLogs() });
 });
 
-// Clear console logs
-consoleStreamRouter.delete('/console-logs', canClearLogs, (_req: Request, res: Response) => {
+// Clear console logs (Primary Admin only)
+consoleStreamRouter.delete('/console-logs', (req: Request, res: Response) => {
+  const user = (req as Request & { user?: SessionUser }).user;
+  if (!user?.isPrimary) {
+    res.status(403).json({ error: { type: 'forbidden', message: 'Primary Admin access required.' } });
+    return;
+  }
   clearConsoleLogs();
   res.status(204).end();
 });
