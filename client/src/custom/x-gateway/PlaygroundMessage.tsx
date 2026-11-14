@@ -475,9 +475,9 @@ function PlaygroundMessageContentInner({
 }: PlaygroundMessageContentProps) {
   if (!content && isGenerating) {
     return (
-      <div className="inline-flex items-center gap-1.5 text-muted-foreground text-sm">
-        <span className="size-2 bg-primary rounded-full animate-ping" />
-        <span>{generatingLabel}</span>
+      <div className="x-typing" role="status">
+        <span /><span /><span />
+        <span className="x-sr-only">{generatingLabel}</span>
       </div>
     );
   }

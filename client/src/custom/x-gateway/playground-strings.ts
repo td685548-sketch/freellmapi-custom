@@ -24,6 +24,9 @@ const en = {
   collapseInput: 'Collapse input box',
   clearChat: 'Clear conversation',
   clearConfirm: 'Clear all messages in this conversation?',
+  suggestion1: 'Explain how a language model works in simple terms',
+  suggestion2: 'Write a Python function that reads a CSV file',
+  suggestion3: 'Help me plan a three-day trip to Da Nang',
 };
 const vi: Record<keyof typeof en, string> = {
   title: 'Chat cơ bản / Playground', help: 'Trò chuyện với model và combo đã kết nối.',
@@ -50,5 +53,8 @@ const vi: Record<keyof typeof en, string> = {
   collapseInput: 'Thu gọn khung nhập',
   clearChat: 'Xóa hội thoại',
   clearConfirm: 'Xóa tất cả tin nhắn trong cuộc hội thoại này?',
+  suggestion1: 'Giải thích mô hình ngôn ngữ hoạt động thế nào, dễ hiểu',
+  suggestion2: 'Viết hàm Python đọc một tệp CSV',
+  suggestion3: 'Giúp tôi lên kế hoạch đi Đà Nẵng ba ngày',
 };
 export const usePlaygroundStrings = () => useI18n().locale === 'vi' ? vi : en;
