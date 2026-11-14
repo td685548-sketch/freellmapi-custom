@@ -246,4 +246,98 @@ describe('deepseek-web executor', () => {
     expect(result.choices[0].message.content).toBe('Image received');
     expect(capturedRefIds).toEqual(['ds-file-1']);
   });
+
+  it('times out instead of hanging when the SSE stream stalls after headers', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith('/api/v0/users/current')) {
+        return new Response(JSON.stringify({ code: 0, data: { biz_data: { token: 'ds_access_123' } } }), { status: 200 });
+      }
+      if (url.endsWith('/api/v0/chat_session/create')) {
+        return new Response(JSON.stringify({ code: 0, data: { biz_data: { chat_session: { id: 'sess_hang' } } } }), { status: 200 });
+      }
+      if (url.endsWith('/api/v0/chat/create_pow_challenge')) {
+        return new Response(JSON.stringify({
+          code: 0,
+          data: { biz_data: { challenge: { algorithm: 'DeepSeekHashV1', challenge: 'a'.repeat(64), salt: 's', signature: 'sig', difficulty: 10, expire_at: 1700000000 } } },
+        }), { status: 200 });
+      }
+      if (url.endsWith('/api/v0/chat/completion')) {
+        return new Response(new ReadableStream({ start() {} }), {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        });
+      }
+      if (url.endsWith('/api/v0/chat_session/delete')) {
+        return new Response(JSON.stringify({ code: 0 }), { status: 200 });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+
+    const powMod = await import('../../custom/provider-accounts/deepseek-pow.js');
+    vi.spyOn(powMod, 'solveDeepSeekPowHeader').mockReturnValue('bW9ja19wb3c=');
+    const { streamDeepSeekWebChat } = await import('../../custom/provider-accounts/deepseek-web-chat.js');
+
+    const iter = streamDeepSeekWebChat({
+      credential: '{"value":"user_tok_hang"}',
+      messages: [{ role: 'user', content: 'Hello' }],
+      modelId: 'deepseek-v4-pro',
+      options: { timeoutMs: 50 },
+    });
+
+    await expect(iter.next()).rejects.toMatchObject({
+      name: 'DeepSeekWebChatError',
+      status: 504,
+      message: expect.stringContaining('timed out'),
+    });
+  });
+
+  it('aborts promptly when signal is aborted while reading a stalled SSE stream', async () => {
+    let cancelled = false;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith('/api/v0/users/current')) {
+        return new Response(JSON.stringify({ code: 0, data: { biz_data: { token: 'ds_access_123' } } }), { status: 200 });
+      }
+      if (url.endsWith('/api/v0/chat_session/create')) {
+        return new Response(JSON.stringify({ code: 0, data: { biz_data: { chat_session: { id: 'sess_abort' } } } }), { status: 200 });
+      }
+      if (url.endsWith('/api/v0/chat/create_pow_challenge')) {
+        return new Response(JSON.stringify({
+          code: 0,
+          data: { biz_data: { challenge: { algorithm: 'DeepSeekHashV1', challenge: 'a'.repeat(64), salt: 's', signature: 'sig', difficulty: 10, expire_at: 1700000000 } } },
+        }), { status: 200 });
+      }
+      if (url.endsWith('/api/v0/chat/completion')) {
+        return new Response(new ReadableStream({
+          start() {},
+          cancel() { cancelled = true; },
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        });
+      }
+      if (url.endsWith('/api/v0/chat_session/delete')) {
+        return new Response(JSON.stringify({ code: 0 }), { status: 200 });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+
+    const powMod = await import('../../custom/provider-accounts/deepseek-pow.js');
+    vi.spyOn(powMod, 'solveDeepSeekPowHeader').mockReturnValue('bW9ja19wb3c=');
+    const { streamDeepSeekWebChat } = await import('../../custom/provider-accounts/deepseek-web-chat.js');
+
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 30);
+
+    const iter = streamDeepSeekWebChat({
+      credential: '{"value":"user_tok_abort"}',
+      messages: [{ role: 'user', content: 'Hello' }],
+      modelId: 'deepseek-v4-pro',
+      options: { signal: controller.signal, timeoutMs: 5_000 },
+    });
+
+    await expect(iter.next()).rejects.toMatchObject({ name: 'AbortError' });
+    expect(cancelled).toBe(true);
+  });
 });

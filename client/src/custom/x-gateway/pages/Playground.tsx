@@ -50,6 +50,30 @@ import '../playground.css';
 import { ThrulineLogo } from '../ThrulineLogo';
 import { askConfirm } from '../shell/confirm'
 
+/** Extract `<think>...</think>` blocks (including unclosed streaming tags) and merge with `reasoning_content`. */
+function splitThinkContent(content: string, reasoning?: string): { thinking: string; answer: string } {
+  const thinkParts: string[] = [];
+  if (reasoning?.trim()) thinkParts.push(reasoning.trim());
+
+  let answer = content.replace(/<think>([\s\S]*?)<\/think>/gi, (_m, inner: string) => {
+    const trimmed = inner.trim();
+    if (trimmed) thinkParts.push(trimmed);
+    return '';
+  });
+
+  const openIdx = answer.toLowerCase().indexOf('<think>');
+  if (openIdx !== -1) {
+    const partial = answer.slice(openIdx + 7).trim();
+    if (partial) thinkParts.push(partial);
+    answer = answer.slice(0, openIdx);
+  }
+
+  return {
+    thinking: thinkParts.join('\n\n'),
+    answer: answer.trimStart(),
+  };
+}
+
 async function optimizeImageFile(file: File): Promise<{ id: string; name: string; url: string }> {
   // If file is GIF or already small (<= 800KB), keep as-is to avoid re-encoding
   if (file.type === 'image/gif' || file.size <= 800_000) {
@@ -244,6 +268,7 @@ export default function Playground() {
   const [systemPrompt, setSystemPrompt] = useState('');
   const [temperature, setTemperature] = useState<number>(0.7);
   const [maxTokens, setMaxTokens] = useState<number>(2048);
+  const [reasoningEffort, setReasoningEffort] = useState<'' | 'low' | 'medium' | 'high'>('');
 
   // Streaming state
   const [isStreaming, setIsStreaming] = useState(false);
@@ -637,9 +662,11 @@ export default function Playground() {
       messages: requestMessages,
       temperature,
       max_tokens: maxTokens,
+      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
     };
 
     let accumulatedContent = '';
+    let accumulatedReasoning = '';
 
     try {
       const result = await streamPlayground(
@@ -654,6 +681,20 @@ export default function Playground() {
                 ...c,
                 messages: c.messages.map((m) =>
                   m.id === assistantTurnId ? { ...m, content: accumulatedContent } : m
+                ),
+              };
+            })
+          );
+        },
+        (reasoningDelta) => {
+          accumulatedReasoning += reasoningDelta;
+          setChats((prev) =>
+            prev.map((c) => {
+              if (c.id !== activeChat.id) return c;
+              return {
+                ...c,
+                messages: c.messages.map((m) =>
+                  m.id === assistantTurnId ? { ...m, reasoning: accumulatedReasoning } : m
                 ),
               };
             })
@@ -952,6 +993,20 @@ export default function Playground() {
                   className="w-full text-xs"
                 />
               </label>
+
+              <label>
+                <span className="block mb-1 text-muted-foreground">Reasoning</span>
+                <select
+                  value={reasoningEffort}
+                  onChange={(e) => setReasoningEffort(e.target.value as '' | 'low' | 'medium' | 'high')}
+                  className="w-full text-xs"
+                >
+                  <option value="">Default (model)</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </label>
             </fieldset>
           </details>
 
@@ -1000,13 +1055,32 @@ export default function Playground() {
                     <div className="x-turn-body">
                       {msg.role === 'user' ? (
                         <div className="x-user-text">{msg.content}</div>
-                      ) : (
-                        <PlaygroundMessageContent
-                          content={msg.content}
-                          isGenerating={msg.meta === s.generating}
-                          generatingLabel={s.generating}
-                        />
-                      )}
+                      ) : (() => {
+                        const { thinking, answer } = splitThinkContent(msg.content, msg.reasoning);
+                        const isStillGenerating = msg.meta === s.generating;
+                        return (
+                          <>
+                            {thinking && (
+                              <details
+                                className="mb-2 rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
+                                open={!answer}
+                              >
+                                <summary className="cursor-pointer select-none font-medium">
+                                  {isStillGenerating && !answer ? 'Thinking...' : 'Thinking'}
+                                </summary>
+                                <div className="mt-1.5 whitespace-pre-wrap leading-relaxed opacity-90">
+                                  {thinking}
+                                </div>
+                              </details>
+                            )}
+                            <PlaygroundMessageContent
+                              content={answer}
+                              isGenerating={isStillGenerating}
+                              generatingLabel={s.generating}
+                            />
+                          </>
+                        );
+                      })()}
 
                       {/* Render attached user images */}
                       {msg.images && msg.images.some((img) => Boolean(img.url)) && (

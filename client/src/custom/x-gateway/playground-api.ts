@@ -8,7 +8,12 @@ export type { PlaygroundCatalog, PlaygroundRequest, PlaygroundContent };
 export const loadPlaygroundModels = (signal?: AbortSignal) =>
   apiFetch<PlaygroundCatalog>('/api/thruline/playground/models', { signal });
 
-export async function streamPlayground(body: PlaygroundRequest, signal: AbortSignal, onDelta: (text: string) => void) {
+export async function streamPlayground(
+  body: PlaygroundRequest,
+  signal: AbortSignal,
+  onDelta: (text: string) => void,
+  onReasoning?: (text: string) => void,
+) {
   const token = getToken();
   const revision = getSessionRevision();
   const assertSession = () => {
@@ -29,7 +34,10 @@ export async function streamPlayground(body: PlaygroundRequest, signal: AbortSig
     throw new Error(result?.error?.message ?? `HTTP ${response.status}`);
   }
   if (!response.body || !response.headers.get('content-type')?.includes('text/event-stream')) throw new Error('Expected a chat stream.');
-  const result = await readChatStream(response.body, { onDelta: text => { assertSession(); onDelta(text); } });
+  const result = await readChatStream(response.body, {
+    onDelta: text => { assertSession(); onDelta(text); },
+    onReasoning: onReasoning ? text => { assertSession(); onReasoning(text); } : undefined,
+  });
   assertSession();
   if (result.error || !result.done) throw new Error(result.error ?? 'Response interrupted. Please try again.');
   return { ...result, route: response.headers.get('x-routed-via') ?? body.model, latencyMs: Math.round(performance.now() - started) };
