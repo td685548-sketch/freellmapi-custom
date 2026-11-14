@@ -34,6 +34,10 @@ export interface GateProfile {
   contentFilter: ContentFilterSettings;
   /** Ready answers sent without an AI call. */
   quickAnswers: QuickAnswerSettings;
+  /** Whether MCP server-side tools are enabled for this profile. */
+  aiToolsEnabled?: boolean;
+  /** Optional per-profile max tool loop rounds override. */
+  aiToolMaxRounds?: number | null;
 }
 
 /** The stored JSON list, tolerant of anything unexpected (an unreadable list restricts nothing it cannot name, so it reads as empty). */
@@ -51,8 +55,8 @@ export function profileForGate(token: string): GateProfile | null {
   const hash = hashClientProfileKey(token);
   const select = 'SELECT id, rpm_limit AS rpmLimit, allowed_models AS allowedModels, max_tokens_cap AS maxTokens, '
     + 'eu_daily_requests AS euDR, eu_daily_tokens AS euDT, eu_monthly_requests AS euMR, eu_monthly_tokens AS euMT, '
-    + `kb_enabled AS kbEnabled, kb_max_chars AS kbMaxChars, ${CONV_COLUMNS}, ${CONTENT_FILTER_COLUMNS}, ${QUICK_ANSWER_COLUMNS} FROM client_profiles WHERE enabled = 1 AND `;
-  type Row = (Omit<GateProfile, 'allowedModels' | 'endUserQuota' | 'knowledge' | 'conversations' | 'contentFilter' | 'quickAnswers'> & Parameters<typeof conversationSettings>[0] & ContentFilterRow & Parameters<typeof quickAnswerSettingsFromRow>[0] & { allowedModels: string | null; euDR: number | null; euDT: number | null; euMR: number | null; euMT: number | null; kbEnabled: number; kbMaxChars: number | null }) | undefined;
+    + `kb_enabled AS kbEnabled, kb_max_chars AS kbMaxChars, ai_tools_enabled AS aiToolsEnabled, ai_tool_max_rounds AS aiToolMaxRounds, ${CONV_COLUMNS}, ${CONTENT_FILTER_COLUMNS}, ${QUICK_ANSWER_COLUMNS} FROM client_profiles WHERE enabled = 1 AND `;
+  type Row = (Omit<GateProfile, 'allowedModels' | 'endUserQuota' | 'knowledge' | 'conversations' | 'contentFilter' | 'quickAnswers' | 'aiToolsEnabled' | 'aiToolMaxRounds'> & Parameters<typeof conversationSettings>[0] & ContentFilterRow & Parameters<typeof quickAnswerSettingsFromRow>[0] & { allowedModels: string | null; euDR: number | null; euDT: number | null; euMR: number | null; euMT: number | null; kbEnabled: number; kbMaxChars: number | null; aiToolsEnabled?: number; aiToolMaxRounds?: number | null }) | undefined;
   let row = db.prepare(select + 'token_hash = ?').get(hash) as Row;
   if (!row) {
     // A key in its post-rotation grace period counts as its profile: same limits, same numbers.
@@ -67,6 +71,8 @@ export function profileForGate(token: string): GateProfile | null {
     conversations: conversationSettings(row),
     contentFilter: contentFilterFromRow(row),
     quickAnswers: quickAnswerSettingsFromRow(row),
+    aiToolsEnabled: row.aiToolsEnabled === 1,
+    aiToolMaxRounds: row.aiToolMaxRounds ?? null,
   };
 }
 

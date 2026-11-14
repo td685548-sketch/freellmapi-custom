@@ -31,6 +31,11 @@ export function captureInternalCall(req: Request): void {
   if (!admittedCalls.has(req)) admittedCalls.set(req, isInternalCall(req));
 }
 
+/** True only when this is a verified internal loopback subcall that already ran outer enrichment. */
+export function isEnrichmentAlreadyApplied(req: Request): boolean {
+  return isInternalCall(req) !== null && req.headers['x-ai-platform-enriched'] === '1';
+}
+
 // ── Public interfaces ────────────────────────────────────────────────────────
 
 export interface LoopbackRequest {
@@ -38,6 +43,18 @@ export interface LoopbackRequest {
   model: string;
   tools?: ToolDefinition[];
   maxTokens?: number;
+  safeParams?: {
+    temperature?: number;
+    topP?: number;
+    stop?: string | string[];
+    maxCompletionTokens?: number;
+    toolChoice?: unknown;
+    responseFormat?: unknown;
+    frequencyPenalty?: number;
+    presencePenalty?: number;
+  };
+  skipEnrichment?: boolean;
+  endUser?: string | null;
   runId?: string;
   depth: number;
   signal: AbortSignal;
@@ -81,6 +98,7 @@ function signingMessage(opts: {
   bodyHash: string;
   runId: string;
   depth: number;
+  enriched: string;
   timestamp: string;
   nonce: string;
 }): string {
@@ -92,6 +110,7 @@ function signingMessage(opts: {
     opts.bodyHash,
     opts.runId,
     String(opts.depth),
+    opts.enriched,
     opts.timestamp,
     opts.nonce,
   ].join('\n');
@@ -109,6 +128,7 @@ function buildHeader(opts: {
   bodyJson: string;
   runId?: string;
   depth: number;
+  enriched: string;
 }): string {
   const timestamp = String(Math.floor(Date.now() / 1000));
   const nonce = crypto.randomBytes(16).toString('hex');
@@ -121,6 +141,7 @@ function buildHeader(opts: {
     bodyHash,
     runId: opts.runId ?? '',
     depth: opts.depth,
+    enriched: opts.enriched,
     timestamp,
     nonce,
   });
@@ -172,6 +193,7 @@ export function isInternalCall(req: Request): { runId?: string; depth: number } 
     const profile = typeof req.headers['x-profile'] === 'string' ? req.headers['x-profile'] : '';
     const endUser = typeof req.headers['x-end-user'] === 'string' ? req.headers['x-end-user'] : '';
     const runId = typeof req.headers['x-run-id'] === 'string' ? req.headers['x-run-id'] : '';
+    const enriched = req.headers['x-ai-platform-enriched'] === '1' ? '1' : '0';
 
     // Body hash: use the already-parsed body or the raw body.
     const bodyJson = req.body !== undefined && req.body !== null
@@ -190,6 +212,7 @@ export function isInternalCall(req: Request): { runId?: string; depth: number } 
         bodyHash,
         runId,
         depth: candidateDepth,
+        enriched,
         timestamp: timestampStr,
         nonce,
       });
@@ -241,6 +264,16 @@ export async function callGateway(
   };
   if (body.tools?.length) reqBody['tools'] = body.tools;
   if (body.maxTokens != null) reqBody['max_tokens'] = body.maxTokens;
+  if (body.safeParams?.maxCompletionTokens != null) {
+    reqBody['max_completion_tokens'] = body.safeParams.maxCompletionTokens;
+  }
+  if (body.safeParams?.temperature != null) reqBody['temperature'] = body.safeParams.temperature;
+  if (body.safeParams?.topP != null) reqBody['top_p'] = body.safeParams.topP;
+  if (body.safeParams?.stop !== undefined) reqBody['stop'] = body.safeParams.stop;
+  if (body.safeParams?.toolChoice !== undefined) reqBody['tool_choice'] = body.safeParams.toolChoice;
+  if (body.safeParams?.responseFormat !== undefined) reqBody['response_format'] = body.safeParams.responseFormat;
+  if (body.safeParams?.frequencyPenalty !== undefined) reqBody['frequency_penalty'] = body.safeParams.frequencyPenalty;
+  if (body.safeParams?.presencePenalty !== undefined) reqBody['presence_penalty'] = body.safeParams.presencePenalty;
   const bodyJson = JSON.stringify(reqBody);
 
   // Stay on loopback even when the incoming socket was addressed through a LAN IP.
@@ -254,11 +287,21 @@ export async function callGateway(
     originalUrl: req.originalUrl ?? req.url ?? req.path ?? '', query: req.query ?? {} } as Request);
   const authHeader = callerToken ? `Bearer ${callerToken}` : '';
 
-  // Profile/end-user headers for HMAC.
+  // Profile/end-user headers for HMAC (preserve endUser even when originally in body.user).
   const profile = typeof req.headers['x-profile'] === 'string' ? req.headers['x-profile'] : '';
-  const endUser = typeof req.headers['x-end-user'] === 'string' ? req.headers['x-end-user'] : '';
+  const bodyUser =
+    req.body && typeof req.body === 'object' && typeof (req.body as Record<string, unknown>).user === 'string'
+      ? ((req.body as Record<string, unknown>).user as string)
+      : '';
+  const endUser =
+    typeof body.endUser === 'string' && body.endUser.length > 0
+      ? body.endUser
+      : typeof req.headers['x-end-user'] === 'string' && req.headers['x-end-user'].length > 0
+        ? req.headers['x-end-user']
+        : bodyUser;
 
   // Build the internal header.
+  const enriched = body.skipEnrichment ? '1' : '0';
   const internalHeader = buildHeader({
     method: 'POST',
     path,
@@ -267,6 +310,7 @@ export async function callGateway(
     bodyJson,
     runId: body.runId,
     depth: outDepth,
+    enriched,
   });
 
   const headers: Record<string, string | number> = {
@@ -274,6 +318,7 @@ export async function callGateway(
     'content-length': Buffer.byteLength(bodyJson),
     [HEADER_NAME]: internalHeader,
   };
+  if (body.skipEnrichment) headers['x-ai-platform-enriched'] = '1';
   if (authHeader) headers['authorization'] = authHeader;
   if (body.runId) headers['x-run-id'] = body.runId;
   // Propagate profile/end-user so isInternalCall can reconstruct the message.

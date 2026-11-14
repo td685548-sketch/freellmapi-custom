@@ -1,0 +1,137 @@
+{
+  "contractVersion": "1.0.0",
+  "baseCommit": "d91b649d0a83d921ba4f15ffd0bd65412a21cc62",
+  "branch": "codex/fix-mcp-core",
+  "owner": "agent-1",
+  "findings": ["F02", "F03:snapshot-schema", "F04:effective-scope", "F08:journal-DTO"],
+  "sharedTypes": {
+    "file": "shared/ai-platform-mcp.ts",
+    "McpToolCallStatus": [
+      "ok",
+      "tool_error",
+      "timeout",
+      "too_large",
+      "blocked",
+      "transport_error",
+      "unknown",
+      "awaiting_approval",
+      "rejected"
+    ],
+    "McpApprovalViewAdditions": {
+      "resultMasked": "string | null (optional)",
+      "error": "string | null (optional)",
+      "executedAt": "string | null (optional)",
+      "durationMs": "number | null (optional)",
+      "resultBytes": "number | null (optional)"
+    },
+    "McpApprovalSnapshot": {
+      "toolId": "number",
+      "toolName": "string",
+      "serverId": "number",
+      "serverSlug": "string",
+      "serverUrl": "string",
+      "schemaHash": "string",
+      "serverRevision": "number",
+      "credentialGeneration": "number",
+      "effect": "'read' | 'write'",
+      "scopeKind": "'global' | 'profile' | 'support_tenant' | 'agent'",
+      "scopeId": "string",
+      "capturedAt": "string (ISO-8601)"
+    },
+    "McpSafetyCheckCode": [
+      "ok",
+      "legacy_missing_snapshot",
+      "invalid_snapshot",
+      "server_not_found",
+      "server_paused",
+      "server_url_changed",
+      "credential_changed",
+      "tool_not_found",
+      "tool_not_allowed",
+      "schema_changed",
+      "scope_not_effective",
+      "binding_missing"
+    ],
+    "McpJournalOutcomeStatus": [
+      "ok",
+      "tool_error",
+      "timeout",
+      "too_large",
+      "blocked",
+      "transport_error",
+      "unknown",
+      "rejected"
+    ]
+  },
+  "modules": {
+    "sanitize": {
+      "file": "server/src/custom/ai-platform/mcp-client/sanitize.ts",
+      "exports": [
+        "scrubSensitiveKeys(value: unknown, secretValues?: string[]): unknown",
+        "scrubCredentialEcho(text: string, secretValues?: string[]): string",
+        "sanitizeMcpText(text: string | null | undefined, secretValues?: string[]): string",
+        "sanitizeMcpValue(value: unknown, secretValues?: string[]): unknown",
+        "sanitizeMcpError(err: unknown, secretValues?: string[]): string",
+        "assertSafeToolSchema(schema: Record<string, unknown>, description?: string | null, secretValues?: string[]): { ok: true } | { ok: false; reason: string }"
+      ],
+      "rules": [
+        "Pure module: no imports from registry, bindings, calls, executor, approvals, tools, or transport.",
+        "Redacts opaque credentials of length >= 6 anywhere in text or JSON values (no sk-/Bearer prefix required).",
+        "assertSafeToolSchema rejects/quarantines schemas or descriptions echoing secrets rather than mutating enum/required/properties."
+      ]
+    },
+    "approvalSafety": {
+      "file": "server/src/custom/ai-platform/mcp-client/approval-safety.ts",
+      "exports": [
+        "captureApprovalSnapshot(params: { toolId: number; scopeKind: ScopeKind; scopeId: string }): Promise<McpApprovalSnapshot | null>",
+        "parseApprovalSnapshot(snapshotJson: string | null | undefined): McpApprovalSnapshot | null",
+        "validateApprovalSnapshot(snapshot: McpApprovalSnapshot | null | undefined): Promise<McpSafetyCheckResult>",
+        "assertApprovalExecutable(snapshotJson: string | null | undefined): Promise<McpApprovalSnapshot>",
+        "isScopeEffective(scopeKind: ScopeKind, scopeId: string): Promise<boolean>",
+        "assertScopeEffective(scopeKind: ScopeKind, scopeId: string): Promise<void>"
+      ],
+      "rules": [
+        "Fail-closed: null or invalid snapshot_json returns legacy_missing_snapshot / invalid_snapshot and throws in assertApprovalExecutable.",
+        "Compares serverUrl, schemaHash, serverRevision, credentialGeneration, server status !== paused, tool state === allowed, scope effectiveness, and active binding.",
+        "Profile scope requires client_profiles.enabled = 1 AND ai_tools_enabled = 1.",
+        "Support tenant scope requires x_support_tenants row present and enabled."
+      ]
+    },
+    "calls": {
+      "file": "server/src/custom/ai-platform/mcp-client/calls.ts",
+      "exports": [
+        "transitionToolCallOutcome(executionKey: string, outcome: McpJournalOutcomeInput): Promise<McpCallView | null>",
+        "getToolCallByExecutionKey(executionKey: string): Promise<McpCallView | null>"
+      ],
+      "transitions": {
+        "from": ["awaiting_approval"],
+        "to": ["ok", "tool_error", "timeout", "too_large", "blocked", "transport_error", "unknown", "rejected"],
+        "idempotentWhenAlreadyTerminal": true,
+        "immutableColumns": ["execution_key", "run_id", "step_seq", "scope_kind", "scope_id", "end_user", "tool_id", "args_masked", "created_at"]
+      }
+    }
+  },
+  "migration": {
+    "file": "server/src/db/migrations/20261114_200000_custom_ai_mcp_approval_safety.ts",
+    "id": "20261114_200000_custom_ai_mcp_approval_safety",
+    "alterations": {
+      "custom_ai_mcp_servers": [
+        "server_revision INTEGER NOT NULL DEFAULT 1",
+        "credential_generation INTEGER NOT NULL DEFAULT 1"
+      ],
+      "custom_ai_approvals": [
+        "snapshot_json TEXT",
+        "result_masked TEXT",
+        "error_text TEXT",
+        "duration_ms INTEGER",
+        "result_bytes INTEGER",
+        "executed_at TEXT",
+        "owner_instance_id TEXT"
+      ],
+      "custom_ai_tool_calls": [
+        "error_text TEXT",
+        "updated_at TEXT"
+      ]
+    }
+  }
+}

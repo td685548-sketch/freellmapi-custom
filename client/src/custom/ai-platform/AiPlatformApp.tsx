@@ -15,6 +15,8 @@
 import { Routes, Route, NavLink } from 'react-router-dom';
 import { useCustomT } from '../i18n/use-custom-t';
 import { useAdministrativeAccess } from '../use-administrative-access';
+import { useUserSession } from '../use-session';
+import { McpServers } from './pages/McpServers';
 import { Overview } from './pages/Overview';
 import {
   NAV_AI_PLATFORM,
@@ -46,9 +48,8 @@ const NAV_ITEMS = [
   { to: 'overview', labelKey: 'Platform overview' as const },
 ] as const;
 
-// Future screens — links shown but pages are placeholders until US2–US7 ship.
+// Future screens — links shown but pages are placeholders until US3–US7 ship.
 const FUTURE_NAV_ITEMS = [
-  { to: 'mcp', labelKey: MCP_SERVERS_HEADING },
   { to: 'output-guard', labelKey: OUTPUT_GUARD_HEADING },
   { to: 'knowledge', labelKey: KNOWLEDGE_HEADING },
   { to: 'prompt-cache', labelKey: PROMPT_CACHE_HEADING },
@@ -61,9 +62,18 @@ const FUTURE_NAV_ITEMS = [
 export function AiPlatformApp() {
   const tc = useCustomT();
   const { can } = useAdministrativeAccess();
+  const { isPrimary } = useUserSession();
+
+  const canOverview = isPrimary || can('view_ai_platform') || can('edit_ai_flags') || can('manage_ai_platform');
+  const canMcp =
+    isPrimary ||
+    can('view_mcp_servers') ||
+    can('edit_mcp_servers') ||
+    can('review_mcp_tools') ||
+    can('approve_ai_actions');
 
   // Guard: no sensitive query when user lacks access.
-  if (!can('view_ai_platform') && !can('edit_ai_flags') && !can('manage_ai_platform')) {
+  if (!canOverview && !canMcp) {
     return (
       <div className="p-6">
         <p className="text-sm text-muted-foreground">{tc(NO_ACCESS)}</p>
@@ -73,13 +83,13 @@ export function AiPlatformApp() {
 
   return (
     <Routes>
-      <Route path="/ai-platform/*" element={<AiPlatformShell />} />
-      <Route path="*" element={<AiPlatformShell />} />
+      <Route path="/ai-platform/*" element={<AiPlatformShell canOverview={canOverview} canMcp={canMcp} />} />
+      <Route path="*" element={<AiPlatformShell canOverview={canOverview} canMcp={canMcp} />} />
     </Routes>
   );
 }
 
-function AiPlatformShell() {
+function AiPlatformShell({ canOverview, canMcp }: { canOverview: boolean; canMcp: boolean }) {
   const tc = useCustomT();
 
   return (
@@ -87,7 +97,7 @@ function AiPlatformShell() {
       {/* Sub-navigation */}
       <nav className="w-48 shrink-0 pt-6 pl-6" aria-label={tc(NAV_AI_PLATFORM)}>
         <div className="space-y-1">
-          {NAV_ITEMS.map(({ to, labelKey }) => (
+          {canOverview && NAV_ITEMS.map(({ to, labelKey }) => (
             <NavLink
               key={to}
               to={to}
@@ -102,6 +112,20 @@ function AiPlatformShell() {
               {tc(labelKey)}
             </NavLink>
           ))}
+          {canMcp && (
+            <NavLink
+              to="mcp"
+              className={({ isActive }) =>
+                `block px-3 py-2 rounded-md text-sm transition-colors ${
+                  isActive
+                    ? 'bg-primary/10 text-primary font-medium'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                }`
+              }
+            >
+              {tc(MCP_SERVERS_HEADING)}
+            </NavLink>
+          )}
           {/* Future screens — rendered as nav links but go to placeholder pages */}
           {FUTURE_NAV_ITEMS.map(({ to, labelKey }) => (
             <NavLink
@@ -124,11 +148,11 @@ function AiPlatformShell() {
       {/* Page content */}
       <div className="flex-1">
         <Routes>
-          <Route index element={<Overview />} />
+          <Route index element={canOverview ? <Overview /> : <McpServers />} />
           <Route path="overview" element={<Overview />} />
+          <Route path="mcp" element={<McpServers />} />
 
-          {/* Future US2–US7 screens — placeholder until implemented */}
-          <Route path="mcp" element={<NotImplemented title={tc(MCP_SERVERS_HEADING)} />} />
+          {/* Future US3–US7 screens — placeholder until implemented */}
           <Route path="output-guard" element={<NotImplemented title={tc(OUTPUT_GUARD_HEADING)} />} />
           <Route path="knowledge" element={<NotImplemented title={tc(KNOWLEDGE_HEADING)} />} />
           <Route path="prompt-cache" element={<NotImplemented title={tc(PROMPT_CACHE_HEADING)} />} />
@@ -136,7 +160,7 @@ function AiPlatformShell() {
           <Route path="runs" element={<NotImplemented title={tc(RUNS_HEADING)} />} />
 
           {/* Catch-all */}
-          <Route path="*" element={<Overview />} />
+          <Route path="*" element={canOverview ? <Overview /> : <McpServers />} />
         </Routes>
       </div>
     </div>

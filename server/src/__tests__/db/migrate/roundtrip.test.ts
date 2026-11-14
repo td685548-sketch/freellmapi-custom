@@ -219,7 +219,9 @@ describe('migration round trip', () => {
         '20261112_180001_support_runtime_fencing.ts',
         '20261113_090001_support_evidence.ts',
         '20261113_100000_custom_ai_platform_base.ts',
+        '20261113_110000_custom_ai_mcp_client.ts',
         '20261113_180001_support_service_desk.ts',
+        '20261114_200000_custom_ai_mcp_approval_safety.ts',
       ]);
     } finally {
       db.close();
