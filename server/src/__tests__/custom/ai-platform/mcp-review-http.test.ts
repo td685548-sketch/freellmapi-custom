@@ -247,15 +247,15 @@ describe('Reviewer HTTP compatibility probes', () => {
     .prepare('UPDATE client_profiles SET qa_enabled=1, qa_min_similarity=50, kb_enabled=1, kb_max_chars=4000 WHERE id=?')
     .run(profileId);
   getDb()
-    .prepare("INSERT INTO custom_quick_answers (profile_id, question, answer, enabled) VALUES (?, 'What are your hours?', 'Open 24/7', 1)")
+    .prepare("INSERT INTO custom_quick_answers (profile_id, questions, answer, enabled, updated_at) VALUES (?, '[\"What are your hours?\"]', 'Open 24/7', 1, datetime('now'))")
     .run(profileId);
   const docId = Number(
     getDb()
-      .prepare("INSERT INTO custom_knowledge_docs (profile_id, filename, size_bytes, chunk_count) VALUES (?, 'faq.txt', 32, 1)")
+      .prepare("INSERT INTO custom_knowledge_docs (profile_id, title, content) VALUES (?, 'faq.txt', 'KB_UNIQUE_MARKER_991')")
       .run(profileId).lastInsertRowid,
   );
   getDb()
-    .prepare("INSERT INTO custom_knowledge_chunks (doc_id, profile_id, chunk_index, content) VALUES (?, ?, 0, 'KB_UNIQUE_MARKER_991')")
+    .prepare("INSERT INTO custom_knowledge_chunks (doc_id, profile_id, ord, text) VALUES (?, ?, 0, 'KB_UNIQUE_MARKER_991')")
     .run(docId, profileId);
 
   const realFetch = installProviderFetchRedirect();

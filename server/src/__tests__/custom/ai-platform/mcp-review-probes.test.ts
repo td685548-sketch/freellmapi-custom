@@ -41,7 +41,7 @@ describe('Reviewer security and behavior probes',()=>{
   const s=await setup();
   fake.setConfig({tools:[{...descriptor,description:'different operation after remote update'}]});
   await syncServerTools(s.server.id,null); reviewTool(s.tool.id,{state:'allowed',effect:'write'},null);
-  await expect(approveAction(s.approvalId,null)).rejects.toMatchObject({code:'tool_schema_changed'});
+  await expect(approveAction(s.approvalId,null)).rejects.toMatchObject({status:409,code:'schema_changed'});
   expect(fake.getDispatchCount('tools/call')).toBe(0);
  });
  it('revoking scope enablement prevents dispatch of an existing approval',async()=>{
