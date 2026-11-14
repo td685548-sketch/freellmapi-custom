@@ -3,21 +3,25 @@ import { UNIFORM_FLOATS, type Effect } from './effect'
 // WebGPU flag values (the DOM typings declare the types but not these globals).
 const BUFFER_COPY_DST = 0x8
 const BUFFER_UNIFORM = 0x40
+const STAGE_VERTEX = 0x1
+const STAGE_FRAGMENT = 0x2
 
 /** Fragment work scales with pixels, so very large screens render smaller and stretch. */
-const MAX_PIXELS = 3_200_000
+const MAX_PIXELS = 2_600_000
 const MAX_SCALE = 1.5
 
 interface Gpu {
   device: GPUDevice
   format: GPUTextureFormat
 }
-interface Pipe {
-  pipeline: GPURenderPipeline
+export interface EffectPipes {
+  layout: GPUBindGroupLayout
+  background: GPURenderPipeline
+  stars: GPURenderPipeline | null
 }
 
 let gpuPromise: Promise<Gpu | null> | null = null
-const pipes = new Map<Effect['id'], Promise<Pipe>>()
+const pipes = new Map<Effect['id'], Promise<EffectPipes>>()
 
 export function overlaySupported() {
   return typeof navigator !== 'undefined' && 'gpu' in navigator
@@ -33,37 +37,68 @@ async function createGpu(): Promise<Gpu | null> {
   return { device, format: navigator.gpu.getPreferredCanvasFormat() }
 }
 
-function pipeFor(gpu: Gpu, effect: Effect) {
-  let pipe = pipes.get(effect.id)
-  if (!pipe) {
-    const module = gpu.device.createShaderModule({ code: effect.wgsl })
-    pipe = gpu.device.createRenderPipelineAsync({
-      layout: 'auto',
-      vertex: { module, entryPoint: 'vs' },
-      fragment: {
-        module, entryPoint: 'fs',
-        targets: [{
-          format: gpu.format,
-          blend: {
-            color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
-            alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
-          },
-        }],
-      },
-      primitive: { topology: 'triangle-list' },
-    }).then(pipeline => ({ pipeline }))
-    // A shader that fails to compile must not poison later runs with a stale rejection.
-    pipe.catch(() => pipes.delete(effect.id))
-    pipes.set(effect.id, pipe)
+/**
+ * Two pipelines over one shared uniform block: the full-screen background
+ * (premultiplied "over"), then the star sprites (additive, drawn on top).
+ */
+export async function buildPipes(device: GPUDevice, format: GPUTextureFormat, effect: Effect): Promise<EffectPipes> {
+  const module = device.createShaderModule({ code: effect.wgsl })
+  const layout = device.createBindGroupLayout({
+    entries: [{ binding: 0, visibility: STAGE_VERTEX | STAGE_FRAGMENT, buffer: { type: 'uniform' } }],
+  })
+  const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] })
+  const over: GPUBlendState = {
+    color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
+    alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
   }
-  return pipe
+  const add: GPUBlendState = {
+    color: { srcFactor: 'one', dstFactor: 'one' },
+    alpha: { srcFactor: 'one', dstFactor: 'one' },
+  }
+  const background = await device.createRenderPipelineAsync({
+    layout: pipelineLayout,
+    vertex: { module, entryPoint: 'vs' },
+    fragment: { module, entryPoint: 'fs', targets: [{ format, blend: over }] },
+    primitive: { topology: 'triangle-list' },
+  })
+  const stars = effect.particles
+    ? await device.createRenderPipelineAsync({
+      layout: pipelineLayout,
+      vertex: { module, entryPoint: 'vsStar' },
+      fragment: { module, entryPoint: 'fsStar', targets: [{ format, blend: add }] },
+      primitive: { topology: 'triangle-list' },
+    })
+    : null
+  return { layout, background, stars }
+}
+
+/** Record one frame: background first, then the stars. */
+export function drawEffect(pass: GPURenderPassEncoder, effect: Effect, set: EffectPipes, bindGroup: GPUBindGroup) {
+  pass.setBindGroup(0, bindGroup)
+  pass.setPipeline(set.background)
+  pass.draw(3)
+  if (set.stars && effect.particles) {
+    pass.setPipeline(set.stars)
+    pass.draw(6, effect.particles)
+  }
+}
+
+function pipesFor(gpu: Gpu, effect: Effect) {
+  let set = pipes.get(effect.id)
+  if (!set) {
+    set = buildPipes(gpu.device, gpu.format, effect)
+    // A shader that fails to compile must not poison later runs with a stale rejection.
+    set.catch(() => pipes.delete(effect.id))
+    pipes.set(effect.id, set)
+  }
+  return set
 }
 
 /** Build the device and this effect's pipeline ahead of the first click. Safe to call repeatedly. */
 export function warmEffect(effect: Effect) {
   if (!overlaySupported()) return Promise.resolve(null)
   gpuPromise ??= createGpu().catch(() => null)
-  return gpuPromise.then(gpu => (gpu ? pipeFor(gpu, effect) : null)).catch(() => null)
+  return gpuPromise.then(gpu => (gpu ? pipesFor(gpu, effect) : null)).catch(() => null)
 }
 
 export interface PlayOptions {
@@ -84,7 +119,7 @@ export async function playEffect(effect: Effect, options: PlayOptions): Promise<
   gpuPromise ??= createGpu().catch(() => null)
   const gpu = await gpuPromise
   if (!gpu) throw new Error('WebGPU unavailable')
-  const pipe = await pipeFor(gpu, effect)
+  const set = await pipesFor(gpu, effect)
   const { device } = gpu
 
   const cssWidth = window.innerWidth
@@ -102,7 +137,7 @@ export async function playEffect(effect: Effect, options: PlayOptions): Promise<
 
   const uniforms = device.createBuffer({ size: UNIFORM_FLOATS * 4, usage: BUFFER_UNIFORM | BUFFER_COPY_DST })
   const bindGroup = device.createBindGroup({
-    layout: pipe.pipeline.getBindGroupLayout(0),
+    layout: set.layout,
     entries: [{ binding: 0, resource: { buffer: uniforms } }],
   })
 
@@ -149,9 +184,7 @@ export async function playEffect(effect: Effect, options: PlayOptions): Promise<
             clearValue: { r: 0, g: 0, b: 0, a: 0 }, loadOp: 'clear', storeOp: 'store',
           }],
         })
-        pass.setPipeline(pipe.pipeline)
-        pass.setBindGroup(0, bindGroup)
-        pass.draw(3)
+        drawEffect(pass, effect, set, bindGroup)
         pass.end()
         device.queue.submit([encoder.finish()])
       } catch {

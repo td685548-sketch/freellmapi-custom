@@ -41,11 +41,11 @@ describe('PageSwitch', () => {
     expect(link()?.textContent).toBe('Thruline')
   })
 
-  it('leads from Thruline back to FreeLLMAPI with the ink look', async () => {
+  it('leads from Thruline back to FreeLLMAPI with the black-hole look', async () => {
     await render('/thruline/combos')
     expect(link()?.getAttribute('href')).toBe('/models/chat')
     expect(link()?.dataset.pageSwitch).toBe('to-freellmapi')
-    expect(link()?.className).toContain('page-switch--ink')
+    expect(link()?.className).toContain('page-switch--hole')
     expect(link()?.getAttribute('aria-label')).toBe('Switch to FreeLLMAPI')
     expect(link()?.textContent).toBe('FreeLLMAPI')
   })
