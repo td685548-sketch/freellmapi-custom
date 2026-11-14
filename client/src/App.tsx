@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { GatewayGalaxyLabel } from './custom/x-gateway/GatewayGalaxyLabel'
+import { PageSwitch } from './custom/page-switch/PageSwitch'
 import { BrowserRouter, Routes, Route, Navigate, NavLink, Link, useLocation, useNavigate } from 'react-router-dom'
 import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ChevronDown, KeyRound, LogOut, Menu, MoreHorizontal, RefreshCw, Search, Settings, Sparkles } from 'lucide-react'
@@ -298,7 +298,6 @@ function Navbar() {
     // tabs only when the Analytics tab itself is hidden for this account.
     ...(!analyticsFolded && canViewUsage ? [{ to: '/usage', labelKey: 'nav.usage', customLabel: 'Usage' }] : []),
     ...(!analyticsFolded && hasPermission('view_audit_log') ? [{ to: '/audit', labelKey: 'nav.audit', customLabel: 'History' }] : []),
-    ...(hasPermission('use_x_gateway') ? [{ to: '/thruline/providers', labelKey: 'nav.xGateway', customLabel: 'Thruline' }] : []),
   ]
 
   return (
@@ -313,7 +312,7 @@ function Navbar() {
         <div
           // Physical pl: reserves macOS traffic lights only on macOS. On Windows and Linux,
           // standard window controls sit on the top-right, so no left padding is needed.
-          className={`mx-auto flex max-w-6xl items-center px-4 sm:px-6 ${isMacDesktop ? 'pl-20 sm:pl-20' : ''}`}
+          className={`ps-reserve mx-auto flex max-w-6xl items-center px-4 sm:px-6 ${isMacDesktop ? 'pl-20 sm:pl-20' : ''}`}
           style={isMacDesktop ? { minHeight: 52 } : undefined}
         >
           <Brand />
@@ -346,9 +345,7 @@ function Navbar() {
                 </div>
               ) : (
                 <NavItem key={item.to} to={item.to}>
-                  {item.to === '/thruline/providers'
-                    ? <GatewayGalaxyLabel>{item.customLabel || t(item.labelKey)}</GatewayGalaxyLabel>
-                    : item.customLabel || t(item.labelKey)}
+                  {item.customLabel || t(item.labelKey)}
                   {item.to === '/users' && <UsersNavBadge />}
                 </NavItem>
               )
@@ -427,9 +424,7 @@ function Navbar() {
                         onClick={() => navigate(item.to)}
                         className={location.pathname === item.to ? 'bg-accent text-accent-foreground font-medium' : undefined}
                       >
-                        {item.to === '/thruline/providers'
-                          ? <GatewayGalaxyLabel>{item.customLabel || t(item.labelKey)}</GatewayGalaxyLabel>
-                          : item.customLabel || t(item.labelKey)}
+                        {item.customLabel || t(item.labelKey)}
                         {item.to === '/users' && <UsersNavBadge />}
                       </DropdownMenuItem>
                     )
@@ -528,6 +523,8 @@ function App() {
         <I18nProvider>
           <BrowserRouter basename={import.meta.env.BASE_URL}>
             <AuthGate>
+              {/* One switch above both layouts, so it never moves between FreeLLMAPI and Thruline. */}
+              <PageSwitch />
               {/* Column, so a full-bleed route can claim the height the navbar
                   leaves without anyone having to know how tall the navbar is.
                   Fixed-position children (toaster, palette, reminder) are out of

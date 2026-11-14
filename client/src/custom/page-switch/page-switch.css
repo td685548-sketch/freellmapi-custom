@@ -1,0 +1,183 @@
+/*
+ * The FreeLLMAPI ⇄ Thruline switch. Fixed to the viewport so it has the same
+ * coordinates on both pages; the headers leave room for it through the
+ * html[data-has-page-switch] rules at the bottom.
+ */
+@property --ps-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+:root {
+  --ps-w: 148px;
+  --ps-h: 32px;
+  --ps-top: 11px;
+  --ps-edge: 16px;
+  --ps-gap: 12px;
+  --ps-reserve: calc(var(--ps-w) + var(--ps-edge) + var(--ps-gap));
+}
+/* Below 1100px the FreeLLMAPI nav has no spare room, so the switch shrinks to its mark.
+   Both pages share this rule, so the two buttons stay on the same coordinates. */
+@media (max-width: 1099px) {
+  :root { --ps-w: 36px; --ps-gap: 8px; }
+}
+
+.page-switch {
+  position: fixed;
+  top: var(--ps-top);
+  right: var(--ps-edge);
+  z-index: 41; /* above both headers (40 and 20); dialogs and menus (50+) still cover it */
+  width: var(--ps-w);
+  height: var(--ps-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  isolation: isolate;
+  color: #f5f7fa;
+  font-size: 13px;
+  text-decoration: none;
+  -webkit-app-region: no-drag;
+  transition: transform 220ms cubic-bezier(.2, .8, .2, 1), filter 220ms;
+}
+.page-switch:hover { transform: translateY(-1px) scale(1.04); filter: brightness(1.12); }
+.page-switch:active { transform: scale(0.97); }
+.page-switch:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+
+/* A turning ring of light around the pill, plus a soft halo that breathes. */
+.page-switch::before,
+.page-switch::after {
+  content: '';
+  position: absolute;
+  border-radius: inherit;
+  background: conic-gradient(from var(--ps-angle), var(--ps-a), var(--ps-b), var(--ps-c), var(--ps-a));
+  animation: ps-orbit 3.6s linear infinite;
+  pointer-events: none;
+}
+.page-switch::before { inset: -2px; z-index: -1; }
+.page-switch::after { inset: -4px; z-index: -2; filter: blur(11px); opacity: .55; animation: ps-orbit 3.6s linear infinite, ps-breathe 2.8s ease-in-out infinite; }
+.page-switch:hover::after { opacity: .9; }
+
+.page-switch__arrow {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  transition: transform 220ms;
+  text-shadow: none;
+}
+
+/* ---- FreeLLMAPI → Thruline: the galaxy ---- */
+.page-switch--galaxy { --ps-a: #5b8cff; --ps-b: #b18cff; --ps-c: #5ee0ff; }
+.page-switch--galaxy .gateway-galaxy {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0 28px 0 12px;
+  box-sizing: border-box;
+  justify-content: flex-start;
+  border-color: rgb(196 214 255 / 45%);
+}
+.page-switch--galaxy .page-switch__arrow { right: 11px; color: #dbe6ff; }
+.page-switch--galaxy:hover .page-switch__arrow { transform: translateX(3px); }
+
+/* ---- Thruline → FreeLLMAPI: black ink and a single dot ---- */
+.page-switch--ink { --ps-a: #f4f7fb; --ps-b: #5a6272; --ps-c: #14161b; }
+.page-switch__ink {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  border: 1px solid rgb(220 228 237 / 30%);
+  background: #090a0d;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 14%);
+}
+.page-switch__marble {
+  position: absolute;
+  inset: -90% -25%;
+  background: conic-gradient(#08090c, #3d4350, #08090c 22%, #b8c0cf 38%, #0b0c10 50%, #596071 66%, #08090c 82%, #08090c);
+  filter: blur(7px);
+  opacity: .85;
+  animation: ps-marble 10s linear infinite;
+}
+.page-switch__ink::after { /* keeps the label readable over the marble */
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 35% 50%, rgb(6 7 9 / 78%), rgb(6 7 9 / 38%) 75%);
+}
+.page-switch__dot,
+.page-switch__ripple {
+  position: absolute;
+  left: 40px;
+  top: 50%;
+  border-radius: 50%;
+  translate: -50% -50%;
+  z-index: 1;
+}
+.page-switch__dot { width: 8px; height: 8px; background: #f4f7fb; box-shadow: 0 0 9px 1px rgb(244 247 251 / 85%); }
+.page-switch__ripple {
+  width: 8px;
+  height: 8px;
+  border: 1px solid rgb(244 247 251 / 75%);
+  opacity: 0;
+  animation: ps-ripple 2.6s ease-out infinite;
+}
+.page-switch__ripple--late { animation-delay: 1.3s; }
+.page-switch--ink .page-switch__arrow { left: 11px; color: #cbd2de; }
+.page-switch--ink:hover .page-switch__arrow { transform: translateX(-3px); }
+.page-switch__brand {
+  position: relative;
+  z-index: 1;
+  margin-left: 40px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  text-shadow: 0 1px 3px #000;
+}
+
+@keyframes ps-orbit { to { --ps-angle: 360deg; } }
+@keyframes ps-breathe { 50% { opacity: .85; } }
+@keyframes ps-marble { to { transform: rotate(360deg); } }
+@keyframes ps-ripple {
+  0% { transform: scale(1); opacity: .85; }
+  100% { transform: scale(7); opacity: 0; }
+}
+
+/* Compact: just the mark, in the same place. */
+@media (max-width: 1099px) {
+  .page-switch__arrow,
+  .page-switch__brand { display: none; }
+  .page-switch--galaxy .gateway-galaxy { padding: 0; justify-content: center; }
+  .page-switch--galaxy .gateway-galaxy__label { font-size: 0; gap: 0; }
+  .page-switch__dot,
+  .page-switch__ripple { left: 50%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-switch,
+  .page-switch::before,
+  .page-switch::after,
+  .page-switch__marble,
+  .page-switch__ripple { animation: none; transition: none; }
+  .page-switch__ripple { display: none; }
+}
+
+@media (forced-colors: active) {
+  .page-switch { color: LinkText; border: 1px solid LinkText; }
+  .page-switch::before,
+  .page-switch::after,
+  .page-switch__marble,
+  .page-switch__ripple { display: none; }
+}
+
+/*
+ * Room for the button. Only while it is on screen (the component sets the
+ * attribute), so accounts without Thruline keep their headers as they were.
+ */
+html[data-has-page-switch] .x-header { padding-right: var(--ps-reserve); }
+/* The FreeLLMAPI navbar centres a 72rem column; only the part of the reserve that
+   falls inside that column needs padding, and none at all on very wide screens. */
+html[data-has-page-switch] .ps-reserve {
+  padding-right: max(1.5rem, calc(var(--ps-reserve) - max(0px, (100vw - 72rem) / 2)));
+}

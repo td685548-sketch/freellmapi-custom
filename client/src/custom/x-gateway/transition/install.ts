@@ -1,10 +1,12 @@
-import { playPortal, portalSupported, warmPortal } from './portal'
+import { effectFor } from './effects'
+import { overlaySupported, playEffect, warmEffect } from './overlay'
 
 /**
- * Plays the WebGPU transition when a link crosses between the FreeLLMAPI
+ * Plays a WebGPU transition when a link crosses between the FreeLLMAPI
  * dashboard and Thruline (/thruline). Installed once as a document-level listener so
- * no upstream component has to know about it. Browsers without WebGPU, and
- * people who prefer reduced motion, get the normal instant navigation.
+ * no upstream component has to know about it. Going in and coming back use
+ * different effects (see effects.ts). Browsers without WebGPU, and people who
+ * prefer reduced motion, get the normal instant navigation.
  */
 const base = import.meta.env.BASE_URL.replace(/\/$/, '')
 const inGateway = (pathname: string) => {
@@ -35,9 +37,22 @@ function navigate(anchor: HTMLAnchorElement, url: URL) {
   }
 }
 
+/**
+ * Where the effect starts. The page switch always starts from its own centre, so
+ * a click on its edge and a keyboard press look the same; any other link starts
+ * from the pointer (or from the link itself when activated by keyboard).
+ */
+function originOf(event: MouseEvent, anchor: HTMLAnchorElement) {
+  const box = anchor.getBoundingClientRect()
+  const centre = { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+  if (anchor.hasAttribute('data-page-switch')) return centre
+  const fromKeyboard = event.clientX === 0 && event.clientY === 0
+  return fromKeyboard ? centre : { x: event.clientX, y: event.clientY }
+}
+
 function onClick(event: MouseEvent) {
   if (replaying || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-  if (!portalSupported()) return
+  if (!overlaySupported()) return
   const link = crossingLink(event.target)
   if (!link) return
   event.preventDefault()
@@ -46,13 +61,8 @@ function onClick(event: MouseEvent) {
   running = true
   let navigated = false
   const go = () => { if (!navigated) { navigated = true; navigate(link.anchor, link.url) } }
-  // A keyboard-activated link reports 0,0; start from the link itself then.
-  const box = link.anchor.getBoundingClientRect()
-  const fromKeyboard = event.clientX === 0 && event.clientY === 0
-  playPortal({
-    x: fromKeyboard ? box.left + box.width / 2 : event.clientX,
-    y: fromKeyboard ? box.top + box.height / 2 : event.clientY,
-    entering: link.entering,
+  playEffect(effectFor(link.entering), {
+    ...originOf(event, link.anchor),
     dark: document.documentElement.classList.contains('dark'),
     onCovered: go,
   }).catch(go).finally(() => { running = false })
@@ -60,7 +70,9 @@ function onClick(event: MouseEvent) {
 
 /** Start building the GPU pipeline as soon as the pointer or focus reaches a crossing link. */
 function onIntent(event: Event) {
-  if (portalSupported() && crossingLink(event.target)) void warmPortal()
+  if (!overlaySupported()) return
+  const link = crossingLink(event.target)
+  if (link) void warmEffect(effectFor(link.entering))
 }
 
 let installed = false
