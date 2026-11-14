@@ -13,6 +13,11 @@ import { contentToString } from '../../lib/content.js';
 import { proxyFetch } from '../../lib/proxy.js';
 import type { CompletionOptions } from '../../providers/base.js';
 import { looksLikeCookieHeader, looksLikeHtmlDocument } from './cookie-format.js';
+import {
+  downloadProviderImage,
+  playgroundMediaUrl,
+  storePlaygroundMedia,
+} from '../x-gateway/playground-media.js';
 
 const DEFAULT_BASE_URL = 'https://gemini.google.com';
 const GEMINI_UPLOAD_URL = 'https://push.clients6.google.com/upload/';
@@ -566,6 +571,7 @@ export async function* streamGeminiWebChat(
     let emittedText = '';
     let sawRpcError: number | undefined;
     const imageMarkdown: string[] = [];
+    const replyImages: GeminiWebImage[] = [];
 
     const processLine = (rawLine: string): string | null => {
       const trimmed = rawLine.trim();
@@ -582,11 +588,9 @@ export async function* streamGeminiWebChat(
         sawRpcError = errorCode;
       }
       for (const image of images ?? []) {
-        // The reply text only names the placeholder; hand back the real asset
-        // as markdown so chat clients render the picture instead of a link.
-        const alt = image.alt?.trim() || 'Generated image';
-        const markdown = `[![${alt.replace(/[[\]]/g, '')}](${image.url})](${image.url})`;
-        if (!imageMarkdown.includes(markdown)) imageMarkdown.push(markdown);
+        // The reply text only names the placeholder; remember the real asset and
+        // rewrite it once the stream ends.
+        if (!replyImages.some(existing => existing.url === image.url)) replyImages.push(image);
       }
       if (text !== undefined) {
         const cumulative = stripGeminiPlaceholders(text);
@@ -621,11 +625,24 @@ export async function* streamGeminiWebChat(
       reader.cancel().catch(() => {});
     }
 
-    if (imageMarkdown.length > 0) {
+    if (replyImages.length > 0) {
+      for (const image of replyImages) {
+        // The console blocks cross-origin images (CSP `img-src 'self' data:`)
+        // and the CDN needs the account's cookies, so re-host the picture and
+        // point the markdown at our own origin. If the download fails, fall back
+        // to the provider URL as a plain link rather than a broken image.
+        const alt = (image.alt?.trim() || 'Generated image').replace(/[[\]]/g, '');
+        const downloaded = await downloadProviderImage(image.url, cookieHeader, opts.options?.signal)
+          .catch(() => null);
+        const id = downloaded ? storePlaygroundMedia(downloaded.bytes, downloaded.contentType) : null;
+        imageMarkdown.push(id
+          ? `![${alt}](${playgroundMediaUrl(id)})`
+          : `[${alt}](${image.url})`);
+      }
       yield { content: `${emittedText ? '\n\n' : ''}${imageMarkdown.join('\n\n')}` };
     }
 
-    if (!emittedText && imageMarkdown.length === 0) {
+    if (!emittedText && replyImages.length === 0) {
       if (sawRpcError !== undefined) {
         sessionCache.delete(`${origin}::${cookieHeader}`);
         throw new GeminiWebChatError(
