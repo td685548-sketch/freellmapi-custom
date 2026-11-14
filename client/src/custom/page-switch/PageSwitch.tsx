@@ -5,6 +5,7 @@ import { useI18n } from '@/i18n'
 import { useUserSession } from '../use-session'
 import { GatewayGalaxyLabel } from '../x-gateway/GatewayGalaxyLabel'
 import { readMemory, remember, sideOf, switchTarget } from './switch-state'
+import '../x-gateway/transition/install'
 import './page-switch.css'
 
 /**

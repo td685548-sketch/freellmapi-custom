@@ -21,6 +21,7 @@ import { Dialog, DialogDescription, DialogPopup, DialogTitle } from '@/component
 import { apiFetch } from '@/lib/api'
 import { accountsApi, refreshAccounts, useAccounts, type BatchTestResponse, type ValidateNodeResponse, type CustomProviderNode } from '../api'
 import { useXStrings } from '../strings'
+import { AccountLoadState } from '../components/AccountLoadState'
 import { useXGatewayCopy } from '../copy'
 import type { AccountProvider } from '../../../../../shared/x-accounts'
 
@@ -75,10 +76,8 @@ export function ProviderMark({ id, name }: { id: string; name?: string }) {
   return <span className={`x-provider-mark ${colors[id] ?? 'blue'}`} aria-hidden="true">{id === 'github-copilot' ? <GitBranch size={26} /> : id === 'openrouter' ? <Waypoints size={27} /> : <span>{id.slice(0, 2).toUpperCase()}</span>}</span>
 }
 
-export function AccountLoadState({ error, retry }: { error?: boolean; retry?: () => void }) {
-  const s = useXStrings()
-  return <div className="x-empty" role={error ? 'alert' : 'status'}>{error ? <Server size={32} /> : <LoaderCircle size={30} className="x-spin" />}<p>{error ? s.loadError : s.loading}</p>{error && <button className="x-button" onClick={retry}>{s.retry}</button>}</div>
-}
+// Moved so the Thruline shell can show it without downloading this page; re-exported for the pages that import it from here.
+export { AccountLoadState }
 
 function ProviderCard({
   provider,

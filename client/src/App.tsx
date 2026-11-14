@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { Suspense, useEffect, useState, type ReactNode } from 'react'
 import { PageSwitch } from './custom/page-switch/PageSwitch'
 import { BrowserRouter, Routes, Route, Navigate, NavLink, Link, useLocation, useNavigate } from 'react-router-dom'
 import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -31,33 +31,19 @@ import { I18nProvider, useI18n } from '@/i18n'
 import { logout } from '@/lib/api'
 import { toast } from '@/lib/toast'
 import { ThemeProvider } from '@/theme'
-import KeysPage from '@/pages/KeysPage'
-import PlaygroundPage from '@/pages/PlaygroundPage'
-import FallbackPage from '@/pages/FallbackPage'
-import ModelDetailPage from '@/pages/ModelDetailPage'
-import FusionPage from '@/pages/FusionPage'
-import EmbeddingsPage from '@/pages/EmbeddingsPage'
-import ImagePage from '@/pages/ImagePage'
-import VideoPage from '@/pages/VideoPage'
-import AudioPage from '@/pages/AudioPage'
-import SearchPage from '@/pages/SearchPage'
-import DecisionPage from '@/pages/DecisionPage'
-import MediaDetailPage from '@/pages/MediaDetailPage'
-import EmbeddingDetailPage from '@/pages/EmbeddingDetailPage'
 import { useAdministrativeAccess } from '@/custom/use-administrative-access'
-import { AnalyticsAccessPage, InvitesAccessPage, LogsAccessPage, UsersAccessPage } from '@/custom/ScopedAdministrativePages'
 import { UsersNavBadge } from '@/custom/UsersNavBadge'
-import { UserAnalyticsPage } from '@/custom/UserAnalyticsPage'
-import { ProfileUsagePage } from '@/custom/ProfileUsagePage'
-import { UsageRankingPage } from '@/custom/UsageRankingPage'
-import { AuditLogPage } from '@/custom/AuditLogPage'
-import PremiumPage from '@/pages/PremiumPage'
 import NotFoundPage from '@/pages/NotFoundPage'
-import AgentsPage from '@/pages/AgentsPage'
-import XGatewayApp from '@/custom/x-gateway/XGatewayApp'
+// Every routed page is downloaded on first use; see custom/route-splitting.
+import {
+  AgentsPage, AiPlatformApp, AnalyticsAccessPage, AuditLogPage, AudioPage, DecisionPage, EmbeddingDetailPage,
+  EmbeddingsPage, FallbackPage, FusionPage, ImagePage, InvitesAccessPage, KeysPage, LogsAccessPage,
+  MediaDetailPage, ModelDetailPage, PlaygroundPage, PremiumPage, ProfileUsagePage, SearchPage,
+  UsageRankingPage, UserAnalyticsPage, UsersAccessPage, VideoPage, XGatewayApp, preloadRoute,
+} from '@/custom/route-splitting/lazy-pages'
+import { RouteFallback } from '@/custom/route-splitting/RouteFallback'
 import { legacyGatewayTarget } from '@/custom/x-gateway/legacy-gateway-target'
 // ai-platform (T032/US1 — Foundation dashboard)
-import { AiPlatformApp } from '@/custom/ai-platform/AiPlatformApp'
 import { useCustomT } from '@/custom/i18n/use-custom-t'
 
 // Every failed mutation surfaces as an error toast, so no action fails
@@ -139,6 +125,8 @@ function NavItem({ to, children }: { to: string; children: React.ReactNode }) {
   return (
     <NavLink
       to={to}
+      onPointerEnter={() => preloadRoute(to)}
+      onFocus={() => preloadRoute(to)}
       className={({ isActive }) =>
         `relative text-sm px-1 py-4 transition-colors ${
           isActive
@@ -342,7 +330,7 @@ export function Navbar() {
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start" className="w-44">
                       {(item.to === '/analytics' ? analyticsMenuEntries(menu.items) : menu.items).map((entry) => (
-                        <DropdownMenuItem key={entry.to} onClick={() => navigate(entry.to)}>
+                        <DropdownMenuItem key={entry.to} onClick={() => navigate(entry.to)} onPointerEnter={() => preloadRoute(entry.to)}>
                           {entry.customLabel || t(entry.labelKey)}
                         </DropdownMenuItem>
                       ))}
@@ -418,7 +406,7 @@ export function Navbar() {
                         </DropdownMenuSubTrigger>
                         <DropdownMenuSubContent>
                           {(item.to === '/analytics' ? analyticsMenuEntries(menu.items) : menu.items).map((entry) => (
-                            <DropdownMenuItem key={entry.to} onClick={() => navigate(entry.to)}>
+                            <DropdownMenuItem key={entry.to} onClick={() => navigate(entry.to)} onPointerEnter={() => preloadRoute(entry.to)}>
                               {entry.customLabel || t(entry.labelKey)}
                             </DropdownMenuItem>
                           ))}
@@ -514,8 +502,8 @@ function AppShell({ children }: { children: ReactNode }) {
   const fullBleed = FULL_BLEED_ROUTES.has(location.pathname)
   const legacyGateway = legacyGatewayTarget(location)
   if (legacyGateway) return <Navigate to={legacyGateway} replace />
-  if (location.pathname === '/thruline' || location.pathname.startsWith('/thruline/')) return <XGatewayApp />
-  if (location.pathname === '/ai-platform' || location.pathname.startsWith('/ai-platform/')) return <AiPlatformApp />
+  if (location.pathname === '/thruline' || location.pathname.startsWith('/thruline/')) return <Suspense fallback={<RouteFallback fullScreen />}><XGatewayApp /></Suspense>
+  if (location.pathname === '/ai-platform' || location.pathname.startsWith('/ai-platform/')) return <Suspense fallback={<RouteFallback fullScreen />}><AiPlatformApp /></Suspense>
   return (
     <div className={`flex flex-col ${fullBleed ? 'h-dvh overflow-hidden' : 'min-h-screen'} ${isMacDesktop ? 'desktop-backdrop' : 'bg-background'}`}>
       {children}
@@ -540,40 +528,42 @@ function App() {
                 <Navbar />
                 <PageContainer>
                   <PageBoundary>
-                    <Routes>
-                      <Route path="/" element={<Navigate to="/models/chat" replace />} />
-                      <Route path="/models" element={<Navigate to="/models/chat" replace />} />
-                      <Route path="/models/chat" element={<FallbackPage />} />
-                      <Route path="/models/chat/:id" element={<ModelDetailPage />} />
-                      <Route path="/models/fusion" element={<FusionPage />} />
-                      <Route path="/models/embeddings" element={<EmbeddingsPage />} />
-                      <Route path="/models/embeddings/:id" element={<EmbeddingDetailPage />} />
-                      <Route path="/models/image" element={<ImagePage />} />
-                      <Route path="/models/image/:id" element={<MediaDetailPage modality="image" />} />
-                      <Route path="/models/video" element={<VideoPage />} />
-                      <Route path="/models/video/:id" element={<MediaDetailPage modality="video" />} />
-                      <Route path="/models/audio" element={<AudioPage />} />
-                      <Route path="/models/audio/:id" element={<MediaDetailPage modality="audio" />} />
-                      <Route path="/models/transcription/:id" element={<MediaDetailPage modality="transcription" />} />
-                      <Route path="/models/search" element={<SearchPage />} />
-                      <Route path="/models/decision" element={<DecisionPage />} />
-                      <Route path="/playground" element={<PlaygroundPage />} />
-                      <Route path="/keys" element={<KeysPage />} />
-                      <Route path="/invites" element={<InvitesAccessPage />} />
-                      <Route path="/users" element={<UsersAccessPage />} />
-                      <Route path="/users/:id/analytics" element={<UserAnalyticsPage />} />
-                      <Route path="/profiles/:id/usage" element={<ProfileUsagePage />} />
-                      <Route path="/usage" element={<UsageRankingPage />} />
-                      <Route path="/audit" element={<AuditLogPage />} />
-                      <Route path="/agents" element={<AgentsPage />} />
-                      <Route path="/fallback" element={<Navigate to="/models/chat" replace />} />
-                      <Route path="/analytics" element={<AnalyticsAccessPage />} />
-                      <Route path="/logs" element={<LogsAccessPage />} />
-                      <Route path="/premium" element={<PremiumPage />} />
-                      <Route path="/test" element={<Navigate to="/playground" replace />} />
-                      <Route path="/health" element={<Navigate to="/keys" replace />} />
-                      <Route path="*" element={<NotFoundPage />} />
-                    </Routes>
+                    <Suspense fallback={<RouteFallback />}>
+                      <Routes>
+                        <Route path="/" element={<Navigate to="/models/chat" replace />} />
+                        <Route path="/models" element={<Navigate to="/models/chat" replace />} />
+                        <Route path="/models/chat" element={<FallbackPage />} />
+                        <Route path="/models/chat/:id" element={<ModelDetailPage />} />
+                        <Route path="/models/fusion" element={<FusionPage />} />
+                        <Route path="/models/embeddings" element={<EmbeddingsPage />} />
+                        <Route path="/models/embeddings/:id" element={<EmbeddingDetailPage />} />
+                        <Route path="/models/image" element={<ImagePage />} />
+                        <Route path="/models/image/:id" element={<MediaDetailPage modality="image" />} />
+                        <Route path="/models/video" element={<VideoPage />} />
+                        <Route path="/models/video/:id" element={<MediaDetailPage modality="video" />} />
+                        <Route path="/models/audio" element={<AudioPage />} />
+                        <Route path="/models/audio/:id" element={<MediaDetailPage modality="audio" />} />
+                        <Route path="/models/transcription/:id" element={<MediaDetailPage modality="transcription" />} />
+                        <Route path="/models/search" element={<SearchPage />} />
+                        <Route path="/models/decision" element={<DecisionPage />} />
+                        <Route path="/playground" element={<PlaygroundPage />} />
+                        <Route path="/keys" element={<KeysPage />} />
+                        <Route path="/invites" element={<InvitesAccessPage />} />
+                        <Route path="/users" element={<UsersAccessPage />} />
+                        <Route path="/users/:id/analytics" element={<UserAnalyticsPage />} />
+                        <Route path="/profiles/:id/usage" element={<ProfileUsagePage />} />
+                        <Route path="/usage" element={<UsageRankingPage />} />
+                        <Route path="/audit" element={<AuditLogPage />} />
+                        <Route path="/agents" element={<AgentsPage />} />
+                        <Route path="/fallback" element={<Navigate to="/models/chat" replace />} />
+                        <Route path="/analytics" element={<AnalyticsAccessPage />} />
+                        <Route path="/logs" element={<LogsAccessPage />} />
+                        <Route path="/premium" element={<PremiumPage />} />
+                        <Route path="/test" element={<Navigate to="/playground" replace />} />
+                        <Route path="/health" element={<Navigate to="/keys" replace />} />
+                        <Route path="*" element={<NotFoundPage />} />
+                      </Routes>
+                    </Suspense>
                   </PageBoundary>
                 </PageContainer>
                 <Toaster />

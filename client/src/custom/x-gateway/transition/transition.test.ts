@@ -71,7 +71,12 @@ describe('effects', () => {
 
 describe('page transition install', () => {
   // The module installs document-level listeners once, so load it once for the whole file.
-  beforeAll(async () => { await import('./install') })
+  beforeAll(async () => {
+    // jsdom has neither WebGPU nor matchMedia; the install guard looks for both before loading anything.
+    Object.defineProperty(navigator, 'gpu', { value: {}, configurable: true })
+    window.matchMedia = (() => ({ matches: false })) as unknown as typeof window.matchMedia
+    await import('./install')
+  })
   beforeEach(() => {
     overlay.playEffect.mockClear()
     document.body.innerHTML = ''
