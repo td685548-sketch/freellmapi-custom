@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -53,6 +54,46 @@ describe('encrypted SQLite backup', () => {
 
     const restored = new Database(dbPath);
     expect((restored.prepare('SELECT name FROM items').get() as { name: string }).name).toBe('survived');
+    restored.close();
+  });
+});
+
+describe('backup does not stall the server', () => {
+  afterEach(() => restoreEnv());
+
+  it('keeps the event loop running while a large database is compressed', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'freeapi-db-backup-loop-'));
+    const dbPath = path.join(dir, 'freeapi.db');
+    process.env.ENCRYPTION_KEY = 'a'.repeat(64);
+    process.env.FREEAPI_DB_BACKUP_PATH = path.join(dir, 'backup.bin');
+
+    // Random bytes do not compress, so the gzip step takes long enough to measure reliably.
+    const db = new Database(dbPath);
+    db.exec('CREATE TABLE blobs (data BLOB)');
+    const insert = db.prepare('INSERT INTO blobs (data) VALUES (?)');
+    const chunk = crypto.randomBytes(1024 * 1024);
+    db.transaction(() => { for (let i = 0; i < 24; i++) insert.run(chunk); })();
+
+    let ticks = 0;
+    const timer = setInterval(() => { ticks++; }, 1);
+    try {
+      const result = await backupDbNow(db, dbPath);
+      expect(result.ok).toBe(true);
+    } finally {
+      clearInterval(timer);
+      db.close();
+    }
+
+    // With a synchronous gzip the loop is frozen for the whole compression and barely ticks once.
+    expect(ticks).toBeGreaterThan(10);
+
+    // And the result is still a backup that restores.
+    fs.rmSync(dbPath);
+    fs.rmSync(`${dbPath}-wal`, { force: true });
+    fs.rmSync(`${dbPath}-shm`, { force: true });
+    expect((await restoreDbBackupIfNeeded(dbPath)).restored).toBe(true);
+    const restored = new Database(dbPath);
+    expect((restored.prepare('SELECT COUNT(*) AS n FROM blobs').get() as { n: number }).n).toBe(24);
     restored.close();
   });
 });

@@ -40,6 +40,7 @@ import { guardKeyAddition } from './key-addition-guard.js';
 import { cachePreferencesRouter } from '../routes/cache-preferences.js';
 import { outputSaversRouter } from './output-savers/router.js';
 import { statusCache } from './status-cache.js';
+import { analyticsMemo } from './analytics-memo.js';
 import { xGatewayRouter } from './x-gateway/router.js';
 import { xGatewayConsoleRouter } from './x-gateway/console-router.js';
 import { xSkillsPublicRouter } from './x-gateway/skills-router.js';
@@ -175,6 +176,8 @@ export function registerCustomRoutes(app: Express): void {
 
   // Granular route-level permission gates for upstream-mounted endpoints
   for (const gate of PERMISSION_GATES) installGate(app, gate);
+  // After the gates, never before: every caller is still authorised; only the computed answer is shared.
+  app.use('/api/analytics', analyticsMemo);
   app.use(['/api/keys', '/api/embeddings', '/api/media', '/api/decisions'], guardKeyAddition);
   // Usage and request cap per client profile; the manage_settings gate for this prefix is installed just above.
   app.use('/api/client-profiles', profileAnalyticsRouter, profileQuotaRouter, profileRestrictionsRouter, profileTestRouter, profileKeyRotationRouter, profileRequestsRouter, endUsersRouter, profileKnowledgeRouter, profileConversationsRouter, contentFilterRouter, quickAnswersRouter, profileFeedbackRouter);
