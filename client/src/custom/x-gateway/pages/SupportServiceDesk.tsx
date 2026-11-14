@@ -427,7 +427,7 @@ function WidgetTabPanel({
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           {/* Status */}
-          <div style={{ padding: 16, background: '#f9fafb', borderRadius: 8, border: '1px solid #e5e7eb' }}>
+          <div style={{ padding: 16, background: 'var(--x-alt)', borderRadius: 8, border: '1px solid var(--x-border)' }}>
             <h3 style={{ margin: '0 0 8px 0', fontSize: 14, fontWeight: 600 }}>{s.widget.statusHeading}</h3>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 500 }}>
               <input
@@ -558,8 +558,8 @@ function WidgetTabPanel({
                         alignItems: 'center',
                         justifyContent: 'space-between',
                         padding: '6px 10px',
-                        background: '#f9fafb',
-                        border: '1px solid #e5e7eb',
+                        background: 'var(--x-alt)',
+                        border: '1px solid var(--x-border)',
                         borderRadius: 6,
                         fontSize: 13,
                       }}
@@ -582,7 +582,7 @@ function WidgetTabPanel({
           </div>
 
           {/* Intake Survey Configuration */}
-          <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ borderTop: '1px solid var(--x-border)', paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
             <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>{s.widget.intakeHeading}</h3>
 
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 500 }}>
@@ -625,14 +625,14 @@ function WidgetTabPanel({
                   flexDirection: 'column',
                   gap: 8,
                   padding: 12,
-                  background: '#f9fafb',
-                  border: '1px solid #e5e7eb',
+                  background: 'var(--x-alt)',
+                  border: '1px solid var(--x-border)',
                   borderRadius: 8,
                 }}
               >
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#4b5563' }}>
+                    <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--x-muted)' }}>
                       {s.widget.fieldKey}
                     </label>
                     <input
@@ -644,7 +644,7 @@ function WidgetTabPanel({
                     />
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#4b5563' }}>
+                    <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--x-muted)' }}>
                       {s.widget.fieldLabel}
                     </label>
                     <input
@@ -659,7 +659,7 @@ function WidgetTabPanel({
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, alignItems: 'center' }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#4b5563' }}>
+                    <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--x-muted)' }}>
                       {s.widget.fieldType}
                     </label>
                     <select
@@ -701,7 +701,7 @@ function WidgetTabPanel({
 
                 {field.type === 'select' && (
                   <div>
-                    <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#4b5563' }}>
+                    <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--x-muted)' }}>
                       {s.widget.fieldOptions}
                     </label>
                     <input
@@ -985,8 +985,8 @@ function CopilotConversationPanel({ tenantBase, tenantKey, tenant, activeConv, c
             <div
               data-testid="copilot-messages-list"
               style={{
-                background: '#f9fafb',
-                border: '1px solid #e5e7eb',
+                background: 'var(--x-alt)',
+                border: '1px solid var(--x-border)',
                 borderRadius: 8,
                 padding: 14,
                 maxHeight: 460,
@@ -1011,9 +1011,9 @@ function CopilotConversationPanel({ tenantBase, tenantKey, tenant, activeConv, c
                       alignSelf: isUser ? 'flex-end' : 'flex-start',
                       maxWidth: '85%',
                       padding: '8px 12px',
-                      background: isUser ? '#2563eb' : '#fff',
-                      color: isUser ? '#fff' : '#1f2937',
-                      border: isUser ? 'none' : '1px solid #e5e7eb',
+                      background: isUser ? '#2563eb' : 'var(--x-panel)',
+                      color: isUser ? '#fff' : 'var(--x-text)',
+                      border: isUser ? 'none' : '1px solid var(--x-border)',
                       borderRadius: 12,
                       fontSize: 13,
                       wordBreak: 'break-word',
@@ -1092,8 +1092,8 @@ function CopilotConversationPanel({ tenantBase, tenantKey, tenant, activeConv, c
                       data-testid={`copilot-draft-${draft.tone}`}
                       style={{
                         padding: 12,
-                        background: '#fff',
-                        border: '1px solid #e5e7eb',
+                        background: 'var(--x-panel)',
+                        border: '1px solid var(--x-border)',
                         borderRadius: 8,
                         display: 'flex',
                         flexDirection: 'column',
@@ -1116,14 +1116,14 @@ function CopilotConversationPanel({ tenantBase, tenantKey, tenant, activeConv, c
                       </div>
                       <div
                         data-testid={`copilot-draft-text-${draft.tone}`}
-                        style={{ fontSize: 13, color: '#374151', whiteSpace: 'pre-wrap' }}
+                        style={{ fontSize: 13, color: 'var(--x-text)', whiteSpace: 'pre-wrap' }}
                       >
                         {draft.text}
                       </div>
                       {draft.citations && draft.citations.length > 0 && (
                         <div
                           data-testid={`copilot-draft-citations-${draft.tone}`}
-                          style={{ fontSize: 11, color: '#6b7280', borderTop: '1px solid #f3f4f6', paddingTop: 6 }}
+                          style={{ fontSize: 11, color: 'var(--x-muted)', borderTop: '1px solid var(--x-border)', paddingTop: 6 }}
                         >
                           <strong>{s.copilot.citationsHeading}: </strong>
                           {draft.citations.map((c, ci) => (
@@ -1142,10 +1142,10 @@ function CopilotConversationPanel({ tenantBase, tenantKey, tenant, activeConv, c
                   data-testid="copilot-usage-info"
                   style={{
                     padding: 8,
-                    background: '#f9fafb',
+                    background: 'var(--x-alt)',
                     borderRadius: 6,
                     fontSize: 11,
-                    color: '#6b7280',
+                    color: 'var(--x-muted)',
                     display: 'flex',
                     flexWrap: 'wrap',
                     gap: 12,
@@ -1174,7 +1174,7 @@ function CopilotConversationPanel({ tenantBase, tenantKey, tenant, activeConv, c
             <div
               data-testid="copilot-composer-section"
               style={{
-                borderTop: '1px solid #e5e7eb',
+                borderTop: '1px solid var(--x-border)',
                 paddingTop: 14,
                 display: 'flex',
                 flexDirection: 'column',
@@ -1363,7 +1363,7 @@ function QueuesTabPanel({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       {/* Section 1: SLA Policy Configuration */}
-      <div style={{ padding: 16, background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8 }}>
+      <div style={{ padding: 16, background: 'var(--x-alt)', border: '1px solid var(--x-border)', borderRadius: 8 }}>
         <h3 style={{ margin: '0 0 8px 0', fontSize: 15, fontWeight: 600 }}>{s.queues.policyHeading}</h3>
         <p className="x-hint" style={{ margin: '0 0 14px 0', fontSize: 12 }}>
           {s.queues.policyEnabledHint}
@@ -1394,19 +1394,19 @@ function QueuesTabPanel({
                 key={p}
                 style={{
                   padding: 10,
-                  background: '#fff',
-                  border: '1px solid #e5e7eb',
+                  background: 'var(--x-panel)',
+                  border: '1px solid var(--x-border)',
                   borderRadius: 6,
                   display: 'flex',
                   flexDirection: 'column',
                   gap: 6,
                 }}
               >
-                <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--x-text)' }}>
                   {s.queues.priorities[p]}
                 </span>
                 <div>
-                  <label style={{ display: 'block', fontSize: 11, color: '#6b7280' }}>
+                  <label style={{ display: 'block', fontSize: 11, color: 'var(--x-muted)' }}>
                     {s.queues.firstResponseMinutes}
                   </label>
                   <input
@@ -1428,7 +1428,7 @@ function QueuesTabPanel({
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: 11, color: '#6b7280' }}>
+                  <label style={{ display: 'block', fontSize: 11, color: 'var(--x-muted)' }}>
                     {s.queues.resolutionMinutes}
                   </label>
                   <input
@@ -1484,8 +1484,8 @@ function QueuesTabPanel({
                 gap: 8,
                 alignItems: 'center',
                 padding: 8,
-                background: '#fff',
-                border: '1px solid #e5e7eb',
+                background: 'var(--x-panel)',
+                border: '1px solid var(--x-border)',
                 borderRadius: 6,
               }}
             >
@@ -1598,7 +1598,7 @@ function QueuesTabPanel({
           <div data-testid="queue-items-list" style={{ overflowX: 'auto' }}>
             <table className="x-table" style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
               <thead>
-                <tr style={{ borderBottom: '1px solid #e5e7eb', textAlign: 'left', background: '#f9fafb' }}>
+                <tr style={{ borderBottom: '1px solid var(--x-border)', textAlign: 'left', background: 'var(--x-alt)' }}>
                   <th style={{ padding: '8px 12px' }}>{s.queues.ticketColId}</th>
                   <th style={{ padding: '8px 12px' }}>{s.queues.ticketColSubject}</th>
                   <th style={{ padding: '8px 12px' }}>{s.queues.ticketColPriority}</th>
@@ -1636,14 +1636,14 @@ function QueuesTabPanel({
                     <tr
                       key={t.id}
                       data-testid={`queue-ticket-row-${t.id}`}
-                      style={{ borderBottom: '1px solid #f3f4f6' }}
+                      style={{ borderBottom: '1px solid var(--x-border)' }}
                     >
                       <td style={{ padding: '8px 12px', fontFamily: 'monospace', fontWeight: 600 }}>
                         {t.id.slice(0, 8)}
                       </td>
                       <td style={{ padding: '8px 12px' }}>
                         <div>{t.subject}</div>
-                        {t.reason && <div style={{ fontSize: 11, color: '#6b7280' }}>{t.reason}</div>}
+                        {t.reason && <div style={{ fontSize: 11, color: 'var(--x-muted)' }}>{t.reason}</div>}
                       </td>
                       <td style={{ padding: '8px 12px' }}>
                         <span className="x-badge">{t.priority}</span>
@@ -1794,12 +1794,12 @@ function EmbedTabPanel({
         </div>
       </div>
 
-      <div style={{ padding: 16, background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ padding: 16, background: 'var(--x-alt)', border: '1px solid var(--x-border)', borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 10 }}>
         <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{s.embed.instructionsHeading}</h4>
-        <p style={{ margin: 0, fontSize: 13, color: '#374151' }}>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--x-text)' }}>
           • {s.embed.instructionsGuest}
         </p>
-        <p style={{ margin: 0, fontSize: 13, color: '#374151' }}>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--x-text)' }}>
           • {s.embed.instructionsCustomer}
         </p>
         <div style={{ padding: '8px 12px', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 6, fontSize: 12, color: '#92400e' }}>
