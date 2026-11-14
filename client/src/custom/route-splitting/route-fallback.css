@@ -1,0 +1,4 @@
+/* Hidden for the first 150 ms: a route that loads faster than that never shows a spinner. */
+.route-fallback { animation: route-fallback-in 0.2s ease 0.15s both; }
+@keyframes route-fallback-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .route-fallback { animation: none; } }

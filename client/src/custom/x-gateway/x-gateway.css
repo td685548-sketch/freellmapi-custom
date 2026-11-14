@@ -109,3 +109,9 @@
 .x-snippet-tab { padding: 4px 12px; border-radius: 6px; border: 1px solid transparent; background: transparent; color: var(--x-muted); font-size: 12px; cursor: pointer; }
 .x-snippet-tab.active { background: var(--x-alt); border-color: var(--x-border); color: var(--x-text); font-weight: 600; }
 .x-snippet-code { margin: 0; padding: 14px; border-radius: 8px; background: var(--x-alt); border: 1px solid var(--x-border); overflow-x: auto; font-family: monospace; font-size: 12px; line-height: 1.5; color: var(--x-text); }
+/* Dark theme: make native controls (select popups, optgroup headers, scrollbars)
+   render with a dark palette, and pin optgroup labels which Chrome paints with the
+   select's inherited light colour on a white list. */
+.dark .x-console { color-scheme: dark; }
+.x-console select optgroup { background-color: var(--x-alt); color: var(--x-muted); font-style: normal; font-weight: 600; }
+.x-console select optgroup option { background-color: var(--x-panel); color: var(--x-text); font-weight: 400; }

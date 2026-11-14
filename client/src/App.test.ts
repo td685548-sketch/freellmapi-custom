@@ -37,7 +37,7 @@ describe('app shell heights', () => {
   })
 
   it('renders the X console outside the dashboard navbar and gates its entry', () => {
-    expect(app).toContain("if (location.pathname === '/thruline' || location.pathname.startsWith('/thruline/')) return <XGatewayApp />")
+    expect(app).toContain("if (location.pathname === '/thruline' || location.pathname.startsWith('/thruline/')) return <Suspense fallback={<RouteFallback fullScreen />}><XGatewayApp /></Suspense>")
     // The entry is the page switch, mounted once above both layouts and gated on use_x_gateway
     // inside the component (see PageSwitch.test.tsx), not a nav tab that moves with the navbar.
     expect(app).toContain('<PageSwitch />')

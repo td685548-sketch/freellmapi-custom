@@ -1,12 +1,18 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { gzipSync, gunzipSync } from 'zlib';
+import { promisify } from 'util';
+import { gzip, gunzipSync } from 'zlib';
 import type { Db } from '../db/types.js';
 import type { Scheduler } from './scheduler.js';
 import { getDefaultDbPath } from '../db/index.js';
 import { isTursoDatabase, tursoEnabled } from '../db/turso.js';
 import { restrictToOwner } from './file-permissions.js';
+
+// Compressing a whole database is the one expensive step of a backup (about 0.7 s for a 27 MB
+// file with gzipSync, growing with the file). The async form runs on the libuv thread pool, so
+// requests keep being served while it works.
+const gzipAsync = promisify(gzip);
 
 const MAGIC = Buffer.from('FAPIBK1\0');
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
@@ -256,8 +262,12 @@ export async function backupDbNow(db: Db, dbPath = getDefaultDbPath()): Promise<
     // Best effort: reading the main DB still works for rollback-journal or quiet WAL DBs.
   }
 
+  // The read stays synchronous on purpose: it takes the snapshot in one step relative to this
+  // process's own writes, which could otherwise trigger an automatic checkpoint into the file
+  // while an async read is half done and tear the copy. Everything after it works on the
+  // in-memory snapshot, so only the compression is moved off the event loop.
   const plain = fs.readFileSync(dbPath);
-  const payload = encryptBackup(gzipSync(plain));
+  const payload = encryptBackup(await gzipAsync(plain));
   await writeTarget(target, payload);
   console.log(`[db-backup] uploaded ${plain.length} bytes to ${target}`);
   return { ok: true, target, bytes: plain.length };
