@@ -1,25 +1,34 @@
 /**
- * T053 — Secret-leak verification across MCP server CRUD, responses, error surfaces,
- * call logs, approvals, audit logs, real stdout/stderr sinks, and backup/export.
+ * T053 — Secret-leak verification across MCP server CRUD, authenticated remote
+ * echo (serverInfo, descriptors, tool results, protocol error), seeded call logs,
+ * approvals, audit logs, real stdout/stderr sinks, and backup download artifacts.
  *
- * NOTE: Requires Agent 3 (I0) router mounted at /api/ai-platform/mcp/* and /api/ai-platform/approvals*.
- * Without I0, HTTP calls to /api/ai-platform/mcp/* fail in RED state (404) until I0 is integrated.
+ * Uses opaque credentials without sk-/Bearer prefixes so generic token regexes
+ * cannot mask missing credential-echo scrubbing (F01 / F02).
  */
 
 import type { Server } from 'node:http';
+import zlib from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../../../app.js';
+import { resetFlagsCacheForTests, setFlags } from '../../../custom/ai-platform/flags.js';
+import { executeTool } from '../../../custom/ai-platform/mcp-client/tools.js';
 import { getDb, initDb } from '../../../db/index.js';
+import { hashClientProfileKey } from '../../../lib/system-prompt.js';
 import { createSession, createUser } from '../../../services/auth.js';
 import { setUserPermissions } from '../../../services/users.js';
+import { startFakeMcpHttpServer, type FakeMcpHttpServer } from '../../helpers/ai-platform-fake-mcp-http.js';
 
-const SENTINEL_SECRET = 'sk-mcp-sentinel-secret-9911-do-not-leak';
+const OPAQUE_CREDENTIAL = 'opaque-mcp-sentinel-cred-991122-xyz';
+const OPAQUE_PASSWORD = 'opaque-mcp-sentinel-pass-882233-abc';
 
-describe('MCP secret leak prevention (T053)', () => {
+describe('MCP secret leak prevention (T053 / F01 / F02)', () => {
   let server: Server;
+  let fakeMcp: FakeMcpHttpServer;
   let base: string;
   let primaryToken: string;
-  let memberNoBackupToken: string;
+  let viewerToken: string;
+  let profileId: number;
 
   async function call(path: string, token?: string, method = 'GET', body?: unknown) {
     const res = await fetch(`${base}${path}`, {
@@ -37,6 +46,35 @@ describe('MCP secret leak prevention (T053)', () => {
   beforeAll(async () => {
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     initDb(':memory:');
+    resetFlagsCacheForTests();
+    setFlags({ mcpClient: true });
+
+    fakeMcp = await startFakeMcpHttpServer({
+      serverInfo: {
+        name: 'echo-mcp',
+        version: '1.0.0',
+        echo: OPAQUE_CREDENTIAL,
+      },
+      tools: [
+        {
+          name: 'echo_write',
+          description: `Write tool echoing ${OPAQUE_CREDENTIAL}`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              password: { type: 'string' },
+              note: { type: 'string' },
+            },
+            required: ['id'],
+          },
+        },
+      ],
+      onToolCall: () => ({
+        content: [{ type: 'text', text: `result-echo:${OPAQUE_CREDENTIAL}` }],
+      }),
+    });
+
     server = createApp().listen(0, '127.0.0.1');
     await new Promise<void>((resolve) => server.once('listening', resolve));
     base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
@@ -44,73 +82,170 @@ describe('MCP secret leak prevention (T053)', () => {
     const primaryId = createUser('leak-primary@example.com', 'Password123!').userId;
     primaryToken = createSession(primaryId);
 
-    const memberId = createUser('leak-member@example.com', 'Password123!', 'member').userId;
+    const memberId = createUser('leak-viewer@example.com', 'Password123!', 'member').userId;
     setUserPermissions(memberId, ['view_mcp_servers'], primaryId);
-    memberNoBackupToken = createSession(memberId);
+    viewerToken = createSession(memberId);
+
+    profileId = Number(
+      getDb()
+        .prepare(
+          `INSERT INTO client_profiles (name, token_hash, encrypted_key, iv, auth_tag, enabled, ai_tools_enabled, ai_tool_max_rounds)
+           VALUES ('leak-profile', ?, 'enc', 'iv', 'tag', 1, 1, 8)`,
+        )
+        .run(hashClientProfileKey('leak-profile-raw-key'))
+        .lastInsertRowid,
+    );
   });
 
   afterAll(async () => {
+    resetFlagsCacheForTests();
+    await fakeMcp.close();
     await new Promise<void>((resolve) => server.close(() => resolve()));
+    try {
+      getDb().close();
+    } catch {
+      /* already closed */
+    }
   });
 
-  it('never exposes sentinel secret in server responses, audit logs, call logs, approvals, or stdout/stderr', async () => {
+  it('never leaks opaque credential across authenticated MCP echo, sync error, calls, approvals, audit, or stdout/stderr', async () => {
     const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
 
     try {
+      const originRes = await call('/api/ai-platform/mcp/allowed-internal-hosts', primaryToken, 'PUT', {
+        origins: [fakeMcp.origin],
+      });
+      expect(originRes.status).toBe(200);
+
       const createRes = await call('/api/ai-platform/mcp/servers', primaryToken, 'POST', {
         slug: 'sentinel-srv',
         name: 'Sentinel Server',
-        url: 'https://sentinel.example.com/mcp',
+        url: fakeMcp.url,
         authKind: 'bearer',
-        secret: SENTINEL_SECRET,
+        secret: OPAQUE_CREDENTIAL,
       });
       expect(createRes.status).toBe(201);
-      expect(createRes.text).not.toContain(SENTINEL_SECRET);
+      expect(createRes.text).not.toContain(OPAQUE_CREDENTIAL);
       expect(createRes.text).toContain('"hasSecret":true');
       expect(createRes.text).not.toContain('auth_ciphertext');
 
-      const listRes = await call('/api/ai-platform/mcp/servers', primaryToken);
-      expect(listRes.status).toBe(200);
-      expect(listRes.text).not.toContain(SENTINEL_SECRET);
+      const serverId = (JSON.parse(createRes.text) as { server: { id: number } }).server.id;
 
-      const callsRes = await call('/api/ai-platform/mcp/calls', primaryToken);
-      expect(callsRes.status).toBe(200);
-      expect(callsRes.text).not.toContain(SENTINEL_SECRET);
+      // Test & sync against fakeMcp echoing OPAQUE_CREDENTIAL in serverInfo and descriptor
+      const testRes = await call(`/api/ai-platform/mcp/servers/${serverId}/test`, primaryToken, 'POST');
+      expect(testRes.status).toBe(200);
+      expect(testRes.text).not.toContain(OPAQUE_CREDENTIAL);
+
+      const syncRes = await call(`/api/ai-platform/mcp/servers/${serverId}/sync`, primaryToken, 'POST');
+      expect(syncRes.status).toBe(200);
+      expect(syncRes.text).not.toContain(OPAQUE_CREDENTIAL);
+
+      const toolsRes = await call(`/api/ai-platform/mcp/servers/${serverId}/tools`, viewerToken);
+      expect(toolsRes.status).toBe(200);
+      expect(toolsRes.text).not.toContain(OPAQUE_CREDENTIAL);
+      const toolId = (JSON.parse(toolsRes.text) as { tools: Array<{ id: number }> }).tools[0]!.id;
+
+      // Approve as read? No, keep write -> bind -> queue pending approval with password + credential
+      const reviewRes = await call(`/api/ai-platform/mcp/tools/${toolId}`, primaryToken, 'PATCH', {
+        state: 'allowed',
+        effect: 'write',
+      });
+      expect(reviewRes.status).toBe(200);
+
+      const bindRes = await call(`/api/ai-platform/mcp/bindings/profile/${profileId}`, primaryToken, 'PUT', {
+        toolIds: [toolId],
+        enabled: true,
+        maxRounds: 8,
+      });
+      expect(bindRes.status).toBe(200);
+
+      const boundRes = await call(`/api/ai-platform/mcp/bindings/profile/${profileId}`, viewerToken);
+      expect(boundRes.status).toBe(200);
+      const boundTool = (JSON.parse(boundRes.text) as { binding: { tools: Array<{ id: number; serverId: number; serverSlug: string; name: string; exposedName: string; description: string | null; inputSchema: Record<string, unknown>; outputSchema: Record<string, unknown> | null; effect: 'read' | 'write' }> } }).binding.tools[0]!;
+
+      const execOutcome = await executeTool(
+        {
+          scope: { kind: 'profile', id: String(profileId) },
+          endUser: 'leak-end-user',
+          turnId: 'leak-turn-1',
+          stepSeq: 1,
+          signal: new AbortController().signal,
+        },
+        {
+          toolId: boundTool.id,
+          serverId: boundTool.serverId,
+          serverSlug: boundTool.serverSlug,
+          name: boundTool.name,
+          exposedName: boundTool.exposedName,
+          description: boundTool.description,
+          inputSchema: boundTool.inputSchema,
+          outputSchema: boundTool.outputSchema,
+          effect: boundTool.effect,
+          timeoutMs: 5000,
+          maxResultBytes: 65536,
+          maxConcurrency: 2,
+        },
+        { id: 'order-1', password: OPAQUE_PASSWORD, note: OPAQUE_CREDENTIAL },
+      );
+      expect(execOutcome.kind).toBe('awaiting_approval');
+
+      // Also trigger protocol error echoing OPAQUE_CREDENTIAL during sync
+      fakeMcp.setConfig({ protocolVersion: OPAQUE_CREDENTIAL });
+      const errSyncRes = await call(`/api/ai-platform/mcp/servers/${serverId}/sync`, primaryToken, 'POST');
+      expect(errSyncRes.status).toBeGreaterThanOrEqual(400);
+      expect(errSyncRes.text).not.toContain(OPAQUE_CREDENTIAL);
+
+      // Viewer-only user (view_mcp_servers) must never see credential in list/calls
+      const viewerListRes = await call('/api/ai-platform/mcp/servers', viewerToken);
+      expect(viewerListRes.status).toBe(200);
+      expect(viewerListRes.text).not.toContain(OPAQUE_CREDENTIAL);
+
+      const viewerCallsRes = await call('/api/ai-platform/mcp/calls', viewerToken);
+      expect(viewerCallsRes.status).toBe(200);
+      expect(viewerCallsRes.text).not.toContain(OPAQUE_CREDENTIAL);
+      expect(viewerCallsRes.text).not.toContain(OPAQUE_PASSWORD);
 
       const approvalsRes = await call('/api/ai-platform/approvals', primaryToken);
       expect(approvalsRes.status).toBe(200);
-      expect(approvalsRes.text).not.toContain(SENTINEL_SECRET);
+      expect(approvalsRes.text).not.toContain(OPAQUE_CREDENTIAL);
+      expect(approvalsRes.text).not.toContain(OPAQUE_PASSWORD);
 
-      const auditRows = getDb().prepare('SELECT * FROM custom_audit_log ORDER BY id DESC LIMIT 20').all();
-      expect(JSON.stringify(auditRows)).not.toContain(SENTINEL_SECRET);
+      const auditRows = getDb().prepare('SELECT * FROM custom_audit_log ORDER BY id DESC LIMIT 30').all();
+      const auditJson = JSON.stringify(auditRows);
+      expect(auditJson).not.toContain(OPAQUE_CREDENTIAL);
+      expect(auditJson).not.toContain(OPAQUE_PASSWORD);
 
       const stdoutText = stdoutSpy.mock.calls.map((c) => String(c[0])).join('');
       const stderrText = stderrSpy.mock.calls.map((c) => String(c[0])).join('');
-      expect(stdoutText).not.toContain(SENTINEL_SECRET);
-      expect(stderrText).not.toContain(SENTINEL_SECRET);
+      expect(stdoutText).not.toContain(OPAQUE_CREDENTIAL);
+      expect(stderrText).not.toContain(OPAQUE_CREDENTIAL);
     } finally {
       stdoutSpy.mockRestore();
       stderrSpy.mockRestore();
     }
   });
 
-  it('enforces backup authorization and never exposes plaintext sentinel in backup download', async () => {
-    // Non-authorized member cannot create/download backups
-    const unauthBackup = await call('/api/backups', memberNoBackupToken, 'POST', {});
+  it('enforces backup authorization and never exposes plaintext opaque credential in downloaded backup artifact', async () => {
+    const unauthBackup = await call('/api/backups', viewerToken, 'POST', {});
     expect(unauthBackup.status).toBe(403);
 
-    // Primary backup download contains encrypted ciphertext at most, never plaintext sentinel
     const created = await call('/api/backups', primaryToken, 'POST', {});
-    if (created.status === 200 || created.status === 201) {
-      const parsed = JSON.parse(created.text) as { backup?: { id?: number } };
-      if (parsed.backup?.id) {
-        const dl = await fetch(`${base}/api/backups/${parsed.backup.id}/download`, {
-          headers: { authorization: `Bearer ${primaryToken}` },
-        });
-        const buf = Buffer.from(await dl.arrayBuffer());
-        expect(buf.toString('utf8')).not.toContain(SENTINEL_SECRET);
-      }
-    }
+    expect(created.status).toBe(201);
+    const parsed = JSON.parse(created.text) as { backup?: { id?: number; filename?: string } };
+    expect(parsed.backup?.id).toBeTypeOf('number');
+
+    const dl = await fetch(`${base}/api/backups/${parsed.backup!.id}/download`, {
+      headers: { authorization: `Bearer ${primaryToken}` },
+    });
+    expect(dl.status).toBe(200);
+    const rawBuf = Buffer.from(await dl.arrayBuffer());
+    expect(rawBuf.length).toBeGreaterThan(0);
+
+    // Decompress if gzipped so we inspect actual backup payload content, not just compressed bytes
+    const isGzip = rawBuf.length >= 2 && rawBuf[0] === 0x1f && rawBuf[1] === 0x8b;
+    const decodedText = isGzip ? zlib.gunzipSync(rawBuf).toString('utf8') : rawBuf.toString('utf8');
+    expect(decodedText).not.toContain(OPAQUE_CREDENTIAL);
+    expect(decodedText).not.toContain(OPAQUE_PASSWORD);
   });
 });

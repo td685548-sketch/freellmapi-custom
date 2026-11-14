@@ -295,6 +295,62 @@ describe('MCP E2E 4-wire × stream/non-stream matrix (T041)', () => {
     expect(callsRes.status).toBe(200);
     const calls = (callsRes.body?.calls ?? []) as Array<{ status: string; toolName: string }>;
     expect(calls.some((c) => c.toolName.includes('lookup_order') && c.status === 'ok')).toBe(true);
+
+    // Verify DB request & token accounting (no duplicate outer charge)
+    const reqSummary = getDb()
+      .prepare(
+        'SELECT COUNT(*) as cnt, COALESCE(SUM(input_tokens + output_tokens), 0) as totalTokens FROM requests',
+      )
+      .get() as { cnt: number; totalTokens: number };
+    expect(reqSummary.cnt).toBe(2);
+    expect(reqSummary.totalTokens).toBe(45);
+  });
+
+  it('executes model -> MCP read -> model -> output on gemini JSON-array stream (without alt=sse)', async () => {
+    const realFetch = installProviderFetchRedirect();
+    fakeProvider.enqueue(
+      {
+        kind: 'scripted',
+        wire: 'gemini',
+        stream: false,
+        toolCalls: [
+          {
+            id: 'call_gem_json_1',
+            name: 'mcp__orders__lookup_order',
+            arguments: JSON.stringify({ order_id: 'ord-json-77' }),
+          },
+        ],
+        finishReason: 'tool_calls',
+        usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      },
+      {
+        kind: 'scripted',
+        wire: 'gemini',
+        stream: false,
+        text: 'Order ord-json-77 is shipped.',
+        finishReason: 'stop',
+        usage: { promptTokens: 20, completionTokens: 10, totalTokens: 30 },
+      },
+    );
+
+    const res = await realFetch(`${baseUrl}/v1beta/models/gemini-2.5-flash:streamGenerateContent`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${clientKey}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: 'Check order ord-json-77' }] }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-freellm-tool-rounds')).toBe('2');
+    const rawText = await res.text();
+    expect(rawText).toContain('Order ord-json-77 is shipped.');
+    expect(fakeMcp.getDispatchCount('tools/call')).toBe(1);
+    const parsed = JSON.parse(rawText) as unknown[];
+    expect(Array.isArray(parsed)).toBe(true);
   });
 });
 

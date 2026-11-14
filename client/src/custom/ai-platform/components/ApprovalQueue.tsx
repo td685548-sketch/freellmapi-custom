@@ -24,6 +24,7 @@ import {
   MCP_APPROVAL_UNKNOWN,
   MCP_APPROVAL_UNKNOWN_NOTICE,
   MCP_APPROVE,
+  MCP_CALL_MASKED_RESULT,
   MCP_DECISION_NOTE,
   MCP_EXPIRES_AT,
   MCP_FILTER_STATUS,
@@ -209,6 +210,15 @@ export function ApprovalQueue({ canApprove }: ApprovalQueueProps) {
                     {item.argsMasked}
                   </pre>
                 </div>
+
+                {(item.resultMasked || item.error) && (
+                  <div className="text-xs" data-testid={`mcp-approval-result-${item.id}`}>
+                    <span className="font-medium text-muted-foreground">{tc(MCP_CALL_MASKED_RESULT)}:</span>
+                    <pre className="mt-1 overflow-x-auto rounded bg-muted/50 p-2 font-mono text-[11px]">
+                      {item.resultMasked ?? item.error}
+                    </pre>
+                  </div>
+                )}
 
                 {item.decisionNote && (
                   <div className="text-xs text-muted-foreground">{item.decisionNote}</div>

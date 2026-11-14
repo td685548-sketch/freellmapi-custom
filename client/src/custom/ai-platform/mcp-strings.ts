@@ -102,6 +102,10 @@ export const MCP_BINDINGS_SAVED = 'Bindings saved';
 export const MCP_SCOPE_UNAVAILABLE = 'Agent scopes are unavailable until Orchestrator (US7) is installed.';
 export const MCP_SUPPORT_RUNTIME_NOTE = 'Bindings can be configured here; MCP execution in support runtime is not enabled in this release.';
 export const MCP_NO_ALLOWED_TOOLS = 'No allowed tools available from enabled servers.';
+export const MCP_CATALOG_LOAD_ERROR = 'Failed to load MCP tool catalog';
+export const MCP_UNAVAILABLE_BOUND_TOOLS = 'Bound tools no longer usable (uncheck to unbind)';
+export const MCP_NON_ALLOWED_TOOLS = 'Pending, blocked, or missing tools (cannot be bound)';
+export const MCP_SERVER_DISABLED_BADGE = 'Server disabled';
 
 // ─── Approval Queue ───────────────────────────────────────────────────────────
 export const MCP_APPROVALS_HEADING = 'Tool execution approvals';

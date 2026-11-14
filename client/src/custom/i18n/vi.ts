@@ -819,4 +819,8 @@ export const VI: Record<string, string> = {
   "No internal origins allowlisted.": "Chưa có nguồn nội bộ nào trong danh sách cho phép.",
   "You do not have permission to view MCP management": "Bạn không có quyền xem quản lý MCP",
   "Access denied — missing required permission": "Truy cập bị từ chối — thiếu quyền yêu cầu",
+  "Failed to load MCP tool catalog": "Không thể tải danh mục công cụ MCP",
+  "Bound tools no longer usable (uncheck to unbind)": "Công cụ đang gán không còn khả dụng (bỏ chọn để gỡ)",
+  "Pending, blocked, or missing tools (cannot be bound)": "Công cụ chờ duyệt, bị chặn hoặc thiếu (không thể gán)",
+  "Server disabled": "Máy chủ đang tắt",
 }

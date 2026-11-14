@@ -3,10 +3,13 @@ import { useCustomT } from '../../i18n/use-custom-t';
 import {
   MCP_LIMITS,
   fetchMcpBindings,
+  fetchMcpServers,
+  fetchMcpServerTools,
   fetchProfileOptions,
   fetchSupportTenantOptions,
   putMcpBindings,
   type McpBindingView,
+  type McpToolView,
   type ProfileOption,
   type Scope,
   type ScopeKind,
@@ -17,8 +20,10 @@ import {
   MCP_AI_TOOLS_ENABLED,
   MCP_BINDINGS_HEADING,
   MCP_BINDINGS_SAVED,
+  MCP_CATALOG_LOAD_ERROR,
   MCP_MAX_ROUNDS,
   MCP_NO_ALLOWED_TOOLS,
+  MCP_NON_ALLOWED_TOOLS,
   MCP_SAVE_BINDINGS,
   MCP_SAVING,
   MCP_SCOPE_AGENT,
@@ -28,13 +33,31 @@ import {
   MCP_SCOPE_SUPPORT_TENANT,
   MCP_SCOPE_TARGET,
   MCP_SCOPE_UNAVAILABLE,
+  MCP_SERVER_DISABLED_BADGE,
+  MCP_STATE_ALLOWED,
+  MCP_STATE_BLOCKED,
+  MCP_STATE_MISSING,
+  MCP_STATE_PENDING,
   MCP_SUPPORT_RUNTIME_NOTE,
   MCP_TOOL_REQUIRES_REVIEW_PERM,
+  MCP_UNAVAILABLE_BOUND_TOOLS,
 } from '../mcp-strings';
 
 interface ScopeToolBindingsProps {
   canEdit: boolean;
 }
+
+interface CatalogToolEntry {
+  tool: McpToolView;
+  serverEnabled: boolean;
+}
+
+const TOOL_STATE_LABEL: Record<McpToolView['state'], string> = {
+  allowed: MCP_STATE_ALLOWED,
+  pending: MCP_STATE_PENDING,
+  blocked: MCP_STATE_BLOCKED,
+  missing: MCP_STATE_MISSING,
+};
 
 export function ScopeToolBindings({ canEdit }: ScopeToolBindingsProps) {
   const tc = useCustomT();
@@ -43,6 +66,8 @@ export function ScopeToolBindings({ canEdit }: ScopeToolBindingsProps) {
   const [profiles, setProfiles] = useState<ProfileOption[]>([]);
   const [tenants, setTenants] = useState<SupportTenantOption[]>([]);
 
+  const [catalog, setCatalog] = useState<CatalogToolEntry[]>([]);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
   const [binding, setBinding] = useState<McpBindingView | null>(null);
   const [enabled, setEnabled] = useState(false);
   const [maxRounds, setMaxRounds] = useState<number>(MCP_LIMITS.defaultMaxRounds);
@@ -56,13 +81,20 @@ export function ScopeToolBindings({ canEdit }: ScopeToolBindingsProps) {
   const loading = activeScopeKey !== null && loadedScopeKey !== activeScopeKey;
 
   const loadAbortRef = useRef<AbortController | null>(null);
+  const catalogAbortRef = useRef<AbortController | null>(null);
   const saveAbortRef = useRef<AbortController | null>(null);
   const epochRef = useRef(0);
+  const catalogEpochRef = useRef(0);
   const mountedRef = useRef(true);
 
   useEffect(() => {
     mountedRef.current = true;
     const ac = new AbortController();
+    catalogAbortRef.current?.abort();
+    catalogAbortRef.current = ac;
+    catalogEpochRef.current += 1;
+    const myCatalogEpoch = catalogEpochRef.current;
+
     Promise.all([
       fetchProfileOptions(ac.signal).catch(() => []),
       fetchSupportTenantOptions(ac.signal).catch(() => []),
@@ -72,13 +104,41 @@ export function ScopeToolBindings({ canEdit }: ScopeToolBindingsProps) {
       setTenants(tList);
       setScopeId((prev) => prev || (pList[0] ? String(pList[0].id) : ''));
     });
+
+    fetchMcpServers(ac.signal)
+      .then(async (srvRes) => {
+        if (!mountedRef.current || ac.signal.aborted || myCatalogEpoch !== catalogEpochRef.current) return;
+        const servers = srvRes.servers ?? [];
+        const perServer = await Promise.all(
+          servers.map(async (srv) => {
+            const toolsRes = await fetchMcpServerTools(srv.id, ac.signal);
+            const serverEnabled = srv.enabled !== false;
+            return (toolsRes.tools ?? []).map((tool) => ({ tool, serverEnabled }));
+          }),
+        );
+        if (!mountedRef.current || ac.signal.aborted || myCatalogEpoch !== catalogEpochRef.current) return;
+        setCatalog(perServer.flat());
+        setCatalogError(null);
+      })
+      .catch((err: unknown) => {
+        if (!mountedRef.current || ac.signal.aborted || myCatalogEpoch !== catalogEpochRef.current) return;
+        if ((err as { name?: string })?.name === 'AbortError') return;
+        const status = (err as { status?: number })?.status;
+        setCatalogError(
+          status === 403
+            ? tc(MCP_ACTION_FORBIDDEN)
+            : (err as Error)?.message ?? tc(MCP_CATALOG_LOAD_ERROR),
+        );
+      });
+
     return () => {
       mountedRef.current = false;
       ac.abort();
       loadAbortRef.current?.abort();
+      catalogAbortRef.current?.abort();
       saveAbortRef.current?.abort();
     };
-  }, []);
+  }, [tc]);
 
   // Reset scopeId when switching scopeKind
   function handleKindChange(nextKind: ScopeKind) {
@@ -266,6 +326,12 @@ export function ScopeToolBindings({ canEdit }: ScopeToolBindingsProps) {
         </div>
       )}
 
+      {catalogError && (
+        <div className="rounded border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive" role="alert">
+          {catalogError}
+        </div>
+      )}
+
       {savedNotice && (
         <div className="rounded border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300" role="status">
           {tc(MCP_BINDINGS_SAVED)}
@@ -275,70 +341,177 @@ export function ScopeToolBindings({ canEdit }: ScopeToolBindingsProps) {
       {scopeKind !== 'agent' && scopeId.trim() && (
         loading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : binding && (
-          <div className="space-y-4">
-            <div className="flex flex-wrap items-center gap-6">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  data-testid="mcp-binding-enabled"
-                  checked={enabled}
-                  disabled={!canEdit || saving}
-                  onChange={(e) => setEnabled(e.target.checked)}
-                />
-                <span>{tc(MCP_AI_TOOLS_ENABLED)}</span>
-              </label>
+        ) : binding && (() => {
+          const catalogById = new Map<number, CatalogToolEntry>();
+          for (const entry of catalog) {
+            catalogById.set(entry.tool.id, entry);
+          }
 
-              <label className="flex items-center gap-2 text-sm">
-                <span>{tc(MCP_MAX_ROUNDS)}</span>
-                <input
-                  type="number"
-                  data-testid="mcp-binding-max-rounds"
-                  min={MCP_LIMITS.minRounds}
-                  max={MCP_LIMITS.maxRounds}
-                  value={maxRounds}
-                  disabled={!canEdit || saving}
-                  onChange={(e) => setMaxRounds(Number(e.target.value))}
-                  className="w-20 rounded border bg-background px-2 py-1 text-sm"
-                />
-              </label>
-            </div>
+          const selectableTools: McpToolView[] = [];
+          const nonAllowedTools: CatalogToolEntry[] = [];
+          for (const entry of catalog) {
+            if (entry.tool.state === 'allowed' && entry.serverEnabled) {
+              selectableTools.push(entry.tool);
+            } else {
+              nonAllowedTools.push(entry);
+            }
+          }
+          const selectableIds = new Set(selectableTools.map((t) => t.id));
 
-            {binding.tools.length === 0 ? (
-              <p className="text-xs text-muted-foreground">{tc(MCP_NO_ALLOWED_TOOLS)}</p>
-            ) : (
-              <div className="space-y-1.5">
-                {binding.tools.map((tool) => (
-                  <label key={tool.id} className="flex items-start gap-2 rounded border p-2 text-sm">
-                    <input
-                      type="checkbox"
-                      data-testid={`mcp-binding-tool-${tool.id}`}
-                      checked={selectedToolIds.includes(tool.id)}
-                      disabled={!canEdit || saving}
-                      onChange={() => toggleTool(tool.id)}
-                    />
-                    <div className="flex-1">
-                      <div className="font-mono text-xs font-medium">{tool.exposedName}</div>
-                      {tool.description && (
-                        <div className="text-xs text-muted-foreground">{tool.description}</div>
-                      )}
-                    </div>
-                  </label>
-                ))}
+          // Preserve any bound tools missing from selectableTools (e.g., pending/blocked/missing or disabled server)
+          const unusableBoundMap = new Map<number, { tool: McpToolView; serverEnabled: boolean }>();
+          for (const bt of binding.tools) {
+            if (!selectableIds.has(bt.id)) {
+              const cat = catalogById.get(bt.id);
+              unusableBoundMap.set(bt.id, { tool: cat?.tool ?? bt, serverEnabled: cat?.serverEnabled ?? true });
+            }
+          }
+          for (const id of selectedToolIds) {
+            if (!selectableIds.has(id) && !unusableBoundMap.has(id)) {
+              const cat = catalogById.get(id);
+              if (cat) {
+                unusableBoundMap.set(id, cat);
+              }
+            }
+          }
+          const unusableBound = Array.from(unusableBoundMap.values());
+          const remainingNonAllowed = nonAllowedTools.filter((e) => !unusableBoundMap.has(e.tool.id));
+
+          return (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-6">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    data-testid="mcp-binding-enabled"
+                    checked={enabled}
+                    disabled={!canEdit || saving}
+                    onChange={(e) => setEnabled(e.target.checked)}
+                  />
+                  <span>{tc(MCP_AI_TOOLS_ENABLED)}</span>
+                </label>
+
+                <label className="flex items-center gap-2 text-sm">
+                  <span>{tc(MCP_MAX_ROUNDS)}</span>
+                  <input
+                    type="number"
+                    data-testid="mcp-binding-max-rounds"
+                    min={MCP_LIMITS.minRounds}
+                    max={MCP_LIMITS.maxRounds}
+                    value={maxRounds}
+                    disabled={!canEdit || saving}
+                    onChange={(e) => setMaxRounds(Number(e.target.value))}
+                    className="w-20 rounded border bg-background px-2 py-1 text-sm"
+                  />
+                </label>
               </div>
-            )}
 
-            <button
-              type="button"
-              data-testid="mcp-save-bindings"
-              disabled={!canEdit || saving}
-              onClick={handleSave}
-              className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
-            >
-              {saving ? tc(MCP_SAVING) : tc(MCP_SAVE_BINDINGS)}
-            </button>
-          </div>
-        )
+              {selectableTools.length === 0 ? (
+                <p className="text-xs text-muted-foreground">{tc(MCP_NO_ALLOWED_TOOLS)}</p>
+              ) : (
+                <div className="space-y-1.5" data-testid="mcp-binding-available-list">
+                  {selectableTools.map((tool) => (
+                    <label key={tool.id} className="flex items-start gap-2 rounded border p-2 text-sm">
+                      <input
+                        type="checkbox"
+                        data-testid={`mcp-binding-tool-${tool.id}`}
+                        checked={selectedToolIds.includes(tool.id)}
+                        disabled={!canEdit || saving}
+                        onChange={() => toggleTool(tool.id)}
+                      />
+                      <div className="flex-1">
+                        <div className="font-mono text-xs font-medium">{tool.exposedName}</div>
+                        {tool.description && (
+                          <div className="text-xs text-muted-foreground">{tool.description}</div>
+                        )}
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              {unusableBound.length > 0 && (
+                <div className="space-y-1.5" data-testid="mcp-binding-unusable-bound">
+                  <div className="text-xs font-medium text-amber-700 dark:text-amber-400">
+                    {tc(MCP_UNAVAILABLE_BOUND_TOOLS)}
+                  </div>
+                  {unusableBound.map(({ tool, serverEnabled }) => (
+                    <label key={tool.id} className="flex items-start gap-2 rounded border border-amber-500/40 bg-amber-500/5 p-2 text-sm">
+                      <input
+                        type="checkbox"
+                        data-testid={`mcp-binding-tool-${tool.id}`}
+                        checked={selectedToolIds.includes(tool.id)}
+                        disabled={!canEdit || saving}
+                        onChange={() => toggleTool(tool.id)}
+                      />
+                      <div className="flex-1">
+                        <div className="flex flex-wrap items-center gap-2 font-mono text-xs font-medium">
+                          <span>{tool.exposedName}</span>
+                          <span className="rounded bg-amber-500/20 px-1.5 py-0.5 font-sans text-[11px]">
+                            {tc(TOOL_STATE_LABEL[tool.state])}
+                          </span>
+                          {!serverEnabled && (
+                            <span className="rounded bg-muted px-1.5 py-0.5 font-sans text-[11px]">
+                              {tc(MCP_SERVER_DISABLED_BADGE)}
+                            </span>
+                          )}
+                        </div>
+                        {tool.description && (
+                          <div className="text-xs text-muted-foreground">{tool.description}</div>
+                        )}
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              {remainingNonAllowed.length > 0 && (
+                <div className="space-y-1.5" data-testid="mcp-binding-non-allowed">
+                  <div className="text-xs font-medium text-muted-foreground">
+                    {tc(MCP_NON_ALLOWED_TOOLS)}
+                  </div>
+                  {remainingNonAllowed.map(({ tool, serverEnabled }) => (
+                    <div key={tool.id} className="flex items-start gap-2 rounded border bg-muted/30 p-2 text-sm opacity-75">
+                      <input
+                        type="checkbox"
+                        data-testid={`mcp-binding-disabled-tool-${tool.id}`}
+                        checked={false}
+                        disabled
+                        readOnly
+                      />
+                      <div className="flex-1">
+                        <div className="flex flex-wrap items-center gap-2 font-mono text-xs font-medium">
+                          <span>{tool.exposedName}</span>
+                          <span className="rounded bg-muted px-1.5 py-0.5 font-sans text-[11px]">
+                            {tc(TOOL_STATE_LABEL[tool.state])}
+                          </span>
+                          {!serverEnabled && (
+                            <span className="rounded bg-muted px-1.5 py-0.5 font-sans text-[11px]">
+                              {tc(MCP_SERVER_DISABLED_BADGE)}
+                            </span>
+                          )}
+                        </div>
+                        {tool.description && (
+                          <div className="text-xs text-muted-foreground">{tool.description}</div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <button
+                type="button"
+                data-testid="mcp-save-bindings"
+                disabled={!canEdit || saving}
+                onClick={handleSave}
+                className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
+              >
+                {saving ? tc(MCP_SAVING) : tc(MCP_SAVE_BINDINGS)}
+              </button>
+            </div>
+          );
+        })()
       )}
     </section>
   );
