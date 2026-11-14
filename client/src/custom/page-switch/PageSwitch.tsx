@@ -13,7 +13,7 @@ import './page-switch.css'
  * It is mounted once, above both layouts, and positioned with `position: fixed`,
  * so it sits at exactly the same screen coordinates on both pages and is never
  * rebuilt when the route changes. Each side carries its own look (a galaxy going
- * in, an ink dot coming back) and its own WebGPU transition; see
+ * in, a black hole coming back) and its own WebGPU transition; see
  * x-gateway/transition. Both headers keep clear of it through the
  * `html[data-has-page-switch]` rules in page-switch.css.
  */
@@ -54,7 +54,7 @@ export function PageSwitch() {
       key={side}
       to={target}
       data-page-switch={toThruline ? 'to-thruline' : 'to-freellmapi'}
-      className={`page-switch ${toThruline ? 'page-switch--galaxy' : 'page-switch--ink'}`}
+      className={`page-switch ${toThruline ? 'page-switch--galaxy' : 'page-switch--hole'}`}
       aria-label={label}
       title={label}
     >

@@ -2,7 +2,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectFor } from './effects'
 import { galaxyEffect } from './galaxy'
-import { inkEffect } from './ink'
+import { blackholeEffect } from './blackhole'
 import { prelude } from './effect'
 
 const overlay = vi.hoisted(() => ({
@@ -17,12 +17,12 @@ vi.mock('./overlay', () => ({
 describe('effects', () => {
   it('uses a different effect going in than coming back', () => {
     expect(effectFor(true)).toBe(galaxyEffect)
-    expect(effectFor(false)).toBe(inkEffect)
-    expect(galaxyEffect.wgsl).not.toBe(inkEffect.wgsl)
+    expect(effectFor(false)).toBe(blackholeEffect)
+    expect(galaxyEffect.wgsl).not.toBe(blackholeEffect.wgsl)
   })
 
   it('hides the page before the route changes and well before the end', () => {
-    for (const effect of [galaxyEffect, inkEffect]) {
+    for (const effect of [galaxyEffect, blackholeEffect]) {
       expect(effect.coveredAt).toBeGreaterThan(0.2)
       expect(effect.coveredAt).toBeLessThan(0.7)
       expect(effect.duration).toBeGreaterThan(1500)
@@ -30,7 +30,7 @@ describe('effects', () => {
   })
 
   it('shares one uniform block and entry points, so the runner can drive either', () => {
-    for (const effect of [galaxyEffect, inkEffect]) {
+    for (const effect of [galaxyEffect, blackholeEffect]) {
       expect(effect.wgsl.startsWith(prelude)).toBe(true)
       expect(effect.wgsl).toContain('@vertex')
       expect(effect.wgsl).toContain('fn vs(')
@@ -39,7 +39,7 @@ describe('effects', () => {
   })
 
   it('gives every palette four RGBA colours in range, for both themes', () => {
-    for (const effect of [galaxyEffect, inkEffect]) {
+    for (const effect of [galaxyEffect, blackholeEffect]) {
       for (const dark of [true, false]) {
         const colours = effect.palette(dark)
         expect(colours).toHaveLength(4)
@@ -51,9 +51,21 @@ describe('effects', () => {
     }
   })
 
-  it('draws the ink in the light theme paler than in the dark one', () => {
-    const luminance = (c: number[]) => c[0] + c[1] + c[2]
-    expect(luminance(inkEffect.palette(false)[0])).toBeGreaterThan(luminance(inkEffect.palette(true)[0]))
+  it('draws star sprites in both, with a vertex entry point to place them', () => {
+    for (const effect of [galaxyEffect, blackholeEffect]) {
+      expect(effect.particles).toBeGreaterThan(10_000)
+      expect(effect.wgsl).toContain('fn vsStar(')
+      expect(effect.wgsl).toContain('fn fsStar(')
+    }
+  })
+
+  it('declares the sprite count in the shader the same as in the effect', () => {
+    expect(galaxyEffect.wgsl).toContain('const NG: u32 = 70000u;')
+    expect(galaxyEffect.wgsl).toContain('const NW: u32 = 1500u;')
+    expect(galaxyEffect.particles).toBe(70000 + 1500)
+    expect(blackholeEffect.wgsl).toContain('const NK: u32 = 9000u;')
+    expect(blackholeEffect.wgsl).toContain('const NP: u32 = 36000u;')
+    expect(blackholeEffect.particles).toBe(9000 + 36000)
   })
 })
 
@@ -92,12 +104,12 @@ describe('page transition install', () => {
     await vi.waitFor(() => expect(navigated).toHaveBeenCalled())
   })
 
-  it('plays the ink when a link leaves Thruline', async () => {
+  it('plays the black hole when a link leaves Thruline', async () => {
     window.history.replaceState(null, '', '/thruline/combos')
     const a = addLink('/models/chat', { 'data-page-switch': 'to-freellmapi' })
     click(a)
     await vi.waitFor(() => expect(overlay.playEffect).toHaveBeenCalledTimes(1))
-    expect((overlay.playEffect.mock.calls[0] as unknown as [{ id: string }])[0].id).toBe('ink')
+    expect((overlay.playEffect.mock.calls[0] as unknown as [{ id: string }])[0].id).toBe('blackhole')
   })
 
   it('leaves links that stay on one side alone', () => {
