@@ -1,6 +1,6 @@
 import React, { memo, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import ReactMarkdown, { type Components } from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Check, Code2, Copy, Eye, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -575,6 +575,14 @@ const customComponents: Components = {
   },
 } as unknown as Components;
 
+function playgroundUrlTransform(url: string): string {
+  const trimmed = url.trim();
+  if (/^data:image\/(?:png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=\s]+$/i.test(trimmed)) {
+    return trimmed;
+  }
+  return defaultUrlTransform(url);
+}
+
 interface PlaygroundMessageContentProps {
   content: string;
   isGenerating?: boolean;
@@ -607,6 +615,7 @@ function PlaygroundMessageContentInner({
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeRawHtml]}
         remarkRehypeOptions={{ allowDangerousHtml: true }}
+        urlTransform={playgroundUrlTransform}
         components={customComponents}
       >
         {content}

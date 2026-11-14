@@ -319,4 +319,18 @@ describe('Playground component', () => {
     expect(container.querySelector('button[aria-label="Preview"]')).toBeNull();
     expect(container.querySelector('button[aria-label="Copy"]')).not.toBeNull();
   });
+
+  it('renders inline data:image URLs as img tags in assistant messages', () => {
+    const dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const reply = `![watermarked_img_1.png](${dataUrl})`;
+
+    act(() => {
+      root.render(<PlaygroundMessageContent content={reply} />);
+    });
+
+    const img = container.querySelector('img') as HTMLImageElement | null;
+    expect(img).not.toBeNull();
+    expect(img?.getAttribute('src')).toBe(dataUrl);
+    expect(img?.getAttribute('alt')).toBe('watermarked_img_1.png');
+  });
 });
