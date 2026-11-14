@@ -16,6 +16,7 @@ import { solveDeepSeekPowHeader, type DeepSeekPowChallenge } from './deepseek-po
 
 const DEFAULT_BASE_URL = 'https://chat.deepseek.com';
 const REQUEST_TIMEOUT_MS = 30_000;
+const STREAM_IDLE_TIMEOUT_MS = 45_000;
 const COMPLETION_TIMEOUT_MS = 120_000;
 const CACHE_MAX_SIZE = 100;
 
@@ -240,6 +241,56 @@ async function dsFetch(
   } finally {
     clearTimeout(timer);
     outerSignal?.removeEventListener('abort', onAbort);
+  }
+}
+
+/**
+ * Read one SSE chunk while enforcing both per-chunk idle timeout, total stream
+ * deadline, and caller abort signals (since `dsFetch` clears its timer once
+ * response headers arrive).
+ */
+async function readDeepSeekStreamChunk(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  idleTimeoutMs: number,
+  deadlineAt: number,
+  signal?: AbortSignal,
+): ReturnType<ReadableStreamDefaultReader<Uint8Array>['read']> {
+  if (signal?.aborted) {
+    void reader.cancel().catch(() => {});
+    throw new DOMException('The operation was aborted.', 'AbortError');
+  }
+  const remainingMs = deadlineAt - Date.now();
+  if (remainingMs <= 0) {
+    void reader.cancel().catch(() => {});
+    throw new DeepSeekWebChatError('DeepSeek Web stream timed out.', 504);
+  }
+  const waitMs = Math.max(1, Math.min(idleTimeoutMs, remainingMs));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          const msg = remainingMs <= idleTimeoutMs
+            ? 'DeepSeek Web stream timed out.'
+            : 'DeepSeek Web stream timed out waiting for data.';
+          reject(new DeepSeekWebChatError(msg, 504));
+          void reader.cancel().catch(() => {});
+        }, waitMs);
+        timer.unref?.();
+        if (signal) {
+          onAbort = () => {
+            reject(new DOMException('The operation was aborted.', 'AbortError'));
+            void reader.cancel().catch(() => {});
+          };
+          signal.addEventListener('abort', onAbort, { once: true });
+        }
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (signal && onAbort) signal.removeEventListener('abort', onAbort);
   }
 }
 
@@ -588,6 +639,7 @@ export async function* streamDeepSeekWebChat(
   const platform = opts.platform ?? 'custom';
   const signal = opts.options?.signal;
   const timeoutMs = opts.options?.timeoutMs ?? COMPLETION_TIMEOUT_MS;
+  const deadlineAt = Date.now() + timeoutMs;
 
   const images = extractDeepSeekImages(opts.messages);
   const auth = await acquireAuth(origin, cred, platform, signal);
@@ -778,7 +830,12 @@ export async function* streamDeepSeekWebChat(
 
     try {
       while (true) {
-        const { done, value } = await reader.read();
+        const { done, value } = await readDeepSeekStreamChunk(
+          reader,
+          STREAM_IDLE_TIMEOUT_MS,
+          deadlineAt,
+          signal,
+        );
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
