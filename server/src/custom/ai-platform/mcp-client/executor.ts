@@ -44,7 +44,7 @@ function scrubSensitiveKeys(value: unknown): unknown {
   return value;
 }
 
-function maskArgsForLog(
+export function maskArgsForLog(
   scope: Scope,
   args: unknown,
   secret: string | null | undefined,
@@ -69,11 +69,11 @@ function wrapUntrustedToolResult(serverSlug: string, toolName: string, content: 
   return `<tool_result server="${serverSlug}" tool="${toolName}" trust="untrusted">\n${content}\n</tool_result>`;
 }
 
-function formatToolErrorJson(type: ToolExecutionErrorType, message: string): string {
+export function formatToolErrorJson(type: ToolExecutionErrorType, message: string): string {
   return JSON.stringify({ error: { type, message } });
 }
 
-function validateArgsAgainstSchema(
+export function validateArgsAgainstSchema(
   schema: Record<string, unknown>,
   args: unknown,
 ): { ok: true; normalized: Record<string, unknown> } | { ok: false; reason: string } {
@@ -127,7 +127,7 @@ function validateArgsAgainstSchema(
   return { ok: true, normalized };
 }
 
-function isToolBoundToScope(toolId: number, scope: Scope): boolean {
+export function isToolBoundToScope(toolId: number, scope: Scope): boolean {
   const row = getDb()
     .prepare(
       'SELECT 1 FROM custom_ai_tool_bindings WHERE tool_id = ? AND scope_kind = ? AND scope_id = ?',
