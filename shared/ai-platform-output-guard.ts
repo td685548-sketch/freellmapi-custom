@@ -88,6 +88,7 @@ export type GuardBufferingReason =
   | 'none'
   | 'streaming_window'
   | 'unbounded_pattern'
+  | 'custom_pattern'
   | 'external_detector'
   | 'non_stream';
 

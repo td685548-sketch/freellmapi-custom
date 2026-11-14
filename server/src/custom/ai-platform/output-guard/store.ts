@@ -202,7 +202,7 @@ export function computeBufferingReason(
     return 'external_detector';
   }
   if (policy.detectors.patterns.enabled && policy.detectors.patterns.rules.length > 0) {
-    return 'unbounded_pattern';
+    return 'custom_pattern';
   }
   return 'streaming_window';
 }

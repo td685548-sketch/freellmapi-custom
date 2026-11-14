@@ -583,4 +583,85 @@ describe('Output Guard E2E HTTP Acceptance (T059)', () => {
     setTimeout(() => ac.abort(), 50);
     await expect(fetchPromise).rejects.toThrow();
   });
+
+  for (const stream of [false, true]) {
+    it(`runs the configured judge with the real profile credential (stream=${stream})`, async () => {
+      setFlags({ mcpClient: false });
+      const detectors = {
+        keywords: { enabled: false, terms: [] },
+        patterns: { enabled: false, rules: [] },
+        promptLeak: { enabled: false, minShingles: 2 },
+        pii: { enabled: false, action: 'mask' },
+        maxLength: { enabled: false, chars: 20000 },
+        moderation: { enabled: false },
+        judge: { enabled: true, model: 'groq/compound', criteria: `Reject restricted output (${stream}).` },
+      };
+      await setPolicy({ detectors, failMode: 'allow' });
+      fakeProvider.enqueue(
+        { kind: 'scripted', stream, text: 'Restricted assistant output.' },
+        { kind: 'scripted', stream: false, text: '{"violation":true,"reason":"restricted"}' },
+      );
+      const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${clientKey}`, 'content-type': 'application/json' },
+        body: JSON.stringify(wireRequest('openai-chat', stream, `judge-${stream}`).body),
+      });
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      expect(body).toContain('Blocked by output guard.');
+      expect(body).not.toContain('Restricted assistant output.');
+      expect(fakeProvider.requests).toHaveLength(2);
+      expect(fakeProvider.requests[1].bodyText).toContain('strict output safety judge');
+      expect(fakeProvider.requests[1].bodyText).not.toContain('"tools":');
+    });
+  }
+
+  for (const wire of ['openai-chat', 'anthropic', 'responses', 'gemini'] as const) {
+    it(`blocks bounded regex before emitting ${wire} stream`, async () => {
+      setFlags({ mcpClient: false });
+      await setPolicy({ detectors: {
+        keywords: { enabled: false, terms: [] },
+        patterns: { enabled: true, rules: [{ id: 'secret', name: 'Secret', pattern: 'SECRET', flags: '' }] },
+        promptLeak: { enabled: false, minShingles: 2 },
+        pii: { enabled: false, action: 'mask' },
+        maxLength: { enabled: false, chars: 20000 },
+        moderation: { enabled: false },
+        judge: { enabled: false, model: 'auto', criteria: '' },
+      } });
+      fakeProvider.enqueue({ kind: 'scripted', stream: true, geminiAltSse: true, textChunks: ['Safe ', 'SEC', 'RET'], chunkDelayMs: 5 });
+      const reqSpec = wireRequest(wire, true, `regex-${wire}`);
+      const res = await fetch(`${baseUrl}${reqSpec.path}`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${clientKey}`, 'content-type': 'application/json' },
+        body: JSON.stringify(reqSpec.body),
+      });
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      expect(body).toContain('Blocked by output guard.');
+      expect(body).not.toContain('Safe ');
+      expect(body).not.toContain('SECRET');
+    });
+  }
+
+  it('masks a PII continuation after a provider pause while preserving later safe text', async () => {
+    setFlags({ mcpClient: false });
+    await setPolicy();
+    fakeProvider.enqueue({ kind: 'scripted', stream: true,
+      textChunks: ['Contact alice@', 'example.com', ' Afterwards we can help.'], chunkDelayMs: 350 });
+    const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${clientKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify(wireRequest('openai-chat', true, 'pii-pause').body),
+    });
+    const frames = await readSseFrames(res);
+    const visible = frames.map((frame) => {
+      const parsed = frame.json as { choices?: Array<{ delta?: { content?: string } }> } | null;
+      return parsed?.choices?.map((choice) => choice.delta?.content ?? '').join('') ?? '';
+    }).join('');
+    expect(visible).not.toContain('alice@example.com');
+    expect(visible).toContain('[redacted]');
+    expect(visible).toContain('Afterwards we can help.');
+    expect(frames.map((frame) => frame.raw).join('')).not.toContain('content_filter');
+  });
+
 });

@@ -8,7 +8,6 @@ import {
 import { maskText } from '../masking.js';
 import {
   evaluatePatternsSafe,
-  isPatternBounded,
   PatternTimeoutError,
 } from './pattern-validator.js';
 
@@ -230,12 +229,8 @@ export function analyzeStreamingCapability(policy: GuardPolicyView): {
     return { canIncrementalStream: false, bufferingReason: 'external_detector' };
   }
   if (policy.detectors.patterns.enabled && policy.detectors.patterns.rules.length > 0) {
-    const hasUnbounded = policy.detectors.patterns.rules.some(
-      (r) => !isPatternBounded(r.pattern, r.flags ?? '', policy.holdChars),
-    );
-    if (hasUnbounded) {
-      return { canIncrementalStream: false, bufferingReason: 'unbounded_pattern' };
-    }
+    // Regex execution is asynchronous and isolated; never skip it in the sync fast path.
+    return { canIncrementalStream: false, bufferingReason: 'custom_pattern' };
   }
   if (policy.holdChars > 0) {
     return { canIncrementalStream: true, bufferingReason: 'streaming_window' };
@@ -243,15 +238,14 @@ export function analyzeStreamingCapability(policy: GuardPolicyView): {
   return { canIncrementalStream: true, bufferingReason: 'none' };
 }
 
-export async function evaluateLocalDetectors(
+export function evaluateLocalDetectorsSync(
   scope: Scope,
   text: string,
   policy: GuardPolicyView,
   opts: LocalEvalOptions,
-): Promise<LocalDetectorResult> {
+): LocalDetectorResult {
   const hits: LocalDetectorHit[] = [];
   let maskedText = text;
-  let checkFailed = false;
   const { bufferingReason } = analyzeStreamingCapability(policy);
   const { detectors } = policy;
 
@@ -259,30 +253,6 @@ export async function evaluateLocalDetectors(
   if (detectors.keywords.enabled && detectors.keywords.terms.length > 0) {
     const normMap = normalizeNfcLowerWithMap(text);
     hits.push(...detectKeywords(text, normMap, detectors.keywords.terms));
-  }
-
-  // 2. Custom Regex Patterns (isolated worker with hard terminate budget)
-  if (detectors.patterns.enabled && detectors.patterns.rules.length > 0) {
-    try {
-      const matches = await evaluatePatternsSafe(detectors.patterns.rules, text, {
-        timeoutMs: opts.patternBudgetMs,
-      });
-      for (const m of matches) {
-        hits.push({
-          detector: 'patterns',
-          action: 'block',
-          match: m.match,
-          index: m.start,
-          endIndex: m.end,
-          ruleId: m.id,
-          ruleName: m.name,
-        });
-      }
-    } catch (err) {
-      if (err instanceof PatternTimeoutError || err instanceof Error) {
-        checkFailed = true;
-      }
-    }
   }
 
   // 3. Prompt Leak (distinct 12-word shingles)
@@ -332,7 +302,6 @@ export async function evaluateLocalDetectors(
       maskedText,
       reason: blockingHit.detector,
       bufferingReason,
-      ...(checkFailed ? { checkFailed } : {}),
     };
   }
 
@@ -344,7 +313,6 @@ export async function evaluateLocalDetectors(
       maskedText,
       reason: maskHit.detector,
       bufferingReason,
-      ...(checkFailed ? { checkFailed } : {}),
     };
   }
 
@@ -353,6 +321,49 @@ export async function evaluateLocalDetectors(
     hits,
     maskedText,
     bufferingReason,
+  };
+}
+
+/** Runs the same local checks as streaming, plus isolated asynchronous regex checks. */
+export async function evaluateLocalDetectors(
+  scope: Scope,
+  text: string,
+  policy: GuardPolicyView,
+  opts: LocalEvalOptions,
+): Promise<LocalDetectorResult> {
+  const result = evaluateLocalDetectorsSync(scope, text, policy, opts);
+  const hits = result.hits;
+  const { detectors } = policy;
+  let checkFailed = false;
+  // 2. Custom Regex Patterns (isolated worker with hard terminate budget)
+  if (detectors.patterns.enabled && detectors.patterns.rules.length > 0) {
+    try {
+      const matches = await evaluatePatternsSafe(detectors.patterns.rules, text, {
+        timeoutMs: opts.patternBudgetMs,
+      });
+      for (const m of matches) {
+        hits.push({
+          detector: 'patterns',
+          action: 'block',
+          match: m.match,
+          index: m.start,
+          endIndex: m.end,
+          ruleId: m.id,
+          ruleName: m.name,
+        });
+      }
+    } catch (err) {
+      if (err instanceof PatternTimeoutError || err instanceof Error) {
+        checkFailed = true;
+      }
+    }
+  }
+
+  const block = hits.find((hit) => hit.action === 'block');
+  return {
+    ...result,
+    action: block ? 'blocked' : result.action,
+    reason: block?.detector ?? result.reason,
     ...(checkFailed ? { checkFailed } : {}),
   };
 }

@@ -41,8 +41,20 @@ export function installOutputGuardIfNeeded(
   if (!detected) return;
 
   const ctx = buildProfileGuardContext(req, profile, endUser, detected.wire, detected.stream);
+  const ac = new AbortController();
+  ctx.signal = ac.signal;
   const filter = registeredFilterProvider(ctx);
   if (filter) {
+    const cleanup = () => {
+      res.off('close', onClose);
+      res.off('finish', cleanup);
+    };
+    const onClose = () => {
+      if (!res.writableFinished) ac.abort();
+      cleanup();
+    };
+    res.once('close', onClose);
+    res.once('finish', cleanup);
     installInterceptor(req, res, detected.wire, [filter]);
   }
 }

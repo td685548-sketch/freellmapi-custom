@@ -96,6 +96,11 @@ async function runModerationCheck(
       guardCall: true,
     });
     const results = Array.isArray(res.result?.results) ? (res.result.results as Array<Record<string, unknown>>) : [];
+    // One input requires exactly one well-typed result. Empty/partial responses
+    // must follow failMode rather than being mistaken for a clean moderation.
+    if (results.length !== 1 || !results[0] || typeof results[0].flagged !== 'boolean') {
+      return { status: 'check_failed', errorCode: 'invalid_moderation_output' };
+    }
     const flaggedEntry = results.find((r) => r && r.flagged === true);
     if (flaggedEntry) {
       const cats = flaggedEntry.categories && typeof flaggedEntry.categories === 'object'

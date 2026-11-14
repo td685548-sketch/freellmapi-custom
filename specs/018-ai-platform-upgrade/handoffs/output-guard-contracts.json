@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "phase": "Delivery stage 3 / US3 / tasks Phase 5 (T054-T071)",
   "baseSha": "92a4f520cd01cc33f403d5f1bbd30ec98a6d569d",
   "mcpPr": 52,
@@ -20,7 +20,7 @@
     "GuardEventAction": ["logged", "blocked", "masked", "bypassed", "check_failed"],
     "GuardEvalAction": ["pass", "logged", "masked", "blocked"],
     "GuardWire": ["openai-chat", "anthropic", "responses", "gemini", "support"],
-    "GuardBufferingReason": ["none", "streaming_window", "unbounded_pattern", "external_detector", "non_stream"],
+    "GuardBufferingReason": ["none", "streaming_window", "unbounded_pattern", "custom_pattern", "external_detector", "non_stream"],
     "GuardAllowedPatternFlags": ["i", "m", "u", "s"]
   },
   "defaults": {
@@ -260,6 +260,7 @@
     "modeLog": "returns original text unchanged even on PII or blocking detector hits; records 'logged' events",
     "piiMask": "replaces PII in-place using masking.ts; keeps original finish_reason unless another blocking detector triggers",
     "bypass": "only trustedRole in bypassRoles bypasses evaluation and records 'bypassed' event; untrusted header/body role is ignored",
+    "customPatterns": "All enabled regex rules require full buffering and execute in an isolated worker before any response text is emitted; bufferingReason is custom_pattern",
     "externalFailure": "records 'check_failed' event and applies policy.failMode ('allow' -> pass/continue, 'block' -> block with replacementText)"
   }
 }

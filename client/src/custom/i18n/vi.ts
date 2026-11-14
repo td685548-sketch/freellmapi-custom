@@ -845,7 +845,7 @@ export const VI: Record<string, string> = {
   "Hold window (chars)": "Cửa sổ giữ (ký tự)",
   "Max hold delay (ms)": "Độ trễ giữ tối đa (ms)",
   "Hold window and max delay add buffering latency before emitting tokens. External checks disable incremental streaming (full buffer) and may incur additional model calls, cost, and quota.": "Cửa sổ giữ và độ trễ tối đa làm tăng độ trễ đệm trước khi phát token. Bộ kiểm tra ngoài làm mất phát luồng tăng dần (đệm toàn bộ) và có thể phát sinh thêm lượt gọi model, chi phí và hạn mức.",
-  "Full buffering active: custom regex patterns cannot be bounded to the streaming hold window.": "Đang đệm toàn bộ: mẫu regex tùy chỉnh không thể giới hạn trong cửa sổ giữ luồng.",
+  "Full buffering active: custom regex patterns run in an isolated worker before any response text is emitted.": "Đang đệm toàn bộ: mẫu regex tùy chỉnh chạy trong worker cô lập trước khi phát bất kỳ nội dung trả lời nào.",
   "Full buffering active: external moderation or judge checks require the complete response before emission.": "Đang đệm toàn bộ: kiểm duyệt ngoài hoặc model đánh giá cần toàn bộ câu trả lời trước khi phát.",
   "Judge capability warning: this scope may lack an authorized inference key context; external judge checks will report check_failed according to fail mode.": "Cảnh báo khả năng model đánh giá: phạm vi này có thể thiếu ngữ cảnh khóa suy luận hợp lệ; bộ đánh giá ngoài sẽ báo check_failed theo fail mode.",
   "Replacement message": "Thông báo thay thế",

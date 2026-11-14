@@ -129,3 +129,21 @@
 - **Corpus**: `server/src/__tests__/fixtures/ai-platform-output-guard/guard-eval.json` — 220 diverse benign responses + 7 deterministic violation/masking fixtures (`seed: 20261113`).
 - **Default policy**: `mode: 'block'`, `failMode: 'allow'`, `holdChars: 200`, `maxDelayMs: 300`, non-model detectors (`keywords`, `promptLeak`, `pii` `mask`).
 - **Scope boundary**: Policies requiring full buffering (unbounded custom regex, external moderation, model judge) are explicitly excluded from the `<= 300ms` streaming TTFC claim. Measurements use synthetic `FakeProviderServer` on `127.0.0.1:0` and measure time to first real content delta (excluding HTTP headers, SSE comments, empty role frames); not a production SLA guarantee.
+
+
+## Reviewer acceptance — 2026-11-14
+
+This acceptance supersedes the earlier open trigger-cache finding and full-suite failures above. Integrated branch: `codex/ai-platform-output-guard-review`, with `origin/main` at `ff4de7df` merged before validation.
+
+- Fixed all seven review findings: skipped bounded streaming regex, PII continuation after timer flush, missing authenticated judge request, inconsistent streamed prompt-leak normalization, malformed moderation results accepted as safe, stale cross-scope policy saves, and trigger side-effect cache invalidation.
+- All enabled regex rules now buffer before worker evaluation; the additive `custom_pattern` buffering reason is documented in contract version 2 and the EN/VI UI disclosure.
+- Added 13 backend review regressions, 7 real-HTTP acceptance cases, 3 malformed-moderation HTTP cases, stale-save success/conflict UI cases, and a trigger-driven cache invalidation regression.
+- Made the two existing suite blockers deterministic: router exploration tests force scoring/draw conditions; the query-count fixture freezes Date while leaving network timers real. Existing query budgets and timeouts are unchanged.
+- Spec tasks T054–T071 are complete.
+
+Final local validation:
+- Server: `npx -w server vitest run --pool=forks --maxWorkers=4` — 613 files passed; 7,281 tests passed, 9 skipped.
+- Client: `npx -w client vitest run --maxWorkers=2` — 122 files / 907 tests passed.
+- CLI: `npm run test -w cli` — 7 files / 180 tests passed, 1 skipped.
+- `npm run test:bootstrap`, `npm run test:hooks`, `npm run lint`, changed-client-file ESLint, `npm run check:i18n -w client`, `npm run test:migrations`, `npm run build`, plain-Node compiled app import and compiled regex-worker smoke — passed. Bootstrap skips the two PowerShell-only cases on Linux.
+- The false-positive/latency benchmark remains synthetic local HTTP evidence, not a production SLA guarantee. CI is reported separately by the PR checks.

@@ -77,6 +77,8 @@ export function OutputGuard() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
 
+  const saveEpochRef = useRef(0);
+  const saveAbortRef = useRef<AbortController | null>(null);
   const policyEpochRef = useRef(0);
   const policyAbortRef = useRef<AbortController | null>(null);
 
@@ -166,8 +168,27 @@ export function OutputGuard() {
     };
   }, [canView, scope, sessionRevision, loadPolicy]);
 
+  useEffect(() => {
+    const epoch = ++saveEpochRef.current;
+    saveAbortRef.current?.abort();
+    saveAbortRef.current = null;
+    queueMicrotask(() => {
+      if (saveEpochRef.current !== epoch) return;
+      setSaving(false);
+      resetScopeMessages();
+    });
+    return () => {
+      saveEpochRef.current += 1;
+      saveAbortRef.current?.abort();
+    };
+  }, [scope, identity, canEdit, resetScopeMessages]);
+
   async function handleSavePolicy() {
     if (!canEdit || scope.kind === 'agent' || !scope.id) return;
+    const epoch = ++saveEpochRef.current;
+    saveAbortRef.current?.abort();
+    const controller = new AbortController();
+    saveAbortRef.current = controller;
     setSaving(true);
     setSaveError(null);
     setSavedMessage(null);
@@ -182,14 +203,17 @@ export function OutputGuard() {
         holdChars: policy.holdChars,
         maxDelayMs: policy.maxDelayMs,
         revision: policy.revision,
-      });
+      }, controller.signal);
+      if (controller.signal.aborted || saveEpochRef.current !== epoch) return;
       setPolicy(res.policy);
       setSavedMessage(tc(GUARD_POLICY_SAVED));
     } catch (err) {
+      if (controller.signal.aborted || saveEpochRef.current !== epoch) return;
       const status = getErrorStatus(err);
       if (status === 409) {
         if (canView) {
           await loadPolicy();
+          if (controller.signal.aborted || saveEpochRef.current !== epoch) return;
         }
         setSaveError(tc(GUARD_CONFLICT_409));
       } else if (status === 422) {
@@ -199,7 +223,7 @@ export function OutputGuard() {
         setSaveError(err instanceof Error && err.message ? err.message : tc(GUARD_SAVE_ERROR));
       }
     } finally {
-      setSaving(false);
+      if (saveEpochRef.current === epoch) setSaving(false);
     }
   }
 

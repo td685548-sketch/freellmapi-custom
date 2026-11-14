@@ -1,6 +1,5 @@
 import type { Request } from 'express';
 import {
-  OUTPUT_GUARD_LIMITS,
   type GuardBufferingReason,
   type GuardDetectorId,
   type GuardEvalAction,
@@ -14,13 +13,13 @@ import {
   type Scope,
 } from '@freellmapi/shared/ai-platform-output-guard.js';
 import { isPillarEnabled } from '../flags.js';
-import { maskText } from '../masking.js';
 import { registerOutputFilterProvider } from '../pipeline.js';
 import type { OutputFilter } from '../wire/interceptor.js';
 import { readStoredProfileSystemPrompt } from './context.js';
 import {
   analyzeStreamingCapability,
   evaluateLocalDetectors,
+  evaluateLocalDetectorsSync,
   type LocalDetectorHit,
 } from './detectors.js';
 import { recordGuardEvent } from './events.js';
@@ -107,79 +106,13 @@ function evaluateIncrementalSync(
   policy: GuardPolicyView,
   systemPrompt: string | null,
 ): StreamGuardCheckResult {
-  const { detectors } = policy;
-
-  // 1. Keywords
-  if (detectors.keywords.enabled && detectors.keywords.terms.length > 0) {
-    const normText = text.normalize('NFC').toLowerCase();
-    for (const rawTerm of detectors.keywords.terms) {
-      const term = rawTerm.normalize('NFC').trim().toLowerCase();
-      if (!term) continue;
-      const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const re = new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, 'u');
-      if (re.test(normText)) {
-        return { action: 'blocked', text, detector: 'keywords', reason: 'keywords' };
-      }
-    }
-  }
-
-  // 2. Prompt leak (12-word shingles)
-  if (detectors.promptLeak.enabled && systemPrompt) {
-    const cleaned = text
-      .replace(/<(tool_result|knowledge|reference_data)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
-      .trim();
-    const sysWords = systemPrompt
-      .normalize('NFC')
-      .toLowerCase()
-      .split(/\s+/)
-      .filter(Boolean);
-    const outWords = cleaned
-      .normalize('NFC')
-      .toLowerCase()
-      .split(/\s+/)
-      .filter(Boolean);
-    const shingleLen = OUTPUT_GUARD_LIMITS.shingleWords;
-    if (sysWords.length >= shingleLen && outWords.length >= shingleLen) {
-      const sysShingles = new Set<string>();
-      for (let i = 0; i <= sysWords.length - shingleLen; i += 1) {
-        sysShingles.add(sysWords.slice(i, i + shingleLen).join(' '));
-      }
-      const matched = new Set<string>();
-      for (let i = 0; i <= outWords.length - shingleLen; i += 1) {
-        const s = outWords.slice(i, i + shingleLen).join(' ');
-        if (sysShingles.has(s)) matched.add(s);
-      }
-      const minShingles = Math.max(
-        OUTPUT_GUARD_LIMITS.minShingles,
-        detectors.promptLeak.minShingles ?? OUTPUT_GUARD_LIMITS.defaultMinShingles,
-      );
-      if (matched.size >= minShingles) {
-        return { action: 'blocked', text, detector: 'promptLeak', reason: 'promptLeak' };
-      }
-    }
-  }
-
-  // 3. Max length
-  if (
-    detectors.maxLength.enabled &&
-    detectors.maxLength.chars > 0 &&
-    text.length > detectors.maxLength.chars
-  ) {
-    return { action: 'blocked', text, detector: 'maxLength', reason: 'maxLength' };
-  }
-
-  // 4. PII
-  if (detectors.pii.enabled) {
-    const masked = maskText(scope, text, 'customer');
-    if (masked !== text) {
-      if (detectors.pii.action === 'block') {
-        return { action: 'blocked', text, detector: 'pii', reason: 'pii' };
-      }
-      return { action: 'masked', text: masked, detector: 'pii', reason: 'pii' };
-    }
-  }
-
-  return { action: 'pass', text };
+  const result = evaluateLocalDetectorsSync(scope, text, policy, { systemPrompt });
+  return {
+    action: result.action,
+    text: result.action === 'masked' ? result.maskedText : text,
+    detector: result.reason,
+    reason: result.reason,
+  };
 }
 
 async function evaluateWithPolicySnapshot(
@@ -570,6 +503,8 @@ export async function testPolicy(
 // Register default runtime providers for pipeline & support-adapter without circular imports.
 registerOutputFilterProvider((ctx) =>
   outputFilterFor(ctx.scope, {
+    req: ctx.req,
+    signal: ctx.signal,
     role: ctx.role,
     trustedRole: null,
     endUser: ctx.endUser,

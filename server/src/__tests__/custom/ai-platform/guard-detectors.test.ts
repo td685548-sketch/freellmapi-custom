@@ -169,7 +169,7 @@ describe('output-guard local detectors', () => {
       }, 200),
     );
     expect(capRegex.canIncrementalStream).toBe(false);
-    expect(capRegex.bufferingReason).toBe('unbounded_pattern');
+    expect(capRegex.bufferingReason).toBe('custom_pattern');
 
     const capExternal = analyzeStreamingCapability(
       makePolicy({ moderation: { enabled: true } }, 200),

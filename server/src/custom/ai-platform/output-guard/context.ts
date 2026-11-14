@@ -128,6 +128,8 @@ export function readStoredProfileSystemPrompt(profileId: number): string | null 
 }
 
 export interface ProfileGuardContext {
+  req: Request;
+  signal?: AbortSignal;
   scope: Scope;
   role: string;
   endUser: string | null;
@@ -156,6 +158,7 @@ export function buildProfileGuardContext(
   const canRunExternalJudge = Boolean(token) && isInternalCall(req) === null;
 
   return {
+    req,
     scope: { kind: 'profile', id: String(profile.id) },
     role,
     endUser,

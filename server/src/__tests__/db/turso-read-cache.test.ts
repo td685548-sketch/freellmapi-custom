@@ -136,12 +136,36 @@ describe('Turso SELECT result cache', () => {
     expect(local.prepare('SELECT v FROM a').all()).toHaveLength(2);
   });
 
+  it('invalidates guard policy and event reads when deleting a profile through its trigger', () => {
+    const raw = new Database(':memory:') as unknown as Db;
+    raw.exec(`
+      CREATE TABLE client_profiles (id INTEGER PRIMARY KEY);
+      CREATE TABLE custom_ai_output_policies (scope_kind TEXT, scope_id TEXT);
+      CREATE TABLE custom_ai_guard_events (scope_kind TEXT, scope_id TEXT);
+      CREATE TRIGGER delete_guard AFTER DELETE ON client_profiles BEGIN
+        DELETE FROM custom_ai_output_policies WHERE scope_kind = 'profile' AND scope_id = CAST(OLD.id AS TEXT);
+        DELETE FROM custom_ai_guard_events WHERE scope_kind = 'profile' AND scope_id = CAST(OLD.id AS TEXT);
+      END;
+    `);
+    const db = wrapTursoDatabase(raw, true);
+    db.prepare('INSERT INTO client_profiles VALUES (1)').run();
+    for (const table of ['custom_ai_output_policies', 'custom_ai_guard_events']) {
+      db.prepare(`INSERT INTO ${table} VALUES ('profile', '1')`).run();
+      expect(db.prepare(`SELECT * FROM ${table}`).all()).toHaveLength(1);
+    }
+    db.prepare('DELETE FROM client_profiles WHERE id = 1').run();
+    for (const table of ['custom_ai_output_policies', 'custom_ai_guard_events']) {
+      expect(db.prepare(`SELECT * FROM ${table}`).all()).toEqual([]);
+    }
+    raw.close();
+  });
+
   it('knows about every trigger in the migrations (a trigger writes tables the cache cannot see)', () => {
     const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../db/migrations');
     const withTriggers = fs.readdirSync(dir)
       .filter(f => /CREATE\s+TRIGGER/i.test(fs.readFileSync(path.join(dir, f), 'utf8')));
     // If this fails, add the trigger's written tables to TRIGGER_SIDE_EFFECTS in db/turso.ts.
-    expect(withTriggers).toEqual(['20260914_000001_key_monthly_usage.ts', '20261111_000001_model_monthly_usage.ts']);
+    expect(withTriggers).toEqual(['20260914_000001_key_monthly_usage.ts', '20261111_000001_model_monthly_usage.ts', '20261113_120000_custom_ai_output_guard.ts']);
   });
 });
 

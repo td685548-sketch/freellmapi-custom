@@ -104,6 +104,22 @@ describe('output-guard external checks (moderation & judge)', () => {
     expect(res.triggered[0]?.match).toContain('violence');
   });
 
+  it.each([[], [{}], [{ flagged: 'false' }]].map((results) => ({ results })))('rejects malformed moderation schema over HTTP: $results', async ({ results }) => {
+    insertOpenAiKey();
+    const originalFetch = global.fetch;
+    vi.spyOn(global, 'fetch').mockImplementation((url, init) => {
+      const target = typeof url === 'string' ? url : url.toString();
+      return originalFetch(target.startsWith('https://api.openai.com/v1/moderations')
+        ? `${fakeServer.url}/v1/moderations` : url, init);
+    });
+    fakeServer.setModerationHandler(() => ({ status: 200, body: { results } }));
+    const result = await evaluateExternalDetectors(
+      makePolicy({ moderation: { enabled: true } }), 'test output', { endUser: null },
+    );
+    expect(result.action).toBe('check_failed');
+    expect(result.errorCode).toBe('invalid_moderation_output');
+  });
+
   it('propagates AbortSignal to real moderation HTTP request and returns check_failed', async () => {
     insertOpenAiKey();
     const origFetch = global.fetch;

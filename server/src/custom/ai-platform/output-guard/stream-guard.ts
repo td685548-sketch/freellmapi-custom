@@ -46,7 +46,7 @@ function clampInt(value: number | undefined, fallback: number, min: number, max:
 /** Avoid splitting a UTF-16 surrogate pair or trailing combining mark at `cut`. */
 function safeCutIndex(text: string, targetCut: number): number {
   let cut = Math.max(0, Math.min(text.length, targetCut));
-  if (cut <= 0 || cut >= text.length) return cut;
+  if (cut <= 0) return cut;
   const prev = text.charCodeAt(cut - 1);
   if (prev >= 0xd800 && prev <= 0xdbff) {
     cut -= 1;
@@ -99,85 +99,93 @@ export function createStreamGuard(options: StreamGuardOptions): StreamGuardFilte
   let timer: ReturnType<typeof setTimeout> | null = null;
   let disposed = false;
   let stopped = false;
-  let emittedPrefix = '';
-  let unsentBuffer = '';
+  // Keep original input separate from rewritten output. Detector context must
+  // never lose a token merely because an earlier chunk was already masked.
+  let rawPrefix = '';
+  let pending = '';
   let loggedNotified = false;
 
   const clearFlushTimer = () => {
-    if (timer !== null) {
-      clearTimeout(timer);
-      timer = null;
-    }
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
   };
 
-  const emitEventOnceForLog = (res: StreamGuardCheckResult, source: string) => {
-    if (loggedNotified) return;
-    loggedNotified = true;
+  const notify = (action: GuardAction, check: StreamGuardCheckResult, source: string) => {
+    if (action === 'pass') return;
+    if (action === 'logged') {
+      if (loggedNotified) return;
+      loggedNotified = true;
+    }
     options.onEvent?.({
-      action: 'logged',
-      detector: res.detector ?? res.reason,
-      reason: res.reason,
+      action,
+      detector: check.detector ?? check.reason,
+      reason: check.reason,
       excerptSource: source,
     });
   };
 
+  const stop = (check: StreamGuardCheckResult, source: string) => {
+    stopped = true;
+    clearFlushTimer();
+    pending = '';
+    const reason = check.reason ?? check.detector ?? 'policy';
+    notify('blocked', check, source);
+    return {
+      emit: '',
+      stop: { replacement: replacementText, reason, action: 'blocked' as const },
+      action: 'blocked' as const,
+      reason,
+    };
+  };
+
+  const consume = (check: StreamGuardCheckResult, cut = pending.length) => {
+    const source = rawPrefix + pending;
+    const hit = check.action !== 'pass';
+    const action: GuardAction = mode === 'log' && hit ? 'logged' : check.action;
+    let emit: string;
+    if (action === 'masked') {
+      // A rewrite may change the length of previously sent input. Align against
+      // its *sanitized* prefix, not the bytes sent or the raw character count.
+      const prefixCheck = options.evaluateLocal(rawPrefix, { isFinal: false });
+      const sanitizedPrefix = prefixCheck.action === 'masked' ? prefixCheck.text : rawPrefix;
+      if (check.text.startsWith(sanitizedPrefix)) {
+        emit = check.text.slice(sanitizedPrefix.length);
+      } else {
+        // A detector now recognizes PII crossing an already-flushed boundary.
+        // Sent bytes cannot be recalled; suppress the completing piece instead
+        // of falling back to a tail-only scan that could reveal the full value.
+        emit = '[redacted]';
+      }
+      cut = pending.length;
+    } else {
+      emit = pending.slice(0, cut);
+    }
+    rawPrefix += pending.slice(0, cut);
+    pending = pending.slice(cut);
+    notify(action, check, source);
+    return { emit, action, reason: check.reason ?? check.detector };
+  };
+
   const flushUnsentOnTimer = () => {
     timer = null;
-    if (disposed || stopped || buffering || mode === 'off') return;
-    if (unsentBuffer.length === 0) return;
-
-    const scanContext = emittedPrefix + unsentBuffer;
-    const check = options.evaluateLocal(scanContext, { isFinal: false });
-    if (check.action === 'blocked') {
-      if (mode === 'block') {
-        stopped = true;
-        unsentBuffer = '';
-        const detector = check.detector ?? check.reason ?? 'policy';
-        options.onEvent?.({
-          action: 'blocked',
-          detector,
-          reason: check.reason ?? detector,
-          excerptSource: scanContext,
-        });
-        sink?.stop(replacementText, check.reason ?? detector, 'blocked');
-        return;
-      }
-      emitEventOnceForLog(check, scanContext);
+    if (disposed || stopped || buffering || mode === 'off' || !pending) return;
+    const source = rawPrefix + pending;
+    const check = options.evaluateLocal(source, { isFinal: false });
+    if (check.action === 'blocked' && mode === 'block') {
+      const result = stop(check, source);
+      sink?.stop(result.stop.replacement, result.stop.reason, 'blocked');
+      return;
     }
-
-    let toEmit = unsentBuffer;
-    if (check.action === 'masked' && mode !== 'log') {
-      if (check.text.length >= emittedPrefix.length && check.text.startsWith(emittedPrefix)) {
-        toEmit = check.text.slice(emittedPrefix.length);
-      } else {
-        const tailCheck = options.evaluateLocal(unsentBuffer, { isFinal: false });
-        toEmit = tailCheck.text;
-      }
-      options.onEvent?.({
-        action: 'masked',
-        detector: check.detector ?? check.reason ?? 'pii',
-        reason: check.reason ?? 'pii',
-        excerptSource: scanContext,
-      });
+    const cut = safeCutIndex(pending, pending.length);
+    if (cut > 0) {
+      const result = consume(check, cut);
+      if (result.emit) sink?.emitDelta(result.emit);
     }
-
-    // Keep trailing combining base if unsent ends with a high surrogate
-    const cut = safeCutIndex(toEmit, toEmit.length);
-    const emitNow = toEmit.slice(0, cut);
-    const carry = toEmit.slice(cut);
-    if (emitNow.length > 0) {
-      emittedPrefix += emitNow;
-      unsentBuffer = carry;
-      sink?.emitDelta(emitNow);
-    }
-    if (unsentBuffer.length > 0) {
-      scheduleTimer();
-    }
+    scheduleTimer();
   };
 
   const scheduleTimer = () => {
-    if (disposed || stopped || buffering || mode === 'off' || timer !== null) return;
-    if (unsentBuffer.length === 0) return;
+    if (disposed || stopped || buffering || mode === 'off' || timer !== null || !pending) return;
     timer = setTimeout(flushUnsentOnTimer, maxDelayMs);
   };
 
@@ -186,224 +194,74 @@ export function createStreamGuard(options: StreamGuardOptions): StreamGuardFilte
     isOutputGuard: true,
     buffering,
     failClosed,
-    config: {
-      mode,
-      holdChars,
-      maxDelayMs,
-      buffering,
-      failClosed,
-    },
-
+    config: { mode, holdChars, maxDelayMs, buffering, failClosed },
     attach(nextSink: OutputFilterSink) {
       sink = nextSink;
     },
-
     dispose() {
       disposed = true;
       clearFlushTimer();
-      unsentBuffer = '';
+      pending = '';
+      rawPrefix = '';
     },
-
     onDelta(text: string) {
-      if (mode === 'off') {
-        return { emit: text, action: 'pass' };
-      }
-      if (stopped || disposed) {
-        return { emit: '' };
-      }
-      if (buffering) {
-        unsentBuffer += text;
-        return { emit: '' };
-      }
+      if (mode === 'off') return { emit: text, action: 'pass' };
+      if (stopped || disposed) return { emit: '' };
+      pending += text;
+      if (buffering) return { emit: '' };
 
-      unsentBuffer += text;
-      const scanContext = emittedPrefix + unsentBuffer;
-      const check = options.evaluateLocal(scanContext, { isFinal: false });
-
-      if (check.action === 'blocked') {
-        if (mode === 'block') {
-          stopped = true;
-          clearFlushTimer();
-          unsentBuffer = '';
-          const detector = check.detector ?? check.reason ?? 'policy';
-          options.onEvent?.({
-            action: 'blocked',
-            detector,
-            reason: check.reason ?? detector,
-            excerptSource: scanContext,
-          });
-          return {
-            emit: '',
-            stop: {
-              replacement: replacementText,
-              reason: check.reason ?? detector,
-              action: 'blocked',
-            },
-            action: 'blocked',
-            reason: check.reason ?? detector,
-          };
-        }
-        emitEventOnceForLog(check, scanContext);
-        // log mode: pass through without rewriting
-        const emitAll = unsentBuffer;
-        emittedPrefix += emitAll;
-        unsentBuffer = '';
+      const source = rawPrefix + pending;
+      const check = options.evaluateLocal(source, { isFinal: false });
+      if (check.action === 'blocked' && mode === 'block') return stop(check, source);
+      if (check.action === 'masked' && mode === 'block') {
         clearFlushTimer();
-        return { emit: emitAll, action: 'logged', reason: check.reason ?? check.detector };
+        return consume(check);
       }
-
-      let currentAction: GuardAction = check.action === 'logged' ? 'logged' : 'pass';
-      let currentReason = check.reason ?? check.detector;
-      if (check.action === 'masked' && mode !== 'log') {
-        currentAction = 'masked';
-        currentReason = check.reason ?? check.detector ?? 'pii';
-        if (check.text.length >= emittedPrefix.length && check.text.startsWith(emittedPrefix)) {
-          unsentBuffer = check.text.slice(emittedPrefix.length);
-        } else {
-          unsentBuffer = options.evaluateLocal(unsentBuffer, { isFinal: false }).text;
-        }
-      }
-
-      if (unsentBuffer.length > holdChars) {
-        const cut = safeCutIndex(unsentBuffer, unsentBuffer.length - holdChars);
-        if (cut > 0) {
-          const emitNow = unsentBuffer.slice(0, cut);
-          emittedPrefix += emitNow;
-          unsentBuffer = unsentBuffer.slice(cut);
-          if (unsentBuffer.length === 0) {
-            clearFlushTimer();
-          } else {
-            scheduleTimer();
-          }
-          return { emit: emitNow, action: currentAction, reason: currentReason };
-        }
-      }
-
-      if (unsentBuffer.length > 0) {
+      const cut = safeCutIndex(pending, Math.max(0, pending.length - holdChars));
+      if (cut > 0) {
+        const result = consume(check, cut);
         scheduleTimer();
+        return result;
       }
-      return { emit: '', action: currentAction, reason: currentReason };
+      if (mode === 'log' && check.action !== 'pass') notify('logged', check, source);
+      scheduleTimer();
+      return {
+        emit: '',
+        action: mode === 'log' && check.action !== 'pass' ? 'logged' : 'pass',
+        reason: check.reason ?? check.detector,
+      };
     },
-
     onBeforeTerminal() {
       clearFlushTimer();
-      if (mode === 'off' || buffering || stopped || disposed) {
-        return { emit: '' };
-      }
-      if (unsentBuffer.length === 0) {
-        return { emit: '' };
-      }
-
-      const scanContext = emittedPrefix + unsentBuffer;
-      const check = options.evaluateLocal(scanContext, { isFinal: true });
-      if (check.action === 'blocked') {
-        if (mode === 'block') {
-          stopped = true;
-          unsentBuffer = '';
-          const detector = check.detector ?? check.reason ?? 'policy';
-          options.onEvent?.({
-            action: 'blocked',
-            detector,
-            reason: check.reason ?? detector,
-            excerptSource: scanContext,
-          });
-          return {
-            emit: '',
-            stop: {
-              replacement: replacementText,
-              reason: check.reason ?? detector,
-              action: 'blocked',
-            },
-            action: 'blocked',
-            reason: check.reason ?? detector,
-          };
-        }
-        emitEventOnceForLog(check, scanContext);
-        const emitAll = unsentBuffer;
-        emittedPrefix += emitAll;
-        unsentBuffer = '';
-        return { emit: emitAll, action: 'logged', reason: check.reason ?? check.detector };
-      }
-
-      if (check.action === 'masked' && mode !== 'log') {
-        let maskedTail = unsentBuffer;
-        if (check.text.length >= emittedPrefix.length && check.text.startsWith(emittedPrefix)) {
-          maskedTail = check.text.slice(emittedPrefix.length);
-        } else {
-          maskedTail = options.evaluateLocal(unsentBuffer, { isFinal: true }).text;
-        }
-        options.onEvent?.({
-          action: 'masked',
-          detector: check.detector ?? check.reason ?? 'pii',
-          reason: check.reason ?? 'pii',
-          excerptSource: scanContext,
-        });
-        emittedPrefix += maskedTail;
-        unsentBuffer = '';
-        return { emit: maskedTail, action: 'masked', reason: check.reason ?? 'pii' };
-      }
-
-      const remaining = unsentBuffer;
-      emittedPrefix += remaining;
-      unsentBuffer = '';
-      return { emit: remaining, action: 'pass' };
+      if (mode === 'off' || buffering || stopped || disposed || !pending) return { emit: '' };
+      const source = rawPrefix + pending;
+      const check = options.evaluateLocal(source, { isFinal: true });
+      if (check.action === 'blocked' && mode === 'block') return stop(check, source);
+      return consume(check);
     },
-
     async onComplete(full: string) {
       clearFlushTimer();
-      if (mode === 'off') {
-        return { action: 'pass' };
+      if (mode === 'off') return { action: 'pass' };
+      if (stopped || disposed) return {};
+      const target = full || rawPrefix + pending;
+      const check = options.evaluateFinal
+        ? await options.evaluateFinal(target)
+        : options.evaluateLocal(target, { isFinal: true });
+      if (check.action === 'pass') return { action: 'pass' };
+      if (mode === 'log') {
+        notify('logged', check, target);
+        return { action: 'logged', reason: check.reason ?? check.detector };
       }
-      if (stopped || disposed) {
-        return {};
+      if (check.action === 'blocked') {
+        stop(check, target);
+        return { replaceWith: replacementText, action: 'blocked', reason: check.reason ?? check.detector };
       }
-      const accumulated = emittedPrefix + unsentBuffer;
-      const targetText = full || accumulated;
-      const res = options.evaluateFinal
-        ? await options.evaluateFinal(targetText)
-        : options.evaluateLocal(targetText, { isFinal: true });
-
-      if (res.action === 'blocked') {
-        const detector = res.detector ?? res.reason ?? 'policy';
-        if (mode === 'block') {
-          stopped = true;
-          options.onEvent?.({
-            action: 'blocked',
-            detector,
-            reason: res.reason ?? detector,
-            excerptSource: targetText,
-          });
-          return {
-            replaceWith: replacementText,
-            action: 'blocked',
-            reason: res.reason ?? detector,
-          };
-        }
-        emitEventOnceForLog(res, targetText);
-        return { action: 'logged', reason: res.reason ?? detector };
-      }
-
-      if (res.action === 'masked' && mode !== 'log') {
-        const detector = res.detector ?? res.reason ?? 'pii';
-        options.onEvent?.({
-          action: 'masked',
-          detector,
-          reason: res.reason ?? detector,
-          excerptSource: targetText,
-        });
-        return {
-          replaceWith: res.text,
-          action: 'masked',
-          reason: res.reason ?? detector,
-        };
-      }
-
-      if (res.action === 'logged') {
-        emitEventOnceForLog(res, targetText);
-        return { action: 'logged', reason: res.reason ?? res.detector };
-      }
-
-      return { action: 'pass' };
+      notify(check.action, check, target);
+      return {
+        ...(check.action === 'masked' ? { replaceWith: check.text } : {}),
+        action: check.action,
+        reason: check.reason ?? check.detector,
+      };
     },
   };
 }

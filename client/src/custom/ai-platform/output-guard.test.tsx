@@ -456,3 +456,47 @@ describe('GuardEvents metadata, excerpts, and abort/cleanup', () => {
     errSpy.mockRestore();
   });
 });
+
+
+it.each(['success', 'conflict'])('ignores a late %s save response after switching profile', async (outcome) => {
+  actor.perms.add('view_output_guard');
+  actor.perms.add('edit_output_guard');
+  vi.mocked(guardApi.fetchGuardProfileOptions).mockResolvedValue([{ id: 1, name: 'One' }, { id: 2, name: 'Two' }]);
+  vi.mocked(guardApi.fetchGuardPolicy).mockImplementation(async (scope) => ({
+    policy: makePolicy({ scopeId: scope.id, replacementText: `policy-${scope.id}` }),
+  }));
+  let resolveSave!: (value: { policy: guardApi.GuardPolicyView }) => void;
+  let rejectSave!: (reason: Error) => void;
+  vi.mocked(guardApi.putGuardPolicy).mockImplementation(() => new Promise((resolve, reject) => {
+    resolveSave = resolve;
+    rejectSave = reject;
+  }));
+  renderEl(<OutputGuard />);
+  await flush();
+  act(() => {
+    (container.querySelector('[data-testid="guard-save-policy-btn"]') as HTMLButtonElement).click();
+  });
+  await flush();
+  const saveSignal = vi.mocked(guardApi.putGuardPolicy).mock.calls[0][2]!;
+  const select = container.querySelector('[data-testid="guard-scope-target-select"]') as HTMLSelectElement;
+  act(() => {
+    select.value = '2';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await flush();
+  expect(saveSignal.aborted).toBe(true);
+  const replacement = () => (container.querySelector('[data-testid="guard-replacement-input"]') as HTMLTextAreaElement).value;
+  expect(replacement()).toBe('policy-2');
+  const readsBeforeLateResponse = vi.mocked(guardApi.fetchGuardPolicy).mock.calls.length;
+  await act(async () => {
+    if (outcome === 'success') {
+      resolveSave({ policy: makePolicy({ scopeId: '1', replacementText: 'saved-profile-1' }) });
+    } else {
+      rejectSave(Object.assign(new Error('Stale conflict'), { status: 409 }));
+    }
+  });
+  await flush();
+  expect(replacement()).toBe('policy-2');
+  expect(guardApi.fetchGuardPolicy).toHaveBeenCalledTimes(readsBeforeLateResponse);
+  expect(container.querySelector('[data-testid="guard-policy-error"]')).toBeNull();
+});
