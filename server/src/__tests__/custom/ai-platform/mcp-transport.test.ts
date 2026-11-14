@@ -246,4 +246,81 @@ describe('MCP HTTP Transport (T036 / T043)', () => {
       mcpListTools(staleCfg, session, new AbortController().signal, opts),
     ).rejects.toBeInstanceOf(McpTransportError);
   });
+
+  it('enforces deadline across slow/hanging DNS, releases semaphore slot for reuse, and bounds body reads', async () => {
+    // 1. Slow DNS (350ms) with 50ms timeoutMs must reject < 200ms and release maxConcurrency=1 slot
+    const slowCfg = makeConfig('https://dns-review.example.test/mcp', {
+      serverId: 901,
+      timeoutMs: 50,
+      maxConcurrency: 1,
+    });
+    const fetchSpy = vi.fn(async () => new Response('ok', { status: 200 }));
+    const startSlow = Date.now();
+    await expect(
+      mcpInitialize(slowCfg, new AbortController().signal, {
+        fetchFn: fetchSpy as unknown as typeof fetch,
+        dnsResolver: async () => {
+          await new Promise((r) => setTimeout(r, 350));
+          return ['93.184.216.34'];
+        },
+      }),
+    ).rejects.toMatchObject({ name: 'McpTransportError', code: 'timeout' });
+    expect(Date.now() - startSlow).toBeLessThan(200);
+
+    // 2. Hanging (never-settling) DNS with 50ms timeoutMs must also settle < 200ms and release slot
+    const startHang = Date.now();
+    await expect(
+      mcpInitialize(slowCfg, new AbortController().signal, {
+        fetchFn: fetchSpy as unknown as typeof fetch,
+        dnsResolver: () => new Promise<string[]>(() => {}),
+      }),
+    ).rejects.toMatchObject({ name: 'McpTransportError', code: 'timeout' });
+    expect(Date.now() - startHang).toBeLessThan(200);
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    // 3. Slot on serverId=901 must be reusable immediately after DNS timeout
+    const reuseCfg = makeConfig(fakeServer.url, { serverId: 901, timeoutMs: 2_000, maxConcurrency: 1 });
+    const reusedSession = await mcpInitialize(reuseCfg, new AbortController().signal, {
+      allowedInternalOrigins: [fakeServer.origin],
+    });
+    expect(reusedSession.sessionId).toBeTruthy();
+
+    // 4. Shared operation deadlineAtMs across initialize -> tools/call does not grant a fresh full budget
+    const expiredDeadline = Date.now() - 1;
+    await expect(
+      mcpCallTool(
+        makeConfig(fakeServer.url, { serverId: 902, timeoutMs: 2_000 }),
+        { ...reusedSession, serverId: 902 },
+        'lookup_order',
+        { order_id: 'ORD-BUDGET' },
+        new AbortController().signal,
+        { allowedInternalOrigins: [fakeServer.origin], deadlineAtMs: expiredDeadline },
+      ),
+    ).rejects.toMatchObject({ name: 'McpTransportError', code: 'timeout' });
+
+    // 5. Stalled response body stream is aborted by deadline in < 200ms
+    const stalledFetch: typeof fetch = async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        start() {
+          // Never enqueues or closes
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: { 'content-type': 'application/json', 'mcp-session-id': 'stalled-sess' },
+      });
+    };
+    const startBody = Date.now();
+    await expect(
+      mcpInitialize(
+        makeConfig(fakeServer.url, { serverId: 903, timeoutMs: 50 }),
+        new AbortController().signal,
+        {
+          allowedInternalOrigins: [fakeServer.origin],
+          fetchFn: stalledFetch,
+        },
+      ),
+    ).rejects.toMatchObject({ name: 'McpTransportError', code: 'timeout' });
+    expect(Date.now() - startBody).toBeLessThan(200);
+  });
 });

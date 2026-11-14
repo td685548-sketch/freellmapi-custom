@@ -30,6 +30,7 @@ export interface McpTransportOptions {
   dnsResolver?: (host: string) => Promise<string[]>;
   fetchFn?: typeof fetch;
   retryOn404?: boolean;
+  deadlineAtMs?: number;
 }
 
 interface JsonRpcResponse {
@@ -137,10 +138,19 @@ function resolveAllowedOrigins(opts?: McpTransportOptions): readonly string[] {
   }
 }
 
+export function computeOperationDeadlineMs(timeoutMs: number): number {
+  const effectiveTimeout = Math.max(
+    50,
+    Math.min(MCP_LIMITS.maxTimeoutMs, Math.trunc(timeoutMs || MCP_LIMITS.defaultTimeoutMs)),
+  );
+  return Date.now() + effectiveTimeout;
+}
+
 function createDeadlineSignal(
   callerSignal: AbortSignal,
   timeoutMs: number,
-): { signal: AbortSignal; isDeadlineExpired: () => boolean; cleanup: () => void } {
+  deadlineAtMs?: number,
+): { signal: AbortSignal; isDeadlineExpired: () => boolean; deadlineAtMs: number; cleanup: () => void } {
   const controller = new AbortController();
   let expired = false;
 
@@ -148,6 +158,10 @@ function createDeadlineSignal(
     50,
     Math.min(MCP_LIMITS.maxTimeoutMs, Math.trunc(timeoutMs || MCP_LIMITS.defaultTimeoutMs)),
   );
+  const targetDeadlineAtMs =
+    typeof deadlineAtMs === 'number' && Number.isFinite(deadlineAtMs)
+      ? deadlineAtMs
+      : Date.now() + effectiveTimeout;
 
   const onCallerAbort = () => {
     controller.abort(callerSignal.reason);
@@ -159,16 +173,26 @@ function createDeadlineSignal(
     callerSignal.addEventListener('abort', onCallerAbort, { once: true });
   }
 
-  const timer = setTimeout(() => {
-    expired = true;
-    controller.abort(new Error('MCP request deadline exceeded'));
-  }, effectiveTimeout);
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  if (!controller.signal.aborted) {
+    const remainingMs = targetDeadlineAtMs - Date.now();
+    if (remainingMs <= 0) {
+      expired = true;
+      controller.abort(new Error('MCP request deadline exceeded'));
+    } else {
+      timer = setTimeout(() => {
+        expired = true;
+        controller.abort(new Error('MCP request deadline exceeded'));
+      }, remainingMs);
+    }
+  }
 
   return {
     signal: controller.signal,
     isDeadlineExpired: () => expired,
+    deadlineAtMs: targetDeadlineAtMs,
     cleanup: () => {
-      clearTimeout(timer);
+      if (timer !== null) clearTimeout(timer);
       callerSignal.removeEventListener('abort', onCallerAbort);
     },
   };
@@ -240,6 +264,46 @@ async function readBoundedText(
   };
   signal.addEventListener('abort', onAbort, { once: true });
 
+  const readNextChunk = (): ReturnType<typeof reader.read> => {
+    if (signal.aborted) {
+      return Promise.reject(
+        new McpTransportError(
+          isDeadlineExpired() ? 'timeout' : 'http',
+          isDeadlineExpired() ? 'MCP response timed out.' : 'MCP response aborted.',
+        ),
+      );
+    }
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const onChunkAbort = () => {
+        if (settled) return;
+        settled = true;
+        void reader.cancel().catch(() => {});
+        reject(
+          new McpTransportError(
+            isDeadlineExpired() ? 'timeout' : 'http',
+            isDeadlineExpired() ? 'MCP response timed out.' : 'MCP response aborted.',
+          ),
+        );
+      };
+      signal.addEventListener('abort', onChunkAbort, { once: true });
+      reader.read().then(
+        (res) => {
+          if (settled) return;
+          settled = true;
+          signal.removeEventListener('abort', onChunkAbort);
+          resolve(res);
+        },
+        (err) => {
+          if (settled) return;
+          settled = true;
+          signal.removeEventListener('abort', onChunkAbort);
+          reject(err);
+        },
+      );
+    });
+  };
+
   try {
     while (true) {
       if (signal.aborted) {
@@ -248,7 +312,7 @@ async function readBoundedText(
           isDeadlineExpired() ? 'MCP response timed out.' : 'MCP response aborted.',
         );
       }
-      const { done, value } = await reader.read();
+      const { done, value } = await readNextChunk();
       if (done) break;
       if (value) {
         totalBytes += value.byteLength;
@@ -407,6 +471,13 @@ async function dispatchJsonRpc(
     headers['Mcp-Session-Id'] = session.sessionId;
   }
 
+  if (signal.aborted || isDeadlineExpired()) {
+    throw new McpTransportError(
+      isDeadlineExpired() ? 'timeout' : 'http',
+      isDeadlineExpired() ? 'MCP request timed out.' : 'MCP request aborted.',
+    );
+  }
+
   let res: Response;
   try {
     res = await safeFetch(
@@ -427,6 +498,7 @@ async function dispatchJsonRpc(
         },
         dnsResolver: opts?.dnsResolver,
         fetchFn: opts?.fetchFn,
+        signal,
       },
     );
   } catch (err) {
@@ -579,7 +651,7 @@ export async function mcpInitialize(
   signal: AbortSignal,
   opts?: McpTransportOptions,
 ): Promise<McpSession> {
-  const deadline = createDeadlineSignal(signal, config.timeoutMs);
+  const deadline = createDeadlineSignal(signal, config.timeoutMs, opts?.deadlineAtMs);
   let release: (() => void) | null = null;
   try {
     release = await acquireServerSlot(
@@ -602,7 +674,7 @@ export async function mcpListTools(
   opts?: McpTransportOptions,
 ): Promise<McpToolDescriptor[]> {
   assertSessionValid(config, session);
-  const deadline = createDeadlineSignal(signal, config.timeoutMs);
+  const deadline = createDeadlineSignal(signal, config.timeoutMs, opts?.deadlineAtMs);
   let release: (() => void) | null = null;
 
   try {
@@ -720,7 +792,7 @@ export async function mcpCallTool(
   opts?: McpTransportOptions,
 ): Promise<McpCallToolResult> {
   assertSessionValid(config, session);
-  const deadline = createDeadlineSignal(signal, config.timeoutMs);
+  const deadline = createDeadlineSignal(signal, config.timeoutMs, opts?.deadlineAtMs);
   let release: (() => void) | null = null;
   const retryOn404 = opts?.retryOn404 === true;
 

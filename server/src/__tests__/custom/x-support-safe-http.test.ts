@@ -432,5 +432,50 @@ describe('Safe HTTP SSRF & Transport Protection', () => {
         }),
       ).rejects.toThrow(SafeHttpError);
     });
+
+    it('enforces timeoutMs/signal during slow or hanging DNS resolution without invoking fetchFn', async () => {
+      const fetchFn = vi.fn(async () => new Response('ok', { status: 200 }));
+
+      // Slow DNS (350ms) vs 50ms timeoutMs
+      const startSlow = Date.now();
+      await expect(
+        safeFetch('https://dns-slow.example.test/mcp', { method: 'POST' }, {
+          timeoutMs: 50,
+          fetchFn: fetchFn as unknown as typeof fetch,
+          dnsResolver: async () => {
+            await new Promise((r) => setTimeout(r, 350));
+            return ['93.184.216.34'];
+          },
+        }),
+      ).rejects.toThrow(SafeHttpError);
+      expect(Date.now() - startSlow).toBeLessThan(200);
+
+      // Hanging (never-settling) DNS vs 50ms timeoutMs
+      const startHang = Date.now();
+      await expect(
+        safeFetch('https://dns-hang.example.test/mcp', { method: 'POST' }, {
+          timeoutMs: 50,
+          fetchFn: fetchFn as unknown as typeof fetch,
+          dnsResolver: () => new Promise<string[]>(() => {}),
+        }),
+      ).rejects.toThrow(SafeHttpError);
+      expect(Date.now() - startHang).toBeLessThan(200);
+
+      // Caller AbortSignal aborting during pending DNS
+      const ac = new AbortController();
+      setTimeout(() => ac.abort(new Error('caller cancelled')), 20);
+      const startAbort = Date.now();
+      await expect(
+        safeFetch('https://dns-abort.example.test/mcp', { method: 'POST', signal: ac.signal }, {
+          fetchFn: fetchFn as unknown as typeof fetch,
+          dnsResolver: () => new Promise<string[]>(() => {}),
+        }),
+      ).rejects.toThrow(SafeHttpError);
+      expect(Date.now() - startAbort).toBeLessThan(200);
+
+      // Wait past 350ms to confirm late DNS settlement never dispatches fetchFn
+      await new Promise((r) => setTimeout(r, 380));
+      expect(fetchFn).not.toHaveBeenCalled();
+    });
   });
 });

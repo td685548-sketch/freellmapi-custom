@@ -16,6 +16,7 @@ import { assertToolExecutable, recordServerOutcome } from './registry.js';
 import { canonicalJson, type McpTransportConfig } from './store.js';
 import {
   McpTransportError,
+  computeOperationDeadlineMs,
   mcpCallTool,
   mcpInitialize,
 } from './transport.js';
@@ -278,14 +279,15 @@ export async function executeReadTool(
   }
 
   try {
-    const session = await mcpInitialize(config, ctx.signal);
+    const deadlineAtMs = computeOperationDeadlineMs(config.timeoutMs);
+    const session = await mcpInitialize(config, ctx.signal, { deadlineAtMs });
     const res = await mcpCallTool(
       config,
       session,
       verifiedTool.name,
       schemaCheck.normalized,
       ctx.signal,
-      { retryOn404: true },
+      { retryOn404: true, deadlineAtMs },
     );
     const durationMs = Date.now() - startedAt;
     recordServerOutcome(config.serverId, {
@@ -475,14 +477,15 @@ export async function executeClaimedWrite(ctx: {
   }
 
   try {
-    const session = await mcpInitialize(config, ctx.signal);
+    const deadlineAtMs = computeOperationDeadlineMs(config.timeoutMs);
+    const session = await mcpInitialize(config, ctx.signal, { deadlineAtMs });
     const res = await mcpCallTool(
       config,
       session,
       verifiedTool.name,
       schemaCheck.normalized,
       ctx.signal,
-      { retryOn404: false },
+      { retryOn404: false, deadlineAtMs },
     );
     const durationMs = Date.now() - startedAt;
     recordServerOutcome(config.serverId, {

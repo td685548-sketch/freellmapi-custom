@@ -424,6 +424,98 @@ export async function resolveAndValidateHost(
   return ips;
 }
 
+function createCombinedOperationSignal(
+  initSignal?: AbortSignal | null,
+  optSignal?: AbortSignal | null,
+  timeoutMs?: number,
+): { signal?: AbortSignal; timedOut: () => boolean; cleanup: () => void } {
+  const hasTimeout = typeof timeoutMs === 'number' && Number.isFinite(timeoutMs);
+  if (!initSignal && !optSignal && !hasTimeout) {
+    return { signal: undefined, timedOut: () => false, cleanup: () => {} };
+  }
+
+  const controller = new AbortController();
+  let expired = false;
+  const cleanups: Array<() => void> = [];
+
+  const forward = (src: AbortSignal) => {
+    if (controller.signal.aborted) return;
+    if (src.aborted) {
+      controller.abort(src.reason);
+      return;
+    }
+    const onAbort = () => controller.abort(src.reason);
+    src.addEventListener('abort', onAbort, { once: true });
+    cleanups.push(() => src.removeEventListener('abort', onAbort));
+  };
+
+  if (initSignal) forward(initSignal);
+  if (optSignal && optSignal !== initSignal) forward(optSignal);
+
+  if (hasTimeout && !controller.signal.aborted) {
+    const ms = Math.max(0, Math.trunc(timeoutMs));
+    if (ms === 0) {
+      expired = true;
+      controller.abort(new SafeHttpError(408, 'Request timed out'));
+    } else {
+      const timer = setTimeout(() => {
+        expired = true;
+        controller.abort(new SafeHttpError(408, 'Request timed out'));
+      }, ms);
+      cleanups.push(() => clearTimeout(timer));
+    }
+  }
+
+  return {
+    signal: controller.signal,
+    timedOut: () => expired,
+    cleanup: () => {
+      for (const fn of cleanups) fn();
+    },
+  };
+}
+
+function abortError(timedOut: boolean): SafeHttpError {
+  return new SafeHttpError(timedOut ? 408 : 499, timedOut ? 'Request timed out' : 'Request aborted');
+}
+
+function raceWithAbort<T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined,
+  timedOut: () => boolean,
+): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) {
+    void promise.catch(() => {});
+    return Promise.reject(abortError(timedOut()));
+  }
+
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      reject(abortError(timedOut()));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+
+    promise.then(
+      (val) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener('abort', onAbort);
+        resolve(val);
+      },
+      (err) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener('abort', onAbort);
+        reject(err);
+      },
+    );
+  });
+}
+
 /**
  * Validates safe HTTP URL including DNS lookup.
  */
@@ -435,23 +527,38 @@ export async function validateSafeHttpUrl(
     requireExplicitHttpOrigin?: boolean;
     checkDns?: boolean;
     dnsResolver?: (host: string) => Promise<string[]>;
+    signal?: AbortSignal;
+    timeoutMs?: number;
   },
 ): Promise<{ safe: boolean; reason?: string; resolvedIps?: string[] }> {
   const syncCheck = isSafeHttpUrlSync(rawUrl, options);
   if (!syncCheck.safe) return syncCheck;
 
+  const op = createCombinedOperationSignal(options?.signal, undefined, options?.timeoutMs);
   try {
+    if (op.signal?.aborted) {
+      throw abortError(op.timedOut());
+    }
     const u = new URL(rawUrl);
     const exactAllowed = normalizeAllowedExactOrigins(options?.allowedOrigins).has(u.origin.toLowerCase());
     const trustedOrigin = isTrustedPartnerOrigin(u.origin) || exactAllowed;
-    const resolvedIps = await resolveAndValidateHost(u.hostname, {
-      allowLocalhost: options?.allowLocalhost,
-      dnsResolver: options?.dnsResolver,
-      trustedOrigin,
-    });
+    const resolvedIps = await raceWithAbort(
+      resolveAndValidateHost(u.hostname, {
+        allowLocalhost: options?.allowLocalhost,
+        dnsResolver: options?.dnsResolver,
+        trustedOrigin,
+      }),
+      op.signal,
+      op.timedOut,
+    );
     return { safe: true, resolvedIps };
   } catch (err) {
+    if (err instanceof SafeHttpError && (err.status === 408 || err.status === 499)) {
+      throw err;
+    }
     return { safe: false, reason: (err as Error).message };
+  } finally {
+    op.cleanup();
   }
 }
 
@@ -462,12 +569,18 @@ export function getSafeUndiciDispatcher(options?: {
   allowLocalhost?: boolean;
   dnsResolver?: (host: string) => Promise<string[]>;
   trustedOrigin?: boolean;
+  signal?: AbortSignal;
+  timedOut?: () => boolean;
 }): Agent {
   return new Agent({
     maxRedirections: 0,
     connect: {
       lookup: (hostname, lookupOpts, callback) => {
-        resolveAndValidateHost(hostname, options)
+        raceWithAbort(
+          resolveAndValidateHost(hostname, options),
+          options?.signal,
+          options?.timedOut ?? (() => false),
+        )
           .then((ips) => {
             const chosen = ips[0];
             const family = chosen.includes(':') ? 6 : 4;
@@ -531,6 +644,8 @@ export async function safeFetch(
     followRedirects?: SafeFetchRedirectOptions;
     fetchFn?: typeof fetch;
     dnsResolver?: (host: string) => Promise<string[]>;
+    signal?: AbortSignal;
+    timeoutMs?: number;
   },
 ): Promise<Response> {
   const fetchImpl = options?.fetchFn ?? globalThis.fetch;
@@ -543,52 +658,71 @@ export async function safeFetch(
   let currentInit: RequestInit = init ? { ...init } : {};
   const visitedUrls = new Set<string>([currentUrl]);
   const allowedOriginSet = normalizeAllowedExactOrigins(options?.allowedOrigins);
+  const op = createCombinedOperationSignal(init?.signal, options?.signal, options?.timeoutMs);
 
-  for (let hop = 0; hop <= maxRedirects; hop += 1) {
-    const u = new URL(currentUrl);
-    const trustedOrigin =
-      isTrustedPartnerOrigin(u.origin) || allowedOriginSet.has(u.origin.toLowerCase());
+  try {
+    for (let hop = 0; hop <= maxRedirects; hop += 1) {
+      if (op.signal?.aborted) {
+        throw abortError(op.timedOut());
+      }
 
-    const validation = await validateSafeHttpUrl(currentUrl, {
-      allowLocalhost: options?.allowLocalhost,
-      allowedOrigins: options?.allowedOrigins,
-      requireExplicitHttpOrigin: options?.requireExplicitHttpOrigin,
-      checkDns: true,
-      dnsResolver: options?.dnsResolver,
-    });
+      const u = new URL(currentUrl);
+      const trustedOrigin =
+        isTrustedPartnerOrigin(u.origin) || allowedOriginSet.has(u.origin.toLowerCase());
 
-    if (!validation.safe) {
-      throw new SafeHttpError(403, validation.reason || 'SSRF protection blocked request');
-    }
+      const validation = await validateSafeHttpUrl(currentUrl, {
+        allowLocalhost: options?.allowLocalhost,
+        allowedOrigins: options?.allowedOrigins,
+        requireExplicitHttpOrigin: options?.requireExplicitHttpOrigin,
+        checkDns: true,
+        dnsResolver: options?.dnsResolver,
+        signal: op.signal,
+      });
 
-    const dispatcher = getSafeUndiciDispatcher({
-      allowLocalhost: options?.allowLocalhost,
-      dnsResolver: options?.dnsResolver,
-      trustedOrigin,
-    });
+      if (!validation.safe) {
+        throw new SafeHttpError(403, validation.reason || 'SSRF protection blocked request');
+      }
 
-    const mergedInit: RequestInit & { dispatcher?: Agent } = {
-      ...currentInit,
-      redirect: 'manual',
-      dispatcher,
-    };
+      if (op.signal?.aborted) {
+        throw abortError(op.timedOut());
+      }
 
-    let res: Response;
-    try {
-      res = await fetchImpl(currentUrl, mergedInit);
-    } catch (err) {
-      void dispatcher.destroy().catch(() => {});
-      if (err instanceof SafeHttpError) throw err;
-      throw new SafeHttpError(502, `Network request failed: ${(err as Error).message}`);
-    }
+      const dispatcher = getSafeUndiciDispatcher({
+        allowLocalhost: options?.allowLocalhost,
+        dnsResolver: options?.dnsResolver,
+        trustedOrigin,
+        signal: op.signal,
+        timedOut: op.timedOut,
+      });
 
-    void dispatcher.close().catch(() => {});
+      const mergedInit: RequestInit & { dispatcher?: Agent } = {
+        ...currentInit,
+        signal: op.signal ?? currentInit.signal,
+        redirect: 'manual',
+        dispatcher,
+      };
 
-    if (res.status < 300 || res.status >= 400) {
-      return res;
-    }
+      let res: Response;
+      try {
+        res = await raceWithAbort(fetchImpl(currentUrl, mergedInit), op.signal, op.timedOut);
+      } catch (err) {
+        void dispatcher.destroy().catch(() => {});
+        if (op.signal?.aborted) {
+          throw abortError(op.timedOut());
+        }
+        if (err instanceof SafeHttpError) throw err;
+        throw new SafeHttpError(502, `Network request failed: ${(err as Error).message}`);
+      }
 
-    await res.body?.cancel();
+      void dispatcher.close().catch(() => {});
+
+      if (res.status < 300 || res.status >= 400) {
+        return res;
+      }
+
+      if (res.body) {
+        await raceWithAbort(res.body.cancel().catch(() => {}), op.signal, op.timedOut);
+      }
 
     if (!options?.followRedirects) {
       throw new SafeHttpError(
@@ -645,9 +779,12 @@ export async function safeFetch(
       };
     }
 
-    visitedUrls.add(nextUrl);
-    currentUrl = nextUrl;
-  }
+      visitedUrls.add(nextUrl);
+      currentUrl = nextUrl;
+    }
 
-  throw new SafeHttpError(400, 'HTTP redirect limit exceeded');
+    throw new SafeHttpError(400, 'HTTP redirect limit exceeded');
+  } finally {
+    op.cleanup();
+  }
 }
