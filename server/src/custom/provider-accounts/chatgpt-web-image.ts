@@ -155,7 +155,12 @@ export async function fetchChatGptWebAccessToken(
     res = await webFetch(
       `${baseUrl}/api/auth/session`,
       {
-        headers: { 'User-Agent': userAgent, Accept: 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
+        headers: {
+          'User-Agent': userAgent,
+          Accept: 'application/json',
+          Referer: `${baseUrl}/`,
+          ...(cookie ? { Cookie: cookie } : {}),
+        },
       },
       30_000,
       platform,
@@ -289,19 +294,33 @@ function sentinelRequest(
 export async function fetchSentinelHeaders({
   baseUrl,
   accessToken,
+  cookie,
   userAgent,
   platform,
   signal,
 }: {
   baseUrl: string;
   accessToken: string;
+  cookie?: string;
   userAgent: string;
   platform: Platform;
   signal?: AbortSignal;
 }): Promise<Record<string, string>> {
-  const base = { Authorization: `Bearer ${accessToken}`, 'User-Agent': userAgent };
+  const base: Record<string, string> = {
+    Authorization: `Bearer ${accessToken}`,
+    'User-Agent': userAgent,
+    Origin: baseUrl,
+    Referer: `${baseUrl}/`,
+    ...(cookie ? { Cookie: cookie } : {}),
+  };
   const readJson = async (res: Response, path: string): Promise<Record<string, any>> => {
     const text = await res.text().catch(() => '');
+    if (res.status === 403 || /<!doctype|<html/i.test(text.trimStart())) {
+      throw new ChatGptWebImageError(
+        `ChatGPT ${path} was blocked by Cloudflare/Sentinel (HTTP ${res.status || 403}); configure a residential/SOCKS5 proxy on this account or refresh your cf_clearance/session cookies`,
+        403,
+      );
+    }
     if (!res.ok) {
       throw new ChatGptWebImageError(`ChatGPT ${path} failed (HTTP ${res.status}) ${text.slice(0, 200)}`, res.status || 502);
     }
@@ -740,7 +759,7 @@ export async function generateChatGptWebImage(opts: ChatGptWebImageOptions): Pro
   const accessToken = await fetchChatGptWebAccessToken(cookie, userAgent, baseUrl, platform, opts.signal);
   if (opts.signal?.aborted) throw new Error('Request aborted');
 
-  const sentinel = await fetchSentinelHeaders({ baseUrl, accessToken, userAgent, platform, signal: opts.signal });
+  const sentinel = await fetchSentinelHeaders({ baseUrl, accessToken, cookie, userAgent, platform, signal: opts.signal });
   const ctx: ImageContext = { baseUrl, accessToken, cookie, userAgent, platform, sentinel };
 
   const initial = await runImageConversation(ctx, opts.prompt, opts.size, opts.signal);
