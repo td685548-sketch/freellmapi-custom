@@ -51,6 +51,16 @@ export function deepSeekWebChatErrorStatus(error: unknown): number | undefined {
     : undefined;
 }
 
+export type DeepSeekCredential =
+  | { mode: 'token'; userToken: string }
+  | { mode: 'cookie'; cookieHeader: string };
+
+interface DeepSeekAuthContext {
+  cacheKey: string;
+  cookieHeader?: string;
+  accessToken?: string;
+}
+
 function unwrapUserTokenCandidate(parsed: unknown): string | null {
   if (typeof parsed === 'string') {
     const trimmed = parsed.trim();
@@ -65,6 +75,12 @@ function unwrapUserTokenCandidate(parsed: unknown): string | null {
   const obj = parsed as Record<string, unknown>;
   if (typeof obj.value === 'string' && obj.value.trim()) {
     return obj.value.trim();
+  }
+  if (obj.value && typeof obj.value === 'object' && typeof (obj.value as Record<string, unknown>).id === 'string') {
+    throw new DeepSeekWebChatError(
+      'DeepSeek Local Storage `userToken` only contains a user id; paste the Cookie Editor JSON (containing `ds_session_id`) instead.',
+      401,
+    );
   }
   if (typeof obj.userToken === 'string' && obj.userToken.trim()) {
     return unwrapUserTokenCandidate(obj.userToken) ?? obj.userToken.trim();
@@ -82,31 +98,51 @@ function unwrapUserTokenCandidate(parsed: unknown): string | null {
   return null;
 }
 
-export function extractDeepSeekUserToken(credential: string): string {
+export function parseDeepSeekCredential(credential: string): DeepSeekCredential {
   let raw = credential.trim();
   if (/^bearer\s+/i.test(raw)) {
     raw = raw.replace(/^bearer\s+/i, '').trim();
   }
-  if (!raw) return '';
+  if (!raw) {
+    throw new DeepSeekWebChatError('Missing DeepSeek credential.', 401);
+  }
+
   try {
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      const hit = parsed.find((c: any) => c?.name === 'userToken' && typeof c?.value === 'string');
-      if (hit) return unwrapUserTokenCandidate(hit.value) ?? hit.value.trim();
+      const tokenCookie = parsed.find((c: any) => c?.name === 'userToken' && typeof c?.value === 'string');
+      if (tokenCookie) {
+        const tok = unwrapUserTokenCandidate(tokenCookie.value) ?? tokenCookie.value.trim();
+        if (tok) return { mode: 'token', userToken: tok };
+      }
+      const pairs = parsed
+        .filter((c: any) => typeof c?.name === 'string' && c.name && typeof c?.value === 'string')
+        .map((c: any) => `${c.name}=${c.value}`);
+      if (pairs.some(p => p.startsWith('ds_session_id='))) {
+        return { mode: 'cookie', cookieHeader: pairs.join('; ') };
+      }
       throw new DeepSeekWebChatError(
-        'Cookie Editor JSON does not contain DeepSeek `userToken` (DeepSeek stores `userToken` in Local Storage, not Cookies).',
+        'Cookie Editor JSON does not contain `ds_session_id` or `userToken`.',
         401,
       );
     }
     const extracted = unwrapUserTokenCandidate(parsed);
-    if (extracted) return extracted;
+    if (extracted) return { mode: 'token', userToken: extracted };
   } catch (err) {
     if (err instanceof DeepSeekWebChatError) throw err;
-    // not JSON
+  }
+
+  if (/(?:^|;\s*)ds_session_id=[^;]+/.test(raw)) {
+    return { mode: 'cookie', cookieHeader: raw };
   }
   const cookieMatch = raw.match(/(?:^|;\s*)userToken=([^;]+)/);
-  if (cookieMatch?.[1]) return cookieMatch[1].trim();
-  return raw;
+  if (cookieMatch?.[1]) return { mode: 'token', userToken: cookieMatch[1].trim() };
+  return { mode: 'token', userToken: raw };
+}
+
+export function extractDeepSeekUserToken(credential: string): string {
+  const parsed = parseDeepSeekCredential(credential);
+  return parsed.mode === 'token' ? parsed.userToken : '';
 }
 
 function generateFakeCookie(): string {
@@ -207,15 +243,64 @@ async function dsFetch(
   }
 }
 
-async function acquireAccessToken(
+function buildAuthHeaders(auth: DeepSeekAuthContext, includeFakeCookie = false): Record<string, string> {
+  const headers: Record<string, string> = { ...FAKE_HEADERS };
+  if (auth.accessToken) headers.Authorization = `Bearer ${auth.accessToken}`;
+  if (auth.cookieHeader) headers.Cookie = auth.cookieHeader;
+  else if (includeFakeCookie) headers.Cookie = generateFakeCookie();
+  return headers;
+}
+
+async function acquireAuth(
   origin: string,
-  userToken: string,
+  cred: DeepSeekCredential,
   platform: Platform,
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<DeepSeekAuthContext> {
+  if (cred.mode === 'cookie') {
+    const resp = await dsFetch(
+      `${origin}/api/v0/users/current`,
+      {
+        method: 'GET',
+        headers: { ...FAKE_HEADERS, Cookie: cred.cookieHeader },
+      },
+      REQUEST_TIMEOUT_MS,
+      platform,
+      signal,
+    );
+    if (resp.status === 401 || resp.status === 403) {
+      throw new DeepSeekWebChatError(
+        'DeepSeek session cookie (`ds_session_id`) is invalid or expired — refresh https://chat.deepseek.com and export cookies again.',
+        resp.status,
+      );
+    }
+    if (!resp.ok) {
+      throw new DeepSeekWebChatError(`DeepSeek users/current HTTP ${resp.status}`, resp.status);
+    }
+    const json = (await resp.json()) as Record<string, any>;
+    if (json?.code && json.code !== 0) {
+      if (Number(json.code) === 40003) {
+        throw new DeepSeekWebChatError(
+          'DeepSeek session cookie (`ds_session_id`) is invalid or expired — refresh https://chat.deepseek.com and export cookies again.',
+          401,
+        );
+      }
+      const errMsg = json.msg || json?.data?.biz_msg || `error code ${json.code}`;
+      throw new DeepSeekWebChatError(`DeepSeek rejected session: ${errMsg}`, 401);
+    }
+    const bizData = json?.data?.biz_data || json?.biz_data;
+    const accessToken = typeof bizData?.token === 'string' && bizData.token ? bizData.token : undefined;
+    return {
+      cacheKey: cred.cookieHeader,
+      cookieHeader: cred.cookieHeader,
+      ...(accessToken ? { accessToken } : {}),
+    };
+  }
+
+  const userToken = cred.userToken;
   const cached = tokenCache.get(userToken);
   if (cached && cached.expiresAt > Math.floor(Date.now() / 1000)) {
-    return cached.accessToken;
+    return { cacheKey: userToken, accessToken: cached.accessToken };
   }
 
   const resp = await dsFetch(
@@ -247,7 +332,7 @@ async function acquireAccessToken(
     tokenCache.delete(userToken);
     if (Number(json.code) === 40003) {
       throw new DeepSeekWebChatError(
-        'DeepSeek userToken is invalid or expired — copy a fresh `userToken` from https://chat.deepseek.com Local Storage and reconnect.',
+        'DeepSeek userToken is invalid or expired — copy a fresh `userToken` from https://chat.deepseek.com Local Storage (or Cookie Editor JSON with `ds_session_id`).',
         401,
       );
     }
@@ -269,12 +354,12 @@ async function acquireAccessToken(
     accessToken,
     expiresAt: Math.floor(Date.now() / 1000) + 3600,
   });
-  return accessToken;
+  return { cacheKey: userToken, accessToken };
 }
 
 async function createSession(
   origin: string,
-  accessToken: string,
+  auth: DeepSeekAuthContext,
   platform: Platform,
   signal?: AbortSignal,
 ): Promise<string> {
@@ -283,10 +368,8 @@ async function createSession(
     {
       method: 'POST',
       headers: {
-        ...FAKE_HEADERS,
+        ...buildAuthHeaders(auth, true),
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-        Cookie: generateFakeCookie(),
       },
       body: JSON.stringify({}),
     },
@@ -315,7 +398,7 @@ async function createSession(
 
 async function deleteSession(
   origin: string,
-  accessToken: string,
+  auth: DeepSeekAuthContext,
   sessionId: string,
   platform: Platform,
 ): Promise<void> {
@@ -325,9 +408,8 @@ async function deleteSession(
       {
         method: 'POST',
         headers: {
-          ...FAKE_HEADERS,
+          ...buildAuthHeaders(auth, false),
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({ chat_session_id: sessionId }),
       },
@@ -341,7 +423,7 @@ async function deleteSession(
 
 async function requestPowChallenge(
   origin: string,
-  accessToken: string,
+  auth: DeepSeekAuthContext,
   platform: Platform,
   signal?: AbortSignal,
 ): Promise<DeepSeekPowChallenge> {
@@ -350,9 +432,8 @@ async function requestPowChallenge(
     {
       method: 'POST',
       headers: {
-        ...FAKE_HEADERS,
+        ...buildAuthHeaders(auth, false),
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({ target_path: '/api/v0/chat/completion' }),
     },
@@ -388,21 +469,18 @@ export interface DeepSeekWebDelta {
 export async function* streamDeepSeekWebChat(
   opts: DeepSeekWebChatOptions,
 ): AsyncGenerator<DeepSeekWebDelta> {
-  const userToken = extractDeepSeekUserToken(opts.credential);
-  if (!userToken) {
-    throw new DeepSeekWebChatError('Missing DeepSeek userToken credential.', 401);
-  }
+  const cred = parseDeepSeekCredential(opts.credential);
 
   const origin = resolveOrigin(opts.baseUrl);
   const platform = opts.platform ?? 'custom';
   const signal = opts.options?.signal;
   const timeoutMs = opts.options?.timeoutMs ?? COMPLETION_TIMEOUT_MS;
 
-  const accessToken = await acquireAccessToken(origin, userToken, platform, signal);
-  const sessionId = await createSession(origin, accessToken, platform, signal);
+  const auth = await acquireAuth(origin, cred, platform, signal);
+  const sessionId = await createSession(origin, auth, platform, signal);
 
   try {
-    const powChallenge = await requestPowChallenge(origin, accessToken, platform, signal);
+    const powChallenge = await requestPowChallenge(origin, auth, platform, signal);
     const powHeader = solveDeepSeekPowHeader(powChallenge);
 
     const m = opts.modelId.toLowerCase();
@@ -416,12 +494,10 @@ export async function* streamDeepSeekWebChat(
       {
         method: 'POST',
         headers: {
-          ...FAKE_HEADERS,
+          ...buildAuthHeaders(auth, true),
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
           'X-Ds-Pow-Response': powHeader,
           'X-Client-Timezone-Offset': String(new Date().getTimezoneOffset() * -60),
-          Cookie: generateFakeCookie(),
         },
         body: JSON.stringify({
           chat_session_id: sessionId,
@@ -441,7 +517,7 @@ export async function* streamDeepSeekWebChat(
 
     if (!resp.ok) {
       if (resp.status === 401 || resp.status === 403) {
-        tokenCache.delete(userToken);
+        tokenCache.delete(auth.cacheKey);
       }
       let errMsg = `DeepSeek API error (HTTP ${resp.status})`;
       const errText = await resp.text().catch(() => '');
@@ -617,7 +693,7 @@ export async function* streamDeepSeekWebChat(
       );
     }
   } finally {
-    void deleteSession(origin, accessToken, sessionId, platform);
+    void deleteSession(origin, auth, sessionId, platform);
   }
 }
 
