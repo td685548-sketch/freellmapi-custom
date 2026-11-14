@@ -40,6 +40,21 @@ export interface ModerationResult {
   result: Record<string, unknown>;
 }
 
+export interface RunModerationsOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  sanitizeError?: boolean;
+  guardCall?: boolean;
+}
+
+export interface RunModerationsOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  sanitizeError?: boolean;
+  sanitizeErrors?: boolean;
+  guardCall?: boolean;
+}
+
 export class ModerationError extends Error {
   status: number;
   /** Seconds the caller should wait before retrying (429 exhaustion). */
@@ -127,8 +142,11 @@ async function callProvider(
   row: ModerationModelRow,
   apiKey: string,
   inputs: string[],
+  options?: RunModerationsOptions,
 ): Promise<Record<string, unknown>> {
   const url = `${row.baseUrl}/v1/moderations`;
+  const timeoutSignal = AbortSignal.timeout(options?.timeoutMs ?? 30_000);
+  const signal = options?.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
   const res = await proxyFetch(url, {
     method: 'POST',
     headers: {
@@ -136,10 +154,14 @@ async function callProvider(
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({ model: row.modelId, input: inputs.length === 1 ? inputs[0] : inputs }),
-    signal: AbortSignal.timeout(30_000),
+    signal,
   }, row.platform, 'moderation');
 
   if (!res.ok) {
+    if (options?.sanitizeError || options?.sanitizeErrors || options?.guardCall) {
+      await res.body?.cancel().catch(() => {});
+      throw new ModerationError(`moderation provider ${row.platform} returned ${res.status}`, res.status);
+    }
     const body = await res.text().catch(() => '');
     throw new ModerationError(`moderation provider ${row.platform} returned ${res.status}: ${body.slice(0, 200)}`, res.status);
   }
@@ -182,7 +204,11 @@ function logModerationRequest(
 export async function runModerations(
   model: string | undefined,
   inputs: string[],
+  options?: RunModerationsOptions,
 ): Promise<ModerationResult> {
+  if (options?.signal?.aborted) {
+    throw new ModerationError('Moderation request aborted', 499);
+  }
   const resolved = resolveModel(model);
   if (!resolved) {
     throw new ModerationError(
@@ -226,7 +252,7 @@ export async function runModerations(
     }
     const started = Date.now();
     try {
-      const json = await callProvider(row, apiKey, inputs);
+      const json = await callProvider(row, apiKey, inputs, options);
       logModerationRequest(row, 'success', Date.now() - started, null);
       // A served moderation is the evidence the key works, the same as a
       // served chat request (#1493): it stamps last_healthy_at and lifts an
@@ -238,8 +264,22 @@ export async function runModerations(
         result: json,
       };
     } catch (err: any) {
-      const e = err instanceof ModerationError ? err : new ModerationError(String(err?.message ?? err), 502);
-      logModerationRequest(row, 'error', Date.now() - started, e.message.slice(0, 300));
+      if (options?.signal?.aborted) {
+        logModerationRequest(row, 'error', Date.now() - started, 'aborted');
+        throw new ModerationError('Moderation request aborted', 499);
+      }
+      const isTimeout = err?.name === 'TimeoutError' || err?.name === 'AbortError';
+      const sanitize = Boolean(options?.sanitizeError || options?.sanitizeErrors || options?.guardCall);
+      const e = err instanceof ModerationError
+        ? err
+        : isTimeout
+          ? new ModerationError('moderation provider request timed out', 504)
+          : new ModerationError(
+              sanitize ? `moderation provider ${row.platform} request failed` : String(err?.message ?? err),
+              502,
+            );
+      const loggedErr = sanitize ? `status_${e.status}` : e.message.slice(0, 300);
+      logModerationRequest(row, 'error', Date.now() - started, loggedErr);
       lastError = e;
     }
   }
