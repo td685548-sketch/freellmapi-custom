@@ -1,13 +1,16 @@
 import type { ReactNode } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useAdministrativeAccess } from './use-administrative-access'
-import { UsersPage } from './UsersPage'
-import { InvitesPage } from './InvitesPage'
-import AnalyticsPage from '@/pages/AnalyticsPage'
-import LogsPage from '@/pages/LogsPage'
+import { lazyNamed, lazyPage } from './route-splitting/lazy-page'
 import { ConfirmButton } from '@/components/confirm-button'
 import { apiFetch } from '@/lib/api'
 import { useCustomT } from './i18n/use-custom-t'
+
+// Each page is its own download: Analytics alone pulls in the charting library.
+const UsersPage = lazyNamed(() => import('./UsersPage'), 'UsersPage')
+const InvitesPage = lazyNamed(() => import('./InvitesPage'), 'InvitesPage')
+const AnalyticsPage = lazyPage(() => import('@/pages/AnalyticsPage'))
+const LogsPage = lazyPage(() => import('@/pages/LogsPage'))
 
 const denied = <p role="alert" className="text-sm text-muted-foreground">Your account does not have permission to open this page.</p>
 function Ready({ pending, allowed, children }: { pending: boolean; allowed: boolean; children: ReactNode }) {

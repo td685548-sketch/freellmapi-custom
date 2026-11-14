@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { Suspense, useEffect, useState, type ReactNode } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { ArrowLeft, ChevronRight, Lock, Menu, Moon, PanelLeftClose, PanelLeftOpen, Search, ShieldCheck, Sun, X } from 'lucide-react'
 import { useI18n } from '@/i18n'
@@ -9,37 +9,41 @@ import NotFoundPage from '@/pages/NotFoundPage'
 import { useUserSession } from '../use-session'
 import { useSessionRevision } from '../session-state'
 import { useXStrings } from './strings'
+import { AccountLoadState } from './components/AccountLoadState'
+import { lazyPage } from '../route-splitting/lazy-page'
+import { RouteFallback } from '../route-splitting/RouteFallback'
 import { AccountCallback } from './AccountCallback'
-import Providers, { AccountLoadState } from './pages/Providers'
-import ProviderAccounts from './pages/ProviderAccounts'
-import Endpoint from './pages/Endpoint'
-import AccountUsage from './pages/AccountUsage'
-import Quota from './pages/Quota'
-import TokenSavers from './pages/TokenSavers'
-import Combos from './pages/Combos'
-import ConsoleLog from './pages/ConsoleLog'
-import ProxyPool from './pages/ProxyPool'
-import MediaProviders from './pages/MediaProviders'
-import CLITools from './pages/CLIOperations'
-import TranslatorInspector from './pages/TranslatorInspector'
-import Playground from './pages/Playground'
-import SkillsHub from './pages/SkillsHub'
-import SupportGateway from './pages/SupportGateway'
-import SupportEnterprise from './pages/SupportEnterprise'
-import SupportGovernance from './pages/SupportGovernance'
-import SupportIntegration from './pages/SupportIntegration'
-import SupportKnowledgeStudio from './pages/SupportKnowledgeStudio'
-import SupportServiceDesk from './pages/SupportServiceDesk'
 import ModelAvailabilityBadge from './components/ModelAvailabilityBadge'
 import { THRULINE_ICON, ThrulineLogo } from './ThrulineLogo'
 import { useShellStrings } from './shell-strings'
 import { matchNav, useNavGroups } from './shell/nav'
 import { QuickJump } from './shell/QuickJump'
 import { ConfirmHost } from './shell/confirm'
-import Overview from './pages/Overview'
-import './transition/install'
 import './x-gateway.css'
 import './x-theme.css'
+
+// Each console page is its own download, fetched when you first open it.
+const Providers = lazyPage(() => import('./pages/Providers'))
+const ProviderAccounts = lazyPage(() => import('./pages/ProviderAccounts'))
+const Endpoint = lazyPage(() => import('./pages/Endpoint'))
+const AccountUsage = lazyPage(() => import('./pages/AccountUsage'))
+const Quota = lazyPage(() => import('./pages/Quota'))
+const TokenSavers = lazyPage(() => import('./pages/TokenSavers'))
+const Combos = lazyPage(() => import('./pages/Combos'))
+const ConsoleLog = lazyPage(() => import('./pages/ConsoleLog'))
+const ProxyPool = lazyPage(() => import('./pages/ProxyPool'))
+const MediaProviders = lazyPage(() => import('./pages/MediaProviders'))
+const CLITools = lazyPage(() => import('./pages/CLIOperations'))
+const TranslatorInspector = lazyPage(() => import('./pages/TranslatorInspector'))
+const Playground = lazyPage(() => import('./pages/Playground'))
+const SkillsHub = lazyPage(() => import('./pages/SkillsHub'))
+const SupportGateway = lazyPage(() => import('./pages/SupportGateway'))
+const SupportEnterprise = lazyPage(() => import('./pages/SupportEnterprise'))
+const SupportGovernance = lazyPage(() => import('./pages/SupportGovernance'))
+const SupportIntegration = lazyPage(() => import('./pages/SupportIntegration'))
+const SupportKnowledgeStudio = lazyPage(() => import('./pages/SupportKnowledgeStudio'))
+const SupportServiceDesk = lazyPage(() => import('./pages/SupportServiceDesk'))
+const Overview = lazyPage(() => import('./pages/Overview'))
 
 const RAIL_KEY = 'x-gateway.sidebar-collapsed'
 function readRail() {
@@ -104,7 +108,7 @@ function XGatewayShell() {
       </div>
     </aside>
     <div className={`x-main ${isPlayground ? 'x-main-playground' : ''}`}><header className="x-header"><button className="x-icon-button x-mobile-menu" aria-label={s.menu} onClick={() => setMenuOpen(true)}><Menu size={21} /></button><div className="x-breadcrumb">{current && <><span>{current.group.label}</span><ChevronRight size={14} /></>}<strong>{current?.item.label ?? 'Thruline'}</strong></div><div className="x-header-actions"><button type="button" className="x-jump-trigger" onClick={() => setJumpOpen(true)} aria-label={sh.jump}><Search size={15} /><span>{sh.jump}</span><kbd>{shortcut}</kbd></button>{canView && <ModelAvailabilityBadge />}<label className="x-language"><span className="x-sr-only">{s.language}</span><select value={locale === 'vi' ? 'vi' : 'en'} onChange={event => setLocale(event.target.value as 'vi' | 'en')}><option value="en">English</option><option value="vi">Tiếng Việt</option></select></label><button className="x-icon-button" aria-label={s.theme} onClick={() => setTheme(resolvedDark ? 'light' : 'dark')}>{resolvedDark ? <Sun size={18} /> : <Moon size={18} />}</button><span className="x-avatar" title={session.session?.email}>{session.session?.email?.slice(0, 1).toUpperCase() ?? 'X'}</span></div></header>
-      <main className={`x-content ${isPlayground ? 'x-content-playground' : ''}`}><ErrorBoundary><Routes>
+      <main className={`x-content ${isPlayground ? 'x-content-playground' : ''}`}><ErrorBoundary><Suspense fallback={<RouteFallback />}><Routes>
         <Route index element={<Navigate to="/thruline/home" replace />} />
         <Route path="home" element={<Overview />} />
         <Route path="providers" element={protectedPage(<Providers />)} />
@@ -129,7 +133,7 @@ function XGatewayShell() {
         <Route path="usage" element={protectedPage(<AccountUsage />)} />
         <Route path="quota" element={<Quota />} />
         <Route path="*" element={<NotFoundPage />} />
-      </Routes></ErrorBoundary></main>
+      </Routes></Suspense></ErrorBoundary></main>
     </div><QuickJump groups={groups} open={jumpOpen} onClose={() => setJumpOpen(false)} /><ConfirmHost /><Toaster />
   </div>
 }
