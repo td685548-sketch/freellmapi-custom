@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { getDb } from '../../db/index.js';
+import type { SessionUser } from '../../services/auth.js';
 import { getXGatewayProvider } from '../provider-accounts/catalog.js';
 import { accountModels, getUsableXGatewayKeys } from '../provider-accounts/store.js';
 import {
@@ -198,6 +199,15 @@ xGatewayManagementRouter.get('/usage/logs', (req, res) => {
       ORDER BY id DESC LIMIT ?`,
   ).all(...(status ? [status, limit] : [limit]));
   res.json({ logs: rows });
+});
+
+xGatewayManagementRouter.delete('/usage/logs', (req, res) => {
+  const user = (req as Request & { user?: SessionUser }).user;
+  if (!user?.isPrimary) {
+    return fail(res, 403, 'Primary Admin access required.');
+  }
+  const info = getDb().prepare("DELETE FROM requests WHERE caller = 'x-gateway'").run();
+  res.json({ ok: true, deleted: info.changes });
 });
 
 xGatewayManagementRouter.get('/usage/hourly', (req, res) => {

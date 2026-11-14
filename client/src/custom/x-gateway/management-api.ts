@@ -44,6 +44,7 @@ export const mgmtApi = {
     apiFetch<ComboPresetResult>(`${base}/combos/presets`, { method: 'POST', body: JSON.stringify({}) }),
   logs: (status: string, signal?: AbortSignal) =>
     apiFetch<{ logs: XLog[] }>(`${base}/usage/logs?limit=100${status ? `&status=${status}` : ''}`, { signal }),
+  clearLogs: () => apiFetch<{ ok: true; deleted: number }>(`${base}/usage/logs`, { method: 'DELETE' }),
   hourly: (signal?: AbortSignal) =>
     apiFetch<{ buckets: XHourlyBucket[] }>(`${base}/usage/hourly?hours=24`, { signal })
 }
