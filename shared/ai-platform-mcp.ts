@@ -57,6 +57,7 @@ export type McpToolCallStatus =
   | 'too_large'
   | 'blocked'
   | 'transport_error'
+  | 'unknown'
   | 'awaiting_approval'
   | 'rejected';
 
@@ -203,8 +204,66 @@ export interface McpApprovalView {
   decidedBy: number | null;
   decidedAt: string | null;
   decisionNote: string | null;
+  resultMasked?: string | null;
+  error?: string | null;
+  executedAt?: string | null;
+  durationMs?: number | null;
+  resultBytes?: number | null;
   expiresAt: string;
   createdAt: string;
+}
+
+export interface McpApprovalSnapshot {
+  toolId: number;
+  toolName: string;
+  serverId: number;
+  serverSlug: string;
+  serverUrl: string;
+  schemaHash: string;
+  serverRevision: number;
+  credentialGeneration: number;
+  effect: McpToolEffect;
+  scopeKind: ScopeKind;
+  scopeId: string;
+  capturedAt: string;
+}
+
+export type McpSafetyCheckCode =
+  | 'ok'
+  | 'legacy_missing_snapshot'
+  | 'invalid_snapshot'
+  | 'server_not_found'
+  | 'server_paused'
+  | 'server_url_changed'
+  | 'credential_changed'
+  | 'tool_not_found'
+  | 'tool_not_allowed'
+  | 'schema_changed'
+  | 'scope_not_effective'
+  | 'binding_missing';
+
+export interface McpSafetyCheckResult {
+  ok: boolean;
+  code: McpSafetyCheckCode;
+  reason?: string;
+}
+
+export type McpJournalOutcomeStatus =
+  | 'ok'
+  | 'tool_error'
+  | 'timeout'
+  | 'too_large'
+  | 'blocked'
+  | 'transport_error'
+  | 'unknown'
+  | 'rejected';
+
+export interface McpJournalOutcomeInput {
+  status: McpJournalOutcomeStatus;
+  resultMasked?: string | null;
+  errorText?: string | null;
+  durationMs?: number | null;
+  resultBytes?: number | null;
 }
 
 export interface McpApprovalDecisionInput {
