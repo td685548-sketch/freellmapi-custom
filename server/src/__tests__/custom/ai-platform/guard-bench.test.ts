@@ -18,12 +18,11 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../../../app.js';
 import { resetFlagsCacheForTests, setFlags } from '../../../custom/ai-platform/flags.js';
 import { getDb, initDb } from '../../../db/index.js';
 import { encrypt } from '../../../lib/crypto.js';
-import { hashClientProfileKey } from '../../../lib/system-prompt.js';
 import { createSession, createUser } from '../../../services/auth.js';
 import { setKeyCacheTestOverride } from '../../../services/key-cache.js';
 import { startFakeProviderServer, type FakeProviderServer } from '../../helpers/ai-platform-fake-provider.js';
@@ -97,11 +96,12 @@ async function measureStreamTtfcMs(url: string, clientKey: string, prompt: strin
 }
 
 describe('Output Guard Benchmark: False-Block Rate & TTFC (T071)', () => {
+  const realFetch = global.fetch;
   let appServer: http.Server;
   let baseUrl = '';
   let fakeProvider: FakeProviderServer;
   let primaryToken = '';
-  const clientKey = 'flm_guard_bench_1';
+  let clientKey = '';
   let profileId = 0;
 
   async function adminCall(urlPath: string, method = 'GET', body?: unknown) {
@@ -137,23 +137,41 @@ describe('Output Guard Benchmark: False-Block Rate & TTFC (T071)', () => {
       )
       .run(enc.encrypted, enc.iv, enc.authTag);
 
-    const profRes = getDb()
-      .prepare(
-        `INSERT INTO client_profiles (name, token_hash, encrypted_key, iv, auth_tag, enabled, system_prompt)
-         VALUES (?, ?, 'enc', 'iv', 'tag', 1, ?)`,
-      )
-      .run('guard-bench-profile', hashClientProfileKey(clientKey), CORPUS.defaultPolicy.systemPrompt);
-    profileId = Number(profRes.lastInsertRowid);
-
     appServer = createApp().listen(0, '127.0.0.1');
     await new Promise<void>((resolve) => appServer.once('listening', resolve));
     baseUrl = `http://127.0.0.1:${(appServer.address() as AddressInfo).port}`;
 
     const userId = createUser('guard-bench@example.com', 'Password123!').userId;
     primaryToken = createSession(userId);
+
+    const profRes = await realFetch(`${baseUrl}/api/client-profiles`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${primaryToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'guard-bench-profile', systemPrompt: CORPUS.defaultPolicy.systemPrompt }),
+    });
+    expect(profRes.status).toBe(201);
+    const profBody = (await profRes.json()) as { id: number; key: string };
+    profileId = profBody.id;
+    clientKey = profBody.key;
+
+    await realFetch(`${baseUrl}/api/client-profiles/${profileId}/quota`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${primaryToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ rpmLimit: null }),
+    });
+
+    vi.spyOn(global, 'fetch').mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (urlStr.startsWith(baseUrl) || urlStr.startsWith(fakeProvider.url)) {
+        return realFetch(input, init);
+      }
+      const parsed = new URL(urlStr);
+      return realFetch(`${fakeProvider.url}${parsed.pathname}${parsed.search}`, init);
+    });
   });
 
   afterAll(async () => {
+    vi.restoreAllMocks();
     await new Promise<void>((resolve) => appServer.close(() => resolve()));
     await fakeProvider.close();
   });

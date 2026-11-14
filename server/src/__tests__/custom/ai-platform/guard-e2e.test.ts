@@ -30,6 +30,7 @@ import {
   type FakeProviderWire,
 } from '../../helpers/ai-platform-fake-provider.js';
 
+const realFetch = global.fetch;
 let appServer: http.Server | null = null;
 let baseUrl = '';
 let fakeProvider: FakeProviderServer;
@@ -37,6 +38,18 @@ let fakeMcp: FakeMcpHttpServer;
 let primaryToken = '';
 let clientKey = '';
 let profileId = 0;
+
+function installOutboundProviderRedirect() {
+  vi.spyOn(global, 'fetch').mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    if (urlStr.startsWith(baseUrl) || urlStr.startsWith(fakeProvider.url) || urlStr.startsWith(fakeMcp.url)) {
+      return realFetch(input, init);
+    }
+    const parsed = new URL(urlStr);
+    const targetUrl = `${fakeProvider.url}${parsed.pathname}${parsed.search}`;
+    return realFetch(targetUrl, init);
+  });
+}
 
 async function adminCall(urlPath: string, method = 'GET', body?: unknown) {
   const res = await fetch(`${baseUrl}${urlPath}`, {
@@ -89,7 +102,7 @@ function wireRequest(wire: FakeProviderWire, stream: boolean, prompt = 'hello') 
   if (wire === 'anthropic') {
     return {
       path: '/v1/messages',
-      body: { model: 'anthropic/claude-3-5-sonnet', max_tokens: 64, messages: [{ role: 'user', content: prompt }], stream },
+      body: { model: 'groq/compound', max_tokens: 64, messages: [{ role: 'user', content: prompt }], stream },
     };
   }
   if (wire === 'responses') {
@@ -167,27 +180,38 @@ describe('Output Guard E2E HTTP Acceptance (T059)', () => {
         .run(platform, label, enc.encrypted, enc.iv, enc.authTag);
     }
 
-    const profRes = getDb()
-      .prepare(
-        `INSERT INTO client_profiles (name, token_hash, encrypted_key, iv, auth_tag, enabled, ai_tools_enabled, ai_tool_max_rounds)
-         VALUES (?, ?, 'enc', 'iv', 'tag', 1, 1, 4)`,
-      )
-      .run('guard-e2e-profile', hashClientProfileKey('flm_guard_e2e_1'));
-    profileId = Number(profRes.lastInsertRowid);
-    clientKey = 'flm_guard_e2e_1';
-
     appServer = createApp().listen(0, '127.0.0.1');
     await new Promise<void>((resolve) => appServer!.once('listening', resolve));
     baseUrl = `http://127.0.0.1:${(appServer!.address() as AddressInfo).port}`;
 
     const userId = createUser('guard-e2e-admin@example.com', 'Password123!').userId;
     primaryToken = createSession(userId);
+
+    const profCreateRes = await realFetch(`${baseUrl}/api/client-profiles`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${primaryToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'guard-e2e-profile' }),
+    });
+    expect(profCreateRes.status).toBe(201);
+    const profBody = (await profCreateRes.json()) as { id: number; key: string };
+    profileId = profBody.id;
+    clientKey = profBody.key;
+    getDb()
+      .prepare(`UPDATE client_profiles SET ai_tools_enabled = 1, ai_tool_max_rounds = 4 WHERE id = ?`)
+      .run(profileId);
+    await realFetch(`${baseUrl}/api/client-profiles/${profileId}/quota`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${primaryToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ rpmLimit: null }),
+    });
+    installOutboundProviderRedirect();
   });
 
   beforeEach(() => {
     fakeProvider.reset();
     fakeMcp.reset();
     setFlags({ outputGuard: true, mcpClient: true });
+    installOutboundProviderRedirect();
   });
 
   afterEach(() => {
@@ -205,7 +229,6 @@ describe('Output Guard E2E HTTP Acceptance (T059)', () => {
       await setPolicy({ mode: 'block' });
       fakeProvider.enqueue({
         kind: 'scripted',
-        wire,
         stream: false,
         text: 'Hello forbidden-secret world',
       });
@@ -239,7 +262,6 @@ describe('Output Guard E2E HTTP Acceptance (T059)', () => {
       await setPolicy({ mode: 'block', holdChars: 200, maxDelayMs: 300 });
       fakeProvider.enqueue({
         kind: 'scripted',
-        wire,
         stream: true,
         geminiAltSse: true,
         textChunks: ['Safe prefix ', 'forbid', 'den-sec', 'ret suffix'],
@@ -330,9 +352,11 @@ describe('Output Guard E2E HTTP Acceptance (T059)', () => {
   });
 
   it('guards exact-cache hits (proving 0 second provider call) and rejects spoofed internal/role headers', async () => {
-    await setPolicy({ mode: 'block' });
+    // Enable exact cache in settings
+    getDb()
+      .prepare(`INSERT INTO settings (key, value) VALUES ('response_cache_enabled', '1') ON CONFLICT(key) DO UPDATE SET value = '1'`)
+      .run();
 
-    // 1. Seed a clean response? No, test exact cache hit when policy changes from off->block or cache stores raw response
     // First call with mode=off populates exact cache; second call with mode=block hits cache and MUST be guarded!
     await setPolicy({ mode: 'off' });
     fakeProvider.enqueue({
@@ -377,7 +401,6 @@ describe('Output Guard E2E HTTP Acceptance (T059)', () => {
     // Verify caller-owned tool_calls are not turned into assistant text or stripped
     fakeProvider.enqueue({
       kind: 'scripted',
-      wire: 'openai-chat',
       stream: false,
       toolCalls: [{ id: 'call_caller_1', name: 'caller_fn', arguments: '{"x":1}' }],
       finishReason: 'tool_calls',
@@ -494,7 +517,8 @@ describe('Output Guard E2E HTTP Acceptance (T059)', () => {
   it('guards final answer once after MCP read tool loop', async () => {
     await setPolicy({ mode: 'block' });
 
-    // Register, sync, allow, and bind fakeMcp lookup_order tool
+    // Allow fakeMcp origin in SSRF allowlist, then register, sync, allow, and bind lookup_order
+    expect((await adminCall('/api/ai-platform/mcp/allowed-internal-hosts', 'PUT', { origins: [new URL(fakeMcp.url).origin] })).status).toBe(200);
     const createSrv = await adminCall('/api/ai-platform/mcp/servers', 'POST', {
       slug: 'guard-e2e-mcp',
       name: 'Guard E2E MCP',

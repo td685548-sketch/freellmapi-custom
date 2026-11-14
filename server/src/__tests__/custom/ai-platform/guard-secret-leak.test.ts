@@ -16,7 +16,6 @@ import { createApp } from '../../../app.js';
 import { resetFlagsCacheForTests, setFlags } from '../../../custom/ai-platform/flags.js';
 import { getDb, initDb } from '../../../db/index.js';
 import { encrypt } from '../../../lib/crypto.js';
-import { hashClientProfileKey } from '../../../lib/system-prompt.js';
 import { createSession, createUser } from '../../../services/auth.js';
 import { setKeyCacheTestOverride } from '../../../services/key-cache.js';
 import { setUserPermissions } from '../../../services/users.js';
@@ -27,8 +26,10 @@ const ESCAPED_CREDENTIAL = 'cred\\"esc\\\\99';
 const PROMPT_SENTINEL =
   'SENTINEL_SYS_PROMPT_ALPHA_BETA_GAMMA_DELTA_EPSILON_ZETA_ETA_THETA_IOTA_KAPPA_LAMBDA_MU';
 const VIOLATION_MARKER = 'VIOLATION_SECRET_MARKER_774411';
+const EXCERPT_SENTINEL = 'EXCERPT_ONLY_PLAINTEXT_998877';
 
 describe('Output Guard secret leak & excerpt security', () => {
+  const realFetch = global.fetch;
   let server: Server;
   let fakeProvider: FakeProviderServer;
   let base: string;
@@ -37,7 +38,7 @@ describe('Output Guard secret leak & excerpt security', () => {
   let viewerNoExcerptToken: string;
   let excerptViewerToken: string;
   let profileId = 0;
-  const clientKey = 'flm_guard_secret_1';
+  let clientKey = '';
   let fixtureDirectory: string;
 
   async function call(urlPath: string, token?: string, method = 'GET', body?: unknown) {
@@ -71,20 +72,31 @@ describe('Output Guard secret leak & excerpt security', () => {
       )
       .run(enc.encrypted, enc.iv, enc.authTag);
 
-    const profRes = getDb()
-      .prepare(
-        `INSERT INTO client_profiles (name, token_hash, encrypted_key, iv, auth_tag, enabled, system_prompt)
-         VALUES (?, ?, 'enc', 'iv', 'tag', 1, ?)`,
-      )
-      .run('guard-secret-profile', hashClientProfileKey(clientKey), PROMPT_SENTINEL);
-    profileId = Number(profRes.lastInsertRowid);
-
     server = createApp().listen(0, '127.0.0.1');
     await new Promise<void>((resolve) => server.once('listening', resolve));
     base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 
     primaryId = createUser('guard-sec-primary@example.com', 'Password123!').userId;
     primaryToken = createSession(primaryId);
+
+    const profRes = await realFetch(`${base}/api/client-profiles`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${primaryToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'guard-secret-profile', systemPrompt: PROMPT_SENTINEL }),
+    });
+    expect(profRes.status).toBe(201);
+    const profBody = (await profRes.json()) as { id: number; key: string };
+    profileId = profBody.id;
+    clientKey = profBody.key;
+
+    vi.spyOn(global, 'fetch').mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (urlStr.startsWith(base) || urlStr.startsWith(fakeProvider.url)) {
+        return realFetch(input, init);
+      }
+      const parsed = new URL(urlStr);
+      return realFetch(`${fakeProvider.url}${parsed.pathname}${parsed.search}`, init);
+    });
 
     const viewerId = createUser('guard-sec-viewer@example.com', 'Password123!', 'member').userId;
     setUserPermissions(viewerId, ['view_output_guard'], primaryId);
@@ -100,6 +112,7 @@ describe('Output Guard secret leak & excerpt security', () => {
   });
 
   afterAll(async () => {
+    vi.restoreAllMocks();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await fakeProvider.close();
     fs.rmSync(fixtureDirectory, { recursive: true, force: true });
@@ -135,7 +148,7 @@ describe('Output Guard secret leak & excerpt security', () => {
         kind: 'scripted',
         wire: 'openai-chat',
         stream: false,
-        text: `Output containing ${VIOLATION_MARKER} and ${SHORT_CREDENTIAL} and ${ESCAPED_CREDENTIAL}`,
+        text: `Output containing ${VIOLATION_MARKER} and ${EXCERPT_SENTINEL} and ${SHORT_CREDENTIAL} and ${ESCAPED_CREDENTIAL}`,
       });
 
       const chatRes = await fetch(`${base}/v1/chat/completions`, {
@@ -161,6 +174,7 @@ describe('Output Guard secret leak & excerpt security', () => {
       const eventsJson = JSON.parse(eventsRes.text) as { events: Array<{ id: number | string; action: string }> };
       expect(eventsJson.events.length).toBeGreaterThan(0);
       expect(eventsRes.text).not.toContain(VIOLATION_MARKER);
+      expect(eventsRes.text).not.toContain(EXCERPT_SENTINEL);
       expect(eventsRes.text).not.toContain(PROMPT_SENTINEL);
       expect(eventsRes.text).not.toContain(SHORT_CREDENTIAL);
       expect(eventsRes.text).not.toContain(ESCAPED_CREDENTIAL);
@@ -179,7 +193,7 @@ describe('Output Guard secret leak & excerpt security', () => {
       expect(excerptBody.excerpt).toContain(VIOLATION_MARKER);
 
       const auditRows = getDb()
-        .prepare(`SELECT summary FROM audit_logs WHERE area = 'ai-platform' ORDER BY id DESC LIMIT 20`)
+        .prepare(`SELECT summary FROM custom_audit_log WHERE area = 'ai-platform' ORDER BY id DESC LIMIT 20`)
         .all() as Array<{ summary: string }>;
       const auditBlob = auditRows.map((r) => r.summary).join('\n');
       expect(auditBlob).not.toContain(VIOLATION_MARKER);
@@ -197,7 +211,7 @@ describe('Output Guard secret leak & excerpt security', () => {
       const rawBuf = Buffer.from(await dl.arrayBuffer());
       const isGzip = rawBuf.length >= 2 && rawBuf[0] === 0x1f && rawBuf[1] === 0x8b;
       const decodedBackup = isGzip ? zlib.gunzipSync(rawBuf).toString('utf8') : rawBuf.toString('utf8');
-      expect(decodedBackup).not.toContain(VIOLATION_MARKER);
+      expect(decodedBackup).not.toContain(EXCERPT_SENTINEL);
       expect(decodedBackup).not.toContain(SHORT_CREDENTIAL);
 
       // 6. 7-day expiry enforced on read path -> 410 even before sweeper runs
