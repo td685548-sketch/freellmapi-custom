@@ -95,6 +95,6 @@ describe('output-guard/context', () => {
 
     const role = resolveProfileGuardRole(req, 'end-user-1');
     expect(role).not.toBe('admin');
-    expect(role).toBe('end_user');
+    expect(role).toBe('user');
   });
 });

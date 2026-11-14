@@ -1,33 +1,47 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import type { Request, Response } from 'express';
-import { resetFlagsCacheForTests } from '../../../custom/ai-platform/flags.js';
 import {
-  installOutputGuardIfNeeded,
-  registerOutputFilterProvider,
-} from '../../../custom/ai-platform/pipeline.js';
-import { createStreamGuard } from '../../../custom/ai-platform/output-guard/stream-guard.js';
+  DEFAULT_GUARD_DETECTORS,
+  DEFAULT_GUARD_POLICY_BASE,
+  type GuardPolicyInput,
+} from '@freellmapi/shared/ai-platform-output-guard.js';
+import { getDb, initDb } from '../../../db/index.js';
+import {
+  createSupportTenant,
+  ensureSupportTables,
+} from '../../../custom/x-gateway/support-store.js';
+import { resetFlagsCacheForTests, setFlags } from '../../../custom/ai-platform/flags.js';
+import { installOutputGuardIfNeeded } from '../../../custom/ai-platform/pipeline.js';
+import { setPolicy } from '../../../custom/ai-platform/output-guard/policy.js';
+import { resetGuardEventRateLimitForTests } from '../../../custom/ai-platform/output-guard/events.js';
 import {
   buildSupportGuardContext,
   guardSupportReply,
-  registerSupportOutputGuardEvaluator,
 } from '../../../custom/ai-platform/output-guard/support-adapter.js';
 import type { GateProfile } from '../../../services/profile-usage.js';
 
-vi.mock('../../../custom/ai-platform/flags.js', async (importOriginal) => {
-  const mod = await importOriginal<typeof import('../../../custom/ai-platform/flags.js')>();
+function seedProfile(id: number, name = `profile-${id}`): void {
+  getDb()
+    .prepare(
+      'INSERT INTO client_profiles (id, name, token_hash, encrypted_key, iv, auth_tag) VALUES (?, ?, ?, ?, ?, ?)',
+    )
+    .run(id, name, `th-${id}`, `ek-${id}`, `iv-${id}`, `tag-${id}`);
+}
+
+function makePolicyInput(overrides?: Partial<GuardPolicyInput>): GuardPolicyInput {
   return {
-    ...mod,
-    getFlags: () => ({
-      prompts: false,
-      retrieval: false,
-      promptCache: false,
-      mcpClient: false,
-      outputGuard: true,
-      orchestrator: false,
-    }),
+    mode: DEFAULT_GUARD_POLICY_BASE.mode,
+    detectors: structuredClone(DEFAULT_GUARD_DETECTORS),
+    replacementText: DEFAULT_GUARD_POLICY_BASE.replacementText,
+    failMode: DEFAULT_GUARD_POLICY_BASE.failMode,
+    bypassRoles: [],
+    holdChars: DEFAULT_GUARD_POLICY_BASE.holdChars,
+    maxDelayMs: DEFAULT_GUARD_POLICY_BASE.maxDelayMs,
+    revision: 0,
+    ...overrides,
   };
-});
+}
 
 function makeMockRes() {
   const emitter = new EventEmitter();
@@ -88,26 +102,36 @@ const dummyProfile: GateProfile = {
   quickAnswers: { enabled: false, minSimilarity: 0.8 },
 };
 
-describe('output-guard integration (T066/T067)', () => {
+describe('output-guard integration with real policy.ts (T066/T067)', () => {
   beforeEach(() => {
+    initDb(':memory:');
     resetFlagsCacheForTests();
+    resetGuardEventRateLimitForTests();
+    seedProfile(42);
+    setFlags({ outputGuard: true });
   });
 
   afterEach(() => {
-    registerOutputFilterProvider(null);
-    registerSupportOutputGuardEvaluator(null);
+    resetFlagsCacheForTests();
+    try {
+      getDb().close();
+    } catch {
+      /* already closed */
+    }
   });
 
-  it('installs output guard idempotently and blocks early non-stream response', async () => {
-    registerOutputFilterProvider((_ctx) =>
-      createStreamGuard({
+  it('installs real policy outputFilterFor idempotently and blocks early non-stream response', async () => {
+    await setPolicy(
+      { kind: 'profile', id: '42' },
+      makePolicyInput({
         mode: 'block',
-        replacementText: '[GUARDED]',
-        evaluateLocal: (text) =>
-          text.includes('SECRET_LEAK')
-            ? { action: 'blocked', text, reason: 'keywords', detector: 'keywords' }
-            : { action: 'pass', text },
+        replacementText: '[GUARDED_BY_POLICY]',
+        detectors: {
+          ...structuredClone(DEFAULT_GUARD_DETECTORS),
+          keywords: { enabled: true, terms: ['SECRET_LEAK'] },
+        },
       }),
+      null,
     );
 
     const { res, headers, jsonOut } = makeMockRes();
@@ -138,16 +162,37 @@ describe('output-guard integration (T066/T067)', () => {
       choices: [{ index: 0, message: { role: 'assistant', content: 'Here is SECRET_LEAK' }, finish_reason: 'stop' }],
     });
 
-    await new Promise((r) => setTimeout(r, 15));
+    await new Promise((r) => setTimeout(r, 25));
     expect(headers['x-freellm-guard']).toBe('blocked;reason=keywords');
     expect(jsonOut[0]).toMatchObject({
-      choices: [{ index: 0, message: { content: '[GUARDED]' }, finish_reason: 'content_filter' }],
+      choices: [{ index: 0, message: { content: '[GUARDED_BY_POLICY]' }, finish_reason: 'content_filter' }],
     });
   });
 
-  it('support-adapter builds restricted guest role for unverified context and strips KB reference blocks', async () => {
+  it('support-adapter evaluates real policy.ts for support_tenant without mock evaluator', async () => {
+    ensureSupportTables();
+    const { tenant } = createSupportTenant({
+      name: 'Acme',
+      allowGuest: true,
+      defaultModel: 'auto',
+      systemPrompt: 'Tenant system prompt.',
+    });
+
+    await setPolicy(
+      { kind: 'support_tenant', id: String(tenant.id) },
+      makePolicyInput({
+        mode: 'block',
+        replacementText: '[SUPPORT_POLICY_BLOCKED]',
+        detectors: {
+          ...structuredClone(DEFAULT_GUARD_DETECTORS),
+          keywords: { enabled: true, terms: ['FORBIDDEN_TERM'] },
+        },
+      }),
+      null,
+    );
+
     const ctx = buildSupportGuardContext({
-      tenantId: 7,
+      tenantId: tenant.id,
       verified: false,
       role: 'admin', // unverified must downgrade to guest
       userId: 'u-1',
@@ -163,10 +208,13 @@ describe('output-guard integration (T066/T067)', () => {
     expect(ctx.systemPrompt).not.toContain('Secret KB');
 
     const res = await guardSupportReply({
-      text: 'Normal reply',
+      text: 'This reply contains FORBIDDEN_TERM inside it.',
       context: ctx,
-      evaluator: (_scope, text) => ({ action: 'masked', text: `${text} [checked]`, reason: 'pii' }),
     });
-    expect(res).toEqual({ action: 'masked', text: 'Normal reply [checked]', reason: 'pii' });
+    expect(res).toMatchObject({
+      action: 'blocked',
+      text: '[SUPPORT_POLICY_BLOCKED]',
+      reason: 'keywords',
+    });
   });
 });

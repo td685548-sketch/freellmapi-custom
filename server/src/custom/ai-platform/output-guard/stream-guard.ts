@@ -1,11 +1,15 @@
+import {
+  GUARD_DEFAULT_REPLACEMENT_TEXT,
+  OUTPUT_GUARD_LIMITS,
+} from '@freellmapi/shared/ai-platform-output-guard.js';
 import type { GuardAction, OutputFilter, OutputFilterSink } from '../wire/interceptor.js';
 
 export const STREAM_GUARD_DEFAULTS = {
-  holdChars: 200,
-  maxDelayMs: 300,
-  maxHoldChars: 2000,
-  maxDelayMsCap: 2000,
-  defaultReplacementText: 'Response blocked by output guard policy.',
+  holdChars: OUTPUT_GUARD_LIMITS.defaultHoldChars,
+  maxDelayMs: OUTPUT_GUARD_LIMITS.defaultMaxDelayMs,
+  maxHoldChars: OUTPUT_GUARD_LIMITS.maxHoldChars,
+  maxDelayMsCap: OUTPUT_GUARD_LIMITS.maxDelayMs,
+  defaultReplacementText: GUARD_DEFAULT_REPLACEMENT_TEXT,
 } as const;
 
 export interface StreamGuardCheckResult {
@@ -353,7 +357,8 @@ export function createStreamGuard(options: StreamGuardOptions): StreamGuardFilte
       if (stopped || disposed) {
         return {};
       }
-      const targetText = buffering ? full : emittedPrefix + unsentBuffer || full;
+      const accumulated = emittedPrefix + unsentBuffer;
+      const targetText = full || accumulated;
       const res = options.evaluateFinal
         ? await options.evaluateFinal(targetText)
         : options.evaluateLocal(targetText, { isFinal: true });

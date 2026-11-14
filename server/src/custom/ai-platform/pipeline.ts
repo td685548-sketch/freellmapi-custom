@@ -143,3 +143,6 @@ export async function runPreRequest(
 
   return 'continue';
 }
+
+// Ensure default outputFilterFor provider is registered when pipeline is loaded standalone.
+void import('./output-guard/policy.js').catch(() => {});

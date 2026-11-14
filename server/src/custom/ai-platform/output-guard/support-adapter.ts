@@ -80,9 +80,26 @@ export async function guardSupportReply(options: {
   context: SupportOutputGuardContext;
   evaluator?: SupportOutputGuardEvaluator;
 }): Promise<SupportOutputGuardResult> {
-  const fn = options.evaluator ?? registeredDefaultEvaluator;
+  let fn = options.evaluator ?? registeredDefaultEvaluator;
   if (!fn) {
-    return { action: 'pass', text: options.text };
+    const { evaluateOutput } = await import('./policy.js');
+    fn = async (scope, text, ctx) => {
+      const res = await evaluateOutput(scope, text, {
+        role: ctx.role,
+        trustedRole: ctx.role,
+        endUser: ctx.endUser,
+        wire: 'support',
+        stream: false,
+        systemPrompt: ctx.systemPrompt,
+        signal: ctx.signal,
+        canCallGateway: ctx.hasInferenceCapability,
+      });
+      return {
+        action: res.action,
+        text: res.text,
+        reason: res.reason,
+      };
+    };
   }
   return await fn(options.context.scope, options.text, options.context);
 }

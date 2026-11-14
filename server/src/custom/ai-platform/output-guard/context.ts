@@ -1,4 +1,5 @@
 import type { Request } from 'express';
+import { GUARD_DEFAULT_END_USER_ROLE } from '@freellmapi/shared/ai-platform-output-guard.js';
 import { getDb } from '../../../db/index.js';
 import { extractInferenceToken } from '../../../middleware/user-rate-limit.js';
 import type { GateProfile } from '../../../services/profile-usage.js';
@@ -109,7 +110,7 @@ export function extractEffectiveSystemPrompt(options: {
  * always returns a restricted default (`'end_user'`).
  */
 export function resolveProfileGuardRole(_req: Request, _endUser: string | null): string {
-  return 'end_user';
+  return GUARD_DEFAULT_END_USER_ROLE;
 }
 
 export function readStoredProfileSystemPrompt(profileId: number): string | null {
