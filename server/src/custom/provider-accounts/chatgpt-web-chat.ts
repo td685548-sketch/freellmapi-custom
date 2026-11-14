@@ -404,11 +404,13 @@ export async function runChatGptWebChat(opts: ChatGptWebChatOptions): Promise<st
   const accessToken = await fetchChatGptWebAccessToken(cookie, userAgent, baseUrl, platform, opts.signal);
   if (opts.signal?.aborted) throw new ChatGptWebChatError('Request aborted', 499);
 
-  const sentinel = await fetchSentinelHeaders({ baseUrl, accessToken, userAgent, platform, signal: opts.signal });
+  const sentinel = await fetchSentinelHeaders({ baseUrl, accessToken, cookie, userAgent, platform, signal: opts.signal });
   const headers: Record<string, string> = {
     ...sentinel,
     Authorization: `Bearer ${accessToken}`,
     'User-Agent': userAgent,
+    Origin: baseUrl,
+    Referer: `${baseUrl}/`,
     ...(cookie ? { Cookie: cookie } : {}),
     'Content-Type': 'application/json',
   };

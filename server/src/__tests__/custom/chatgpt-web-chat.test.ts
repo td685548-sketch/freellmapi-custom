@@ -188,4 +188,31 @@ describe('ChatGPT Web chat over plain HTTP', () => {
     })).resolves.toBe('A 1x1 pixel');
     expect(uploadedBytes).toBeGreaterThan(0);
   });
+
+  it('forwards Cookie, Origin, and Referer to Sentinel and explains Cloudflare 403', async () => {
+    const sentinelHeadersSeen: Array<Record<string, string>> = [];
+    vi.mocked(proxyFetch).mockImplementation(async (url, init) => {
+      const target = String(url);
+      if (target.endsWith('/api/auth/session')) return json({ accessToken: 'access-token' });
+      if (target.endsWith('/sentinel/chat-requirements/prepare')) {
+        sentinelHeadersSeen.push((init?.headers ?? {}) as Record<string, string>);
+        return new Response('<html><title>Just a moment...</title></html>', { status: 403 });
+      }
+      return new Response('unexpected', { status: 500 });
+    });
+
+    await expect(runChatGptWebChat({
+      credential: '__Secure-next-auth.session-token=tok; cf_clearance=cf_ok',
+      messages: [{ role: 'user', content: 'hi' }],
+    })).rejects.toMatchObject({
+      status: 403,
+      message: expect.stringMatching(/Cloudflare\/Sentinel.*proxy/i),
+    });
+
+    expect(sentinelHeadersSeen[0]).toMatchObject({
+      Cookie: '__Secure-next-auth.session-token=tok; cf_clearance=cf_ok',
+      Origin: 'https://chatgpt.com',
+      Referer: 'https://chatgpt.com/',
+    });
+  });
 });
