@@ -154,4 +154,65 @@ describe('gemini-web executor', () => {
       ),
     ).rejects.toMatchObject({ status: 401 });
   });
+
+  it('uploads base64 images to content-push and attaches them in StreamGenerate', async () => {
+    const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    let capturedFreq = '';
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+
+      if (url.startsWith('https://gemini.google.com/app')) {
+        return new Response(
+          '"SNlM0e":"csrf_img_token","cfb2h":"bl_img","FdrFJe":"sid_img"',
+          { status: 200, headers: { 'Content-Type': 'text/html' } },
+        );
+      }
+
+      if (url === 'https://push.clients6.google.com/upload/') {
+        expect(init?.method).toBe('POST');
+        return new Response('/contrib_service/ttl_1d/uploaded_img_1.png', { status: 200 });
+      }
+
+      if (url.includes('/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate')) {
+        capturedFreq = new URLSearchParams(String(init?.body ?? '')).get('f.req') ?? '';
+        const frame = [null, ['c_1', 'r_1'], null, null, [['rc_1', ['Đây là ảnh 1x1 pixel.']]]];
+        const payload = JSON.stringify([['wrb.fr', null, JSON.stringify(frame)]]);
+        return new Response(
+          `)]}'\n\n${payload.length}\n${payload}\n`,
+          { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } },
+        );
+      }
+
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const provider = new WebCookieProvider({
+      providerId: 'gemini-web',
+      name: 'Gemini Web',
+      baseUrl: 'https://gemini.google.com/app',
+    });
+
+    const completion = await provider.chatCompletion(
+      '__Secure-1PSID=test_psid_img',
+      [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Mô tả ảnh' },
+          { type: 'image_url', image_url: { url: `data:image/png;base64,${pngBase64}` } },
+        ],
+      }],
+      'gemini-3.1-pro',
+    );
+
+    expect(completion.choices[0]?.message?.content).toBe('Đây là ảnh 1x1 pixel.');
+    const outer = JSON.parse(capturedFreq) as [null, string];
+    const inner = JSON.parse(outer[1]) as unknown[];
+    expect(inner[0]).toEqual([
+      'Mô tả ảnh',
+      0,
+      null,
+      [[['/contrib_service/ttl_1d/uploaded_img_1.png', 1], 'image-1.png']],
+    ]);
+  });
 });

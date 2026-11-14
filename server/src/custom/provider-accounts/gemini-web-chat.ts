@@ -15,6 +15,8 @@ import type { CompletionOptions } from '../../providers/base.js';
 import { looksLikeCookieHeader, looksLikeHtmlDocument } from './cookie-format.js';
 
 const DEFAULT_BASE_URL = 'https://gemini.google.com';
+const GEMINI_UPLOAD_URL = 'https://push.clients6.google.com/upload/';
+const GEMINI_PUSH_ID = 'feeds/mcudyrk2a4khkz';
 const REQUEST_TIMEOUT_MS = 30_000;
 const COMPLETION_TIMEOUT_MS = 120_000;
 const SESSION_CACHE_TTL_MS = 10 * 60_000;
@@ -281,15 +283,118 @@ export interface GeminiWebChatOptions {
   options?: CompletionOptions;
 }
 
+interface ExtractedGeminiImage {
+  fileName: string;
+  mimeType: string;
+  data: Buffer;
+}
+
+interface UploadedGeminiImage {
+  path: string;
+  fileName: string;
+}
+
+function extractGeminiWebImages(messages: ChatMessage[]): ExtractedGeminiImage[] {
+  const images: ExtractedGeminiImage[] = [];
+  for (const message of messages) {
+    if (!Array.isArray(message.content)) continue;
+    for (const part of message.content) {
+      if (!part || typeof part !== 'object') continue;
+      const p = part as unknown as Record<string, unknown>;
+      const type = typeof p.type === 'string' ? p.type.toLowerCase() : '';
+      let url: string | undefined;
+      if (type === 'image_url') {
+        url = typeof p.image_url === 'string'
+          ? p.image_url
+          : (p.image_url as { url?: unknown } | undefined)?.url as string | undefined;
+      } else if (type === 'input_image') {
+        url = typeof p.image_url === 'string' ? p.image_url : (typeof p.url === 'string' ? p.url : undefined);
+      } else if (type === 'image' && typeof p.source === 'string') {
+        url = p.source;
+      }
+      if (!url) continue;
+      const match = /^data:image\/(png|jpe?g|webp|gif);base64,([A-Za-z0-9+/=\s]+)$/i.exec(url);
+      if (!match) {
+        throw new GeminiWebChatError('Gemini Web images must be base64 data URLs (PNG, JPEG, WebP, or GIF).', 400);
+      }
+      const rawExt = match[1].toLowerCase();
+      const ext = rawExt === 'jpeg' ? 'jpg' : rawExt;
+      const mimeType = `image/${rawExt === 'jpg' ? 'jpeg' : rawExt}`;
+      images.push({
+        fileName: `image-${images.length + 1}.${ext}`,
+        mimeType,
+        data: Buffer.from(match[2].replace(/\s/g, ''), 'base64'),
+      });
+    }
+  }
+  return images;
+}
+
+async function uploadGeminiWebImages(
+  images: ExtractedGeminiImage[],
+  platform: Platform,
+  externalSignal?: AbortSignal,
+): Promise<UploadedGeminiImage[]> {
+  const uploaded: UploadedGeminiImage[] = [];
+  for (const image of images) {
+    const boundary = `----freellmapiGemini${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
+    const head = Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${image.fileName}"\r\nContent-Type: ${image.mimeType}\r\n\r\n`,
+    );
+    const tail = Buffer.from(`\r\n--${boundary}--\r\n`);
+    const body = Buffer.concat([head, image.data, tail]);
+
+    const { signal, cleanup } = createRequestSignal(REQUEST_TIMEOUT_MS, externalSignal);
+    try {
+      const res = await proxyFetch(
+        GEMINI_UPLOAD_URL,
+        {
+          method: 'POST',
+          headers: {
+            'Push-ID': GEMINI_PUSH_ID,
+            'Content-Type': `multipart/form-data; boundary=${boundary}`,
+            'User-Agent': BROWSER_USER_AGENT,
+          },
+          body,
+          signal,
+        },
+        platform,
+        'chat',
+      );
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new GeminiWebChatError(
+          `Gemini Web image upload failed (HTTP ${res.status}): ${errText.slice(0, 200) || res.statusText}`,
+          res.status,
+        );
+      }
+      const path = (await res.text()).trim();
+      if (!path) {
+        throw new GeminiWebChatError('Gemini Web image upload returned an empty path.', 502);
+      }
+      uploaded.push({ path, fileName: image.fileName });
+    } finally {
+      cleanup();
+    }
+  }
+  return uploaded;
+}
+
 export async function* streamGeminiWebChat(
   opts: GeminiWebChatOptions,
 ): AsyncGenerator<{ content?: string }> {
   const cookieHeader = normalizeGeminiWebCookie(opts.credential);
   const origin = resolveOrigin(opts.baseUrl);
   const platform: Platform = opts.platform && opts.platform !== 'custom' ? opts.platform : 'custom';
-  const prompt = buildConversationPrompt(opts.messages) || 'Hello';
+  const images = extractGeminiWebImages(opts.messages);
+  const rawPrompt = buildConversationPrompt(opts.messages);
+  const prompt = rawPrompt.trim() || (images.length > 0 ? 'Describe or analyze this image.' : 'Hello');
 
   const session = await fetchGeminiSession(cookieHeader, origin, platform, opts.options?.signal);
+  const uploadedImages = images.length > 0
+    ? await uploadGeminiWebImages(images, platform, opts.options?.signal)
+    : [];
+
   const query = new URLSearchParams({
     hl: 'en',
     _reqid: String(nextReqId()),
@@ -299,7 +404,10 @@ export async function* streamGeminiWebChat(
   if (session.fdrfje) query.set('f.sid', session.fdrfje);
 
   const streamUrl = `${origin}/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?${query.toString()}`;
-  const reqPayload = [null, JSON.stringify([[prompt], null, null])];
+  const messageEntry = uploadedImages.length > 0
+    ? [prompt, 0, null, uploadedImages.map(item => [[item.path, 1], item.fileName])]
+    : [prompt];
+  const reqPayload = [null, JSON.stringify([messageEntry, null, null])];
   const formBody = new URLSearchParams({
     'f.req': JSON.stringify(reqPayload),
     at: session.snlm0e,
