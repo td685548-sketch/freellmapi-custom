@@ -26,7 +26,7 @@ import { cleanupExpiredCooldowns } from './services/ratelimit.js';
 import { loadCacheFromDb } from './services/cache.js';
 import { installGracefulShutdown } from './lib/graceful-shutdown.js';
 import { startWorkerLifecycle } from './custom/x-gateway/support-runtime-router.js';
-import { startGeminiWebKeepAlive } from './custom/provider-accounts/gemini-web-keepalive.js';
+import { rotateGeminiWebAccountsOnce, startGeminiWebKeepAlive } from './custom/provider-accounts/gemini-web-keepalive.js';
 
 // Before any other statement runs, so no provider key can reach stdout — users
 // paste server output into bug reports. Module scope, not inside main(), so it
@@ -112,6 +112,7 @@ async function main() {
         const idle = Math.round(event.idleMs / 1000);
         console.log(`[wake] resumed after ~${idle}s (${event.reason}${event.signal ? `:${event.signal}` : ''}) — flushing stale sockets, re-probing keys`);
         flushProxyCache();
+        void rotateGeminiWebAccountsOnce();
         if (isTursoDatabase(getDb())) {
           // On hosted runtimes (e.g. Render) with synchronous Turso storage,
           // waking from container freeze coincides with the 5s HTTP health check.

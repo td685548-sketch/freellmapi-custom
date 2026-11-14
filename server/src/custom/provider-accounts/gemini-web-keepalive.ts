@@ -56,11 +56,18 @@ export async function rotateGeminiWebAccountsOnce(): Promise<number> {
   return sweepInFlight;
 }
 
-/** Start the background `gemini-web` cookie rotation timer. */
+/** Start the background `gemini-web` cookie rotation timer (plus one initial boot pass). */
 export function startGeminiWebKeepAlive(scheduler: Scheduler): () => void {
-  return scheduler.every(
+  const stopBoot = scheduler.after(5_000, async () => {
+    await rotateGeminiWebAccountsOnce();
+  });
+  const stopInterval = scheduler.every(
     GEMINI_WEB_KEEPALIVE_INTERVAL_MS,
     async () => { await rotateGeminiWebAccountsOnce(); },
     { name: 'gemini-web-keepalive' },
   );
+  return () => {
+    stopBoot();
+    stopInterval();
+  };
 }
