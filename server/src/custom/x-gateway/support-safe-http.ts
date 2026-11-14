@@ -492,7 +492,7 @@ const CROSS_ORIGIN_SENSITIVE_HEADERS = new Set([
 ]);
 
 function stripSensitiveHeadersForCrossOrigin(
-  headersInit: HeadersInit | undefined,
+  headersInit: RequestInit['headers'] | undefined,
   extraStrip?: readonly string[],
 ): Headers {
   const headers = new Headers(headersInit);
