@@ -13,6 +13,7 @@ import { hasPermission } from '../../middleware/requirePermission.js';
 import type { SessionUser } from '../../services/auth.js';
 import { getFlags, setFlags } from './flags.js';
 import { mcpAdminRouter } from './mcp-client/router.js';
+import { outputGuardAdminRouter } from './output-guard/router.js';
 
 const RETENTION_KEY = 'ai_platform_retention_v1';
 
@@ -160,3 +161,4 @@ aiPlatformRouter.put('/retention', requirePerm('edit_ai_flags'), (req, res) => {
 });
 
 aiPlatformRouter.use(mcpAdminRouter);
+aiPlatformRouter.use(outputGuardAdminRouter);

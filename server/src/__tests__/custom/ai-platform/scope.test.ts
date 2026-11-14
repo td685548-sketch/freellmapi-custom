@@ -54,4 +54,34 @@ describe('ai-platform/scope', () => {
       'ai_platform_scope_profile_8_meta',
     ]);
   });
+
+  it('purgeScope deletes exact scope from output-guard tables without affecting neighboring or wildcard-like ids', () => {
+    const db = getDb();
+    for (const [kind, id] of [
+      ['profile', '1'],
+      ['profile', '10'],
+      ['agent', 'a%'],
+      ['agent', 'abc'],
+    ] as const) {
+      db.prepare(
+        `INSERT INTO custom_ai_output_policies (scope_kind, scope_id, detectors_json, replacement_text)
+         VALUES (?, ?, '{}', 'Blocked')`,
+      ).run(kind, id);
+      db.prepare(
+        `INSERT INTO custom_ai_guard_events (scope_kind, scope_id, detector, action, wire)
+         VALUES (?, ?, 'keywords', 'blocked', 'openai-chat')`,
+      ).run(kind, id);
+    }
+
+    expect(purgeScope('profile', '1')).toBe(2);
+    expect(purgeScope('agent', 'a%')).toBe(2);
+
+    const remainingPolicies = db
+      .prepare('SELECT scope_kind, scope_id FROM custom_ai_output_policies ORDER BY scope_kind, scope_id')
+      .all() as Array<{ scope_kind: string; scope_id: string }>;
+    expect(remainingPolicies).toEqual([
+      { scope_kind: 'agent', scope_id: 'abc' },
+      { scope_kind: 'profile', scope_id: '10' },
+    ]);
+  });
 });
