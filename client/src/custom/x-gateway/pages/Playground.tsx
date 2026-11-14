@@ -39,6 +39,11 @@ import {
   type ChatTurn,
   type ChatImage,
 } from '../playground-state';
+import {
+  loadPlaygroundImages,
+  prunePlaygroundImages,
+  savePlaygroundImages,
+} from '../playground-image-store';
 import { useUserSession } from '../../use-session';
 import { useSessionRevision } from '../../session-state';
 import '../playground.css';
@@ -282,10 +287,74 @@ export default function Playground() {
     scrollToBottom(true);
   }, [activeChat.id, scrollToBottom]);
 
-  // Persist chats to localStorage whenever they change
+  const persistedImageIdsRef = useRef(new Set<string>());
+
+  // Hydrate persisted image URLs from IndexedDB on mount and prune expired/orphaned images.
   useEffect(() => {
-    if (userId) {
-      saveChats(userId, chats);
+    if (!userId) return;
+    let cancelled = false;
+    const activeIds = new Set<string>();
+    const missingIds: string[] = [];
+
+    for (const chat of chats) {
+      for (const msg of chat.messages) {
+        if (!msg.images) continue;
+        for (const img of msg.images) {
+          activeIds.add(img.id);
+          if (!img.url) missingIds.push(img.id);
+        }
+      }
+    }
+
+    void prunePlaygroundImages(userId, activeIds);
+    if (missingIds.length === 0) return;
+
+    void loadPlaygroundImages(userId, missingIds).then((urlMap) => {
+      if (cancelled) return;
+      for (const id of Object.keys(urlMap)) {
+        persistedImageIdsRef.current.add(id);
+      }
+      setChats((prev) =>
+        prev.map((chat) => ({
+          ...chat,
+          messages: chat.messages.map((msg) => {
+            if (!msg.images || msg.images.length === 0) return msg;
+            const hydrated = msg.images
+              .map((img) => (img.url ? img : { ...img, url: urlMap[img.id] ?? '' }))
+              .filter((img) => Boolean(img.url));
+            return {
+              ...msg,
+              images: hydrated.length > 0 ? hydrated : undefined,
+            };
+          }),
+        })),
+      );
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  // Persist chats to localStorage and new image payloads to IndexedDB (7-day TTL)
+  useEffect(() => {
+    if (!userId) return;
+    saveChats(userId, chats);
+
+    const newImages: ChatImage[] = [];
+    for (const chat of chats) {
+      for (const msg of chat.messages) {
+        if (!msg.images) continue;
+        for (const img of msg.images) {
+          if (img.url && !persistedImageIdsRef.current.has(img.id)) {
+            persistedImageIdsRef.current.add(img.id);
+            newImages.push(img);
+          }
+        }
+      }
+    }
+    if (newImages.length > 0) {
+      void savePlaygroundImages(userId, newImages);
     }
   }, [chats, userId]);
 
@@ -934,16 +1003,18 @@ export default function Playground() {
                       )}
 
                       {/* Render attached user images */}
-                      {msg.images && msg.images.length > 0 && (
+                      {msg.images && msg.images.some((img) => Boolean(img.url)) && (
                         <div className="x-turn-images">
-                          {msg.images.map((img) => (
-                            <img
-                              key={img.id}
-                              src={img.url}
-                              alt={img.name}
-                              className="x-chat-image"
-                            />
-                          ))}
+                          {msg.images
+                            .filter((img) => Boolean(img.url))
+                            .map((img) => (
+                              <img
+                                key={img.id}
+                                src={img.url}
+                                alt={img.name}
+                                className="x-chat-image"
+                              />
+                            ))}
                         </div>
                       )}
 
