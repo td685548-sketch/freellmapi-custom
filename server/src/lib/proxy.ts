@@ -549,7 +549,7 @@ async function resolveDispatcher(): Promise<{ dispatcher: unknown; isSocks: bool
     }
 
     const ProxyAgentCtor = await loadHttpProxyAgent();
-    const dispatcher = new ProxyAgentCtor({ uri: _proxyUrl });
+    const dispatcher = new ProxyAgentCtor({ uri: _proxyUrl, maxHeaderSize: 131_072 });
     cached = { dispatcher, proxyUrl: _proxyUrl, isSocks: false, ts: now };
     return { dispatcher, isSocks: false };
   } catch (err: any) {
@@ -1054,7 +1054,7 @@ async function resolvePerKeyDispatcher(proxyUrl: string): Promise<{ dispatcher: 
       return { dispatcher, isSocks: true };
     }
     const ProxyAgentCtor = await loadHttpProxyAgent();
-    const dispatcher = new ProxyAgentCtor({ uri: proxyUrl });
+    const dispatcher = new ProxyAgentCtor({ uri: proxyUrl, maxHeaderSize: 131_072 });
     rememberPerKeyDispatcher(proxyUrl, { dispatcher, isSocks: false, ts: now });
     return { dispatcher, isSocks: false };
   } catch (err: any) {
