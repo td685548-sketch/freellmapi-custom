@@ -150,6 +150,65 @@ export function isMetadataIp(ip: string, hostname?: string): boolean {
 }
 
 /**
+ * Checks if IP or hostname is ALWAYS forbidden regardless of allowlists:
+ * cloud metadata, link-local, unspecified (0.0.0.0/8, ::), multicast/broadcast (224.0.0.0/4, ff00::/8).
+ */
+export function isAlwaysBlockedIp(ip: string, hostname?: string): boolean {
+  if (isMetadataIp(ip, hostname)) return true;
+
+  const canonicalV4 = parseIpv4Address(ip);
+  if (canonicalV4) {
+    const p0 = Number(canonicalV4.split('.')[0]);
+    if (p0 === 0 || p0 >= 224) return true;
+  }
+
+  const lower = ip.toLowerCase();
+  if (
+    lower === '::' ||
+    lower === '0:0:0:0:0:0:0:0' ||
+    lower.startsWith('fe8') ||
+    lower.startsWith('fe9') ||
+    lower.startsWith('fea') ||
+    lower.startsWith('feb') ||
+    lower.startsWith('ff')
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Normalizes a list of exact allowed origins (scheme + canonical host + port).
+ * Rejects wildcards, CIDR, paths, queries, fragments, and embedded credentials.
+ */
+export function normalizeAllowedExactOrigins(origins?: readonly string[]): Set<string> {
+  const out = new Set<string>();
+  if (!origins) return out;
+  for (const raw of origins) {
+    const entry = String(raw ?? '').trim();
+    if (!entry || entry.includes('*') || entry.includes('?') || entry.includes('#') || /\s/.test(entry)) {
+      continue;
+    }
+    const schemeIdx = entry.indexOf('://');
+    if (schemeIdx === -1) continue;
+    const afterScheme = entry.slice(schemeIdx + 3);
+    if (afterScheme.includes('/')) continue;
+    try {
+      const u = new URL(entry);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') continue;
+      if (u.username || u.password) continue;
+      if (u.origin.toLowerCase() === entry.toLowerCase()) {
+        out.add(u.origin.toLowerCase());
+      }
+    } catch {
+      // Ignore malformed origin entry
+    }
+  }
+  return out;
+}
+
+/**
  * Checks if IP address is private, loopback, link-local, multicast, or reserved.
  */
 export function isPrivateIp(ip: string): boolean {
@@ -229,7 +288,11 @@ export function isLocalhostAllowedByServer(allowLocalhostOption?: boolean): bool
  */
 export function isSafeHttpUrlSync(
   rawUrl: string,
-  options?: { allowLocalhost?: boolean },
+  options?: {
+    allowLocalhost?: boolean;
+    allowedOrigins?: readonly string[];
+    requireExplicitHttpOrigin?: boolean;
+  },
 ): { safe: boolean; reason?: string } {
   try {
     const u = new URL(rawUrl);
@@ -245,13 +308,25 @@ export function isSafeHttpUrlSync(
       return { safe: false, reason: 'Host is empty' };
     }
 
-    // Metadata check is strictly forbidden under all circumstances
-    if (isMetadataIp(host, host)) {
-      return { safe: false, reason: 'SSRF protection: cloud metadata destinations are strictly forbidden' };
+    // Metadata, link-local, unspecified, and multicast are strictly forbidden under all circumstances
+    if (isAlwaysBlockedIp(host, host)) {
+      return { safe: false, reason: 'SSRF protection: cloud metadata and reserved destinations are strictly forbidden' };
+    }
+
+    const ip = parseIpAddress(host);
+    if (ip && isAlwaysBlockedIp(ip, host)) {
+      return { safe: false, reason: 'SSRF protection: cloud metadata and reserved destinations are strictly forbidden' };
+    }
+
+    const exactAllowed = normalizeAllowedExactOrigins(options?.allowedOrigins).has(u.origin.toLowerCase());
+    const trustedOrigin = isTrustedPartnerOrigin(u.origin);
+
+    if (options?.requireExplicitHttpOrigin && u.protocol === 'http:' && !exactAllowed && !trustedOrigin) {
+      return { safe: false, reason: 'SSRF protection: http: URLs require an exact origin in allowedOrigins' };
     }
 
     // Server-owned exact origin allowlist check
-    if (isTrustedPartnerOrigin(u.origin)) {
+    if (trustedOrigin || exactAllowed) {
       return { safe: true };
     }
 
@@ -263,15 +338,9 @@ export function isSafeHttpUrlSync(
       return { safe: false, reason: 'SSRF protection: private or localhost URLs are not allowed' };
     }
 
-    const ip = parseIpAddress(host);
-    if (ip) {
-      if (isMetadataIp(ip)) {
-        return { safe: false, reason: 'SSRF protection: cloud metadata destinations are strictly forbidden' };
-      }
-      if (isPrivateIp(ip)) {
-        if (localhostPermitted) return { safe: true };
-        return { safe: false, reason: 'SSRF protection: private or localhost URLs are not allowed' };
-      }
+    if (ip && isPrivateIp(ip)) {
+      if (localhostPermitted) return { safe: true };
+      return { safe: false, reason: 'SSRF protection: private or localhost URLs are not allowed' };
     }
 
     return { safe: true };
@@ -293,17 +362,17 @@ export async function resolveAndValidateHost(
 ): Promise<string[]> {
   const host = hostname.toLowerCase();
 
-  // Cloud metadata is strictly blocked even under allowlists
-  if (isMetadataIp(host, host)) {
-    throw new SafeHttpError(403, 'SSRF protection: Cloud metadata destinations are forbidden');
+  // Cloud metadata, link-local, unspecified, multicast are strictly blocked even under allowlists
+  if (isAlwaysBlockedIp(host, host)) {
+    throw new SafeHttpError(403, 'SSRF protection: Cloud metadata and reserved destinations are forbidden');
   }
 
   const directIp = parseIpAddress(host);
   const localhostPermitted = options?.trustedOrigin || isLocalhostAllowedByServer(options?.allowLocalhost);
 
   if (directIp) {
-    if (isMetadataIp(directIp)) {
-      throw new SafeHttpError(403, 'SSRF protection: Cloud metadata destinations are forbidden');
+    if (isAlwaysBlockedIp(directIp, host)) {
+      throw new SafeHttpError(403, 'SSRF protection: Cloud metadata and reserved destinations are forbidden');
     }
     if (isPrivateIp(directIp) && !localhostPermitted) {
       throw new SafeHttpError(403, `SSRF protection: IP address ${directIp} is private or restricted`);
@@ -344,8 +413,8 @@ export async function resolveAndValidateHost(
 
   for (const resolvedIp of ips) {
     const canonical = parseIpAddress(resolvedIp) || resolvedIp;
-    if (isMetadataIp(canonical)) {
-      throw new SafeHttpError(403, `SSRF protection: Host resolved to metadata address ${canonical}`);
+    if (isAlwaysBlockedIp(canonical)) {
+      throw new SafeHttpError(403, `SSRF protection: Host resolved to forbidden metadata/reserved address ${canonical}`);
     }
     if (isPrivateIp(canonical) && !localhostPermitted) {
       throw new SafeHttpError(403, `SSRF protection: Host resolved to private address ${canonical}`);
@@ -362,6 +431,8 @@ export async function validateSafeHttpUrl(
   rawUrl: string,
   options?: {
     allowLocalhost?: boolean;
+    allowedOrigins?: readonly string[];
+    requireExplicitHttpOrigin?: boolean;
     checkDns?: boolean;
     dnsResolver?: (host: string) => Promise<string[]>;
   },
@@ -371,7 +442,8 @@ export async function validateSafeHttpUrl(
 
   try {
     const u = new URL(rawUrl);
-    const trustedOrigin = isTrustedPartnerOrigin(u.origin);
+    const exactAllowed = normalizeAllowedExactOrigins(options?.allowedOrigins).has(u.origin.toLowerCase());
+    const trustedOrigin = isTrustedPartnerOrigin(u.origin) || exactAllowed;
     const resolvedIps = await resolveAndValidateHost(u.hostname, {
       allowLocalhost: options?.allowLocalhost,
       dnsResolver: options?.dnsResolver,
@@ -409,65 +481,173 @@ export function getSafeUndiciDispatcher(options?: {
   });
 }
 
+const CROSS_ORIGIN_SENSITIVE_HEADERS = new Set([
+  'authorization',
+  'proxy-authorization',
+  'cookie',
+  'mcp-session-id',
+  'x-api-key',
+  'x-auth-token',
+  'x-goog-api-key',
+]);
+
+function stripSensitiveHeadersForCrossOrigin(
+  headersInit: HeadersInit | undefined,
+  extraStrip?: readonly string[],
+): Headers {
+  const headers = new Headers(headersInit);
+  const stripSet = new Set(CROSS_ORIGIN_SENSITIVE_HEADERS);
+  if (extraStrip) {
+    for (const h of extraStrip) {
+      const normalized = String(h ?? '').trim().toLowerCase();
+      if (normalized) stripSet.add(normalized);
+    }
+  }
+  for (const name of [...headers.keys()]) {
+    if (stripSet.has(name.toLowerCase())) {
+      headers.delete(name);
+    }
+  }
+  return headers;
+}
+
+export interface SafeFetchRedirectOptions {
+  maxRedirects?: number;
+  methodPreservingOnly?: boolean;
+  stripHeadersOnCrossOrigin?: readonly string[];
+}
+
 /**
- * Executes an HTTP fetch with SSRF validation, DNS binding, and redirect prevention.
+ * Executes an HTTP fetch with SSRF validation, DNS binding, and redirect prevention
+ * (or bounded manual method-preserving redirect following when explicitly requested).
  */
 export async function safeFetch(
   url: string | URL,
   init?: RequestInit,
   options?: {
     allowLocalhost?: boolean;
+    allowedOrigins?: readonly string[];
+    requireExplicitHttpOrigin?: boolean;
+    followRedirects?: SafeFetchRedirectOptions;
     fetchFn?: typeof fetch;
     dnsResolver?: (host: string) => Promise<string[]>;
   },
 ): Promise<Response> {
-  const urlStr = typeof url === 'string' ? url : url.toString();
-  const u = new URL(urlStr);
-
-  const trustedOrigin = isTrustedPartnerOrigin(u.origin);
-
-  // Validate URL and resolve DNS before dispatch
-  const validation = await validateSafeHttpUrl(urlStr, {
-    allowLocalhost: options?.allowLocalhost,
-    checkDns: true,
-    dnsResolver: options?.dnsResolver,
-  });
-
-  if (!validation.safe) {
-    throw new SafeHttpError(403, validation.reason || 'SSRF protection blocked request');
-  }
-
   const fetchImpl = options?.fetchFn ?? globalThis.fetch;
+  const maxRedirects = options?.followRedirects
+    ? Math.min(3, Math.max(0, Math.trunc(options.followRedirects.maxRedirects ?? 3)))
+    : 0;
+  const methodPreservingOnly = options?.followRedirects?.methodPreservingOnly ?? true;
 
-  // Use safe undici dispatcher for connection-pinned DNS if native fetch is used
-  const dispatcher = getSafeUndiciDispatcher({
-    allowLocalhost: options?.allowLocalhost,
-    dnsResolver: options?.dnsResolver,
-    trustedOrigin,
-  });
+  let currentUrl = typeof url === 'string' ? url : url.toString();
+  let currentInit: RequestInit = init ? { ...init } : {};
+  const visitedUrls = new Set<string>([currentUrl]);
+  const allowedOriginSet = normalizeAllowedExactOrigins(options?.allowedOrigins);
 
-  const mergedInit: RequestInit & { dispatcher?: Agent } = {
-    ...init,
-    redirect: 'manual',
-    dispatcher,
-  };
+  for (let hop = 0; hop <= maxRedirects; hop += 1) {
+    const u = new URL(currentUrl);
+    const trustedOrigin =
+      isTrustedPartnerOrigin(u.origin) || allowedOriginSet.has(u.origin.toLowerCase());
 
-  let res: Response;
-  try {
-    res = await fetchImpl(urlStr, mergedInit);
-  } catch (err) {
-    void dispatcher.destroy().catch(() => {});
-    if (err instanceof SafeHttpError) throw err;
-    throw new SafeHttpError(502, `Network request failed: ${(err as Error).message}`);
-  }
+    const validation = await validateSafeHttpUrl(currentUrl, {
+      allowLocalhost: options?.allowLocalhost,
+      allowedOrigins: options?.allowedOrigins,
+      requireExplicitHttpOrigin: options?.requireExplicitHttpOrigin,
+      checkDns: true,
+      dnsResolver: options?.dnsResolver,
+    });
 
-  // Close the per-request pool after its active response body completes.
-  void dispatcher.close().catch(() => {});
-  // Reject redirects strictly: no redirect following
-  if (res.status >= 300 && res.status < 400) {
+    if (!validation.safe) {
+      throw new SafeHttpError(403, validation.reason || 'SSRF protection blocked request');
+    }
+
+    const dispatcher = getSafeUndiciDispatcher({
+      allowLocalhost: options?.allowLocalhost,
+      dnsResolver: options?.dnsResolver,
+      trustedOrigin,
+    });
+
+    const mergedInit: RequestInit & { dispatcher?: Agent } = {
+      ...currentInit,
+      redirect: 'manual',
+      dispatcher,
+    };
+
+    let res: Response;
+    try {
+      res = await fetchImpl(currentUrl, mergedInit);
+    } catch (err) {
+      void dispatcher.destroy().catch(() => {});
+      if (err instanceof SafeHttpError) throw err;
+      throw new SafeHttpError(502, `Network request failed: ${(err as Error).message}`);
+    }
+
+    void dispatcher.close().catch(() => {});
+
+    if (res.status < 300 || res.status >= 400) {
+      return res;
+    }
+
     await res.body?.cancel();
-    throw new SafeHttpError(400, `HTTP redirect ${res.status} blocked: redirects are not permitted for security`);
+
+    if (!options?.followRedirects) {
+      throw new SafeHttpError(
+        400,
+        `HTTP redirect ${res.status} blocked: redirects are not permitted for security`,
+      );
+    }
+
+    if (hop >= maxRedirects) {
+      throw new SafeHttpError(
+        400,
+        `HTTP redirect limit exceeded (max ${maxRedirects})`,
+      );
+    }
+
+    const location = res.headers.get('location');
+    if (!location) {
+      throw new SafeHttpError(400, `HTTP redirect ${res.status} missing Location header`);
+    }
+
+    let nextUrlObj: URL;
+    try {
+      nextUrlObj = new URL(location, currentUrl);
+    } catch {
+      throw new SafeHttpError(400, 'HTTP redirect target URL is invalid');
+    }
+
+    const nextUrl = nextUrlObj.toString();
+    if (visitedUrls.has(nextUrl)) {
+      throw new SafeHttpError(400, 'HTTP redirect loop detected');
+    }
+
+    const method = String(currentInit.method ?? 'GET').toUpperCase();
+    if (
+      methodPreservingOnly &&
+      method !== 'GET' &&
+      method !== 'HEAD' &&
+      res.status !== 307 &&
+      res.status !== 308
+    ) {
+      throw new SafeHttpError(
+        400,
+        `HTTP redirect ${res.status} is not method-preserving for ${method}`,
+      );
+    }
+
+    if (nextUrlObj.origin !== u.origin) {
+      currentInit = {
+        ...currentInit,
+        headers: stripSensitiveHeadersForCrossOrigin(
+          currentInit.headers,
+          options.followRedirects.stripHeadersOnCrossOrigin,
+        ),
+      };
+    }
+
+    visitedUrls.add(nextUrl);
+    currentUrl = nextUrl;
   }
 
-  return res;
+  throw new SafeHttpError(400, 'HTTP redirect limit exceeded');
 }

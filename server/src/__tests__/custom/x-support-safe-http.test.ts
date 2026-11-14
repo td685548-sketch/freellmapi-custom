@@ -243,4 +243,194 @@ describe('Safe HTTP SSRF & Transport Protection', () => {
       expect(data).toEqual({ ok: true });
     });
   });
+
+  describe('Additive MCP options: allowedOrigins, requireExplicitHttpOrigin & manual followRedirects', () => {
+    it('allows exact-origin private/loopback only when listed in allowedOrigins and blocks metadata/unspecified/multicast/link-local', async () => {
+      const mockDns = vi.fn(async (host: string) => {
+        if (host === 'internal-mcp.example') return ['10.20.30.40'];
+        if (host === 'localhost') return ['127.0.0.1'];
+        return ['93.184.216.34'];
+      });
+
+      // Allowed exact origin (private IP)
+      const okPrivate = await validateSafeHttpUrl('https://internal-mcp.example:8443/mcp', {
+        allowedOrigins: ['https://internal-mcp.example:8443'],
+        requireExplicitHttpOrigin: true,
+        dnsResolver: mockDns,
+      });
+      expect(okPrivate.safe).toBe(true);
+      expect(okPrivate.resolvedIps).toEqual(['10.20.30.40']);
+
+      // Different port rejected
+      const wrongPort = await validateSafeHttpUrl('https://internal-mcp.example:9443/mcp', {
+        allowedOrigins: ['https://internal-mcp.example:8443'],
+        requireExplicitHttpOrigin: true,
+        dnsResolver: mockDns,
+      });
+      expect(wrongPort.safe).toBe(false);
+
+      // HTTP rejected unless exact origin in allowedOrigins
+      const httpNotAllowed = await validateSafeHttpUrl('http://api.partner.com/mcp', {
+        allowedOrigins: ['https://api.partner.com'],
+        requireExplicitHttpOrigin: true,
+        dnsResolver: mockDns,
+      });
+      expect(httpNotAllowed.safe).toBe(false);
+
+      // HTTP allowed when exact origin in allowedOrigins
+      const httpAllowed = await validateSafeHttpUrl('http://127.0.0.1:4321/mcp', {
+        allowedOrigins: ['http://127.0.0.1:4321'],
+        requireExplicitHttpOrigin: true,
+        dnsResolver: mockDns,
+      });
+      expect(httpAllowed.safe).toBe(true);
+
+      // Wildcard, CIDR, path, query, userinfo in allowedOrigins are ignored/rejected
+      const wildcardRejected = await validateSafeHttpUrl('http://127.0.0.1:4321/mcp', {
+        allowedOrigins: ['http://*.127.0.0.1:4321', 'http://127.0.0.0/8', 'http://127.0.0.1:4321/path', 'http://user:pass@127.0.0.1:4321'],
+        requireExplicitHttpOrigin: true,
+        dnsResolver: mockDns,
+      });
+      expect(wildcardRejected.safe).toBe(false);
+
+      // Metadata, link-local, unspecified, multicast ALWAYS blocked even if in allowedOrigins
+      for (const badUrl of [
+        'http://169.254.169.254/latest/meta-data',
+        'http://169.254.1.2:8080/mcp',
+        'http://0.0.0.0:8080/mcp',
+        'http://224.0.0.1:8080/mcp',
+        'http://[fe80::1]:8080/mcp',
+        'http://[::]:8080/mcp',
+        'http://[ff02::1]:8080/mcp',
+      ]) {
+        const origin = new URL(badUrl).origin;
+        const res = await validateSafeHttpUrl(badUrl, {
+          allowedOrigins: [origin],
+          requireExplicitHttpOrigin: true,
+          dnsResolver: mockDns,
+        });
+        expect(res.safe).toBe(false);
+      }
+    });
+
+    it('follows up to 3 method-preserving redirects, validates each hop DNS, and strips credentials on cross-origin', async () => {
+      const seenRequests: Array<{ url: string; method?: string; headers: Record<string, string>; hasDispatcher: boolean }> = [];
+      let step = 0;
+      const mockFetch = vi.fn(async (url: string | URL | Request, init?: RequestInit & { dispatcher?: unknown }) => {
+        step += 1;
+        const headersObj: Record<string, string> = {};
+        new Headers(init?.headers).forEach((v, k) => {
+          headersObj[k.toLowerCase()] = v;
+        });
+        seenRequests.push({
+          url: String(url),
+          method: init?.method,
+          headers: headersObj,
+          hasDispatcher: Boolean(init?.dispatcher),
+        });
+        expect(init?.redirect).toBe('manual');
+        expect(init?.dispatcher).toBeDefined();
+
+        if (step === 1) {
+          return new Response(null, { status: 307, headers: { Location: 'https://mcp-b.example.com/v2/rpc' } });
+        }
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      });
+
+      const mockDns = vi.fn(async () => ['93.184.216.34']);
+
+      const res = await safeFetch(
+        'https://mcp-a.example.com/rpc',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer super-secret',
+            'X-Custom-Secret': 'secret-123',
+            'Mcp-Session-Id': 'sess-abc',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize' }),
+        },
+        {
+          fetchFn: mockFetch as unknown as typeof fetch,
+          dnsResolver: mockDns,
+          followRedirects: {
+            maxRedirects: 3,
+            methodPreservingOnly: true,
+            stripHeadersOnCrossOrigin: ['x-custom-secret'],
+          },
+        },
+      );
+
+      expect(res.status).toBe(200);
+      expect(seenRequests).toHaveLength(2);
+      expect(seenRequests[0].headers['authorization']).toBe('Bearer super-secret');
+      expect(seenRequests[0].headers['x-custom-secret']).toBe('secret-123');
+      expect(seenRequests[0].headers['mcp-session-id']).toBe('sess-abc');
+      // Cross-origin hop stripped sensitive headers
+      expect(seenRequests[1].headers['authorization']).toBeUndefined();
+      expect(seenRequests[1].headers['x-custom-secret']).toBeUndefined();
+      expect(seenRequests[1].headers['mcp-session-id']).toBeUndefined();
+      expect(seenRequests[1].headers['content-type']).toBe('application/json');
+      expect(mockDns).toHaveBeenCalledWith('mcp-a.example.com');
+      expect(mockDns).toHaveBeenCalledWith('mcp-b.example.com');
+    });
+
+    it('rejects non-method-preserving 302 on POST, redirect loops, >3 hops, and redirects to private/metadata IPs', async () => {
+      const mockDns = vi.fn(async (host: string) => {
+        if (host === 'evil-internal.example.com') return ['10.0.0.5'];
+        return ['93.184.216.34'];
+      });
+
+      // 302 on POST rejected
+      const fetch302 = vi.fn(async () => new Response(null, { status: 302, headers: { Location: 'https://mcp-b.example.com/rpc' } }));
+      await expect(
+        safeFetch('https://mcp-a.example.com/rpc', { method: 'POST' }, {
+          fetchFn: fetch302 as unknown as typeof fetch,
+          dnsResolver: mockDns,
+          followRedirects: { maxRedirects: 3, methodPreservingOnly: true },
+        }),
+      ).rejects.toThrow(SafeHttpError);
+
+      // >3 hops rejected
+      let hop = 0;
+      const fetch4Hops = vi.fn(async () => {
+        hop += 1;
+        return new Response(null, { status: 307, headers: { Location: `https://mcp-a.example.com/hop-${hop}` } });
+      });
+      await expect(
+        safeFetch('https://mcp-a.example.com/hop-0', { method: 'POST' }, {
+          fetchFn: fetch4Hops as unknown as typeof fetch,
+          dnsResolver: mockDns,
+          followRedirects: { maxRedirects: 3, methodPreservingOnly: true },
+        }),
+      ).rejects.toThrow(SafeHttpError);
+
+      // Redirect loop rejected
+      const fetchLoop = vi.fn(async (url: string | URL | Request) => {
+        const next = String(url).endsWith('/a') ? 'https://mcp-a.example.com/b' : 'https://mcp-a.example.com/a';
+        return new Response(null, { status: 307, headers: { Location: next } });
+      });
+      await expect(
+        safeFetch('https://mcp-a.example.com/a', { method: 'POST' }, {
+          fetchFn: fetchLoop as unknown as typeof fetch,
+          dnsResolver: mockDns,
+          followRedirects: { maxRedirects: 3, methodPreservingOnly: true },
+        }),
+      ).rejects.toThrow(SafeHttpError);
+
+      // Redirect to private DNS target rejected
+      const fetchToInternal = vi.fn(async () => new Response(null, {
+        status: 307,
+        headers: { Location: 'https://evil-internal.example.com/rpc' },
+      }));
+      await expect(
+        safeFetch('https://mcp-a.example.com/rpc', { method: 'POST' }, {
+          fetchFn: fetchToInternal as unknown as typeof fetch,
+          dnsResolver: mockDns,
+          followRedirects: { maxRedirects: 3, methodPreservingOnly: true },
+        }),
+      ).rejects.toThrow(SafeHttpError);
+    });
+  });
 });
