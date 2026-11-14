@@ -12,7 +12,8 @@ import {
   recordXGatewayKeyUsage,
   resolveXGatewayAccountProxy,
 } from '../provider-accounts/store.js';
-import { generateChatGptWebImages, chatGptWebImageErrorStatus } from '../provider-accounts/chatgpt-web-image.js';
+import { chatGptWebImageErrorStatus } from '../provider-accounts/chatgpt-web-image.js';
+import { executeImageGeneration, isUnsupportedWebImageProvider, parseUpstreamJson } from './image-generation.js';
 import {
   getMediaDefaults,
   setMediaDefaults,
@@ -304,67 +305,26 @@ xGatewayMediaRouter.post('/media/test/image', async (req: Request, res: Response
     }
 
     const effectiveProxy = resolveXGatewayAccountProxy(account);
+    if (requestedModel === 'auto' && isUnsupportedWebImageProvider(account.provider)) {
+      lastError ??= new Error(`Provider '${account.provider}' does not support image generation`);
+      continue;
+    }
+
     try {
-      // ChatGPT Web has no OpenAI-style /images/generations endpoint; it runs
-      // the picture_v2 flow over /backend-api instead (9Router parity).
-      if (account.provider === 'chatgpt-web') {
-        const result = await withQuotaTracking(account, modelId, effectiveProxy, () =>
-          generateChatGptWebImages({
-            credential,
-            prompt: parsed.data.prompt,
-            n: parsed.data.n ?? 1,
-            size: parsed.data.size,
-            baseUrl,
-            platform: account.platform,
-          }),
-        );
-        const latencyMs = Date.now() - startMs;
-        recordXGatewayKeyUsage(account.id, Math.max(1, parsed.data.n ?? 1));
-        logRequest(
-          account.provider, modelId, null, 'success', 1, 1,
-          latencyMs, null, latencyMs, requestedModel, null, 'x-gateway',
-        );
-        res.json({
-          ok: true,
-          data: result.data,
-          provider: account.provider,
-          accountLabel: account.label,
-          model: modelId,
-          latencyMs,
-        });
-        return;
-      }
-
-      const upstreamRes = await withQuotaTracking(account, modelId, effectiveProxy, () =>
-        proxyFetch(
-          `${baseUrl}/images/generations`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${credential}`,
-            },
-            body: JSON.stringify({
-              prompt: parsed.data.prompt,
-              model: requestedModel === 'auto' ? modelId : requestedModel,
-              size: parsed.data.size || '1024x1024',
-              n: parsed.data.n || 1,
-            }),
-          },
-          account.platform,
-          'image',
-          120_000,
-        ),
+      const { result, usageUnits } = await withQuotaTracking(account, modelId, effectiveProxy, () =>
+        executeImageGeneration({
+          account,
+          baseUrl,
+          credential,
+          modelId,
+          requestedModel,
+          prompt: parsed.data.prompt,
+          n: parsed.data.n ?? 1,
+          size: parsed.data.size,
+        }),
       );
-
-      if (!upstreamRes.ok) {
-        const text = await upstreamRes.text().catch(() => '');
-        throw new Error(`HTTP ${upstreamRes.status}: ${text.slice(0, 200)}`);
-      }
-
-      const data = (await upstreamRes.json()) as Record<string, unknown>;
       const latencyMs = Date.now() - startMs;
-      recordXGatewayKeyUsage(account.id, 1);
+      recordXGatewayKeyUsage(account.id, usageUnits);
       logRequest(
         account.provider, modelId, null, 'success', 1, 1,
         latencyMs, null, latencyMs, requestedModel, null, 'x-gateway',
@@ -372,7 +332,7 @@ xGatewayMediaRouter.post('/media/test/image', async (req: Request, res: Response
 
       res.json({
         ok: true,
-        data: data.data || [],
+        data: result.data || [],
         provider: account.provider,
         accountLabel: account.label,
         model: modelId,
@@ -646,12 +606,7 @@ xGatewayMediaRouter.post('/media/test/embedding', async (req: Request, res: Resp
         ),
       );
 
-      if (!upstreamRes.ok) {
-        const text = await upstreamRes.text().catch(() => '');
-        throw new Error(`HTTP ${upstreamRes.status}: ${text.slice(0, 200)}`);
-      }
-
-      const data = (await upstreamRes.json()) as Record<string, unknown>;
+      const data = await parseUpstreamJson(upstreamRes, account.provider);
       const latencyMs = Date.now() - startMs;
       const embeddingList = Array.isArray(data.data) ? (data.data as Array<{ embedding?: number[] }>) : [];
       const firstVector = embeddingList[0]?.embedding || [];
