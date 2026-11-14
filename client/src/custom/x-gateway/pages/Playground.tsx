@@ -15,13 +15,13 @@ import {
   Paperclip,
   Plus,
   RefreshCw,
-  Send,
   Sliders,
   Sparkles,
   Square,
   Trash2,
   X,
   AlertCircle,
+  ArrowUp,
 } from 'lucide-react';
 import { usePlaygroundStrings } from '../playground-strings';
 import { PlaygroundMessageContent } from '../PlaygroundMessage';
@@ -42,6 +42,7 @@ import {
 import { useUserSession } from '../../use-session';
 import { useSessionRevision } from '../../session-state';
 import '../playground.css';
+import { ThrulineLogo } from '../ThrulineLogo';
 import { askConfirm } from '../shell/confirm'
 
 async function optimizeImageFile(file: File): Promise<{ id: string; name: string; url: string }> {
@@ -226,7 +227,7 @@ export default function Playground() {
       return;
     }
     el.style.height = 'auto';
-    const newHeight = Math.min(Math.max(el.scrollHeight, 60), 320);
+    const newHeight = Math.min(Math.max(el.scrollHeight, 52), 320);
     el.style.height = `${newHeight}px`;
   }, [isInputExpanded]);
 
@@ -877,11 +878,24 @@ export default function Playground() {
             <div className={`x-chat-thread ${isFullWidth ? 'x-thread-full' : 'x-thread-standard'}`}>
               {activeChat.messages.length === 0 ? (
                 <div className="x-chat-welcome">
-                  <div className="size-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary mx-auto mb-3 shadow-xs">
-                    <MessageSquare size={24} />
-                  </div>
+                  <ThrulineLogo size={44} />
                   <h2>{s.empty}</h2>
                   <p>{s.emptyHelp}</p>
+                  <div className="x-chat-suggestions">
+                    {[s.suggestion1, s.suggestion2, s.suggestion3].map((text) => (
+                      <button
+                        key={text}
+                        type="button"
+                        className="x-chat-suggestion"
+                        onClick={() => {
+                          setInputText(text);
+                          textareaRef.current?.focus();
+                        }}
+                      >
+                        {text}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               ) : (
                 activeChat.messages.map((msg) => (
@@ -891,66 +905,56 @@ export default function Playground() {
                       msg.role === 'user' ? 'x-basic-user' : 'x-basic-assistant'
                     }`}
                   >
-                    <header>
-                      <div className="flex items-center gap-2">
-                        {msg.role === 'assistant' ? (
-                          <>
-                            <div className="size-5 rounded-md bg-primary/10 text-primary flex items-center justify-center font-bold text-[10px]">
-                              AI
-                            </div>
-                            <span className="font-semibold text-foreground text-xs">
-                              {s.assistant}
-                            </span>
-                          </>
-                        ) : (
-                          <span className="font-semibold text-primary text-xs">
-                            {s.you}
-                          </span>
-                        )}
+                    {msg.role === 'assistant' && (
+                      <div className="x-turn-avatar" aria-hidden="true">
+                        <Sparkles size={15} />
                       </div>
+                    )}
 
-                      {msg.role === 'assistant' && msg.content && (
-                        <button
-                          className="x-icon-button hover:text-primary transition"
-                          onClick={() => handleCopyText(msg.content, msg.id)}
-                          title={s.copy}
-                        >
-                          {copiedTurnId === msg.id ? <Check size={13} /> : <Copy size={13} />}
-                        </button>
+                    <div className="x-turn-body">
+                      {msg.role === 'user' ? (
+                        <div className="x-user-text">{msg.content}</div>
+                      ) : (
+                        <PlaygroundMessageContent
+                          content={msg.content}
+                          isGenerating={msg.meta === s.generating}
+                          generatingLabel={s.generating}
+                        />
                       )}
-                    </header>
 
-                    {msg.role === 'user' ? (
-                      <div className="x-user-text font-sans text-sm whitespace-pre-wrap leading-relaxed">
-                        {msg.content}
-                      </div>
-                    ) : (
-                      <PlaygroundMessageContent
-                        content={msg.content}
-                        isGenerating={msg.meta === s.generating}
-                        generatingLabel={s.generating}
-                      />
-                    )}
+                      {/* Render attached user images */}
+                      {msg.images && msg.images.length > 0 && (
+                        <div className="x-turn-images">
+                          {msg.images.map((img) => (
+                            <img
+                              key={img.id}
+                              src={img.url}
+                              alt={img.name}
+                              className="x-chat-image"
+                            />
+                          ))}
+                        </div>
+                      )}
 
-                    {/* Render attached user images */}
-                    {msg.images && msg.images.length > 0 && (
-                      <div className="flex gap-2 mt-2 flex-wrap">
-                        {msg.images.map((img) => (
-                          <img
-                            key={img.id}
-                            src={img.url}
-                            alt={img.name}
-                            className="x-chat-image object-cover rounded-md max-h-36 border border-border"
-                          />
-                        ))}
-                      </div>
-                    )}
-
-                    {msg.meta && msg.meta !== s.generating && (
-                      <div className="mt-2 pt-2 border-t border-border/40 text-[11px] text-muted-foreground flex items-center gap-2">
-                        <span>{msg.meta}</span>
-                      </div>
-                    )}
+                      {msg.role === 'assistant' && ((msg.meta && msg.meta !== s.generating) || msg.content) && (
+                        <div className="x-turn-actions">
+                          {msg.content && (
+                            <button
+                              type="button"
+                              className="x-turn-action"
+                              onClick={() => handleCopyText(msg.content, msg.id)}
+                              title={s.copy}
+                              aria-label={s.copy}
+                            >
+                              {copiedTurnId === msg.id ? <Check size={14} /> : <Copy size={14} />}
+                            </button>
+                          )}
+                          {msg.meta && msg.meta !== s.generating && (
+                            <span className="x-turn-meta">{msg.meta}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ))
               )}
@@ -985,27 +989,24 @@ export default function Playground() {
           {/* Composer & Input Area */}
           <div className={`x-composer-wrapper ${isFullWidth ? 'x-thread-full' : 'x-thread-standard'}`}>
             <div
-              className={`x-chat-composer border rounded-2xl overflow-hidden bg-background transition-all shadow-md ${
-                isDraggingOver ? 'border-primary ring-2 ring-primary/30 bg-primary/5' : 'border-border'
-              }`}
+              className={`x-chat-composer ${isDraggingOver ? 'x-chat-composer-drop' : ''}`}
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
             >
               {/* Attachment Previews */}
               {attachments.length > 0 && (
-                <div className="x-chat-attachments flex gap-2 p-2 border-b border-border flex-wrap bg-muted/20">
+                <div className="x-chat-attachments">
                   {attachments.map((att) => (
-                    <div key={att.id} className="relative group">
+                    <div key={att.id} className="x-chat-attachment">
                       <img
                         src={att.url}
                         alt={att.name}
-                        className="size-16 object-cover rounded-md border border-border"
                       />
                       <button
                         type="button"
                         onClick={() => handleRemoveAttachment(att.id)}
-                        className="absolute -top-1.5 -right-1.5 size-5 bg-background border border-border rounded-full flex items-center justify-center text-muted-foreground hover:text-destructive shadow-xs"
+                        className="x-chat-attachment-remove"
                         title={s.remove}
                       >
                         <X size={11} />
@@ -1017,7 +1018,7 @@ export default function Playground() {
 
               <textarea
                 ref={textareaRef}
-                rows={3}
+                rows={1}
                 value={inputText}
                 onChange={(e) => {
                   setInputText(e.target.value);
@@ -1035,11 +1036,11 @@ export default function Playground() {
                 }}
                 placeholder={s.placeholder}
                 disabled={isStreaming}
-                className="w-full p-3.5 border-0 bg-transparent text-sm focus:outline-hidden resize-none"
+                className="x-chat-input"
               />
 
-              <div className="x-chat-composer-actions flex items-center justify-between p-2.5 border-t border-border bg-muted/10">
-                <div className="flex items-center gap-2">
+              <div className="x-chat-composer-actions">
+                <div className="x-composer-tools">
                   <input
                     type="file"
                     ref={fileInputRef}
@@ -1052,55 +1053,56 @@ export default function Playground() {
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isStreaming || attachments.length >= 4}
-                    className="p-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition inline-flex items-center gap-1 text-xs"
+                    className="x-composer-tool"
                     title={s.attach}
+                    aria-label={s.attach}
                   >
-                    <Paperclip size={14} />
-                    <span className="hidden sm:inline">{s.attach}</span>
+                    <Paperclip size={17} />
+                    <span className="x-sr-only">{s.attach}</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={toggleInputExpanded}
-                    className={`p-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition inline-flex items-center gap-1 text-xs ${
-                      isInputExpanded ? 'text-primary border-primary/40 bg-primary/5' : ''
-                    }`}
+                    className={`x-composer-tool ${isInputExpanded ? 'active' : ''}`}
                     title={isInputExpanded ? s.collapseInput : s.expandInput}
                     aria-label={isInputExpanded ? s.collapseInput : s.expandInput}
+                    aria-pressed={isInputExpanded}
                   >
-                    {isInputExpanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-                    <span className="hidden sm:inline">
+                    {isInputExpanded ? <ChevronDown size={17} /> : <ChevronUp size={17} />}
+                    <span className="x-sr-only">
                       {isInputExpanded ? s.collapseInput : s.expandInput}
                     </span>
                   </button>
-
-                  <small className="text-[11px] text-muted-foreground">{s.shortcut}</small>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  {isStreaming ? (
-                    <button
-                      type="button"
-                      onClick={handleStopStream}
-                      className="x-button text-xs py-1.5 px-3 bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                    >
-                      <Square size={13} />
-                      <span>{s.stop}</span>
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => void handleSend()}
-                      disabled={!inputText.trim() && attachments.length === 0}
-                      className="x-button x-primary text-xs py-1.5 px-4 font-medium"
-                    >
-                      <Send size={13} />
-                      <span>{s.send}</span>
-                    </button>
-                  )}
-                </div>
+                {isStreaming ? (
+                  <button
+                    type="button"
+                    onClick={handleStopStream}
+                    className="x-send-button x-send-stop"
+                    title={s.stop}
+                    aria-label={s.stop}
+                  >
+                    <Square size={13} fill="currentColor" />
+                    <span className="x-sr-only">{s.stop}</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void handleSend()}
+                    disabled={!inputText.trim() && attachments.length === 0}
+                    className="x-send-button"
+                    title={s.send}
+                    aria-label={s.send}
+                  >
+                    <ArrowUp size={18} strokeWidth={2.4} />
+                    <span className="x-sr-only">{s.send}</span>
+                  </button>
+                )}
               </div>
             </div>
+            <p className="x-composer-hint">{s.shortcut}</p>
           </div>
         </main>
       </div>
