@@ -8,7 +8,6 @@ import {
 } from '@freellmapi/shared/ai-platform-output-guard.js';
 import type { Permission } from '@freellmapi/shared/permissions.js';
 import { getDb } from '../../../db/index.js';
-import { hasPermission } from '../../../middleware/requirePermission.js';
 import type { SessionUser } from '../../../services/auth.js';
 import { parseScopeParam } from '../scope.js';
 import { getGuardExcerpt, listGuardEvents } from './events.js';
@@ -20,10 +19,18 @@ function getUser(req: Request): SessionUser | undefined {
   return (req as Request & { user?: SessionUser }).user;
 }
 
+function hasExactChildPermission(user: SessionUser | undefined, permission: Permission): boolean {
+  if (!user) return false;
+  if (user.isPrimary || (user.role === 'admin' && user.permissions === undefined) || user.permissions?.includes('*')) {
+    return true;
+  }
+  return Boolean(user.permissions?.includes(permission));
+}
+
 function requirePerm(permission: Permission) {
   return (req: Request, res: Response, next: NextFunction): void => {
     const user = getUser(req);
-    if (hasPermission(user, permission)) {
+    if (hasExactChildPermission(user, permission)) {
       next();
       return;
     }

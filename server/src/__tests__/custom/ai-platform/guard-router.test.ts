@@ -76,6 +76,7 @@ describe('Output Guard Admin Router (T068)', () => {
   it('enforces auth, exact child permissions (unrelated ai-platform perms denied), and route ordering', async () => {
     await createUser('primary@example.com', 'password123', 'admin');
     const overviewOnly = await createUser('overview@example.com', 'password123', 'member');
+    const parentOnly = await createUser('parent@example.com', 'password123', 'member');
     const viewOnly = await createUser('view@example.com', 'password123', 'member');
     const editOnly = await createUser('edit@example.com', 'password123', 'member');
     const excerptOnly = await createUser('excerpt@example.com', 'password123', 'member');
@@ -83,6 +84,9 @@ describe('Output Guard Admin Router (T068)', () => {
     getDb()
       .prepare('UPDATE users SET permissions = ? WHERE id = ?')
       .run(JSON.stringify(['view_ai_platform', 'edit_ai_flags']), overviewOnly.userId);
+    getDb()
+      .prepare('UPDATE users SET permissions = ? WHERE id = ?')
+      .run(JSON.stringify(['manage_ai_platform']), parentOnly.userId);
     getDb()
       .prepare('UPDATE users SET permissions = ? WHERE id = ?')
       .run(JSON.stringify(['view_output_guard']), viewOnly.userId);
@@ -94,6 +98,7 @@ describe('Output Guard Admin Router (T068)', () => {
       .run(JSON.stringify(['view_guard_excerpts']), excerptOnly.userId);
 
     const overviewToken = createSession(overviewOnly.userId);
+    const parentToken = createSession(parentOnly.userId);
     const viewToken = createSession(viewOnly.userId);
     const editToken = createSession(editOnly.userId);
     const excerptToken = createSession(excerptOnly.userId);
@@ -104,6 +109,29 @@ describe('Output Guard Admin Router (T068)', () => {
     // Unrelated AI platform permissions cannot access output-guard routes
     expect((await api('GET', '/api/ai-platform/output-guard/profile/1', overviewToken)).status).toBe(403);
     expect((await api('GET', '/api/ai-platform/output-guard/events', overviewToken)).status).toBe(403);
+
+    // manage_ai_platform parent-only must NOT bypass exact child permission gates
+    const parentGetPolicy = await api('GET', '/api/ai-platform/output-guard/profile/1', parentToken);
+    expect(parentGetPolicy.status).toBe(403);
+    expect((parentGetPolicy.json.error as { code: string }).code).toBe('missing_permission');
+
+    const parentGetEvents = await api('GET', '/api/ai-platform/output-guard/events', parentToken);
+    expect(parentGetEvents.status).toBe(403);
+    expect((parentGetEvents.json.error as { code: string }).code).toBe('missing_permission');
+
+    const parentPutPolicy = await api('PUT', '/api/ai-platform/output-guard/profile/1', parentToken, {
+      ...DEFAULT_GUARD_POLICY_BASE,
+      detectors: DEFAULT_GUARD_DETECTORS,
+      revision: 0,
+    });
+    expect(parentPutPolicy.status).toBe(403);
+    expect((parentPutPolicy.json.error as { code: string }).code).toBe('missing_permission');
+
+    const parentTestPolicy = await api('POST', '/api/ai-platform/output-guard/profile/1/test', parentToken, {
+      text: 'hello',
+    });
+    expect(parentTestPolicy.status).toBe(403);
+    expect((parentTestPolicy.json.error as { code: string }).code).toBe('missing_permission');
 
     // view_output_guard can GET policy and GET events (not shadowed by :scope!)
     const getPolicyRes = await api('GET', '/api/ai-platform/output-guard/profile/1', viewToken);
@@ -139,6 +167,14 @@ describe('Output Guard Admin Router (T068)', () => {
     expect(
       (await api('GET', `/api/ai-platform/output-guard/events/${ev.id}/excerpt`, viewToken)).status,
     ).toBe(403);
+
+    const parentGetExcerpt = await api(
+      'GET',
+      `/api/ai-platform/output-guard/events/${ev.id}/excerpt`,
+      parentToken,
+    );
+    expect(parentGetExcerpt.status).toBe(403);
+    expect((parentGetExcerpt.json.error as { code: string }).code).toBe('missing_permission');
 
     // view_guard_excerpts can read excerpt and records audit log WITHOUT plaintext excerpt in summary
     const excerptRes = await api(
