@@ -432,7 +432,7 @@ function collectIds(text: string, fileIds: string[], sedimentIds: string[], dire
   for (const match of text.matchAll(/sediment:\/\/([A-Za-z0-9_-]+)/g)) addUnique(sedimentIds, match[1]);
   if (directUrls) {
     const unescaped = text.replace(/\\\//g, '/');
-    for (const match of unescaped.matchAll(/https:\/\/[A-Za-z0-9.-]*(?:oaiusercontent|oaistatic)\.com\/[^\s"')>]+/g)) {
+    for (const match of unescaped.matchAll(/https:\/\/[A-Za-z0-9.-]*oaiusercontent\.com\/[^\s"')>\\\]}]+/g)) {
       addUnique(directUrls, match[0]);
     }
   }
@@ -557,13 +557,144 @@ async function runImageConversation(
   return { conversationId, fileIds, sedimentIds, directUrls };
 }
 
-/** Poll the conversation document until an image_gen record shows up. */
-async function pollConversationImages(
+function isSameOriginUrl(url: string, baseUrl: string): boolean {
+  try {
+    return new URL(url).origin === new URL(baseUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
+/** Signed asset URLs come from ChatGPT itself, so let normal redirects (CDN) work. */
+async function downloadUrl(
+  url: string,
+  ctx: ImageContext,
+  signal?: AbortSignal,
+): Promise<{ b64: string; mime: string } | null> {
+  try {
+    const headers: Record<string, string> = {
+      'User-Agent': ctx.userAgent,
+      Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+    };
+    if (isSameOriginUrl(url, ctx.baseUrl)) {
+      headers.Authorization = `Bearer ${ctx.accessToken}`;
+      if (ctx.cookie) headers.Cookie = ctx.cookie;
+    }
+    const res = await webFetch(
+      url,
+      { headers },
+      DOWNLOAD_TIMEOUT_MS,
+      ctx.platform,
+      signal,
+    );
+    if (!res.ok) return null;
+    const rawContentType = (res.headers.get('content-type') || '').toLowerCase();
+    if (
+      rawContentType &&
+      !rawContentType.startsWith('image/') &&
+      !rawContentType.startsWith('application/octet-stream')
+    ) {
+      return null;
+    }
+    const buffer = Buffer.from(await res.arrayBuffer());
+    if (!buffer.length) return null;
+    return {
+      b64: buffer.toString('base64'),
+      mime: (res.headers.get('content-type') || 'image/png').split(';')[0],
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Query a ChatGPT download endpoint, following 30x redirects, direct image bodies, or JSON download_url. */
+async function tryDownloadEndpoint(
+  endpointUrl: string,
+  ctx: ImageContext,
+  signal?: AbortSignal,
+): Promise<{ b64: string; mime: string } | null> {
+  const jsonHeaders = { ...authHeaders(ctx), Accept: 'application/json' };
+  const res = await request(
+    endpointUrl,
+    { headers: jsonHeaders, redirect: 'manual' },
+    60_000,
+    ctx,
+    signal,
+  ).catch(() => null);
+  if (!res) return null;
+
+  if ([301, 302, 303, 307, 308].includes(res.status)) {
+    const loc = res.headers.get('location');
+    if (loc) {
+      const targetUrl = loc.startsWith('/') ? `${ctx.baseUrl}${loc}` : loc;
+      const media = await downloadUrl(targetUrl, ctx, signal);
+      if (media) return media;
+    }
+  }
+
+  if (res.ok) {
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.startsWith('image/')) {
+      const buffer = Buffer.from(await res.arrayBuffer());
+      if (buffer.length) {
+        return {
+          b64: buffer.toString('base64'),
+          mime: contentType.split(';')[0],
+        };
+      }
+    }
+    const body = await res.json().catch(() => null) as { download_url?: unknown; url?: unknown } | null;
+    const rawUrl = typeof body?.download_url === 'string' ? body.download_url : (typeof body?.url === 'string' ? body.url : '');
+    if (rawUrl) {
+      const targetUrl = rawUrl.startsWith('/') ? `${ctx.baseUrl}${rawUrl}` : rawUrl;
+      const media = await downloadUrl(targetUrl, ctx, signal);
+      if (media) return media;
+    }
+  }
+
+  return null;
+}
+
+/** Try to resolve one generated id or URL into `{ b64, mime }`, or return null if not ready yet. */
+async function tryDownloadGeneratedImage(
+  ctx: ImageContext,
+  conversationId: string,
+  { fileIds, sedimentIds, directUrls }: { fileIds: string[]; sedimentIds: string[]; directUrls?: string[] },
+  signal?: AbortSignal,
+): Promise<{ b64: string; mime: string } | null> {
+  if (directUrls) {
+    for (const rawUrl of directUrls) {
+      const targetUrl = rawUrl.startsWith('/') ? `${ctx.baseUrl}${rawUrl}` : rawUrl;
+      const media = await downloadUrl(targetUrl, ctx, signal);
+      if (media) return media;
+    }
+  }
+
+  for (const fileId of fileIds) {
+    if (fileId === 'file_upload') continue;
+    const media = await tryDownloadEndpoint(`${ctx.baseUrl}/backend-api/files/${fileId}/download`, ctx, signal);
+    if (media) return media;
+  }
+
+  for (const sedimentId of sedimentIds) {
+    const media = await tryDownloadEndpoint(
+      `${ctx.baseUrl}/backend-api/conversation/${conversationId}/attachment/${sedimentId}/download`,
+      ctx,
+      signal,
+    );
+    if (media) return media;
+  }
+
+  return null;
+}
+
+/** Poll the conversation document until an image_gen record is actually downloadable. */
+async function pollAndDownloadConversationImages(
   ctx: ImageContext,
   conversationId: string,
   initial: ConversationIds,
   signal?: AbortSignal,
-): Promise<{ fileIds: string[]; sedimentIds: string[]; directUrls: string[] }> {
+): Promise<{ b64: string; mime: string }> {
   const started = Date.now();
   const fileIds = [...initial.fileIds].filter(id => id !== 'file_upload');
   const sedimentIds = [...initial.sedimentIds];
@@ -595,10 +726,6 @@ async function pollConversationImages(
     }
 
     collectIds(text, fileIds, sedimentIds, directUrls);
-    const validFileIds = fileIds.filter(id => id !== 'file_upload');
-    if (validFileIds.length > 0 || sedimentIds.length > 0 || directUrls.length > 0) {
-      return { fileIds: validFileIds, sedimentIds, directUrls };
-    }
     if (CONTENT_POLICY_RE.test(text) && /"is_error"\s*:\s*true/.test(text)) {
       throw new ChatGptWebImageError('ChatGPT refused the image request (content policy)', 400);
     }
@@ -610,141 +737,26 @@ async function pollConversationImages(
         429,
       );
     }
-    await sleep(POLL_INTERVAL_MS);
-  }
-  throw new ChatGptWebImageError('ChatGPT image generation timed out', 504);
-}
 
-/** Signed asset URLs come from ChatGPT itself, so let normal redirects (CDN) work. */
-async function downloadUrl(
-  url: string,
-  userAgent: string,
-  signal?: AbortSignal,
-): Promise<{ b64: string; mime: string } | null> {
-  try {
-    const res = await webFetch(
-      url,
-      {
-        headers: {
-          'User-Agent': userAgent,
-          Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-        },
-      },
-      DOWNLOAD_TIMEOUT_MS,
-      ('chatgpt-web' as Platform),
-      signal,
-    );
-    if (!res.ok) return null;
-    const buffer = Buffer.from(await res.arrayBuffer());
-    if (!buffer.length) return null;
-    return {
-      b64: buffer.toString('base64'),
-      mime: (res.headers.get('content-type') || 'image/png').split(';')[0],
-    };
-  } catch {
-    return null;
-  }
-}
-
-/** Resolve one generated id into `{ b64, mime }`. */
-async function downloadGeneratedImage(
-  ctx: ImageContext,
-  conversationId: string,
-  { fileIds, sedimentIds, directUrls }: { fileIds: string[]; sedimentIds: string[]; directUrls?: string[] },
-  signal?: AbortSignal,
-): Promise<{ b64: string; mime: string }> {
-  if (directUrls) {
-    for (const rawUrl of directUrls) {
-      const targetUrl = rawUrl.startsWith('/') ? `${ctx.baseUrl}${rawUrl}` : rawUrl;
-      const media = await downloadUrl(targetUrl, ctx.userAgent, signal);
+    const validFileIds = fileIds.filter(id => id !== 'file_upload');
+    if (validFileIds.length > 0 || sedimentIds.length > 0 || directUrls.length > 0) {
+      const media = await tryDownloadGeneratedImage(
+        ctx,
+        conversationId,
+        { fileIds: validFileIds, sedimentIds, directUrls },
+        signal,
+      );
       if (media) return media;
     }
+
+    await sleep(POLL_INTERVAL_MS);
   }
 
-  const jsonHeaders = { ...authHeaders(ctx), Accept: 'application/json' };
-
-  for (const fileId of fileIds) {
-    if (fileId === 'file_upload') continue;
-    const res = await request(
-      `${ctx.baseUrl}/backend-api/files/${fileId}/download`,
-      { headers: jsonHeaders, redirect: 'manual' },
-      60_000,
-      ctx,
-      signal,
-    ).catch(() => null);
-    if (!res) continue;
-
-    if ([301, 302, 303, 307, 308].includes(res.status)) {
-      const loc = res.headers.get('location');
-      if (loc) {
-        const targetUrl = loc.startsWith('/') ? `${ctx.baseUrl}${loc}` : loc;
-        const media = await downloadUrl(targetUrl, ctx.userAgent, signal);
-        if (media) return media;
-      }
-    }
-
-    if (res.ok) {
-      const contentType = res.headers.get('content-type') || '';
-      if (contentType.startsWith('image/')) {
-        const buffer = Buffer.from(await res.arrayBuffer());
-        if (buffer.length) {
-          return {
-            b64: buffer.toString('base64'),
-            mime: contentType.split(';')[0],
-          };
-        }
-      }
-      const body = await res.json().catch(() => null) as { download_url?: unknown; url?: unknown } | null;
-      const rawUrl = typeof body?.download_url === 'string' ? body.download_url : (typeof body?.url === 'string' ? body.url : '');
-      if (rawUrl) {
-        const targetUrl = rawUrl.startsWith('/') ? `${ctx.baseUrl}${rawUrl}` : rawUrl;
-        const media = await downloadUrl(targetUrl, ctx.userAgent, signal);
-        if (media) return media;
-      }
-    }
+  const validFileIds = fileIds.filter(id => id !== 'file_upload');
+  if (validFileIds.length > 0 || sedimentIds.length > 0 || directUrls.length > 0) {
+    throw new ChatGptWebImageError('ChatGPT image generation produced no downloadable file', 502);
   }
-
-  for (const sedimentId of sedimentIds) {
-    const res = await request(
-      `${ctx.baseUrl}/backend-api/conversation/${conversationId}/attachment/${sedimentId}/download`,
-      { headers: jsonHeaders, redirect: 'manual' },
-      60_000,
-      ctx,
-      signal,
-    ).catch(() => null);
-    if (!res) continue;
-
-    if ([301, 302, 303, 307, 308].includes(res.status)) {
-      const loc = res.headers.get('location');
-      if (loc) {
-        const targetUrl = loc.startsWith('/') ? `${ctx.baseUrl}${loc}` : loc;
-        const media = await downloadUrl(targetUrl, ctx.userAgent, signal);
-        if (media) return media;
-      }
-    }
-
-    if (res.ok) {
-      const contentType = res.headers.get('content-type') || '';
-      if (contentType.startsWith('image/')) {
-        const buffer = Buffer.from(await res.arrayBuffer());
-        if (buffer.length) {
-          return {
-            b64: buffer.toString('base64'),
-            mime: contentType.split(';')[0],
-          };
-        }
-      }
-      const body = await res.json().catch(() => null) as { download_url?: unknown; url?: unknown } | null;
-      const rawUrl = typeof body?.download_url === 'string' ? body.download_url : (typeof body?.url === 'string' ? body.url : '');
-      if (rawUrl) {
-        const targetUrl = rawUrl.startsWith('/') ? `${ctx.baseUrl}${rawUrl}` : rawUrl;
-        const media = await downloadUrl(targetUrl, ctx.userAgent, signal);
-        if (media) return media;
-      }
-    }
-  }
-
-  throw new ChatGptWebImageError('ChatGPT image generation produced no downloadable file', 502);
+  throw new ChatGptWebImageError('ChatGPT image generation timed out', 504);
 }
 
 /** Generate one image through the picture_v2 pipeline. Plain HTTP, no browser. */
@@ -769,11 +781,20 @@ export async function generateChatGptWebImage(opts: ChatGptWebImageOptions): Pro
   if (!initial.conversationId && !hasInitialMedia) {
     throw new ChatGptWebImageError('ChatGPT image conversation produced no conversation id', 502);
   }
-  const ids = hasInitialMedia
-    ? { ...initial, fileIds: initialValidFiles, directUrls: initial.directUrls ?? [] }
-    : await pollConversationImages(ctx, initial.conversationId, initial, opts.signal);
+  if (hasInitialMedia) {
+    const media = await tryDownloadGeneratedImage(
+      ctx,
+      initial.conversationId,
+      { ...initial, fileIds: initialValidFiles, directUrls: initial.directUrls ?? [] },
+      opts.signal,
+    );
+    if (media) return media;
+  }
+  if (!initial.conversationId) {
+    throw new ChatGptWebImageError('ChatGPT image generation produced no downloadable file', 502);
+  }
 
-  return downloadGeneratedImage(ctx, initial.conversationId, ids, opts.signal);
+  return pollAndDownloadConversationImages(ctx, initial.conversationId, initial, opts.signal);
 }
 
 /** Generate `n` images and shape the result like OpenAI's images API. */
