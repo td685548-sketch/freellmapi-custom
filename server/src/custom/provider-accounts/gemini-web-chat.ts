@@ -20,11 +20,14 @@ import {
 } from '../x-gateway/playground-media.js';
 
 const DEFAULT_BASE_URL = 'https://gemini.google.com';
+const GEMINI_ROTATE_COOKIES_URL = 'https://accounts.google.com/RotateCookies';
+const ROTATE_COOKIES_BODY = '[000,"-0000000000000000000"]';
 const GEMINI_UPLOAD_URL = 'https://push.clients6.google.com/upload/';
 const GEMINI_PUSH_ID = 'feeds/mcudyrk2a4khkz';
 const REQUEST_TIMEOUT_MS = 30_000;
 const COMPLETION_TIMEOUT_MS = 120_000;
 const SESSION_CACHE_TTL_MS = 10 * 60_000;
+const ROTATE_COOLDOWN_MS = 60_000;
 const CACHE_MAX_SIZE = 100;
 
 const BROWSER_USER_AGENT =
@@ -37,7 +40,24 @@ interface GeminiWebSession {
   expiresAt: number;
 }
 
+export interface RotateGeminiCookiesResult {
+  cookieHeader: string;
+  rotated: boolean;
+  status?: number;
+}
+
 const sessionCache = new Map<string, GeminiWebSession>();
+const rotatedCookieMap = new Map<string, string>();
+const rotateInFlight = new Map<string, Promise<RotateGeminiCookiesResult>>();
+const rotateCooldownUntil = new Map<string, number>();
+
+/** Clear in-memory Gemini Web session and cookie-rotation caches (used by tests). */
+export function clearGeminiWebCaches(): void {
+  sessionCache.clear();
+  rotatedCookieMap.clear();
+  rotateInFlight.clear();
+  rotateCooldownUntil.clear();
+}
 
 let reqCounter = Math.floor(100_000 + Math.random() * 800_000);
 function nextReqId(): number {
@@ -157,12 +177,180 @@ function createRequestSignal(timeoutMs: number, externalSignal?: AbortSignal): {
   };
 }
 
-function setCachedSession(key: string, session: GeminiWebSession): void {
-  if (sessionCache.size >= CACHE_MAX_SIZE) {
-    const oldestKey = sessionCache.keys().next().value;
-    if (oldestKey !== undefined) sessionCache.delete(oldestKey);
+function setBoundedMap<K, V>(map: Map<K, V>, key: K, value: V): void {
+  if (map.size >= CACHE_MAX_SIZE && !map.has(key)) {
+    const oldestKey = map.keys().next().value;
+    if (oldestKey !== undefined) map.delete(oldestKey);
   }
-  sessionCache.set(key, session);
+  map.set(key, value);
+}
+
+function setCachedSession(key: string, session: GeminiWebSession): void {
+  setBoundedMap(sessionCache, key, session);
+}
+
+function parseCookieHeader(header: string): Map<string, string> {
+  const cookies = new Map<string, string>();
+  for (const part of header.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq <= 0) continue;
+    const name = part.slice(0, eq).trim();
+    const value = part.slice(eq + 1).trim();
+    if (name) cookies.set(name, value);
+  }
+  return cookies;
+}
+
+function formatCookieHeader(cookies: Map<string, string>): string {
+  return Array.from(cookies.entries())
+    .map(([name, value]) => `${name}=${value}`)
+    .join('; ');
+}
+
+function getSetCookieValues(headers: Headers): string[] {
+  const withGetSetCookie = headers as Headers & { getSetCookie?: () => string[] };
+  if (typeof withGetSetCookie.getSetCookie === 'function') {
+    return withGetSetCookie.getSetCookie();
+  }
+  const single = headers.get('set-cookie');
+  return single ? [single] : [];
+}
+
+/** Merge any non-empty `Set-Cookie` values from `res` into `cookieHeader`. */
+export function mergeResponseCookies(
+  cookieHeader: string,
+  res: Response,
+): { nextHeader: string; changed: boolean } {
+  const setCookies = getSetCookieValues(res.headers);
+  if (setCookies.length === 0) {
+    return { nextHeader: cookieHeader, changed: false };
+  }
+
+  const cookies = parseCookieHeader(cookieHeader);
+  let changed = false;
+
+  for (const raw of setCookies) {
+    const segments = raw.split(';');
+    const pair = segments[0] ?? '';
+    const eq = pair.indexOf('=');
+    if (eq <= 0) continue;
+    const name = pair.slice(0, eq).trim();
+    const value = pair.slice(eq + 1).trim();
+    if (!name || !value || value.toLowerCase() === 'deleted') continue;
+
+    const isExpired = segments.slice(1).some(attr => /^max-age\s*=\s*0$/i.test(attr.trim()));
+    if (isExpired) continue;
+
+    if (cookies.get(name) !== value) {
+      cookies.set(name, value);
+      changed = true;
+    }
+  }
+
+  return {
+    nextHeader: changed ? formatCookieHeader(cookies) : cookieHeader,
+    changed,
+  };
+}
+
+function resolveLiveCookieHeader(cookieHeader: string): string {
+  let current = cookieHeader;
+  const seen = new Set<string>([current]);
+  for (let i = 0; i < 16; i++) {
+    const next = rotatedCookieMap.get(current);
+    if (!next || seen.has(next)) break;
+    seen.add(next);
+    current = next;
+  }
+  return current;
+}
+
+function recordRotatedCookie(
+  prevHeader: string,
+  nextHeader: string,
+  origin?: string,
+  onCredentialUpdate?: (next: string) => void,
+): void {
+  if (prevHeader === nextHeader) return;
+  setBoundedMap(rotatedCookieMap, prevHeader, nextHeader);
+  if (origin) {
+    const prevKey = `${origin}::${prevHeader}`;
+    const cached = sessionCache.get(prevKey);
+    if (cached) {
+      sessionCache.delete(prevKey);
+      setCachedSession(`${origin}::${nextHeader}`, cached);
+    }
+  }
+  if (onCredentialUpdate) {
+    try {
+      onCredentialUpdate(nextHeader);
+    } catch {
+      // Persistence failures must never abort an active Gemini Web request.
+    }
+  }
+}
+
+/**
+ * Call Google's `RotateCookies` endpoint to mint a fresh `__Secure-1PSIDTS`
+ * cookie from an active `__Secure-1PSID` session. Single-flighted per cookie.
+ */
+export async function rotateGeminiCookies(
+  rawCookieHeader: string,
+  platform: Platform = 'custom',
+  externalSignal?: AbortSignal,
+  opts?: { force?: boolean },
+): Promise<RotateGeminiCookiesResult> {
+  const cookieHeader = resolveLiveCookieHeader(rawCookieHeader);
+  const existing = rotateInFlight.get(cookieHeader);
+  if (existing) return existing;
+
+  const cooldown = rotateCooldownUntil.get(cookieHeader) ?? 0;
+  if (!opts?.force && cooldown > Date.now()) {
+    return { cookieHeader, rotated: false };
+  }
+
+  const task = (async (): Promise<RotateGeminiCookiesResult> => {
+    const { signal, cleanup } = createRequestSignal(REQUEST_TIMEOUT_MS, externalSignal);
+    try {
+      const res = await proxyFetch(
+        GEMINI_ROTATE_COOKIES_URL,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Cookie: cookieHeader,
+            'User-Agent': BROWSER_USER_AGENT,
+          },
+          body: ROTATE_COOKIES_BODY,
+          signal,
+        },
+        platform,
+        'chat',
+      );
+      await res.body?.cancel().catch(() => {});
+
+      const { nextHeader, changed } = mergeResponseCookies(cookieHeader, res);
+      if (res.ok && changed) {
+        rotateCooldownUntil.delete(cookieHeader);
+        recordRotatedCookie(cookieHeader, nextHeader);
+        return { cookieHeader: nextHeader, rotated: true, status: res.status };
+      }
+
+      if (!res.ok) {
+        setBoundedMap(rotateCooldownUntil, cookieHeader, Date.now() + ROTATE_COOLDOWN_MS);
+      }
+      return { cookieHeader, rotated: false, status: res.status };
+    } catch {
+      setBoundedMap(rotateCooldownUntil, cookieHeader, Date.now() + ROTATE_COOLDOWN_MS);
+      return { cookieHeader, rotated: false };
+    } finally {
+      cleanup();
+      rotateInFlight.delete(cookieHeader);
+    }
+  })();
+
+  rotateInFlight.set(cookieHeader, task);
+  return task;
 }
 
 /** Extract `SNlM0e`, `cfb2h`, and `FdrFJe` tokens from Gemini's `/app` HTML. */
@@ -179,65 +367,97 @@ async function fetchGeminiSession(
   origin: string,
   platform: Platform,
   externalSignal?: AbortSignal,
-): Promise<GeminiWebSession> {
-  const cacheKey = `${origin}::${cookieHeader}`;
-  const cached = sessionCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached;
+  opts?: { forceRefresh?: boolean; onCredentialUpdate?: (next: string) => void },
+): Promise<{ session: GeminiWebSession; cookieHeader: string }> {
+  let activeCookie = resolveLiveCookieHeader(cookieHeader);
+  const cacheKey = `${origin}::${activeCookie}`;
+  if (!opts?.forceRefresh) {
+    const cached = sessionCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return { session: cached, cookieHeader: activeCookie };
+    }
   }
 
-  const { signal, cleanup } = createRequestSignal(REQUEST_TIMEOUT_MS, externalSignal);
-  try {
-    const res = await proxyFetch(
-      `${origin}/app`,
-      {
-        method: 'GET',
-        headers: {
-          Cookie: cookieHeader,
-          'User-Agent': BROWSER_USER_AGENT,
-          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9',
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { signal, cleanup } = createRequestSignal(REQUEST_TIMEOUT_MS, externalSignal);
+    let shouldRotateAndRetry = false;
+    let pendingError: GeminiWebChatError | null = null;
+
+    try {
+      const res = await proxyFetch(
+        `${origin}/app`,
+        {
+          method: 'GET',
+          headers: {
+            Cookie: activeCookie,
+            'User-Agent': BROWSER_USER_AGENT,
+            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+          },
+          signal,
         },
-        signal,
-      },
-      platform,
-      'chat',
-    );
-
-    if (res.status === 401 || res.status === 403 || res.url.includes('accounts.google.com')) {
-      await res.body?.cancel();
-      throw new GeminiWebChatError(
-        'Gemini Web session is not signed in; refresh your __Secure-1PSID / __Secure-1PSIDTS cookies.',
-        401,
+        platform,
+        'chat',
       );
+
+      const { nextHeader, changed } = mergeResponseCookies(activeCookie, res);
+      if (changed) {
+        recordRotatedCookie(activeCookie, nextHeader, origin, opts?.onCredentialUpdate);
+        activeCookie = nextHeader;
+      }
+
+      if (res.status === 401 || res.status === 403 || res.url.includes('accounts.google.com')) {
+        await res.body?.cancel().catch(() => {});
+        shouldRotateAndRetry = attempt === 0;
+        pendingError = new GeminiWebChatError(
+          'Gemini Web session is not signed in; refresh your __Secure-1PSID / __Secure-1PSIDTS cookies.',
+          401,
+        );
+      } else if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new GeminiWebChatError(
+          `Gemini Web session bootstrap failed (HTTP ${res.status}): ${errText.slice(0, 200) || res.statusText}`,
+          res.status,
+        );
+      } else {
+        const html = await res.text();
+        const tokens = extractGeminiSessionTokens(html);
+        if (!tokens) {
+          shouldRotateAndRetry = attempt === 0;
+          pendingError = new GeminiWebChatError(
+            'Gemini Web session token (SNlM0e) not found; ensure your __Secure-1PSID / __Secure-1PSIDTS cookies are valid and signed in.',
+            401,
+          );
+        } else {
+          const session: GeminiWebSession = {
+            ...tokens,
+            expiresAt: Date.now() + SESSION_CACHE_TTL_MS,
+          };
+          setCachedSession(`${origin}::${activeCookie}`, session);
+          return { session, cookieHeader: activeCookie };
+        }
+      }
+    } finally {
+      cleanup();
     }
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '');
-      throw new GeminiWebChatError(
-        `Gemini Web session bootstrap failed (HTTP ${res.status}): ${errText.slice(0, 200) || res.statusText}`,
-        res.status,
-      );
+    if (shouldRotateAndRetry) {
+      sessionCache.delete(`${origin}::${activeCookie}`);
+      const rotated = await rotateGeminiCookies(activeCookie, platform, externalSignal);
+      if (rotated.rotated) {
+        recordRotatedCookie(activeCookie, rotated.cookieHeader, origin, opts?.onCredentialUpdate);
+        activeCookie = rotated.cookieHeader;
+        continue;
+      }
     }
 
-    const html = await res.text();
-    const tokens = extractGeminiSessionTokens(html);
-    if (!tokens) {
-      throw new GeminiWebChatError(
-        'Gemini Web session token (SNlM0e) not found; ensure your __Secure-1PSID / __Secure-1PSIDTS cookies are valid and signed in.',
-        401,
-      );
-    }
-
-    const session: GeminiWebSession = {
-      ...tokens,
-      expiresAt: Date.now() + SESSION_CACHE_TTL_MS,
-    };
-    setCachedSession(cacheKey, session);
-    return session;
-  } finally {
-    cleanup();
+    throw pendingError!;
   }
+
+  throw new GeminiWebChatError(
+    'Gemini Web session token (SNlM0e) not found; ensure your __Secure-1PSID / __Secure-1PSIDTS cookies are valid and signed in.',
+    401,
+  );
 }
 
 export interface GeminiWebImage {
@@ -486,177 +706,252 @@ async function uploadGeminiWebImages(
 export async function* streamGeminiWebChat(
   opts: GeminiWebChatOptions,
 ): AsyncGenerator<{ content?: string }> {
-  const cookieHeader = normalizeGeminiWebCookie(opts.credential);
+  let activeCookie = resolveLiveCookieHeader(normalizeGeminiWebCookie(opts.credential));
   const origin = resolveOrigin(opts.baseUrl);
   const platform: Platform = opts.platform && opts.platform !== 'custom' ? opts.platform : 'custom';
+  const onCredentialUpdate = opts.options?.onCredentialUpdate;
   const images = extractGeminiWebImages(opts.messages);
   const rawPrompt = buildConversationPrompt(opts.messages);
   const prompt = rawPrompt.trim() || (images.length > 0 ? 'Describe or analyze this image.' : 'Hello');
 
-  const session = await fetchGeminiSession(cookieHeader, origin, platform, opts.options?.signal);
+  let sessionResult = await fetchGeminiSession(
+    activeCookie,
+    origin,
+    platform,
+    opts.options?.signal,
+    { onCredentialUpdate },
+  );
+  activeCookie = sessionResult.cookieHeader;
+  let session = sessionResult.session;
+
   const uploadedImages = images.length > 0
     ? await uploadGeminiWebImages(images, platform, opts.options?.signal)
     : [];
 
-  const query = new URLSearchParams({
-    hl: 'en',
-    _reqid: String(nextReqId()),
-    rt: 'c',
-  });
-  if (session.cfb2h) query.set('bl', session.cfb2h);
-  if (session.fdrfje) query.set('f.sid', session.fdrfje);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const query = new URLSearchParams({
+      hl: 'en',
+      _reqid: String(nextReqId()),
+      rt: 'c',
+    });
+    if (session.cfb2h) query.set('bl', session.cfb2h);
+    if (session.fdrfje) query.set('f.sid', session.fdrfje);
 
-  const streamUrl = `${origin}/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?${query.toString()}`;
-  const messageEntry = uploadedImages.length > 0
-    ? [prompt, 0, null, uploadedImages.map(item => [[item.path, 1], item.fileName])]
-    : [prompt];
-  const reqPayload = [null, JSON.stringify([messageEntry, null, null])];
-  const formBody = new URLSearchParams({
-    'f.req': JSON.stringify(reqPayload),
-    at: session.snlm0e,
-  }).toString();
+    const streamUrl = `${origin}/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate?${query.toString()}`;
+    const messageEntry = uploadedImages.length > 0
+      ? [prompt, 0, null, uploadedImages.map(item => [[item.path, 1], item.fileName])]
+      : [prompt];
+    const reqPayload = [null, JSON.stringify([messageEntry, null, null])];
+    const formBody = new URLSearchParams({
+      'f.req': JSON.stringify(reqPayload),
+      at: session.snlm0e,
+    }).toString();
 
-  const { signal, cleanup } = createRequestSignal(
-    opts.options?.timeoutMs ?? COMPLETION_TIMEOUT_MS,
-    opts.options?.signal,
-  );
-
-  try {
-    const res = await proxyFetch(
-      streamUrl,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
-          Cookie: cookieHeader,
-          Origin: origin,
-          Referer: `${origin}/`,
-          'User-Agent': BROWSER_USER_AGENT,
-          'X-Same-Domain': '1',
-        },
-        body: formBody,
-        signal,
-      },
-      platform,
-      'chat',
+    const { signal, cleanup } = createRequestSignal(
+      opts.options?.timeoutMs ?? COMPLETION_TIMEOUT_MS,
+      opts.options?.signal,
     );
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '');
-      if (res.status === 401 || res.status === 403) {
-        sessionCache.delete(`${origin}::${cookieHeader}`);
-      }
-      throw new GeminiWebChatError(
-        `Gemini Web stream error (HTTP ${res.status}): ${errText.slice(0, 240) || res.statusText}`,
-        res.status,
-      );
-    }
-
-    const contentType = res.headers.get('content-type') ?? '';
-    if (contentType.includes('text/html')) {
-      sessionCache.delete(`${origin}::${cookieHeader}`);
-      throw new GeminiWebChatError(
-        'Gemini Web returned an HTML page instead of a stream; refresh your __Secure-1PSID / __Secure-1PSIDTS cookies.',
-        403,
-      );
-    }
-
-    const reader = res.body?.getReader();
-    if (!reader) {
-      throw new GeminiWebChatError('Gemini Web: empty response body.', 502);
-    }
-
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let emittedText = '';
-    let sawRpcError: number | undefined;
-    const imageMarkdown: string[] = [];
-    const replyImages: GeminiWebImage[] = [];
-
-    const processLine = (rawLine: string): string | null => {
-      const trimmed = rawLine.trim();
-      if (!trimmed) return null;
-      if (!emittedText && looksLikeHtmlDocument(trimmed)) {
-        sessionCache.delete(`${origin}::${cookieHeader}`);
-        throw new GeminiWebChatError(
-          'Gemini Web returned an HTML page instead of a stream; refresh your __Secure-1PSID / __Secure-1PSIDTS cookies.',
-          403,
-        );
-      }
-      const { text, errorCode, images } = extractGeminiStreamText(trimmed);
-      if (errorCode !== undefined) {
-        sawRpcError = errorCode;
-      }
-      for (const image of images ?? []) {
-        // The reply text only names the placeholder; remember the real asset and
-        // rewrite it once the stream ends.
-        if (!replyImages.some(existing => existing.url === image.url)) replyImages.push(image);
-      }
-      if (text !== undefined) {
-        const cumulative = stripGeminiPlaceholders(text);
-        if (cumulative.length > emittedText.length) {
-          const delta = cumulative.startsWith(emittedText) ? cumulative.slice(emittedText.length) : cumulative;
-          emittedText = cumulative;
-          return delta;
-        }
-      }
-      return null;
-    };
+    let shouldRetryWithFreshSession = false;
 
     try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
+      const res = await proxyFetch(
+        streamUrl,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+            Cookie: activeCookie,
+            Origin: origin,
+            Referer: `${origin}/`,
+            'User-Agent': BROWSER_USER_AGENT,
+            'X-Same-Domain': '1',
+          },
+          body: formBody,
+          signal,
+        },
+        platform,
+        'chat',
+      );
 
-        for (const line of lines) {
-          const delta = processLine(line);
-          if (delta) yield { content: delta };
+      const { nextHeader, changed } = mergeResponseCookies(activeCookie, res);
+      if (changed) {
+        recordRotatedCookie(activeCookie, nextHeader, origin, onCredentialUpdate);
+        activeCookie = nextHeader;
+      }
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        if (res.status === 401 || res.status === 403) {
+          sessionCache.delete(`${origin}::${activeCookie}`);
+          if (attempt === 0) {
+            shouldRetryWithFreshSession = true;
+          } else {
+            throw new GeminiWebChatError(
+              `Gemini Web stream error (HTTP ${res.status}): ${errText.slice(0, 240) || res.statusText}`,
+              res.status,
+            );
+          }
+        } else {
+          throw new GeminiWebChatError(
+            `Gemini Web stream error (HTTP ${res.status}): ${errText.slice(0, 240) || res.statusText}`,
+            res.status,
+          );
         }
       }
 
-      if (buffer.trim()) {
-        const delta = processLine(buffer);
-        if (delta) yield { content: delta };
+      if (!shouldRetryWithFreshSession) {
+        const contentType = res.headers.get('content-type') ?? '';
+        if (contentType.includes('text/html')) {
+          sessionCache.delete(`${origin}::${activeCookie}`);
+          await res.body?.cancel().catch(() => {});
+          if (attempt === 0) {
+            shouldRetryWithFreshSession = true;
+          } else {
+            throw new GeminiWebChatError(
+              'Gemini Web returned an HTML page instead of a stream; refresh your __Secure-1PSID / __Secure-1PSIDTS cookies.',
+              403,
+            );
+          }
+        }
+      }
+
+      if (!shouldRetryWithFreshSession) {
+        const reader = res.body?.getReader();
+        if (!reader) {
+          throw new GeminiWebChatError('Gemini Web: empty response body.', 502);
+        }
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let emittedText = '';
+        let sawRpcError: number | undefined;
+        const imageMarkdown: string[] = [];
+        const replyImages: GeminiWebImage[] = [];
+
+        const processLine = (rawLine: string): string | null => {
+          const trimmed = rawLine.trim();
+          if (!trimmed) return null;
+          if (!emittedText && looksLikeHtmlDocument(trimmed)) {
+            sessionCache.delete(`${origin}::${activeCookie}`);
+            throw new GeminiWebChatError(
+              'Gemini Web returned an HTML page instead of a stream; refresh your __Secure-1PSID / __Secure-1PSIDTS cookies.',
+              403,
+            );
+          }
+          const { text, errorCode, images } = extractGeminiStreamText(trimmed);
+          if (errorCode !== undefined) {
+            sawRpcError = errorCode;
+          }
+          for (const image of images ?? []) {
+            // The reply text only names the placeholder; remember the real asset and
+            // rewrite it once the stream ends.
+            if (!replyImages.some(existing => existing.url === image.url)) replyImages.push(image);
+          }
+          if (text !== undefined) {
+            const cumulative = stripGeminiPlaceholders(text);
+            if (cumulative.length > emittedText.length) {
+              const delta = cumulative.startsWith(emittedText) ? cumulative.slice(emittedText.length) : cumulative;
+              emittedText = cumulative;
+              return delta;
+            }
+          }
+          return null;
+        };
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() ?? '';
+
+            for (const line of lines) {
+              const delta = processLine(line);
+              if (delta) yield { content: delta };
+            }
+          }
+
+          if (buffer.trim()) {
+            const delta = processLine(buffer);
+            if (delta) yield { content: delta };
+          }
+        } catch (err) {
+          if (
+            attempt === 0 &&
+            !emittedText &&
+            err instanceof GeminiWebChatError &&
+            err.status === 403
+          ) {
+            shouldRetryWithFreshSession = true;
+          } else {
+            throw err;
+          }
+        } finally {
+          reader.cancel().catch(() => {});
+        }
+
+        if (!shouldRetryWithFreshSession) {
+          if (replyImages.length > 0) {
+            for (const image of replyImages) {
+              // The console blocks cross-origin images (CSP `img-src 'self' data:`)
+              // and the CDN needs the account's cookies, so re-host the picture and
+              // point the markdown at our own origin. If the download fails, fall back
+              // to the provider URL as a plain link rather than a broken image.
+              const alt = (image.alt?.trim() || 'Generated image').replace(/[[\]]/g, '');
+              const downloaded = await downloadProviderImage(image.url, activeCookie, opts.options?.signal)
+                .catch(() => null);
+              const id = downloaded ? storePlaygroundMedia(downloaded.bytes, downloaded.contentType) : null;
+              imageMarkdown.push(id
+                ? `![${alt}](${playgroundMediaUrl(id)})`
+                : `[${alt}](${image.url})`);
+            }
+            yield { content: `${emittedText ? '\n\n' : ''}${imageMarkdown.join('\n\n')}` };
+          }
+
+          if (!emittedText && replyImages.length === 0) {
+            if (sawRpcError !== undefined) {
+              sessionCache.delete(`${origin}::${activeCookie}`);
+              if (sawRpcError === 16 && attempt === 0) {
+                shouldRetryWithFreshSession = true;
+              } else {
+                throw new GeminiWebChatError(
+                  `Gemini Web RPC error (code ${sawRpcError}); refresh your __Secure-1PSID / __Secure-1PSIDTS cookies or try again.`,
+                  sawRpcError === 16 ? 401 : 502,
+                );
+              }
+            } else {
+              throw new GeminiWebChatError(
+                'Gemini Web returned no response text; refresh your __Secure-1PSID / __Secure-1PSIDTS cookies.',
+                502,
+              );
+            }
+          } else {
+            return;
+          }
+        }
       }
     } finally {
-      reader.cancel().catch(() => {});
+      cleanup();
     }
 
-    if (replyImages.length > 0) {
-      for (const image of replyImages) {
-        // The console blocks cross-origin images (CSP `img-src 'self' data:`)
-        // and the CDN needs the account's cookies, so re-host the picture and
-        // point the markdown at our own origin. If the download fails, fall back
-        // to the provider URL as a plain link rather than a broken image.
-        const alt = (image.alt?.trim() || 'Generated image').replace(/[[\]]/g, '');
-        const downloaded = await downloadProviderImage(image.url, cookieHeader, opts.options?.signal)
-          .catch(() => null);
-        const id = downloaded ? storePlaygroundMedia(downloaded.bytes, downloaded.contentType) : null;
-        imageMarkdown.push(id
-          ? `![${alt}](${playgroundMediaUrl(id)})`
-          : `[${alt}](${image.url})`);
+    if (shouldRetryWithFreshSession) {
+      const rotated = await rotateGeminiCookies(activeCookie, platform, opts.options?.signal);
+      if (rotated.rotated) {
+        recordRotatedCookie(activeCookie, rotated.cookieHeader, origin, onCredentialUpdate);
+        activeCookie = rotated.cookieHeader;
       }
-      yield { content: `${emittedText ? '\n\n' : ''}${imageMarkdown.join('\n\n')}` };
-    }
-
-    if (!emittedText && replyImages.length === 0) {
-      if (sawRpcError !== undefined) {
-        sessionCache.delete(`${origin}::${cookieHeader}`);
-        throw new GeminiWebChatError(
-          `Gemini Web RPC error (code ${sawRpcError}); refresh your __Secure-1PSID / __Secure-1PSIDTS cookies or try again.`,
-          sawRpcError === 16 ? 401 : 502,
-        );
-      }
-      throw new GeminiWebChatError(
-        'Gemini Web returned no response text; refresh your __Secure-1PSID / __Secure-1PSIDTS cookies.',
-        502,
+      sessionResult = await fetchGeminiSession(
+        activeCookie,
+        origin,
+        platform,
+        opts.options?.signal,
+        { forceRefresh: true, onCredentialUpdate },
       );
+      activeCookie = sessionResult.cookieHeader;
+      session = sessionResult.session;
     }
-  } finally {
-    cleanup();
   }
 }
 

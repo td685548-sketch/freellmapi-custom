@@ -1,14 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  clearGeminiWebCaches,
   extractGeminiImages,
   extractGeminiSessionTokens,
   extractGeminiStreamText,
   normalizeGeminiWebCookie,
   stripGeminiPlaceholders,
 } from '../../custom/provider-accounts/gemini-web-chat.js';
+import { rotateGeminiWebAccountsOnce } from '../../custom/provider-accounts/gemini-web-keepalive.js';
+import { accountRow, createApiKeyAccount } from '../../custom/provider-accounts/store.js';
 import { WebCookieProvider } from '../../custom/provider-accounts/web-cookie.js';
 import { readPlaygroundMedia } from '../../custom/x-gateway/playground-media.js';
 import { initDb } from '../../db/index.js';
+import { decrypt } from '../../lib/crypto.js';
 
 /** Minimal PNG payload; only the byte round-trip matters here. */
 const IMAGE_BYTES = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
@@ -28,6 +32,7 @@ function streamFromLines(lines: string[]): ReadableStream<Uint8Array> {
 describe('gemini-web executor', () => {
   beforeEach(() => {
     // The image rewrite persists bytes, so every test gets its own database.
+    clearGeminiWebCaches();
     initDb(':memory:');
   });
 
@@ -415,5 +420,173 @@ describe('gemini-web executor', () => {
       null,
       [[['/contrib_service/ttl_1d/uploaded_img_1.png', 1], 'image-1.png']],
     ]);
+  });
+
+  it('auto-rotates __Secure-1PSIDTS via RotateCookies when /app omits SNlM0e and persists the new cookie', async () => {
+    let appCalls = 0;
+    let rotateCalls = 0;
+    const seenStreamCookies: string[] = [];
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const cookie = new Headers(init?.headers).get('cookie') ?? '';
+
+      if (url === 'https://gemini.google.com/app') {
+        appCalls++;
+        if (appCalls === 1) {
+          // Stale __Secure-1PSIDTS: /app loads without SNlM0e.
+          return new Response('<html><body>Sign in</body></html>', {
+            status: 200,
+            headers: { 'Content-Type': 'text/html' },
+          });
+        }
+        expect(cookie).toContain('__Secure-1PSIDTS=fresh_ts_2');
+        return new Response(
+          '<script>{"SNlM0e":"snl_rotated","cfb2h":"boq_bl_2","FdrFJe":"554433"}</script>',
+          { status: 200, headers: { 'Content-Type': 'text/html' } },
+        );
+      }
+
+      if (url === 'https://accounts.google.com/RotateCookies') {
+        rotateCalls++;
+        expect(cookie).toContain('__Secure-1PSID=psid_keep');
+        return new Response(')]}\'\n[1]', {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Set-Cookie': '__Secure-1PSIDTS=fresh_ts_2; Path=/; HttpOnly; Secure',
+          },
+        });
+      }
+
+      if (url.includes('/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate')) {
+        seenStreamCookies.push(cookie);
+        const frame = [null, ['c_1', 'r_1'], null, null, [['rc_1', ['Xoay cookie thành công!']]]];
+        const payload = JSON.stringify([['wrb.fr', null, JSON.stringify(frame)]]);
+        return new Response(
+          `)]}'\n\n${payload.length}\n${payload}\n`,
+          { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } },
+        );
+      }
+
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const provider = new WebCookieProvider({
+      providerId: 'gemini-web',
+      name: 'Gemini Web',
+      baseUrl: 'https://gemini.google.com/app',
+    });
+
+    const persisted: string[] = [];
+    const completion = await provider.chatCompletion(
+      '__Secure-1PSID=psid_keep; __Secure-1PSIDTS=stale_ts_1',
+      [{ role: 'user', content: 'ping' }],
+      'auto',
+      {
+        onCredentialUpdate: next => persisted.push(next),
+      },
+    );
+
+    expect(completion.choices[0]?.message?.content).toBe('Xoay cookie thành công!');
+    expect(appCalls).toBe(2);
+    expect(rotateCalls).toBe(1);
+    expect(seenStreamCookies[0]).toContain('__Secure-1PSIDTS=fresh_ts_2');
+    expect(persisted).toEqual(['__Secure-1PSID=psid_keep; __Secure-1PSIDTS=fresh_ts_2']);
+  });
+
+  it('recovers from StreamGenerate RPC error 16 by rotating cookies and retrying once', async () => {
+    let streamCalls = 0;
+    let rotateCalls = 0;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const cookie = new Headers(init?.headers).get('cookie') ?? '';
+
+      if (url === 'https://gemini.google.com/app') {
+        const snl = cookie.includes('ts_new') ? 'snl_fresh' : 'snl_old';
+        return new Response(
+          `<script>{"SNlM0e":"${snl}","cfb2h":"boq_bl","FdrFJe":"112233"}</script>`,
+          { status: 200, headers: { 'Content-Type': 'text/html' } },
+        );
+      }
+
+      if (url === 'https://accounts.google.com/RotateCookies') {
+        rotateCalls++;
+        return new Response(')]}\'\n[1]', {
+          status: 200,
+          headers: {
+            'Set-Cookie': '__Secure-1PSIDTS=ts_new; Path=/; Secure',
+          },
+        });
+      }
+
+      if (url.includes('/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate')) {
+        streamCalls++;
+        if (streamCalls === 1) {
+          const errPayload = JSON.stringify([['wrb.fr', null, null, null, null, [16]]]);
+          return new Response(
+            `)]}'\n\n${errPayload.length}\n${errPayload}\n`,
+            { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } },
+          );
+        }
+        expect(cookie).toContain('__Secure-1PSIDTS=ts_new');
+        const okFrame = [null, ['c_1', 'r_1'], null, null, [['rc_1', ['Đã khôi phục phiên!']]]];
+        const okPayload = JSON.stringify([['wrb.fr', null, JSON.stringify(okFrame)]]);
+        return new Response(
+          `)]}'\n\n${okPayload.length}\n${okPayload}\n`,
+          { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } },
+        );
+      }
+
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const provider = new WebCookieProvider({
+      providerId: 'gemini-web',
+      name: 'Gemini Web',
+      baseUrl: 'https://gemini.google.com/app',
+    });
+
+    const persisted: string[] = [];
+    const completion = await provider.chatCompletion(
+      '__Secure-1PSID=psid_rpc; __Secure-1PSIDTS=ts_old',
+      [{ role: 'user', content: 'hello' }],
+      'auto',
+      { onCredentialUpdate: next => persisted.push(next) },
+    );
+
+    expect(completion.choices[0]?.message?.content).toBe('Đã khôi phục phiên!');
+    expect(streamCalls).toBe(2);
+    expect(rotateCalls).toBe(1);
+    expect(persisted).toEqual(['__Secure-1PSID=psid_rpc; __Secure-1PSIDTS=ts_new']);
+  });
+
+  it('background keep-alive rotates enabled gemini-web accounts and persists updated cookies', async () => {
+    const id = createApiKeyAccount({
+      provider: 'gemini-web',
+      label: 'My Gemini Web',
+      key: '__Secure-1PSID=bg_psid; __Secure-1PSIDTS=bg_ts_1',
+    });
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url === 'https://accounts.google.com/RotateCookies') {
+        return new Response(')]}\'\n[1]', {
+          status: 200,
+          headers: {
+            'Set-Cookie': '__Secure-1PSIDTS=bg_ts_2; Path=/; Secure',
+          },
+        });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const count = await rotateGeminiWebAccountsOnce();
+    expect(count).toBe(1);
+
+    const updated = accountRow(id);
+    const decrypted = decrypt(updated.encrypted_key, updated.iv, updated.auth_tag);
+    expect(decrypted).toBe('__Secure-1PSID=bg_psid; __Secure-1PSIDTS=bg_ts_2');
   });
 });
