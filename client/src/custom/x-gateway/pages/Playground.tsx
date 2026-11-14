@@ -611,11 +611,17 @@ export default function Playground() {
       return parts;
     };
 
+    const stripInlineImageDataUrls = (text: string): string =>
+      text.replace(/!\[([^\]]*)\]\(data:image\/[^)]+\)/gi, (_match, alt: string) =>
+        alt.trim() ? `[Image: ${alt.trim()}]` : '[Generated image]',
+      );
+
     for (const msg of activeChat.messages) {
+      const sanitizedContent = stripInlineImageDataUrls(msg.content);
       if (msg.images && msg.images.length > 0) {
-        requestMessages.push({ role: msg.role, content: buildParts(msg.content, msg.images) });
+        requestMessages.push({ role: msg.role, content: buildParts(sanitizedContent, msg.images) });
       } else {
-        requestMessages.push({ role: msg.role, content: msg.content });
+        requestMessages.push({ role: msg.role, content: sanitizedContent });
       }
     }
 
