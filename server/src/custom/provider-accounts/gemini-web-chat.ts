@@ -235,8 +235,104 @@ async function fetchGeminiSession(
   }
 }
 
-/** Parse a single `wrb.fr` or batchexecute JSON line and extract cumulative candidate text if present. */
-export function extractGeminiStreamText(line: string): { text?: string; errorCode?: number } {
+export interface GeminiWebImage {
+  url: string;
+  alt?: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Safe navigation through nested arrays (by index) and objects (by key). */
+function nested(value: unknown, path: Array<number | string>): unknown {
+  let current = value;
+  for (const key of path) {
+    if (Array.isArray(current) && typeof key === 'number') {
+      current = current[key];
+    } else if (isRecord(current) && typeof key === 'string') {
+      current = current[key];
+    } else {
+      return undefined;
+    }
+  }
+  return current;
+}
+
+/**
+ * Read field `index` of a candidate's `[12]` rich-content block.
+ *
+ * Gemini's JSPB arrays put low-numbered fields in positional slots and collect
+ * sparse high-numbered ones into a dict in the last slot, keyed by the 1-based
+ * field number — so field 7 may live at index 7 or under key `"8"`.
+ */
+function richContentField(candidate: unknown, index: number): unknown {
+  const container = nested(candidate, [12]);
+  if (!Array.isArray(container) || container.length === 0) return undefined;
+
+  const usable = (value: unknown) => value !== undefined && value !== null
+    && !(Array.isArray(value) && value.length === 0)
+    && !(isRecord(value) && Object.keys(value).length === 0);
+
+  const positional = container[index];
+  if (usable(positional) && !isRecord(positional)) return positional;
+
+  const bundle = container[container.length - 1];
+  const sparse = isRecord(bundle) ? bundle[String(index + 1)] : undefined;
+  return usable(sparse) ? sparse : undefined;
+}
+
+/**
+ * Images attached to a reply candidate. Generated images sit in rich-content
+ * field 7 (`[0][3][3]` = CDN url, `[0][3][2]` = alt text); images Gemini found
+ * on the web sit in field 1 (`[0][0][0]` = url, `[0][4]` = alt text).
+ *
+ * The reply text only carries a `googleusercontent.com/...` placeholder for
+ * each of them, which is not fetchable — the real asset is here.
+ */
+export function extractGeminiImages(candidate: unknown): GeminiWebImage[] {
+  const images: GeminiWebImage[] = [];
+  const push = (url: unknown, alt: unknown) => {
+    if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return;
+    if (images.some(image => image.url === url)) return;
+    images.push({ url, ...(typeof alt === 'string' && alt ? { alt } : {}) });
+  };
+
+  const generated = richContentField(candidate, 7);
+  if (Array.isArray(nested(generated, [0]))) {
+    for (const entry of nested(generated, [0]) as unknown[]) {
+      push(nested(entry, [0, 3, 3]), nested(entry, [0, 3, 2]));
+    }
+  }
+
+  const webImages = richContentField(candidate, 1);
+  if (Array.isArray(webImages)) {
+    for (const entry of webImages) {
+      push(nested(entry, [0, 0, 0]), nested(entry, [0, 4]));
+    }
+  }
+
+  return images;
+}
+
+/**
+ * Drop the unfetchable `googleusercontent.com/...` placeholder links Gemini
+ * leaves in reply text where a rendered attachment belongs (generated image,
+ * web-image collection, canvas card, …).
+ */
+export function stripGeminiPlaceholders(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/https?:\/\/googleusercontent\.com\/\S*/gi, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** Parse a single `wrb.fr` or batchexecute JSON line and extract the cumulative candidate. */
+export function extractGeminiStreamText(
+  line: string,
+): { text?: string; errorCode?: number; images?: GeminiWebImage[] } {
   const trimmed = line.trim();
   if (!trimmed || trimmed === ")]}'" || /^\d+$/.test(trimmed)) {
     return {};
@@ -259,8 +355,10 @@ export function extractGeminiStreamText(line: string): { text?: string; errorCod
         const candidates = Array.isArray(inner?.[4]) ? (inner[4] as unknown[]) : null;
         const firstCandidate = Array.isArray(candidates?.[0]) ? (candidates[0] as unknown[]) : null;
         const textParts = Array.isArray(firstCandidate?.[1]) ? (firstCandidate[1] as unknown[]) : null;
-        if (typeof textParts?.[0] === 'string') {
-          return { text: textParts[0] };
+        const text = typeof textParts?.[0] === 'string' ? (textParts[0] as string) : undefined;
+        const images = extractGeminiImages(firstCandidate);
+        if (text !== undefined || images.length > 0) {
+          return { ...(text !== undefined ? { text } : {}), ...(images.length > 0 ? { images } : {}) };
         }
       } catch {
         // Ignore malformed inner payload
@@ -467,6 +565,7 @@ export async function* streamGeminiWebChat(
     let buffer = '';
     let emittedText = '';
     let sawRpcError: number | undefined;
+    const imageMarkdown: string[] = [];
 
     const processLine = (rawLine: string): string | null => {
       const trimmed = rawLine.trim();
@@ -478,14 +577,24 @@ export async function* streamGeminiWebChat(
           403,
         );
       }
-      const { text, errorCode } = extractGeminiStreamText(trimmed);
+      const { text, errorCode, images } = extractGeminiStreamText(trimmed);
       if (errorCode !== undefined) {
         sawRpcError = errorCode;
       }
-      if (text && text.length > emittedText.length) {
-        const delta = text.startsWith(emittedText) ? text.slice(emittedText.length) : text;
-        emittedText = text;
-        return delta;
+      for (const image of images ?? []) {
+        // The reply text only names the placeholder; hand back the real asset
+        // as markdown so chat clients render the picture instead of a link.
+        const alt = image.alt?.trim() || 'Generated image';
+        const markdown = `[![${alt.replace(/[[\]]/g, '')}](${image.url})](${image.url})`;
+        if (!imageMarkdown.includes(markdown)) imageMarkdown.push(markdown);
+      }
+      if (text !== undefined) {
+        const cumulative = stripGeminiPlaceholders(text);
+        if (cumulative.length > emittedText.length) {
+          const delta = cumulative.startsWith(emittedText) ? cumulative.slice(emittedText.length) : cumulative;
+          emittedText = cumulative;
+          return delta;
+        }
       }
       return null;
     };
@@ -512,7 +621,11 @@ export async function* streamGeminiWebChat(
       reader.cancel().catch(() => {});
     }
 
-    if (!emittedText) {
+    if (imageMarkdown.length > 0) {
+      yield { content: `${emittedText ? '\n\n' : ''}${imageMarkdown.join('\n\n')}` };
+    }
+
+    if (!emittedText && imageMarkdown.length === 0) {
       if (sawRpcError !== undefined) {
         sessionCache.delete(`${origin}::${cookieHeader}`);
         throw new GeminiWebChatError(

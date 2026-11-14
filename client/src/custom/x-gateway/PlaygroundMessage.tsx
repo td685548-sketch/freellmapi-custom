@@ -393,6 +393,17 @@ const baseComponents: Components = {
     </blockquote>
   ),
   hr: () => <hr className="my-3 border-border" />,
+  // Generated/provider images come through as markdown; keep them inside the
+  // bubble instead of letting the default renderer overflow it.
+  img: ({ src, alt }) => (
+    <img
+      src={typeof src === 'string' ? src : undefined}
+      alt={alt ?? ''}
+      loading="lazy"
+      decoding="async"
+      className="my-2 max-h-96 w-auto max-w-full rounded-lg border border-border bg-muted/20 object-contain"
+    />
+  ),
   strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
   b: ({ children }) => <b className="font-semibold text-foreground">{children}</b>,
   em: ({ children }) => <em className="italic">{children}</em>,
