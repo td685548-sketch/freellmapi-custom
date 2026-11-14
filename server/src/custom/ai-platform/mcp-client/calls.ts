@@ -3,11 +3,13 @@ import {
   MCP_LIMITS,
   type McpCallView,
   type McpCallsResponse,
+  type McpJournalOutcomeInput,
   type McpToolCallStatus,
 } from '@freellmapi/shared/ai-platform-mcp.js';
 import { getDb } from '../../../db/index.js';
 import { maskText } from '../masking.js';
 import { normalizeScope } from '../scope.js';
+import { sanitizeMcpText } from './sanitize.js';
 import {
   getToolCallsRetentionDays,
   toCallView,
@@ -110,6 +112,83 @@ export function recordToolCall(input: RecordToolCallInput): McpCallView {
     .get(Number(res.lastInsertRowid)) as McpCallRow;
 
   return toCallView(inserted);
+}
+
+export function getToolCallByExecutionKey(executionKey: string): McpCallView | null {
+  if (!executionKey) return null;
+  const row = getDb()
+    .prepare(
+      `SELECT c.*, s.slug AS server_slug
+         FROM custom_ai_tool_calls c
+         LEFT JOIN custom_ai_mcp_servers s ON s.id = c.server_id
+        WHERE c.execution_key = ?`,
+    )
+    .get(executionKey) as McpCallRow | undefined;
+  return row ? toCallView(row) : null;
+}
+
+/**
+ * Atomically transitions an `awaiting_approval` journal row to a terminal
+ * outcome (`ok`, `tool_error`, `timeout`, `too_large`, `blocked`,
+ * `transport_error`, `unknown`, `rejected`). Idempotent once terminal; never
+ * mutates identity/scope/args columns.
+ */
+export function transitionToolCallOutcome(
+  executionKey: string,
+  outcome: McpJournalOutcomeInput,
+): McpCallView | null {
+  if (!executionKey) return null;
+  const db = getDb();
+  const existing = db
+    .prepare(
+      `SELECT c.*, s.slug AS server_slug
+         FROM custom_ai_tool_calls c
+         LEFT JOIN custom_ai_mcp_servers s ON s.id = c.server_id
+        WHERE c.execution_key = ?`,
+    )
+    .get(executionKey) as McpCallRow | undefined;
+
+  if (!existing) return null;
+  if (existing.status !== 'awaiting_approval') {
+    return toCallView(existing);
+  }
+
+  const scope = { kind: existing.scope_kind, id: existing.scope_id } as Scope;
+  const maskedResult =
+    outcome.resultMasked === undefined || outcome.resultMasked === null
+      ? null
+      : truncateUtf8WithMarker(maskText(scope, sanitizeMcpText(outcome.resultMasked)));
+  const maskedError =
+    outcome.errorText === undefined || outcome.errorText === null
+      ? null
+      : truncateUtf8WithMarker(maskText(scope, sanitizeMcpText(outcome.errorText)));
+
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE custom_ai_tool_calls
+        SET status = ?,
+            result_masked = ?,
+            error_text = ?,
+            duration_ms = COALESCE(?, duration_ms),
+            result_bytes = COALESCE(?, result_bytes),
+            updated_at = ?
+      WHERE execution_key = ?
+        AND status = 'awaiting_approval'`,
+  ).run(
+    outcome.status,
+    maskedResult,
+    maskedError,
+    outcome.durationMs !== undefined && outcome.durationMs !== null
+      ? Math.max(0, Math.trunc(outcome.durationMs))
+      : null,
+    outcome.resultBytes !== undefined && outcome.resultBytes !== null
+      ? Math.max(0, Math.trunc(outcome.resultBytes))
+      : null,
+    now,
+    executionKey,
+  );
+
+  return getToolCallByExecutionKey(executionKey);
 }
 
 export interface ListToolCallsFilter {

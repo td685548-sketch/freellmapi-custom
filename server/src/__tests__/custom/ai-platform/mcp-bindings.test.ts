@@ -106,5 +106,11 @@ describe('MCP bindings (T045:bindings)', () => {
     // Disabling aiToolsEnabled hides all MCP tools
     setBindings(scope, { toolIds: [tAllowed], enabled: false });
     expect(toolsForScope(scope)).toEqual([]);
+
+    // Re-enable binding, then disable client_profiles.enabled -> toolsForScope must hide all tools (F04)
+    setBindings(scope, { toolIds: [tAllowed], enabled: true });
+    expect(toolsForScope(scope).map((t) => t.exposedName)).toEqual(['mcp__crm__lookup']);
+    getDb().prepare('UPDATE client_profiles SET enabled = 0 WHERE id = ?').run(profileId);
+    expect(toolsForScope(scope)).toEqual([]);
   });
 });

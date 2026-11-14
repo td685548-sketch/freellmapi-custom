@@ -18,6 +18,7 @@ import {
 } from '@freellmapi/shared/ai-platform-mcp.js';
 import { getDb } from '../../../db/index.js';
 import type { Db } from '../../../db/types.js';
+import { sanitizeMcpText, sanitizeMcpValue } from './sanitize.js';
 
 // ── Private Server-Only Transport Types ──────────────────────────────────────
 
@@ -116,6 +117,8 @@ export interface McpCallRow {
   status: McpToolCallStatus;
   duration_ms: number;
   result_bytes: number;
+  error_text?: string | null;
+  updated_at?: string | null;
   created_at: string;
   server_slug?: string | null;
 }
@@ -247,12 +250,14 @@ export function toServerView(row: McpServerRow): McpServerView {
     maxResultBytes: row.max_result_bytes,
     maxConcurrency: row.max_concurrency,
     status: row.status,
-    lastError: row.last_error,
+    lastError: row.last_error ? sanitizeMcpText(row.last_error) : null,
     lastConnectedAt: row.last_connected_at,
     failCount: row.fail_count,
     pausedUntil: row.paused_until,
-    protocolVersion: row.protocol_version,
-    serverInfo: safeJsonParse<Record<string, unknown> | null>(row.server_info_json, null),
+    protocolVersion: row.protocol_version ? sanitizeMcpText(row.protocol_version) : null,
+    serverInfo: sanitizeMcpValue(
+      safeJsonParse<Record<string, unknown> | null>(row.server_info_json, null),
+    ) as Record<string, unknown> | null,
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

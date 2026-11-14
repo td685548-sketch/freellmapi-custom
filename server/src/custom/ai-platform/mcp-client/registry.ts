@@ -36,6 +36,12 @@ import {
   type McpTransportClient,
   type McpTransportConfig,
 } from './store.js';
+import {
+  assertSafeToolSchema,
+  sanitizeMcpError,
+  sanitizeMcpText,
+  sanitizeMcpValue,
+} from './sanitize.js';
 
 export { getAllowedInternalOrigins, setAllowedInternalOrigins };
 export type { McpTransportConfig, McpTransportClient };
@@ -43,12 +49,7 @@ export type { McpTransportConfig, McpTransportClient };
 const VALID_AUTH_KINDS = new Set<McpAuthKind>(['none', 'bearer', 'header']);
 
 function sanitizeErrorMessage(err: unknown, secret?: string | null): string {
-  let msg = err instanceof Error ? err.message : String(err ?? 'Unknown error');
-  if (secret && secret.length > 0) {
-    msg = msg.split(secret).join('[redacted]');
-  }
-  msg = msg.replace(/\bBearer\s+[A-Za-z0-9._-]{6,}\b/gi, 'Bearer [redacted]');
-  return msg.slice(0, 500);
+  return sanitizeMcpError(err, secret ? [secret] : undefined).slice(0, 500);
 }
 
 function validateSlug(slug: string): string {
@@ -478,8 +479,19 @@ export function recordServerOutcome(
   const db = getDb();
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
+  const secret =
+    row.auth_ciphertext && row.auth_iv && row.auth_tag
+      ? decrypt(row.auth_ciphertext, row.auth_iv, row.auth_tag)
+      : null;
+  const secrets = secret ? [secret] : undefined;
 
   if (outcome.ok) {
+    const cleanProtocolVersion = outcome.protocolVersion
+      ? sanitizeMcpText(outcome.protocolVersion, secrets)
+      : null;
+    const cleanServerInfo = outcome.serverInfo
+      ? (sanitizeMcpValue(outcome.serverInfo, secrets) as Record<string, unknown>)
+      : null;
     db.prepare(
       `UPDATE custom_ai_mcp_servers
           SET status = 'ok',
@@ -493,8 +505,8 @@ export function recordServerOutcome(
         WHERE id = ?`,
     ).run(
       nowIso,
-      outcome.protocolVersion ?? null,
-      outcome.serverInfo ? JSON.stringify(outcome.serverInfo) : null,
+      cleanProtocolVersion,
+      cleanServerInfo ? JSON.stringify(cleanServerInfo) : null,
       nowIso,
       serverId,
     );
@@ -522,7 +534,7 @@ export function recordServerOutcome(
             paused_until = ?,
             updated_at = ?
       WHERE id = ?`,
-  ).run(nextStatus, sanitizeErrorMessage(outcome.error), nextFailCount, nextPausedUntil, nowIso, serverId);
+  ).run(nextStatus, sanitizeErrorMessage(outcome.error, secret), nextFailCount, nextPausedUntil, nowIso, serverId);
 
   return toServerView(getServerRowOrThrow(serverId));
 }
@@ -536,6 +548,7 @@ export async function testServer(
     throw new McpPillarDisabledError();
   }
   const config = getServerTransportConfig(id);
+  const secrets = config.secret ? [config.secret] : undefined;
   const client = await resolveTransportClient(transport);
   const controller = new AbortController();
   const effectiveSignal = signal ?? controller.signal;
@@ -543,15 +556,19 @@ export async function testServer(
   try {
     const session = await client.mcpInitialize(config, effectiveSignal);
     const tools = await client.mcpListTools(config, session, effectiveSignal);
+    const cleanProtocolVersion = sanitizeMcpText(session.protocolVersion, secrets);
+    const cleanServerInfo = session.serverInfo
+      ? (sanitizeMcpValue(session.serverInfo, secrets) as Record<string, unknown>)
+      : undefined;
     recordServerOutcome(id, {
       ok: true,
-      protocolVersion: session.protocolVersion,
-      serverInfo: session.serverInfo ?? undefined,
+      protocolVersion: cleanProtocolVersion,
+      serverInfo: cleanServerInfo,
     });
     return {
       ok: true,
-      protocolVersion: session.protocolVersion,
-      serverInfo: session.serverInfo ?? undefined,
+      protocolVersion: cleanProtocolVersion,
+      serverInfo: cleanServerInfo,
       toolCount: tools.length,
     };
   } catch (err) {
@@ -574,6 +591,7 @@ export async function syncServerTools(
     throw new McpPillarDisabledError();
   }
   const config = getServerTransportConfig(id);
+  const secrets = config.secret ? [config.secret] : undefined;
   const client = await resolveTransportClient(transport);
   const controller = new AbortController();
   const effectiveSignal = signal ?? controller.signal;
@@ -584,13 +602,17 @@ export async function syncServerTools(
     descriptors = await client.mcpListTools(config, session, effectiveSignal);
     recordServerOutcome(id, {
       ok: true,
-      protocolVersion: session.protocolVersion,
-      serverInfo: session.serverInfo ?? undefined,
+      protocolVersion: sanitizeMcpText(session.protocolVersion, secrets),
+      serverInfo: session.serverInfo
+        ? (sanitizeMcpValue(session.serverInfo, secrets) as Record<string, unknown>)
+        : undefined,
     });
   } catch (err) {
     const sanitized = sanitizeErrorMessage(err, config.secret);
     recordServerOutcome(id, { ok: false, error: sanitized });
-    throw err;
+    const status = err instanceof McpServiceError ? err.status : 502;
+    const code = err instanceof McpServiceError ? err.code : 'upstream_error';
+    throw new McpServiceError(status, code, sanitized);
   }
 
   const db = getDb();
@@ -619,9 +641,31 @@ export async function syncServerTools(
       if (!desc.name || seenNames.has(desc.name)) continue;
       seenNames.add(desc.name);
 
-      const inputSchema = desc.inputSchema ?? {};
-      const outputSchema = desc.outputSchema ?? null;
-      const schemaHash = computeSchemaHash(desc.name, desc.description, inputSchema, outputSchema);
+      const rawInputSchema = desc.inputSchema ?? {};
+      const rawOutputSchema = desc.outputSchema ?? null;
+      const inputCheck = assertSafeToolSchema(rawInputSchema, desc.description, secrets);
+      const outputCheck = rawOutputSchema
+        ? assertSafeToolSchema(rawOutputSchema, null, secrets)
+        : ({ ok: true } as const);
+      const isUnsafe = !inputCheck.ok || !outputCheck.ok;
+
+      const storedDescription = isUnsafe
+        ? sanitizeMcpText(desc.description, secrets)
+        : (desc.description ?? null);
+      const storedInputSchema = isUnsafe
+        ? (sanitizeMcpValue(rawInputSchema, secrets) as Record<string, unknown>)
+        : rawInputSchema;
+      const storedOutputSchema =
+        isUnsafe && rawOutputSchema
+          ? (sanitizeMcpValue(rawOutputSchema, secrets) as Record<string, unknown>)
+          : rawOutputSchema;
+
+      const schemaHash = computeSchemaHash(
+        desc.name,
+        storedDescription,
+        storedInputSchema,
+        storedOutputSchema,
+      );
       const existing = existingByName.get(desc.name);
 
       if (!existing) {
@@ -631,37 +675,39 @@ export async function syncServerTools(
           `INSERT INTO custom_ai_mcp_tools (
             server_id, name, description, input_schema_json, output_schema_json,
             schema_hash, exposed_name, state, effect, missing_since, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 'write', NULL, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'write', NULL, ?, ?)`,
         ).run(
           id,
           desc.name,
-          desc.description ?? null,
-          JSON.stringify(inputSchema),
-          outputSchema ? JSON.stringify(outputSchema) : null,
+          storedDescription,
+          JSON.stringify(storedInputSchema),
+          storedOutputSchema ? JSON.stringify(storedOutputSchema) : null,
           schemaHash,
           exposedName,
+          isUnsafe ? 'blocked' : 'pending',
           now,
           now,
         );
         added++;
-      } else if (existing.schema_hash !== schemaHash) {
+      } else if (existing.schema_hash !== schemaHash || (isUnsafe && existing.state !== 'blocked')) {
         db.prepare(
           `UPDATE custom_ai_mcp_tools
               SET description = ?,
                   input_schema_json = ?,
                   output_schema_json = ?,
                   schema_hash = ?,
-                  state = 'pending',
+                  state = ?,
                   reviewed_by = NULL,
                   reviewed_at = NULL,
                   missing_since = NULL,
                   updated_at = ?
             WHERE id = ?`,
         ).run(
-          desc.description ?? null,
-          JSON.stringify(inputSchema),
-          outputSchema ? JSON.stringify(outputSchema) : null,
+          storedDescription,
+          JSON.stringify(storedInputSchema),
+          storedOutputSchema ? JSON.stringify(storedOutputSchema) : null,
           schemaHash,
+          isUnsafe ? 'blocked' : 'pending',
           now,
           existing.id,
         );

@@ -264,4 +264,73 @@ describe('MCP registry (T037/T044)', () => {
     await expect(testServer(srv.id)).rejects.toMatchObject({ status: 409, code: 'pillar_disabled' });
     await expect(syncServerTools(srv.id, 1)).rejects.toMatchObject({ status: 409, code: 'pillar_disabled' });
   });
+
+  it('redacts opaque credential echoes in serverInfo, tool metadata/schema, and syncServerTools errors (F02)', async () => {
+    const { startFakeMcpHttpServer } = await import('../../helpers/ai-platform-fake-mcp-http.js');
+    const opaqueSecret = 'opaque-vault-token-778899-alpha';
+    const fake = await startFakeMcpHttpServer({
+      protocolVersion: '2025-06-18',
+      serverInfo: {
+        name: `echo-${opaqueSecret}`,
+        authorization: opaqueSecret,
+      },
+      tools: [
+        {
+          name: 'clean_read',
+          description: 'Safe read tool',
+          inputSchema: { type: 'object', properties: { q: { type: 'string' } }, required: ['q'] },
+        },
+        {
+          name: 'unsafe_schema_echo',
+          description: `Leaks ${opaqueSecret}`,
+          inputSchema: {
+            type: 'object',
+            properties: { token: { type: 'string', enum: [opaqueSecret] } },
+            required: ['token'],
+          },
+        },
+      ],
+    });
+
+    try {
+      const { setAllowedInternalOrigins } = await import(
+        '../../../custom/ai-platform/mcp-client/registry.js'
+      );
+      setFlags({ mcpClient: true });
+      setAllowedInternalOrigins([fake.origin]);
+      const srv = await createServer(
+        {
+          slug: 'echo-srv',
+          name: 'Echo Server',
+          url: fake.url,
+          authKind: 'bearer',
+          secret: opaqueSecret,
+        },
+        1,
+      );
+
+      const tested = await testServer(srv.id);
+      expect(tested.ok).toBe(true);
+      expect(JSON.stringify(tested)).not.toContain(opaqueSecret);
+
+      const listed = listServers();
+      expect(JSON.stringify(listed[0])).not.toContain(opaqueSecret);
+
+      await syncServerTools(srv.id, 1);
+      const tools = listServerTools(srv.id);
+      expect(JSON.stringify(tools)).not.toContain(opaqueSecret);
+      const unsafeTool = tools.find((t) => t.name === 'unsafe_schema_echo');
+      expect(unsafeTool?.state).toBe('blocked');
+
+      // Now trigger HTTP 500 echoing opaqueSecret on tools/list
+      fake.setConfig({
+        httpErrorOnMethod: { 'tools/list': { status: 500, body: `Upstream error with ${opaqueSecret}` } },
+      });
+      await expect(syncServerTools(srv.id, 1)).rejects.toSatisfy((err: Error) => {
+        return !err.message.includes(opaqueSecret);
+      });
+    } finally {
+      await fake.close();
+    }
+  });
 });

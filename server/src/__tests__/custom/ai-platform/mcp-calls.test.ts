@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getDb, initDb } from '../../../db/index.js';
 import {
+  getToolCallByExecutionKey,
   listToolCalls,
   pruneToolCalls,
   recordToolCall,
+  transitionToolCallOutcome,
 } from '../../../custom/ai-platform/mcp-client/calls.js';
 
 beforeEach(() => {
@@ -97,5 +99,47 @@ describe('MCP call log (T046)', () => {
     const deleted = pruneToolCalls(now);
     expect(deleted).toBe(2);
     expect(listToolCalls({ scope }).calls.map((c) => c.toolName)).toEqual(['tool_5', 'tool_4', 'tool_3']);
+  });
+
+  it('transitions awaiting_approval journal rows atomically to terminal outcome and stays idempotent (F08)', () => {
+    const scope = { kind: 'profile' as const, id: '3' };
+    const queued = recordToolCall({
+      executionKey: 'run-99:1:mcp__srv__write:hash1',
+      scope,
+      endUser: 'u1',
+      serverId: 1,
+      toolName: 'mcp__srv__write',
+      argsMasked: '{"id":1}',
+      resultMasked: '42',
+      status: 'awaiting_approval',
+      durationMs: 0,
+      resultBytes: 0,
+    });
+    expect(queued.status).toBe('awaiting_approval');
+
+    const transitioned = transitionToolCallOutcome('run-99:1:mcp__srv__write:hash1', {
+      status: 'ok',
+      resultMasked: '{"created":true}',
+      durationMs: 120,
+      resultBytes: 16,
+    });
+    expect(transitioned).not.toBeNull();
+    expect(transitioned!.id).toBe(queued.id);
+    expect(transitioned!.status).toBe('ok');
+    expect(transitioned!.resultMasked).toBe('{"created":true}');
+    expect(transitioned!.durationMs).toBe(120);
+    expect(transitioned!.resultBytes).toBe(16);
+
+    // Second transition attempt must NOT overwrite terminal outcome
+    const replay = transitionToolCallOutcome('run-99:1:mcp__srv__write:hash1', {
+      status: 'tool_error',
+      resultMasked: 'should-not-overwrite',
+      errorText: 'late error',
+      durationMs: 999,
+      resultBytes: 5,
+    });
+    expect(replay!.status).toBe('ok');
+    expect(replay!.resultMasked).toBe('{"created":true}');
+    expect(getToolCallByExecutionKey('run-99:1:mcp__srv__write:hash1')?.status).toBe('ok');
   });
 });

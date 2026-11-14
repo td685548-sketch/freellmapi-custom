@@ -89,18 +89,43 @@ export function validateScope(scope: Scope): Scope {
   throw new McpValidationError('Unsupported scope kind.', 'invalid_scope', 400);
 }
 
-function readScopeFlags(scope: Scope): { aiToolsEnabled: boolean; maxRounds: number | null } {
+function readScopeFlags(scope: Scope): {
+  aiToolsEnabled: boolean;
+  scopeActive: boolean;
+  maxRounds: number | null;
+} {
   const db = getDb();
   if (scope.kind === 'profile') {
     const row = db
-      .prepare('SELECT ai_tools_enabled, ai_tool_max_rounds FROM client_profiles WHERE id = ?')
+      .prepare('SELECT enabled, ai_tools_enabled, ai_tool_max_rounds FROM client_profiles WHERE id = ?')
       .get(Number(scope.id)) as
-      | { ai_tools_enabled: number; ai_tool_max_rounds: number | null }
+      | { enabled: number; ai_tools_enabled: number; ai_tool_max_rounds: number | null }
       | undefined;
     return {
       aiToolsEnabled: row?.ai_tools_enabled === 1,
+      scopeActive: row?.enabled === 1,
       maxRounds: row?.ai_tool_max_rounds ?? null,
     };
+  }
+
+  let scopeActive = false;
+  if (scope.kind === 'support_tenant' && hasTable(db, 'x_support_tenants')) {
+    const tenant = db
+      .prepare('SELECT * FROM x_support_tenants WHERE id = ?')
+      .get(Number(scope.id)) as Record<string, unknown> | undefined;
+    if (tenant) {
+      const enabledOk = tenant.enabled === undefined || tenant.enabled === 1 || tenant.enabled === true;
+      const statusOk = tenant.status === undefined || (tenant.status !== 'disabled' && tenant.status !== 'archived');
+      scopeActive = enabledOk && statusOk;
+    }
+  } else if (scope.kind === 'agent' && hasTable(db, 'custom_ai_agents')) {
+    const agent = db
+      .prepare('SELECT * FROM custom_ai_agents WHERE id = ?')
+      .get(scope.id) as Record<string, unknown> | undefined;
+    if (agent) {
+      const enabledOk = agent.enabled === undefined || agent.enabled === 1 || agent.enabled === true;
+      scopeActive = enabledOk;
+    }
   }
 
   const setting = db
@@ -109,8 +134,20 @@ function readScopeFlags(scope: Scope): { aiToolsEnabled: boolean; maxRounds: num
   const parsed = safeJsonParse<{ enabled?: unknown; maxRounds?: unknown }>(setting?.value, {});
   return {
     aiToolsEnabled: parsed.enabled === true,
+    scopeActive,
     maxRounds: typeof parsed.maxRounds === 'number' ? parsed.maxRounds : null,
   };
+}
+
+export function isScopeEffectiveSync(scope: Scope): boolean {
+  let norm: Scope;
+  try {
+    norm = normalizeScope(scope);
+  } catch {
+    return false;
+  }
+  const { aiToolsEnabled, scopeActive } = readScopeFlags(norm);
+  return aiToolsEnabled && scopeActive;
 }
 
 export function getBindings(scope: Scope): McpBindingView {
@@ -227,8 +264,7 @@ export function toolsForScope(
     return [];
   }
 
-  const { aiToolsEnabled } = readScopeFlags(norm);
-  if (!aiToolsEnabled) {
+  if (!isScopeEffectiveSync(norm)) {
     return [];
   }
 

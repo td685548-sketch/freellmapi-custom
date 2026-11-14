@@ -86,6 +86,7 @@ import * as supportRuntimeFencing from '../migrations/20261112_180001_support_ru
 import * as supportEvidence from '../migrations/20261113_090001_support_evidence.js';
 import * as customAiPlatformBase from '../migrations/20261113_100000_custom_ai_platform_base.js';
 import * as customAiMcpClient from '../migrations/20261113_110000_custom_ai_mcp_client.js';
+import * as customAiMcpApprovalSafety from '../migrations/20261114_200000_custom_ai_mcp_approval_safety.js';
 import * as supportServiceDesk from '../migrations/20261113_180001_support_service_desk.js';
 import * as modelMonthlyUsage from '../migrations/20261111_000001_model_monthly_usage.js';
 import * as profileRoutingStrategy from '../migrations/20261111_000002_profile_routing_strategy.js';
@@ -269,4 +270,5 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: '20261113_100000_custom_ai_platform_base.ts', module: customAiPlatformBase },
   { filename: '20261113_110000_custom_ai_mcp_client.ts', module: customAiMcpClient },
   { filename: '20261113_180001_support_service_desk.ts', module: supportServiceDesk },
+  { filename: '20261114_200000_custom_ai_mcp_approval_safety.ts', module: customAiMcpApprovalSafety },
 ];
