@@ -87,9 +87,10 @@ export function kiroBody(messages: ChatMessage[], model: string, options?: Compl
     if (message.role === 'tool') user.userInputMessageContext = { toolResults: [{ toolUseId: message.tool_call_id, status: message.is_error === true ? 'error' : 'success', content: [{ text: messageText(message) }] }] };
     if (Array.isArray(message.content)) for (const part of message.content) {
       if (typeof part !== 'string' && part.type === 'image_url') {
-        const match = /^data:image\/(png|jpeg|webp|gif);base64,([A-Za-z0-9+/=]+)$/.exec((part.image_url as { url?: string } | undefined)?.url ?? '');
+        const match = /^data:image\/(png|jpe?g|webp|gif);base64,([A-Za-z0-9+/=]+)$/i.exec((part.image_url as { url?: string } | undefined)?.url ?? '');
         if (!match) throw new Error('Kiro images must be inline base64 image data.');
-        (user.images ??= []).push({ format: match[1], source: { bytes: match[2] } });
+        const format = match[1].toLowerCase() === 'jpg' ? 'jpeg' : match[1].toLowerCase();
+        (user.images ??= []).push({ format, source: { bytes: match[2] } });
       }
     }
     const previous = history.at(-1)?.userInputMessage;

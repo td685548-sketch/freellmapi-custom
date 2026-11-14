@@ -167,4 +167,83 @@ describe('deepseek-web executor', () => {
     }
     expect(chunks.join('')).toBe('Xin chao ban!');
   });
+
+  it('uploads base64 images via /api/v0/file/upload_file and passes ref_file_ids', async () => {
+    const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    let capturedRefIds: unknown = null;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+
+      if (url.endsWith('/api/v0/users/current')) {
+        return new Response(JSON.stringify({ code: 0, data: { biz_data: { token: 'ds_access_img' } } }), { status: 200 });
+      }
+      if (url.endsWith('/api/v0/chat_session/create')) {
+        return new Response(JSON.stringify({ code: 0, data: { biz_data: { chat_session: { id: 'sess_img' } } } }), { status: 200 });
+      }
+      if (url.endsWith('/api/v0/chat/create_pow_challenge')) {
+        return new Response(JSON.stringify({
+          code: 0,
+          data: {
+            biz_data: {
+              challenge: {
+                algorithm: 'DeepSeekHashV1',
+                challenge: 'c'.repeat(64),
+                salt: 'salt',
+                difficulty: 10,
+                expire_at: Date.now() + 60000,
+                signature: 'sig',
+              },
+            },
+          },
+        }), { status: 200 });
+      }
+      if (url.endsWith('/api/v0/file/upload_file')) {
+        expect(init?.method).toBe('POST');
+        return new Response(JSON.stringify({
+          code: 0,
+          data: { biz_data: { id: 'ds-file-1', status: 'SUCCESS' } },
+        }), { status: 200 });
+      }
+      if (url.endsWith('/api/v0/chat/completion')) {
+        const body = JSON.parse(String(init?.body));
+        capturedRefIds = body.ref_file_ids;
+        return new Response(
+          sseStream([
+            'data: {"v":"Image received"}',
+            'data: {"p":"response/status","v":"FINISHED"}',
+            'data: [DONE]',
+          ]),
+          { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+        );
+      }
+      if (url.endsWith('/api/v0/chat_session/delete')) {
+        return new Response(JSON.stringify({ code: 0 }), { status: 200 });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+
+    const powMod = await import('../../custom/provider-accounts/deepseek-pow.js');
+    vi.spyOn(powMod, 'solveDeepSeekPowHeader').mockReturnValue('bW9ja19wb3c=');
+
+    const provider = new WebCookieProvider({
+      providerId: 'deepseek-web',
+      name: 'DeepSeek Web',
+      baseUrl: 'https://chat.deepseek.com/api/v0/chat/completion',
+    });
+
+    const result = await provider.chatCompletion(
+      '{"value":"user_tok_img"}',
+      [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Analyze image' },
+          { type: 'image_url', image_url: { url: `data:image/png;base64,${pngBase64}` } },
+        ],
+      }],
+      'deepseek-v4',
+    );
+    expect(result.choices[0].message.content).toBe('Image received');
+    expect(capturedRefIds).toEqual(['ds-file-1']);
+  });
 });

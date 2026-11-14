@@ -109,6 +109,195 @@ async function readJsonResponse(res: Response, label: string): Promise<Record<st
   }
 }
 
+const OAI_UPLOAD_HOST_RE = /(?:^|\.)(oaiusercontent\.com|blob\.core\.windows\.net)$/i;
+const IMAGE_MIME_EXT: Record<string, { mimeType: string; ext: string }> = {
+  png: { mimeType: 'image/png', ext: 'png' },
+  jpeg: { mimeType: 'image/jpeg', ext: 'jpg' },
+  jpg: { mimeType: 'image/jpeg', ext: 'jpg' },
+  webp: { mimeType: 'image/webp', ext: 'webp' },
+  gif: { mimeType: 'image/gif', ext: 'gif' },
+};
+
+interface ExtractedChatGptImage {
+  name: string;
+  mimeType: string;
+  size: number;
+  width?: number;
+  height?: number;
+  data: Buffer;
+}
+
+interface UploadedChatGptImage extends ExtractedChatGptImage {
+  fileId: string;
+}
+
+function sniffImageDimensions(bytes: Buffer): { width: number; height: number } | null {
+  if (bytes.length >= 24 && bytes.readUInt32BE(0) === 0x89504e47) {
+    return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+  }
+  if (bytes.length >= 10 && bytes.toString('ascii', 0, 3) === 'GIF') {
+    return { width: bytes.readUInt16LE(6), height: bytes.readUInt16LE(8) };
+  }
+  if (bytes.length >= 30 && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP') {
+    const chunk = bytes.toString('ascii', 12, 16);
+    if (chunk === 'VP8X') {
+      return {
+        width: 1 + ((bytes[24] | (bytes[25] << 8) | (bytes[26] << 16)) & 0xffffff),
+        height: 1 + ((bytes[27] | (bytes[28] << 8) | (bytes[29] << 16)) & 0xffffff),
+      };
+    }
+    if (chunk === 'VP8 ') {
+      return { width: bytes.readUInt16LE(26) & 0x3fff, height: bytes.readUInt16LE(28) & 0x3fff };
+    }
+    if (chunk === 'VP8L') {
+      const b = bytes.readUInt32LE(21);
+      return { width: (b & 0x3fff) + 1, height: ((b >> 14) & 0x3fff) + 1 };
+    }
+  }
+  if (bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8) {
+    let offset = 2;
+    while (offset + 9 < bytes.length) {
+      if (bytes[offset] !== 0xff) { offset += 1; continue; }
+      const marker = bytes[offset + 1];
+      const isSof = (marker >= 0xc0 && marker <= 0xc3) || (marker >= 0xc5 && marker <= 0xc7)
+        || (marker >= 0xc9 && marker <= 0xcb) || (marker >= 0xcd && marker <= 0xcf);
+      if (isSof) return { height: bytes.readUInt16BE(offset + 5), width: bytes.readUInt16BE(offset + 7) };
+      if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) { offset += 2; continue; }
+      offset += 2 + bytes.readUInt16BE(offset + 2);
+    }
+  }
+  return null;
+}
+
+function extractChatGptImages(messages: ChatMessage[]): ExtractedChatGptImage[] {
+  const images: ExtractedChatGptImage[] = [];
+  for (const message of messages) {
+    if (!Array.isArray(message.content)) continue;
+    for (const part of message.content) {
+      if (!part || typeof part !== 'object') continue;
+      const p = part as unknown as Record<string, unknown>;
+      const type = typeof p.type === 'string' ? p.type.toLowerCase() : '';
+      let url: string | undefined;
+      if (type === 'image_url') {
+        url = typeof p.image_url === 'string'
+          ? p.image_url
+          : (p.image_url as { url?: unknown } | undefined)?.url as string | undefined;
+      } else if (type === 'input_image') {
+        url = typeof p.image_url === 'string' ? p.image_url : (typeof p.url === 'string' ? p.url : undefined);
+      } else if (type === 'image' && typeof p.source === 'string') {
+        url = p.source;
+      }
+      if (!url) continue;
+      const match = /^data:image\/(png|jpe?g|webp|gif);base64,([A-Za-z0-9+/=]+)$/i.exec(url);
+      if (!match) {
+        throw new ChatGptWebChatError('ChatGPT Web images must be base64 data URLs (PNG, JPEG, WebP, or GIF)', 400);
+      }
+      const meta = IMAGE_MIME_EXT[match[1].toLowerCase()];
+      const data = Buffer.from(match[2], 'base64');
+      const dims = sniffImageDimensions(data);
+      images.push({
+        name: `image-${images.length + 1}.${meta.ext}`,
+        mimeType: meta.mimeType,
+        size: data.length,
+        ...(dims ? { width: dims.width, height: dims.height } : {}),
+        data,
+      });
+    }
+  }
+  return images;
+}
+
+async function uploadChatGptWebImages(
+  images: ExtractedChatGptImage[],
+  baseUrl: string,
+  headers: Record<string, string>,
+  platform: Platform,
+  signal?: AbortSignal,
+): Promise<UploadedChatGptImage[]> {
+  const uploaded: UploadedChatGptImage[] = [];
+  for (const image of images) {
+    const regRes = await chatFetch(
+      `${baseUrl}/backend-api/files`,
+      {
+        method: 'POST',
+        headers: { ...headers, Accept: 'application/json' },
+        body: JSON.stringify({
+          file_name: image.name,
+          file_size: image.size,
+          use_case: 'multimodal',
+          timezone_offset_min: 0,
+          reset_rate_limits: false,
+          supports_direct_azure_multipart: true,
+          mime_type: image.mimeType,
+          store_in_library: false,
+        }),
+      },
+      PREPARE_TIMEOUT_MS,
+      platform,
+      signal,
+    );
+    const regJson = await readJsonResponse(regRes, 'file registration');
+    const fileId = typeof regJson.file_id === 'string' ? regJson.file_id : '';
+    const uploadUrl = typeof regJson.upload_url === 'string' ? regJson.upload_url : '';
+    if (!fileId || !uploadUrl) {
+      throw new ChatGptWebChatError('ChatGPT Web file registration returned an invalid response', 502);
+    }
+    let parsedUploadUrl: URL;
+    try {
+      parsedUploadUrl = new URL(uploadUrl);
+    } catch {
+      throw new ChatGptWebChatError('ChatGPT Web returned an invalid upload URL', 502);
+    }
+    if (parsedUploadUrl.protocol !== 'https:' || !OAI_UPLOAD_HOST_RE.test(parsedUploadUrl.hostname)) {
+      throw new ChatGptWebChatError('ChatGPT Web returned an untrusted upload destination', 502);
+    }
+
+    const putRes = await chatFetch(
+      parsedUploadUrl.toString(),
+      {
+        method: 'PUT',
+        headers: {
+          Accept: 'application/json, text/plain, */*',
+          'Content-Type': image.mimeType,
+          'x-ms-blob-type': 'BlockBlob',
+          'x-ms-version': '2020-04-08',
+        },
+        body: new Uint8Array(image.data),
+      },
+      PREPARE_TIMEOUT_MS,
+      platform,
+      signal,
+    );
+    if (!putRes.ok) {
+      throw new ChatGptWebChatError(`ChatGPT Web image upload failed (HTTP ${putRes.status})`, putRes.status || 502);
+    }
+
+    const procRes = await chatFetch(
+      `${baseUrl}/backend-api/files/process_upload_stream`,
+      {
+        method: 'POST',
+        headers: { ...headers, Accept: 'application/json' },
+        body: JSON.stringify({
+          file_id: fileId,
+          use_case: 'multimodal',
+          index_for_retrieval: false,
+          file_name: image.name,
+        }),
+      },
+      PREPARE_TIMEOUT_MS,
+      platform,
+      signal,
+    );
+    if (!procRes.ok) {
+      throw new ChatGptWebChatError(`ChatGPT Web image processing failed (HTTP ${procRes.status})`, procRes.status || 502);
+    }
+    await procRes.text().catch(() => '');
+
+    uploaded.push({ ...image, fileId });
+  }
+  return uploaded;
+}
+
 /** Flatten OpenAI messages into the single prompt turn the web app understands. */
 function flattenMessages(messages: ChatMessage[]): string {
   const systemLines: string[] = [];
@@ -202,8 +391,10 @@ export async function runChatGptWebChat(opts: ChatGptWebChatOptions): Promise<st
   const messages = Array.isArray(opts.messages) ? opts.messages : [];
   if (messages.length === 0) throw new ChatGptWebChatError('ChatGPT Web requires messages', 400);
 
-  const prompt = flattenMessages(messages);
-  if (!prompt.trim()) throw new ChatGptWebChatError('ChatGPT Web requires non-empty text', 400);
+  const images = extractChatGptImages(messages);
+  const rawPrompt = flattenMessages(messages);
+  const prompt = rawPrompt.trim() || (images.length > 0 ? 'Describe or analyze this image.' : '');
+  if (!prompt) throw new ChatGptWebChatError('ChatGPT Web requires non-empty text', 400);
 
   const baseUrl = (opts.baseUrl?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, '');
   const userAgent = opts.userAgent?.trim() || DEFAULT_USER_AGENT;
@@ -222,6 +413,40 @@ export async function runChatGptWebChat(opts: ChatGptWebChatOptions): Promise<st
     'Content-Type': 'application/json',
   };
 
+  const uploadedImages = images.length > 0
+    ? await uploadChatGptWebImages(images, baseUrl, headers, platform, opts.signal)
+    : [];
+
+  const messageContent = uploadedImages.length > 0
+    ? {
+        content_type: 'multimodal_text',
+        parts: [
+          ...uploadedImages.map(item => ({
+            content_type: 'image_asset_pointer',
+            asset_pointer: `sediment://${item.fileId}`,
+            size_bytes: item.size,
+            ...(item.width && item.height ? { width: item.width, height: item.height } : {}),
+          })),
+          prompt,
+        ],
+      }
+    : { content_type: 'text', parts: [prompt] };
+
+  const messageMetadata = uploadedImages.length > 0
+    ? {
+        attachments: uploadedImages.map(item => ({
+          id: item.fileId,
+          size: item.size,
+          name: item.name,
+          mime_type: item.mimeType,
+          ...(item.width && item.height ? { width: item.width, height: item.height } : {}),
+          source: 'local',
+          is_big_paste: false,
+        })),
+        serialization_metadata: { custom_symbol_offsets: [] },
+      }
+    : { serialization_metadata: { custom_symbol_offsets: [] } };
+
   const parentMessageId = randomUUID();
   const prepare = await chatFetch(
     `${baseUrl}/backend-api/f/conversation/prepare`,
@@ -239,7 +464,7 @@ export async function runChatGptWebChat(opts: ChatGptWebChatOptions): Promise<st
         partial_query: {
           id: randomUUID(),
           author: { role: 'user' },
-          content: { content_type: 'text', parts: [prompt] },
+          content: messageContent,
         },
         supports_buffering: true,
         supported_encodings: ['v1'],
@@ -272,8 +497,8 @@ export async function runChatGptWebChat(opts: ChatGptWebChatOptions): Promise<st
           id: randomUUID(),
           author: { role: 'user' },
           create_time: Date.now() / 1000,
-          content: { content_type: 'text', parts: [prompt] },
-          metadata: { serialization_metadata: { custom_symbol_offsets: [] } },
+          content: messageContent,
+          metadata: messageMetadata,
         }],
         parent_message_id: parentMessageId,
         model: 'auto',

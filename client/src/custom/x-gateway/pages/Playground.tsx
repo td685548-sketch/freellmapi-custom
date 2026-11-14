@@ -375,6 +375,17 @@ export default function Playground() {
 
       try {
         const optimized = await Promise.all(validFiles.map(optimizeImageFile));
+        const maxDecodedBytes = 4_194_304;
+        const oversized = optimized.some((img) => {
+          const comma = img.url.indexOf(',');
+          if (comma === -1) return true;
+          const b64 = img.url.slice(comma + 1);
+          return Math.ceil((b64.length * 3) / 4) > maxDecodedBytes;
+        });
+        if (oversized) {
+          setInputError(s.imageError);
+          return;
+        }
         setAttachments((prev) => [...prev, ...optimized].slice(0, 4));
       } catch {
         setInputError(s.imageError);
@@ -996,23 +1007,26 @@ export default function Playground() {
             >
               {/* Attachment Previews */}
               {attachments.length > 0 && (
-                <div className="x-chat-attachments">
-                  {attachments.map((att) => (
-                    <div key={att.id} className="x-chat-attachment">
-                      <img
-                        src={att.url}
-                        alt={att.name}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveAttachment(att.id)}
-                        className="x-chat-attachment-remove"
-                        title={s.remove}
-                      >
-                        <X size={11} />
-                      </button>
-                    </div>
-                  ))}
+                <div>
+                  <div className="x-chat-attachments">
+                    {attachments.map((att) => (
+                      <div key={att.id} className="x-chat-attachment">
+                        <img
+                          src={att.url}
+                          alt={att.name}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveAttachment(att.id)}
+                          className="x-chat-attachment-remove"
+                          title={s.remove}
+                        >
+                          <X size={11} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="px-2.5 pb-1.5 text-[11px] text-muted-foreground">{s.imageNote}</p>
                 </div>
               )}
 

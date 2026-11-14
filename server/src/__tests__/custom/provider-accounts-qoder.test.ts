@@ -95,6 +95,10 @@ describe('QoderProvider integration', () => {
         return sseStream(lines);
       }
 
+      if (url.includes('/algo/api/v2/image/upload')) {
+        return json({ result: { imageUrl: 'https://oss.qoder.example/uploaded-1.png' } });
+      }
+
       if (url.includes('/algo/api/v2/model/list')) {
         return json({
           chat: [
@@ -173,5 +177,28 @@ describe('QoderProvider integration', () => {
     expect(res.choices[0].message.content).toBe('Xin chào! Tôi là Qoder.');
     expect(res.choices[0].finish_reason).toBe('stop');
     expect(res.usage?.completion_tokens).toBe(8);
+  });
+
+  it('uploads inline base64 images via /algo/api/v2/image/upload before chat generation', async () => {
+    const provider = new QoderProvider('qoder');
+    const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const res = await provider.chatCompletion(
+      'pt-valid-credential',
+      [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Mô tả ảnh này' },
+          { type: 'image_url', image_url: { url: `data:image/png;base64,${pngBase64}` } },
+        ],
+      }],
+      'qfmodel',
+    );
+
+    expect(res.choices[0].message.content).toBe('Xin chào! Tôi là Qoder.');
+    const uploadReq = requests.find(r => r.url.includes('/algo/api/v2/image/upload'));
+    expect(uploadReq).toBeDefined();
+    expect(uploadReq!.init?.method).toBe('PUT');
+    const authHeader = String(new Headers(uploadReq!.init?.headers).get('Authorization') || '');
+    expect(authHeader).toMatch(/^Bearer COSY\./);
   });
 });
