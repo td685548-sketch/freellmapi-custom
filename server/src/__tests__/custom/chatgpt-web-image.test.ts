@@ -268,4 +268,61 @@ describe('ChatGPT Web image generation (9Router picture_v2 parity)', () => {
     expect(result.data[0]?.b64_json).toBe(PNG.toString('base64'));
     expect(cdnUserAgent).toBe('CustomBrowser/1.0');
   }, 15_000);
+
+  it('continues polling when initial SSE id is not downloadable yet or oaistatic url is present', async () => {
+    let pollCount = 0;
+    let fileDownloadCalls = 0;
+    vi.mocked(proxyFetch).mockImplementation(async (url, init) => {
+      const target = String(url);
+      const method = init?.method ?? 'GET';
+      if (target.endsWith('/api/auth/session')) return json({ accessToken: 'access-token' });
+      if (target.endsWith('/sentinel/chat-requirements/prepare')) return json({ prepare_token: 'prepare-token' });
+      if (target.endsWith('/sentinel/chat-requirements')) return json({ token: 'requirements-token' });
+      if (target.endsWith('/backend-api/f/conversation/prepare')) return json({ conduit_token: 'conduit-token' });
+      if (target.endsWith('/backend-api/f/conversation') && method === 'POST') {
+        const sse = [
+          'data: {"conversation_id":"66666666-6666-6666-6666-666666666666"}',
+          'data: {"avatar":"https:\\/\\/cdn.oaistatic.com\\/assets\\/icon.png","message":{"content":{"parts":["sediment://file_00000000111122223333444455556666"]}}}',
+          '',
+        ].join('\n');
+        return new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+      }
+      if (target.endsWith('/backend-api/files/file_00000000111122223333444455556666/download')) {
+        fileDownloadCalls++;
+        if (fileDownloadCalls === 1) return new Response('not ready', { status: 404 });
+        return json({ download_url: 'https://chatgpt.com/backend-api/estuary/content?id=img1' });
+      }
+      if (target.endsWith('/backend-api/conversation/66666666-6666-6666-6666-666666666666')) {
+        pollCount++;
+        return json({
+          mapping: {
+            node1: {
+              message: {
+                author: { role: 'tool' },
+                content: { parts: ['sediment://file_00000000111122223333444455556666'] },
+              },
+            },
+          },
+        });
+      }
+      if (target === 'https://chatgpt.com/backend-api/estuary/content?id=img1') {
+        const headers = init?.headers as Record<string, string> | undefined;
+        if (!headers?.Cookie || !headers?.Authorization) {
+          return new Response('unauthorized', { status: 401 });
+        }
+        return new Response(PNG, { status: 200, headers: { 'content-type': 'image/png' } });
+      }
+      return new Response('not found', { status: 404 });
+    });
+
+    const result = await generateChatGptWebImages({
+      credential: '__Secure-next-auth.session-token=valid',
+      prompt: 'a futuristic cityscape',
+      n: 1,
+    });
+
+    expect(pollCount).toBeGreaterThanOrEqual(1);
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]?.b64_json).toBe(PNG.toString('base64'));
+  }, 15_000);
 });
