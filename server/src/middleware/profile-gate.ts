@@ -12,7 +12,8 @@ import { profileForGate } from '../services/profile-usage.js';
 import { checkUserRateLimit } from '../services/user-quotas.js';
 import { extractInferenceToken } from './user-rate-limit.js';
 import { runPreRequest } from '../custom/ai-platform/pipeline.js';
-import { captureInternalCall } from '../custom/ai-platform/loopback.js';
+import { captureInternalCall, isInternalCall } from '../custom/ai-platform/loopback.js';
+import { prepareMcpTakeover } from '../custom/ai-platform/mcp-client/admission.js';
 
 /**
  * Attributes /v1 and /v1beta traffic made with a client-profile key (`sk-cp-…`) to
@@ -47,12 +48,45 @@ export function profileInferenceGate(req: Request, res: Response, next: NextFunc
   // Content rules next, for the same reason: a blocked message costs nothing.
   if (!screenContent(req, res, profile.id, endUser, profile.contentFilter)) return;
 
+  // T049: Prepare MCP server-side takeover BEFORE outer RPM/quota admission.
+  // Only a safely convertible takeover skips outer quota; each inner round settles once.
+  const mcpPlan = prepareMcpTakeover(req, profile, endUser);
+  if (mcpPlan !== null) {
+    runPreRequest(req, res, profile, endUser)
+      .then((result) => {
+        if (result !== 'handled' && !res.headersSent) {
+          res.status(500).json({
+            error: {
+              message: 'MCP takeover failed to complete.',
+              type: 'internal_error',
+              code: 'mcp_takeover_unhandled',
+            },
+          });
+        }
+      })
+      .catch((err) => {
+        if (!res.headersSent) {
+          res.status(500).json({
+            error: {
+              message: err instanceof Error ? err.message : 'MCP takeover failed.',
+              type: 'internal_error',
+              code: 'mcp_takeover_error',
+            },
+          });
+        }
+      });
+    return;
+  }
+
   const tokens = () => context?.userTokens ?? 0;
+  const internalCall = isInternalCall(req) !== null;
   // Once admitted: add the stored conversation and the key's reference passages, then route.
   const proceed = () => {
-    if (!applyConversation(req, res, profile.id, endUser, profile.conversations)) return;
-    // A ready answer ends the request here (a stored conversation still records it).
-    if (answerQuickly(req, res, profile.id, profile.quickAnswers)) return;
+    if (!internalCall) {
+      if (!applyConversation(req, res, profile.id, endUser, profile.conversations)) return;
+      // A ready answer ends the request here (a stored conversation still records it).
+      if (answerQuickly(req, res, profile.id, profile.quickAnswers)) return;
+    }
     if (profile.knowledge.enabled) injectKnowledge(req, profile.id, profile.knowledge.maxChars);
     // Pipeline composition boundary (T029): call AI platform pre-request hook before next().
     // With all flags off, the promise resolves without changing the request/response.

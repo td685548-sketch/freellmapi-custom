@@ -38,6 +38,12 @@ export interface LoopbackRequest {
   model: string;
   tools?: ToolDefinition[];
   maxTokens?: number;
+  safeParams?: {
+    temperature?: number;
+    topP?: number;
+    stop?: string | string[];
+  };
+  endUser?: string | null;
   runId?: string;
   depth: number;
   signal: AbortSignal;
@@ -241,6 +247,9 @@ export async function callGateway(
   };
   if (body.tools?.length) reqBody['tools'] = body.tools;
   if (body.maxTokens != null) reqBody['max_tokens'] = body.maxTokens;
+  if (body.safeParams?.temperature != null) reqBody['temperature'] = body.safeParams.temperature;
+  if (body.safeParams?.topP != null) reqBody['top_p'] = body.safeParams.topP;
+  if (body.safeParams?.stop !== undefined) reqBody['stop'] = body.safeParams.stop;
   const bodyJson = JSON.stringify(reqBody);
 
   // Stay on loopback even when the incoming socket was addressed through a LAN IP.
@@ -254,9 +263,18 @@ export async function callGateway(
     originalUrl: req.originalUrl ?? req.url ?? req.path ?? '', query: req.query ?? {} } as Request);
   const authHeader = callerToken ? `Bearer ${callerToken}` : '';
 
-  // Profile/end-user headers for HMAC.
+  // Profile/end-user headers for HMAC (preserve endUser even when originally in body.user).
   const profile = typeof req.headers['x-profile'] === 'string' ? req.headers['x-profile'] : '';
-  const endUser = typeof req.headers['x-end-user'] === 'string' ? req.headers['x-end-user'] : '';
+  const bodyUser =
+    req.body && typeof req.body === 'object' && typeof (req.body as Record<string, unknown>).user === 'string'
+      ? ((req.body as Record<string, unknown>).user as string)
+      : '';
+  const endUser =
+    typeof body.endUser === 'string' && body.endUser.length > 0
+      ? body.endUser
+      : typeof req.headers['x-end-user'] === 'string' && req.headers['x-end-user'].length > 0
+        ? req.headers['x-end-user']
+        : bodyUser;
 
   // Build the internal header.
   const internalHeader = buildHeader({
