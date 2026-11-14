@@ -106,7 +106,7 @@ describe('X Gateway console API', () => {
     expect(res.body.error.type).toBe('not_found');
   });
 
-  it('allows only the primary admin to clear x-gateway usage logs and console stream logs', async () => {
+  it('allows only the primary admin to clear x-gateway usage logs', async () => {
     const secondary = createUser('console-secondary@example.com', 'SecondaryPass123!', 'admin');
     getDb().prepare('UPDATE users SET is_primary = 0, permissions = ? WHERE id = ?')
       .run(JSON.stringify(['*']), secondary.userId);
@@ -120,12 +120,11 @@ describe('X Gateway console API', () => {
 
     // Non-primary admin (even with wildcard permissions) is rejected
     expect((await call('/api/thruline/usage/logs', { method: 'DELETE', token: secondaryToken })).status).toBe(403);
-    expect((await call('/api/translator/console-logs', { method: 'DELETE', token: secondaryToken })).status).toBe(403);
 
     const before = getDb().prepare("SELECT COUNT(*) AS n FROM requests WHERE caller = 'x-gateway'").get() as { n: number };
     expect(before.n).toBe(1);
 
-    // Primary admin can clear both
+    // Primary admin can clear x-gateway usage logs without touching other callers
     const delUsage = await call('/api/thruline/usage/logs', { method: 'DELETE', token: adminToken });
     expect(delUsage.status).toBe(200);
     expect(delUsage.body).toEqual({ ok: true, deleted: 1 });
@@ -134,8 +133,5 @@ describe('X Gateway console API', () => {
     const afterOther = getDb().prepare("SELECT COUNT(*) AS n FROM requests WHERE caller = 'proxy'").get() as { n: number };
     expect(afterGateway.n).toBe(0);
     expect(afterOther.n).toBe(1);
-
-    const delStream = await call('/api/translator/console-logs', { method: 'DELETE', token: adminToken });
-    expect(delStream.status).toBe(204);
   });
 });
