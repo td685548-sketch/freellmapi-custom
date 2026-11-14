@@ -16,6 +16,7 @@ import { setUserPermissions } from '../../../services/users.js';
 describe('MCP HTTP permissions & flag-off boundaries (T053)', () => {
   let server: Server;
   let base: string;
+  let primaryId: number;
   let primaryToken: string;
   let parentOnlyToken: string;
   let viewOnlyToken: string;
@@ -45,7 +46,7 @@ describe('MCP HTTP permissions & flag-off boundaries (T053)', () => {
     await new Promise<void>((resolve) => server.once('listening', resolve));
     base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 
-    const primaryId = createUser('mcp-primary@example.com', 'Password123!').userId;
+    primaryId = createUser('mcp-primary@example.com', 'Password123!').userId;
     primaryToken = createSession(primaryId);
 
     const parentId = createUser('mcp-parent@example.com', 'Password123!', 'member').userId;
@@ -78,11 +79,15 @@ describe('MCP HTTP permissions & flag-off boundaries (T053)', () => {
     expect(res.status).toBe(401);
   });
 
-  it('does not allow manage_ai_platform alone to satisfy child MCP/approval permissions', async () => {
-    const listRes = await call('/api/ai-platform/mcp/servers', parentOnlyToken);
+  it('does not allow unrelated AI platform permissions (view_ai_platform/edit_ai_flags) to satisfy MCP/approval permissions', async () => {
+    const overviewOnlyId = createUser('mcp-overview@example.com', 'Password123!', 'member').userId;
+    setUserPermissions(overviewOnlyId, ['view_ai_platform', 'edit_ai_flags'], primaryId);
+    const overviewToken = createSession(overviewOnlyId);
+
+    const listRes = await call('/api/ai-platform/mcp/servers', overviewToken);
     expect(listRes.status).toBe(403);
 
-    const createRes = await call('/api/ai-platform/mcp/servers', parentOnlyToken, 'POST', {
+    const createRes = await call('/api/ai-platform/mcp/servers', overviewToken, 'POST', {
       slug: 's1',
       name: 'S1',
       url: 'https://example.com/mcp',
@@ -90,8 +95,11 @@ describe('MCP HTTP permissions & flag-off boundaries (T053)', () => {
     });
     expect(createRes.status).toBe(403);
 
-    const approvalsRes = await call('/api/ai-platform/approvals', parentOnlyToken);
+    const approvalsRes = await call('/api/ai-platform/approvals', overviewToken);
     expect(approvalsRes.status).toBe(403);
+
+    // Parent manage_ai_platform still cannot access primary-only allowed-internal-hosts
+    expect((await call('/api/ai-platform/mcp/allowed-internal-hosts', parentOnlyToken)).status).toBe(403);
   });
 
   it('enforces exact child permissions across MCP and approval routes', async () => {

@@ -82,7 +82,7 @@ describe('MCP secret leak prevention (T053)', () => {
       expect(approvalsRes.status).toBe(200);
       expect(approvalsRes.text).not.toContain(SENTINEL_SECRET);
 
-      const auditRows = getDb().prepare('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 20').all();
+      const auditRows = getDb().prepare('SELECT * FROM custom_audit_log ORDER BY id DESC LIMIT 20').all();
       expect(JSON.stringify(auditRows)).not.toContain(SENTINEL_SECRET);
 
       const stdoutText = stdoutSpy.mock.calls.map((c) => String(c[0])).join('');
