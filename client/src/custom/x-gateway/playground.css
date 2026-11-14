@@ -56,7 +56,9 @@
   overflow: hidden;
   transition: grid-template-columns 0.2s ease-in-out;
 }
-.x-console .x-basic-chat.sidebar-collapsed { grid-template-columns: 0px minmax(0, 1fr); }
+/* The list is removed from the layout when hidden, so the workspace is the only item and
+   needs the only track; leaving a 0px track first would put the chat inside it. */
+.x-console .x-basic-chat.sidebar-collapsed { grid-template-columns: minmax(0, 1fr); }
 .x-console .x-basic-chat.sidebar-collapsed .x-chat-history { display: none; }
 
 /* ---------- Conversation list ---------- */
@@ -560,7 +562,7 @@
 }
 @media (max-width: 850px) {
   .x-console .x-basic-chat { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-  .x-console .x-basic-chat.sidebar-collapsed { grid-template-columns: 1fr; grid-template-rows: 0 1fr; }
+  .x-console .x-basic-chat.sidebar-collapsed { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
   .x-console .x-basic-chat .x-chat-history {
     height: auto;
     max-height: 30vh;
