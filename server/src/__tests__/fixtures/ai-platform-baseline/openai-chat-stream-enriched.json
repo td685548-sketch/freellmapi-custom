@@ -1,0 +1,34 @@
+{
+  "id": "openai-chat-stream-enriched",
+  "wire": "openai-chat",
+  "stream": true,
+  "authKind": "profile",
+  "upstream": {
+    "method": "POST",
+    "path": "/openai/v1/chat/completions",
+    "query": {},
+    "bodyJson": {
+      "model": "groq/compound",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Enforced shop prompt."
+        },
+        {
+          "role": "system",
+          "content": "Reference material from this website. Use it when it answers the question; if it does not, answer normally. Do not mention that you were given it.\n\n### Giao hàng\nPhí giao hàng toàn quốc là 30.000đ, miễn phí cho đơn từ 500.000đ."
+        },
+        {
+          "role": "user",
+          "content": "Phí giao hàng bao nhiêu?"
+        }
+      ],
+      "stream": true
+    }
+  },
+  "response": {
+    "status": 200,
+    "contentType": "text/event-stream",
+    "bodyText": "data: {\"id\":\"chatcmpl-fake-1\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"groq/compound\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"chatcmpl-fake-1\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"groq/compound\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"baseline-\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"chatcmpl-fake-1\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"groq/compound\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"chatcmpl-fake-1\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"groq/compound\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: {\"id\":\"chatcmpl-fake-1\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"groq/compound\",\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4,\"total_tokens\":16}}\n\ndata: [DONE]\n\n"
+  }
+}

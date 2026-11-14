@@ -56,6 +56,9 @@ import NotFoundPage from '@/pages/NotFoundPage'
 import AgentsPage from '@/pages/AgentsPage'
 import XGatewayApp from '@/custom/x-gateway/XGatewayApp'
 import { legacyGatewayTarget } from '@/custom/x-gateway/legacy-gateway-target'
+// ai-platform (T032/US1 — Foundation dashboard)
+import { AiPlatformApp } from '@/custom/ai-platform/AiPlatformApp'
+import { useCustomT } from '@/custom/i18n/use-custom-t'
 
 // Every failed mutation surfaces as an error toast, so no action fails
 // silently. A page that already shows the failure inline can opt out with
@@ -257,8 +260,9 @@ function AccountMenuItems({
   )
 }
 
-function Navbar() {
+export function Navbar() {
   const { t } = useI18n()
+  const tc = useCustomT()
   const location = useLocation()
   const navigate = useNavigate()
   const { isMember, isAdmin, hasPermission, group } = useAdministrativeAccess()
@@ -299,6 +303,7 @@ function Navbar() {
     // tabs only when the Analytics tab itself is hidden for this account.
     ...(!analyticsFolded && canViewUsage ? [{ to: '/usage', labelKey: 'nav.usage', customLabel: 'Usage' }] : []),
     ...(!analyticsFolded && hasPermission('view_audit_log') ? [{ to: '/audit', labelKey: 'nav.audit', customLabel: 'History' }] : []),
+    ...(group('manage_ai_platform') ? [{ to: '/ai-platform', labelKey: 'AI Platform', customLabel: tc('AI Platform') }] : []),
   ]
 
   return (
@@ -510,6 +515,7 @@ function AppShell({ children }: { children: ReactNode }) {
   const legacyGateway = legacyGatewayTarget(location)
   if (legacyGateway) return <Navigate to={legacyGateway} replace />
   if (location.pathname === '/thruline' || location.pathname.startsWith('/thruline/')) return <XGatewayApp />
+  if (location.pathname === '/ai-platform' || location.pathname.startsWith('/ai-platform/')) return <AiPlatformApp />
   return (
     <div className={`flex flex-col ${fullBleed ? 'h-dvh overflow-hidden' : 'min-h-screen'} ${isMacDesktop ? 'desktop-backdrop' : 'bg-background'}`}>
       {children}

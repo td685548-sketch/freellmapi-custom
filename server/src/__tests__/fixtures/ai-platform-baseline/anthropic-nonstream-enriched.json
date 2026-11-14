@@ -1,0 +1,51 @@
+{
+  "id": "anthropic-nonstream-enriched",
+  "wire": "anthropic",
+  "stream": false,
+  "authKind": "profile",
+  "upstream": {
+    "method": "POST",
+    "path": "/openai/v1/chat/completions",
+    "query": {},
+    "bodyJson": {
+      "model": "groq/compound",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Enforced shop prompt."
+        },
+        {
+          "role": "system",
+          "content": "Caller anthropic system.\nReference material from this website. Use it when it answers the question; if it does not, answer normally. Do not mention that you were given it.\n\n### Giao hàng\nPhí giao hàng toàn quốc là 30.000đ, miễn phí cho đơn từ 500.000đ."
+        },
+        {
+          "role": "user",
+          "content": "Phí giao hàng bao nhiêu?"
+        }
+      ],
+      "max_tokens": 128
+    }
+  },
+  "response": {
+    "status": 200,
+    "contentType": "application/json",
+    "bodyJson": {
+      "id": "<id>",
+      "type": "message",
+      "role": "assistant",
+      "model": "groq/compound",
+      "content": [
+        {
+          "type": "text",
+          "text": "baseline-ok"
+        }
+      ],
+      "stop_reason": "end_turn",
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 12,
+        "output_tokens": 4
+      }
+    }
+  }
+}

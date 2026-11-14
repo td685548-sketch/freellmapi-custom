@@ -1,0 +1,458 @@
+{
+  "chunks": [
+    {
+      "id": "chunk-001",
+      "docRef": "doc-orders",
+      "docTitle": "Order Management Guide",
+      "text": "Acme Corp allows customers to place orders through the online portal, mobile application, or by calling customer support. Each order is assigned a unique order ID beginning with the prefix ORD-. Orders are confirmed via email within five minutes of placement. If a confirmation email is not received within ten minutes, customers should check their spam folder or contact support. Order details including items, quantities, pricing, and shipping estimates are visible in the customer dashboard under the Orders section. Customers may place up to 20 orders per calendar day. Bulk orders exceeding this limit require approval from an Acme account manager."
+    },
+    {
+      "id": "chunk-002",
+      "docRef": "doc-orders",
+      "docTitle": "Order Management Guide",
+      "text": "Customers can modify an order within 30 minutes of placement, provided the order has not yet entered the picking stage at the warehouse. Modifications may include changing item quantities, removing items, or updating the delivery address. Adding entirely new items to an existing order is not permitted; a new order must be placed instead. To modify an order, navigate to Order History in the dashboard, select the relevant order, and click Edit Order. Changes are confirmed in real time and an updated confirmation email is sent automatically. After 30 minutes, modification requests must go through the customer support team, who may not always be able to fulfil them."
+    },
+    {
+      "id": "chunk-003",
+      "docRef": "doc-orders",
+      "docTitle": "Order Management Guide",
+      "text": "Acme Corp supports order cancellation up until the point an order is marked as Dispatched. To cancel, visit the Orders section of the customer dashboard and select Cancel Order next to the relevant entry. A cancellation reason must be selected from the drop-down menu before the request is submitted. If the cancellation is successful, a full refund is initiated within 24 hours. If the order has already been dispatched, customers must instead initiate a return after the parcel arrives. Orders in a Pending Payment state are automatically cancelled if payment is not completed within 15 minutes."
+    },
+    {
+      "id": "chunk-004",
+      "docRef": "doc-refunds",
+      "docTitle": "Refund Policy Guide",
+      "text": "Acme Corp's standard refund window is 30 days from the date of delivery. Products must be returned in their original condition, unused, and in the original packaging where possible. Digital goods such as software licences and downloadable content are non-refundable once activated. Refund requests are initiated through the Returns & Refunds section of the customer portal. Once a return is received and inspected by the warehouse, refunds are processed within 5-7 business days. The refund amount is credited to the original payment method. Customers who paid with Acme Credit will see the amount reflected in their credit balance within 48 hours of approval."
+    },
+    {
+      "id": "chunk-005",
+      "docRef": "doc-refunds",
+      "docTitle": "Refund Policy Guide",
+      "text": "Partial refunds are available when only a subset of items in an order is returned. The refund amount is calculated based on the per-unit price at the time of purchase, excluding any shipping costs unless Acme was responsible for the shipping error. Promotional discounts applied to the original order are recalculated proportionally; customers will not receive a refund on the discount portion. Partial refunds take the same 5-7 business day processing time as full refunds. If a returned item is found to be damaged or not in original condition, Acme reserves the right to issue a reduced or no refund, and will notify the customer within 48 hours of inspection."
+    },
+    {
+      "id": "chunk-006",
+      "docRef": "doc-refunds",
+      "docTitle": "Refund Policy Guide",
+      "text": "Acme Corp offers an expedited refund option for Premium members. Premium members who request a refund receive a provisional credit to their Acme Credit account within 24 hours of submitting the return request, before the physical item has been received at the warehouse. This provisional credit is converted to a permanent refund upon item inspection. If the returned item fails inspection, the provisional credit is reversed and the customer is notified. The expedited option is not available for items over $500 or for items classified as hazardous. All other refund terms and conditions apply equally to Premium and standard members."
+    },
+    {
+      "id": "chunk-007",
+      "docRef": "doc-shipping",
+      "docTitle": "Shipping & Delivery Guide",
+      "text": "Acme Corp offers three shipping tiers: Standard (5-7 business days), Express (2-3 business days), and Overnight. Shipping fees depend on order weight, destination, and chosen tier. Free Standard shipping is available on all orders over $50 within the continental United States. Standard shipping to Alaska and Hawaii carries an additional surcharge. Express and Overnight shipping are available to all 50 states. International shipping is offered to 42 countries; delivery times vary by country and customs processing. Customers can track their shipment in real time using the tracking link provided in their dispatch confirmation email."
+    },
+    {
+      "id": "chunk-008",
+      "docRef": "doc-shipping",
+      "docTitle": "Shipping & Delivery Guide",
+      "text": "All Acme Corp parcels are shipped with a declared value for insurance purposes. Parcels are insured up to $200 by default. Customers who wish to increase coverage must purchase additional shipping insurance at checkout; the maximum insurable value is $5,000. In the event of a lost or damaged parcel, customers must file a claim within 14 days of the expected delivery date. Claims are submitted through the Help section of the customer portal. Acme Corp investigates claims with the carrier within 10 business days and issues a replacement or refund upon resolution. Insurance does not cover items prohibited under carrier terms of service."
+    },
+    {
+      "id": "chunk-009",
+      "docRef": "doc-shipping",
+      "docTitle": "Shipping & Delivery Guide",
+      "text": "Acme Corp uses a network of regional distribution centres to fulfil orders efficiently. Orders placed before 1:00 PM local warehouse time on a business day are typically processed the same day. Orders placed after the cut-off or on weekends and public holidays are processed the following business day. The warehouse observes all US federal holidays. During peak periods such as the holiday shopping season (November–December), processing times may extend by 1-2 additional business days. Customers are notified by email if their order is affected by a processing delay. Acme Corp does not guarantee delivery dates for Overnight shipping during peak periods."
+    },
+    {
+      "id": "chunk-010",
+      "docRef": "doc-billing",
+      "docTitle": "Billing & Payments Guide",
+      "text": "Acme Corp accepts Visa, Mastercard, American Express, Discover, PayPal, Acme Credit, and ACH bank transfers. Cryptocurrency payments are not accepted. Credit and debit card payments are charged at the time the order is placed. PayPal payments follow the same timing. ACH transfers may take 1-3 business days to settle; orders paid via ACH will not be shipped until payment has cleared. Acme Credit balances are drawn immediately. Each transaction is subject to Acme Corp's fraud prevention checks, which may occasionally result in a brief payment hold. Customers whose payment is held will be contacted via email within two hours."
+    },
+    {
+      "id": "chunk-011",
+      "docRef": "doc-billing",
+      "docTitle": "Billing & Payments Guide",
+      "text": "Acme Corp invoices business account holders monthly for net-30 payment terms. Invoices are generated on the first business day of each month for the prior month's purchases. Payment is due within 30 days of the invoice date. Late payments incur a 1.5% monthly service charge applied to the outstanding balance. Business customers can download invoices as PDF or CSV from the Business Billing section of the portal. Acme Corp sends automated payment reminders at 7 days, 3 days, and 1 day before the due date. Accounts more than 60 days overdue may be suspended pending payment arrangement."
+    },
+    {
+      "id": "chunk-012",
+      "docRef": "doc-billing",
+      "docTitle": "Billing & Payments Guide",
+      "text": "Acme Credit is a prepaid credit system available to all registered customers. Credits can be purchased in denominations of $10, $25, $50, $100, and $250. Acme Credit never expires and is non-transferable between accounts. Credits can be used to pay for any item on the Acme platform, including shipping fees. During the checkout process, customers can choose to apply all or part of their Acme Credit balance. If the order total exceeds the credit balance, the remaining amount is charged to the customer's linked payment method. Acme Credit purchased with a promotional code may carry usage restrictions outlined in the promotion terms."
+    },
+    {
+      "id": "chunk-013",
+      "docRef": "doc-support",
+      "docTitle": "Customer Support Policies",
+      "text": "Acme Corp's customer support team is available 24 hours a day, seven days a week via live chat and email. Phone support is available Monday through Friday, 8:00 AM to 8:00 PM Eastern Time. The average live chat response time is under two minutes. Email responses are delivered within four business hours. Priority support is available to Premium members and business account holders, with a guaranteed response time of 30 minutes via all channels. Customers may also visit the Acme Help Centre, which contains over 2,000 articles covering common issues, how-to guides, and FAQs. The Help Centre is available without logging in."
+    },
+    {
+      "id": "chunk-014",
+      "docRef": "doc-support",
+      "docTitle": "Customer Support Policies",
+      "text": "Acme Corp uses a ticket-based support system. Each support interaction is assigned a unique ticket number for tracking and reference. Customers receive an email confirmation when a ticket is opened and when it is resolved. Tickets may be reopened within 7 days of resolution if the issue recurs or was not fully addressed. After 7 days, customers must open a new ticket. Ticket history is accessible in the Support section of the customer dashboard. Acme Corp retains ticket records for up to 3 years. Customers can rate their support experience at the close of each ticket; Acme's service quality team reviews all ratings below 3 stars."
+    },
+    {
+      "id": "chunk-015",
+      "docRef": "doc-support",
+      "docTitle": "Customer Support Policies",
+      "text": "Acme Corp has an escalation process for unresolved or sensitive issues. Customers who are unsatisfied with the initial support response may request escalation to a Senior Support Specialist. If the issue remains unresolved after escalation, it is routed to the Customer Experience Manager for that region. Complex disputes, particularly those involving significant financial amounts, may be escalated to the Legal and Compliance team. All escalations are acknowledged within one business day. Customers involved in an active escalation are updated every two business days on progress. Acme Corp aims to resolve all escalated cases within 10 business days."
+    },
+    {
+      "id": "chunk-016",
+      "docRef": "doc-returns",
+      "docTitle": "Returns Process Guide",
+      "text": "To initiate a return, customers log into the Acme portal and navigate to Order History. They select the order containing the item(s) to be returned, click Return Items, and follow the on-screen steps. A prepaid return shipping label is emailed to the customer within 15 minutes. The label is valid for 14 days. Items must be securely packaged; Acme recommends using the original packaging. Customers drop the parcel at any affiliated carrier location. Once the warehouse receives and inspects the item, the return status is updated in the portal and an email notification is sent. The inspection process takes 1-2 business days."
+    },
+    {
+      "id": "chunk-017",
+      "docRef": "doc-returns",
+      "docTitle": "Returns Process Guide",
+      "text": "Certain categories of items are not eligible for return under Acme Corp's standard policy. These include perishable goods, personalised or custom-made items, sealed hygiene products that have been opened, and items explicitly marked as final sale at the time of purchase. Items damaged due to customer misuse are also ineligible. Customers who believe their non-returnable item has a manufacturing defect may contact support to open a warranty claim instead. Warranty claims follow a separate process outlined in the Warranty section of the Help Centre. Acme Corp reserves the right to update the list of non-returnable categories with 30 days notice."
+    },
+    {
+      "id": "chunk-018",
+      "docRef": "doc-returns",
+      "docTitle": "Returns Process Guide",
+      "text": "International customers returning items to Acme Corp must clearly mark parcels as 'Returned Goods' on customs documentation to avoid import duties being charged to Acme. Failure to do so may result in Acme deducting applicable duties from the refund amount. International return shipping costs are borne by the customer unless the return is due to an Acme error. Acme Corp provides a return shipping address specific to each country's region to minimise transit times. International returns may take up to 21 days to reach the warehouse, and the standard 5-7 business day inspection timeline begins only after the item is received. Customers are encouraged to retain proof of postage."
+    },
+    {
+      "id": "chunk-019",
+      "docRef": "doc-account",
+      "docTitle": "Account Management Guide",
+      "text": "Registering for an Acme Corp account requires a valid email address and a password of at least 10 characters. Acme recommends using a mix of upper and lower case letters, numbers, and symbols. Two-factor authentication (2FA) is strongly encouraged and can be configured via Security Settings. Supported 2FA methods include authenticator apps (TOTP) and SMS verification. Customers who enable 2FA receive a 5% discount on their next order as an incentive. Account information including name, address book, and payment methods can be updated at any time in the Account Settings section. Email address changes require re-verification via a confirmation link."
+    },
+    {
+      "id": "chunk-020",
+      "docRef": "doc-account",
+      "docTitle": "Account Management Guide",
+      "text": "Acme Corp customers who have not logged in for 24 consecutive months receive an account inactivity notice by email. If no login occurs within 60 days of this notice, the account is suspended. Suspended accounts retain their order history and credit balance for an additional 12 months. Customers can reactivate a suspended account by verifying their identity through the Account Recovery process. After 12 months of suspension, accounts are permanently closed and credits are forfeited. Customers may voluntarily close their account at any time through Account Settings by selecting Close Account. All personal data is deleted in accordance with Acme's data retention policy within 30 days."
+    },
+    {
+      "id": "chunk-021",
+      "docRef": "doc-account",
+      "docTitle": "Account Management Guide",
+      "text": "Acme Corp Premium membership costs $9.99 per month or $99 per year. Benefits include expedited refunds, priority customer support, free Express shipping on all orders, exclusive member-only deals, and early access to product launches. Premium membership is auto-renewed by default; customers may cancel auto-renewal at any time in Subscription Settings without losing the remainder of their current billing period. Premium members who cancel and then re-subscribe within 90 days are exempt from any new-subscriber waiting periods. Gift Premium subscriptions are available in 3-month and 12-month increments and can be purchased as an e-voucher."
+    },
+    {
+      "id": "chunk-022",
+      "docRef": "doc-warranty",
+      "docTitle": "Warranty & Defects Guide",
+      "text": "Acme Corp provides a one-year limited warranty on all physical products sold on its platform, covering manufacturing defects and hardware failures under normal use. The warranty does not cover accidental damage, water damage, cosmetic wear, or damage resulting from use outside of the product's intended purpose. To make a warranty claim, customers submit a request through the Warranty Claims section of the Help Centre, provide a description of the defect, and attach photo evidence. Acme Corp reviews claims within 5 business days. Approved claims result in a repair, replacement, or refund at Acme's discretion. Warranty coverage runs from the date of delivery."
+    },
+    {
+      "id": "chunk-023",
+      "docRef": "doc-warranty",
+      "docTitle": "Warranty & Defects Guide",
+      "text": "Extended warranties are available for purchase at checkout for eligible products. Acme Corp's extended warranty extends the standard one-year coverage to either two or three years, depending on the plan selected. The extended warranty includes all standard warranty benefits plus coverage for accidental damage (up to two incidents per year) and a free annual maintenance check. Extended warranty plans are fulfilled by Acme's partner, ShieldCare Pro. Claims under the extended warranty follow the same submission process as standard warranty claims but are reviewed by ShieldCare Pro within 7 business days. The extended warranty is transferable if the product is resold, subject to a $15 transfer fee."
+    },
+    {
+      "id": "chunk-024",
+      "docRef": "doc-pricing",
+      "docTitle": "Pricing & Promotions Guide",
+      "text": "Acme Corp prices are listed in US dollars and include applicable taxes where required by law. Prices are subject to change without notice, but the price at the time of order placement is always honoured. If a price drops within 7 days of a customer's purchase, Acme Corp's Price Protection policy entitles the customer to a credit for the price difference. Price Protection requests must be submitted through customer support with the original order number. Price Protection does not apply to limited-time flash sales, clearance items, or third-party seller listings. Each customer may submit up to 3 Price Protection requests per calendar year."
+    },
+    {
+      "id": "chunk-025",
+      "docRef": "doc-pricing",
+      "docTitle": "Pricing & Promotions Guide",
+      "text": "Acme Corp runs promotional campaigns throughout the year, including seasonal sales, referral bonuses, and category-specific discounts. Promotional codes can be entered at checkout in the Promo Code field. Only one promotional code may be applied per order. Promotional codes may carry minimum order value requirements, category restrictions, or expiry dates. Acme Credit earned through promotions may have additional usage restrictions. Referral bonuses are credited to both the referrer and the new customer after the referred customer completes their first purchase of $20 or more. Acme Corp reserves the right to withdraw promotional offers at any time without prior notice."
+    },
+    {
+      "id": "chunk-026",
+      "docRef": "doc-pricing",
+      "docTitle": "Pricing & Promotions Guide",
+      "text": "Acme Corp offers a loyalty programme called Acme Rewards. Customers earn one Reward Point for every dollar spent on eligible purchases. Reward Points can be redeemed at checkout at a rate of 100 points per $1 credit. Points expire after 24 months of account inactivity. Premium members earn 1.5 points per dollar. Points are not earned on shipping fees, taxes, or Acme Credit purchases. Points from cancelled or refunded orders are reclaimed by Acme Corp upon refund processing. Business accounts accumulate points in a single pool shared across all users on the account. The minimum redemption threshold is 500 points."
+    },
+    {
+      "id": "chunk-027",
+      "docRef": "doc-privacy",
+      "docTitle": "Privacy & Data Policy",
+      "text": "Acme Corp collects personal data including name, contact details, payment information, and browsing and purchase history to provide and improve its services. Data is stored on servers located in the United States and, for EU customers, in the European Economic Area. Acme Corp does not sell personal data to third parties. Data may be shared with logistics partners, payment processors, and fraud prevention services as necessary to fulfil orders. Customers may request a copy of their personal data via the Privacy section of Account Settings. Requests are fulfilled within 30 days. Acme Corp complies with GDPR, CCPA, and other applicable data protection regulations."
+    },
+    {
+      "id": "chunk-028",
+      "docRef": "doc-privacy",
+      "docTitle": "Privacy & Data Policy",
+      "text": "Acme Corp uses cookies and similar tracking technologies on its website to personalise content, remember preferences, and analyse site usage. Customers visiting from jurisdictions requiring consent (including the EU and UK) are presented with a cookie consent banner on first visit. Strictly necessary cookies are always active. Customers may opt out of analytics and marketing cookies via the Cookie Settings link in the website footer. Opting out of marketing cookies will result in less personalised advertising but will not affect core site functionality. Acme Corp's cookie policy is reviewed and updated annually. A full list of cookies used is available in the Cookie Policy document."
+    },
+    {
+      "id": "chunk-029",
+      "docRef": "doc-b2b",
+      "docTitle": "Business Account Guide",
+      "text": "Acme Corp's Business programme is designed for companies and organisations purchasing in volume. Business accounts benefit from dedicated account managers, volume pricing tiers, consolidated monthly invoicing, and access to the Acme API for order automation. To apply for a Business account, organisations submit an application through the Business section of the Acme website and provide their tax identification number. Applications are reviewed within 3 business days. Approved Business accounts gain access to a separate Business Portal with additional management features. Volume pricing is applied automatically based on 90-day rolling purchase totals and is reviewed quarterly."
+    },
+    {
+      "id": "chunk-030",
+      "docRef": "doc-b2b",
+      "docTitle": "Business Account Guide",
+      "text": "The Acme API enables business customers to integrate order placement, tracking, and reporting directly into their own systems. The API uses REST over HTTPS and authenticates via OAuth 2.0 bearer tokens. API credentials are managed in the Developer section of the Business Portal. Rate limits are 1,000 requests per minute per credential set. Sandbox credentials are available for testing without affecting production data. Acme Corp publishes API documentation and changelogs at developer.acme-corp-example.com. Breaking API changes are announced at least 90 days in advance. Business customers may subscribe to the API change notification mailing list in Developer Settings."
+    },
+    {
+      "id": "chunk-031",
+      "docRef": "doc-accessibility",
+      "docTitle": "Accessibility & Inclusivity Guide",
+      "text": "Acme Corp is committed to making its digital platforms accessible to all customers, including those with disabilities. The Acme website and mobile applications are designed to conform to WCAG 2.1 Level AA guidelines. Screen reader compatibility is tested quarterly using industry-standard tools. Customers who encounter accessibility barriers are encouraged to report them through the Accessibility Feedback form in the Help Centre. Reports are reviewed by the Accessibility team within 5 business days. Acme Corp provides customer support via relay services for customers who are deaf or hard of hearing. All promotional videos are captioned and include audio descriptions."
+    },
+    {
+      "id": "chunk-032",
+      "docRef": "doc-security",
+      "docTitle": "Security & Fraud Prevention Guide",
+      "text": "Acme Corp employs industry-standard security measures to protect customer data and transactions. All communications between customers and Acme systems are encrypted using TLS 1.2 or higher. Payment card data is handled in accordance with PCI DSS standards and is never stored on Acme servers. Acme Corp uses AI-based fraud detection to identify suspicious transactions in real time. Customers are notified immediately by email and push notification if unusual account activity is detected. Accounts are temporarily locked after five consecutive failed login attempts; customers can unlock their account via the Password Reset flow. Acme Corp conducts annual third-party security audits."
+    }
+  ],
+  "queries": [
+    {
+      "id": "q-001",
+      "question": "How do I place an order with Acme Corp and what does the order ID look like?",
+      "relevantChunkId": "chunk-001"
+    },
+    {
+      "id": "q-002",
+      "question": "What should I do if I never received an email confirming my Acme order?",
+      "relevantChunkId": "chunk-001"
+    },
+    {
+      "id": "q-003",
+      "question": "Is there a cap on how many Acme orders a customer can submit per day?",
+      "relevantChunkId": "chunk-001"
+    },
+    {
+      "id": "q-004",
+      "question": "Can I change the delivery address on an Acme order after I have submitted it?",
+      "relevantChunkId": "chunk-002"
+    },
+    {
+      "id": "q-005",
+      "question": "Within what time frame is it possible to edit an Acme order after placing it?",
+      "relevantChunkId": "chunk-002"
+    },
+    {
+      "id": "q-006",
+      "question": "How do I cancel an Acme order before it has been sent out?",
+      "relevantChunkId": "chunk-003"
+    },
+    {
+      "id": "q-007",
+      "question": "What happens to my payment if I cancel an Acme order successfully?",
+      "relevantChunkId": "chunk-003"
+    },
+    {
+      "id": "q-008",
+      "question": "What is Acme Corp's return window and which items qualify for a refund?",
+      "relevantChunkId": "chunk-004"
+    },
+    {
+      "id": "q-009",
+      "question": "How long does it take to receive a refund from Acme Corp after returning an item?",
+      "relevantChunkId": "chunk-004"
+    },
+    {
+      "id": "q-010",
+      "question": "What happens to the discount I received if I only return part of my Acme order?",
+      "relevantChunkId": "chunk-005"
+    },
+    {
+      "id": "q-011",
+      "question": "Will Acme refund me the shipping cost when I send back some items from an order?",
+      "relevantChunkId": "chunk-005"
+    },
+    {
+      "id": "q-012",
+      "question": "Do Acme Premium members get their money back faster than regular customers?",
+      "relevantChunkId": "chunk-006"
+    },
+    {
+      "id": "q-013",
+      "question": "What is the provisional credit that Acme offers to Premium subscribers for returns?",
+      "relevantChunkId": "chunk-006"
+    },
+    {
+      "id": "q-014",
+      "question": "How much does it cost to ship an Acme order and what delivery speed options exist?",
+      "relevantChunkId": "chunk-007"
+    },
+    {
+      "id": "q-015",
+      "question": "Is free shipping available on Acme orders and what is the minimum purchase amount?",
+      "relevantChunkId": "chunk-007"
+    },
+    {
+      "id": "q-016",
+      "question": "How do I file a claim if my Acme parcel arrives damaged or gets lost in transit?",
+      "relevantChunkId": "chunk-008"
+    },
+    {
+      "id": "q-017",
+      "question": "What insurance coverage does Acme Corp include on shipments by default?",
+      "relevantChunkId": "chunk-008"
+    },
+    {
+      "id": "q-018",
+      "question": "What time do I need to place my Acme order to have it shipped the same day?",
+      "relevantChunkId": "chunk-009"
+    },
+    {
+      "id": "q-019",
+      "question": "Are Acme warehouse shipping times affected during the Christmas shopping season?",
+      "relevantChunkId": "chunk-009"
+    },
+    {
+      "id": "q-020",
+      "question": "Which payment methods does Acme Corp accept for purchases?",
+      "relevantChunkId": "chunk-010"
+    },
+    {
+      "id": "q-021",
+      "question": "Why might an Acme order be put on a payment hold and how quickly will I be notified?",
+      "relevantChunkId": "chunk-010"
+    },
+    {
+      "id": "q-022",
+      "question": "When are business invoices sent out and what are the payment terms for Acme corporate accounts?",
+      "relevantChunkId": "chunk-011"
+    },
+    {
+      "id": "q-023",
+      "question": "What penalty does Acme charge business customers who pay invoices late?",
+      "relevantChunkId": "chunk-011"
+    },
+    {
+      "id": "q-024",
+      "question": "How does the Acme Credit prepaid balance system work and does it expire?",
+      "relevantChunkId": "chunk-012"
+    },
+    {
+      "id": "q-025",
+      "question": "Can I use Acme Credit to pay for shipping on my order?",
+      "relevantChunkId": "chunk-012"
+    },
+    {
+      "id": "q-026",
+      "question": "What are the hours for Acme Corp phone support and how fast is live chat response?",
+      "relevantChunkId": "chunk-013"
+    },
+    {
+      "id": "q-027",
+      "question": "How quickly does Acme Corp respond to customer support emails?",
+      "relevantChunkId": "chunk-013"
+    },
+    {
+      "id": "q-028",
+      "question": "How do Acme support tickets work and can I reopen a closed ticket?",
+      "relevantChunkId": "chunk-014"
+    },
+    {
+      "id": "q-029",
+      "question": "How long does Acme Corp keep records of my past support interactions?",
+      "relevantChunkId": "chunk-014"
+    },
+    {
+      "id": "q-030",
+      "question": "What can I do if I am unhappy with Acme Corp's initial support response?",
+      "relevantChunkId": "chunk-015"
+    },
+    {
+      "id": "q-031",
+      "question": "What steps does Acme's escalation path involve for unresolved disputes?",
+      "relevantChunkId": "chunk-015"
+    },
+    {
+      "id": "q-032",
+      "question": "How do I print a return label for an Acme order and how long is it valid?",
+      "relevantChunkId": "chunk-016"
+    },
+    {
+      "id": "q-033",
+      "question": "What items are excluded from Acme Corp's standard return policy?",
+      "relevantChunkId": "chunk-017"
+    },
+    {
+      "id": "q-034",
+      "question": "If I bought a custom-made item from Acme, can I return it for a refund?",
+      "relevantChunkId": "chunk-017"
+    },
+    {
+      "id": "q-035",
+      "question": "What customs documents should I include when returning a product to Acme from abroad?",
+      "relevantChunkId": "chunk-018"
+    },
+    {
+      "id": "q-036",
+      "question": "How do I activate two-factor authentication on my Acme Corp account?",
+      "relevantChunkId": "chunk-019"
+    },
+    {
+      "id": "q-037",
+      "question": "What happens to my Acme account if I do not log in for a very long time?",
+      "relevantChunkId": "chunk-020"
+    },
+    {
+      "id": "q-038",
+      "question": "How much does Acme Premium membership cost and what shipping benefits does it include?",
+      "relevantChunkId": "chunk-021"
+    },
+    {
+      "id": "q-039",
+      "question": "What defects are covered under Acme Corp's standard product warranty?",
+      "relevantChunkId": "chunk-022"
+    },
+    {
+      "id": "q-040",
+      "question": "Does Acme offer an extended warranty and what extra protection does it provide?",
+      "relevantChunkId": "chunk-023"
+    },
+    {
+      "id": "q-041",
+      "question": "If the price of an Acme item drops shortly after I buy it, can I get a price match?",
+      "relevantChunkId": "chunk-024"
+    },
+    {
+      "id": "q-042",
+      "question": "How do I apply a promotional discount code during Acme checkout?",
+      "relevantChunkId": "chunk-025"
+    },
+    {
+      "id": "q-043",
+      "question": "How many Acme Reward Points do I earn per dollar spent and how do I redeem them?",
+      "relevantChunkId": "chunk-026"
+    },
+    {
+      "id": "q-044",
+      "question": "Do Acme Reward Points earned on a purchase get taken back if I return the item?",
+      "relevantChunkId": "chunk-026"
+    },
+    {
+      "id": "q-045",
+      "question": "Does Acme Corp sell my personal data to external companies?",
+      "relevantChunkId": "chunk-027"
+    },
+    {
+      "id": "q-046",
+      "question": "How can I request a copy of the personal information Acme Corp holds about me?",
+      "relevantChunkId": "chunk-027"
+    },
+    {
+      "id": "q-047",
+      "question": "How do I opt out of advertising cookies on the Acme Corp website?",
+      "relevantChunkId": "chunk-028"
+    },
+    {
+      "id": "q-048",
+      "question": "What benefits and pricing tiers are available through Acme Corp's business programme?",
+      "relevantChunkId": "chunk-029"
+    },
+    {
+      "id": "q-049",
+      "question": "How does Acme Corp's REST API work and what authentication method does it use?",
+      "relevantChunkId": "chunk-030"
+    },
+    {
+      "id": "q-050",
+      "question": "Is Acme Corp's website compatible with screen readers and other assistive technologies?",
+      "relevantChunkId": "chunk-031"
+    },
+    {
+      "id": "q-051",
+      "question": "What security protections does Acme Corp use to safeguard my payment information?",
+      "relevantChunkId": "chunk-032"
+    },
+    {
+      "id": "q-052",
+      "question": "What happens to my Acme account after several failed login attempts?",
+      "relevantChunkId": "chunk-032"
+    }
+  ]
+}

@@ -47,6 +47,9 @@ export function callGateway(req: Request, body: LoopbackRequest): Promise<{
   message: ChatMessage; finishReason: string; usage: Usage; servedModel: string;
 }>;                                                                   // ném GatewayCallError (status, code)
 export function isInternalCall(req: Request): { runId?: string; depth: number } | null;
+export function captureInternalCall(req: Request): void;
+// Gọi tại đầu profile gate, trước mọi thay đổi body. Lưu kết quả xác thực của request
+// trong WeakMap riêng; isInternalCall dùng kết quả đó sau khi chèn tri thức/cap token.
 
 // pipeline.ts — điểm vào duy nhất từ middleware/profile-gate.ts
 export function runPreRequest(req: Request, res: Response, profile: GateProfile, endUser: string | null):

@@ -59,6 +59,8 @@ Chỉ cache prompt cần một điểm móc trong đường gửi tới nhà cun
 | `server/src/custom/register.ts` | một mục `PERMISSION_GATES`, một `app.use('/api/ai-platform', …)`, một `app.use('/v1/ai', …)` | 1 |
 | `server/src/middleware/profile-gate.ts` | một lời gọi `runPreRequest()` sau bước chèn tri thức | 1 |
 | `server/src/services/audit-log.ts` | thêm vùng `ai-platform` vào `describeRoute` | 1 |
+| `server/src/db/migrate/defaults.ts` | đăng ký migration nền mới, không sửa migration đã phát hành | 1 |
+| `server/src/__tests__/db/migrate/roundtrip.test.ts` | cập nhật danh sách migration kỳ vọng để kiểm roundtrip | 1 |
 | `server/src/__tests__/custom/surface.test.ts` | cập nhật bản sao đóng băng của `PERMISSION_GATES` | 1 |
 | `client/src/App.tsx` | một mục điều hướng và một route `/ai-platform/*` | 1 |
 | `client/src/custom/PermissionsDialog.tsx` | không sửa nếu đã đọc `PERMISSION_GROUPS`; xác minh ở T024 | 1 |
