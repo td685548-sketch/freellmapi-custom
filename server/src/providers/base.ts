@@ -206,6 +206,12 @@ export interface CompletionOptions extends ExtendedSamplingOptions {
     safeguards?: unknown;
     anthropicBeta?: string;
   };
+  /**
+   * Web-session providers whose cookies rotate on use (e.g. Gemini Web
+   * `__Secure-1PSIDTS`) report the newly issued credential here so the caller
+   * can persist it back to the account store.
+   */
+  onCredentialUpdate?: (nextCredential: string) => void;
 }
 
 /** Per-call abort/timeout wiring for fetchWithTimeout. */
