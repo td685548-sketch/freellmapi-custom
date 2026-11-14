@@ -3,19 +3,21 @@
 - **Branch**: `codex/ai-platform-output-guard-ui`
 - **Base SHA**: `92a4f520cd01cc33f403d5f1bbd30ec98a6d569d` (verified ancestor: PR52 MCP merge `d1e0a03badea3c19fc60200a13155a1eb420b12e`)
 - **C0 Contract SHA**: `3abe64b6fcef0586fb3424d51e895a2beb0ec92b` (from Agent 1 C0 `a2e8aa933f3a585445def0d44b08106677d9f5a0`)
-- **Imported Prerequisites** (cherry-picked cleanly from `codex/ai-platform-output-guard-runtime`):
+- **Imported Prerequisites** (cherry-picked cleanly):
   - `be11bcfe` (Agent 3 S0 `5860591e`)
   - `53b807e8` (Agent 1 migration/store/events/router `9ca92dd2`)
   - `ee6eab98` (Agent 2 D0 `a0517018`)
   - `2664b9a3` (Agent 1 policy/stream wiring `bc48dc8a`)
   - `2688e33f` (Agent 3 `policy.ts` runtime wiring `3442f0e8`)
-- **Code Commit SHAs**: `cdc5ae1cf1153bc9a11d985e3e425c651eadda66`, `8dd41052e816fdf943cbd85813d063523977e622`
+  - `70edff67` (Agent 1 RBAC `manage_ai_platform` fix `b138c959`)
+  - `a1ecfd50` (Agent 1 `guard_log` / multi-candidate fix `a4b7a97e`)
+  - `bbd8792f` (Agent 3 `mode: 'log'` & Gemini JSON-array stream fix `3ddb4a1f`)
+- **Code Commit SHAs**: `cdc5ae1cf1153bc9a11d985e3e425c651eadda66`, `8dd41052e816fdf943cbd85813d063523977e622`, `31c8e595c2fd5933bc0804322077ac4122daccec`
 - **Owned Tasks**: `T059`, `T069`, `T070`, `T071`
 - **Overall Status**:
   - `T069` / `T070` (UI, RBAC, i18n, `output-guard.test.tsx`, `check:i18n`, ESLint, build): **GREEN**
+  - `T059` (`guard-e2e.test.ts` 17/17, `guard-permissions.test.ts` 5/5, `guard-secret-leak.test.ts` 1/1): **GREEN**
   - `T071` (`guard-bench.test.ts` 2/2, `regression.test.ts` 14/14): **GREEN**
-  - `guard-secret-leak.test.ts` (1/1): **GREEN**
-  - `guard-permissions.test.ts` (4/5) & `guard-e2e.test.ts` (11/17): **PARTIAL** — uncovered 4 real peer integration findings (listed below in Section 6).
 
 ---
 
@@ -68,34 +70,38 @@
 
 ## 3. Verification Commands & Observed Results
 
-### Passing Checks (after final code edit)
+### Passing Checks (after final code edit `31c8e595`)
 - `npx -w client eslint ...` (all 9 Agent 4 client files): **0 errors, 0 warnings**
 - `npx -w client vitest run src/custom/ai-platform/output-guard.test.tsx`: **1 file, 8/8 tests PASS**
 - `npm run check:i18n -w client`: **PASS (60 locales, 1336 keys)**
-- `npm run lint` (`server` + `cli`): **PASS**
+- `npm run lint --workspace=server` & `npm run lint --workspace=cli`: **PASS**
 - `npm run build` (`shared`, `server`, `cli`, `client` `tsc -b && vite build`): **PASS**
 - `npm run test:migrations`: **1 file, 3/3 tests PASS** (`roundtrip.test.ts`)
 - `npx -w server vitest run src/__tests__/custom/ai-platform/regression.test.ts`: **1 file, 14/14 tests PASS** (frozen golden baseline)
+- `npx -w server vitest run src/__tests__/custom/ai-platform/guard-permissions.test.ts src/__tests__/custom/ai-platform/guard-secret-leak.test.ts src/__tests__/custom/ai-platform/guard-bench.test.ts src/__tests__/custom/ai-platform/guard-e2e.test.ts`: **4 files, 25/25 tests PASS** (`guard-permissions` 5/5, `guard-secret-leak` 1/1, `guard-bench` 2/2, `guard-e2e` 17/17)
 
-### Full Client Suite & Retry
-- `npm run test -w client`: **121/122 files, 904/905 tests PASS**; `src/custom/granular-permissions.test.tsx` hit its 5000ms timeout under 122-worker parallel load.
+### Full Workspace Suites & Retry Results
+- `npm run test:bootstrap`: **2 passed, 2 skipped (PowerShell on Linux), 0 failed**
+- `npm run test:hooks`: **9 passed, 0 failed**
+- `npm run test -w server`: **609/611 files passed, 2 failed; 7243 passed, 2 failed, 9 skipped (7254 total)**
+  1. `src/__tests__/db/turso-read-cache.test.ts > knows about every trigger in the migrations`: **FAIL** — migration `20261113_120000_custom_ai_output_guard.ts` (Agent 1) defines a `CREATE TRIGGER` not yet registered in `turso-read-cache.test.ts` / `TRIGGER_SIDE_EFFECTS` (both read-only for Agent 4).
+  2. `src/__tests__/services/router-bandit.test.ts > exploration draws are never wasted on a model that cannot serve the request`: **FAIL** (5000ms timeout; standalone rerun: 30/31 PASS, same test timed out at 7833ms > 5000ms).
+- `npx -w cli vitest run`: **7/7 files passed, 180 passed, 1 skipped (181 total)**
+- `npm run test -w client`: **121/122 files passed, 1 failed; 904 passed, 1 failed (905 total)** — `src/custom/granular-permissions.test.tsx > saves actual child grants for a restricted secondary admin` timed out at 5000ms under 122-worker parallel load.
 - Sequential rerun `npx -w client vitest run src/custom/granular-permissions.test.tsx`: **1 file, 11/11 tests PASS**.
-
-### Server Output Guard Acceptance / Bench / RBAC / Secret-Leak (Post-Integration)
-- `npx -w server vitest run src/__tests__/custom/ai-platform/guard-secret-leak.test.ts src/__tests__/custom/ai-platform/guard-bench.test.ts src/__tests__/custom/ai-platform/guard-permissions.test.ts src/__tests__/custom/ai-platform/guard-e2e.test.ts`:
-  - `guard-bench.test.ts`: **2/2 PASS** (`<2%` false-block rate across 220 benign + violation fixtures; `<=300ms` added streaming TTFC)
-  - `guard-secret-leak.test.ts`: **1/1 PASS** (non-empty event, encrypted excerpt, 403 without `view_guard_excerpts`, 200 with it + `custom_audit_log` without plaintext, gzipped backup decoded without plaintext excerpt/credentials, 410 after 7-day fake clock)
-  - `guard-permissions.test.ts`: **4/5 PASS** (1 peer finding: `manage_ai_platform` parent-only user returned `200` instead of `403`)
-  - `guard-e2e.test.ts`: **11/17 PASS** (4 wires non-stream block, 4 wires SSE stream cross-chunk split, `mode: 'off'`, exact-cache hit with 0 second provider call + spoofed headers rejected, provider pause `>300ms`; 6 failures from peer bugs/rate-limit cascade).
 
 ---
 
-## 6. Peer Integration Findings (for Reviewer / Agent 1 / Agent 3)
+## 6. Peer Integration Findings
 
-1. **Agent 1 RBAC (`permission-actions.ts` / `hasPermission`)**: A user with only `manage_ai_platform` receives `200` instead of `403` on `/api/ai-platform/output-guard/*` (`guard-permissions.test.ts`). Per `contracts.md` §2, `manage_ai_platform` must NOT substitute for child permissions (`view_output_guard`, `edit_output_guard`, `view_guard_excerpts`).
-2. **Agent 3 `mode: 'log'` non-stream (`interceptor.ts`)**: `POST /v1/chat/completions` with `mode: 'log'` returned empty string `""` in `choices[0].message.content` instead of preserving `'This has forbidden-secret inside'` (`guard-e2e.test.ts`).
-3. **Agent 3 Gemini JSON-array stream (`interceptor.ts` / `stream-payload.ts`)**: `POST /v1beta/models/gemini-2.0-flash:streamGenerateContent` (without `?alt=sse`) in `mode: 'block'` emitted raw JSON array without `'Blocked by output guard.'` (`guard-e2e.test.ts`).
-4. **Agent 3 Gemini multi-candidate non-stream (`stream-payload.ts` / `interceptor.ts`)**: `POST /v1beta/models/gemini-2.0-flash:generateContent` with 2 candidates returned empty text `""` instead of `'Blocked by output guard.'` (`guard-e2e.test.ts`).
+### Resolved (Verified GREEN via `70edff67`, `a1ecfd50`, `bbd8792f`)
+1. **Agent 1 RBAC (`permission-actions.ts`)**: `manage_ai_platform` alone now returns `403` on `/api/ai-platform/output-guard/*` (`guard-permissions.test.ts` 5/5 PASS).
+2. **Agent 3 `mode: 'log'` non-stream**: `POST /v1/chat/completions` with `mode: 'log'` preserves original text (`guard-e2e.test.ts` PASS).
+3. **Agent 3 Gemini JSON-array stream (`?alt=sse` omitted)**: Now emits replacement `'Blocked by output guard.'` in `mode: 'block'` (`guard-e2e.test.ts` PASS).
+4. **Agent 1 / Agent 3 Gemini multi-candidate non-stream**: Now blocks and returns `'Blocked by output guard.'` (`guard-e2e.test.ts` PASS).
+
+### Open Finding for Reviewer / Agent 1 (Outside Agent 4 Ownership)
+- **`src/__tests__/db/turso-read-cache.test.ts`**: Fails on full `server` run because Agent 1's migration `20261113_120000_custom_ai_output_guard.ts` adds a `CREATE TRIGGER` whose written tables are not listed in `TRIGGER_SIDE_EFFECTS` / `turso-read-cache.test.ts`.
 
 ---
 
@@ -103,24 +109,11 @@
 
 | Task | Owner | Description | Status on `codex/ai-platform-output-guard-ui` |
 |---|---|---|---|
-| T054 | Agent 1 | Migration roundtrip test | Pending integration (Agent 1) |
-| T055 | Agent 2 | Local detectors unit tests | Pending integration (Agent 2 D0 ready) |
-| T056 | Agent 3 | Stream guard & timer tests | Pending integration (Agent 3 S0 ready) |
-| T057 | Agent 2 | External moderation/judge tests | Pending integration (Agent 2 D0 ready) |
-| T058 | Agent 1 | Guard router/events/policy tests | Pending integration (Agent 1) |
-| T059 | Agent 4 | Real HTTP E2E across 4 wires + Gemini array | **Authored (RED pending integration)** |
-| T060 | Agent 1 | DB migration + store + defaults | Pending integration (Agent 1) |
-| T061 | Agent 2 | Local detectors + ReDoS worker validator | Pending integration (Agent 2 D0 ready) |
-| T062 | Agent 3 | Stream guard + OutputFilter timer sink | Pending integration (Agent 3 S0 ready) |
-| T063 | Agent 2 | External moderation/judge + `moderation.ts` | Pending integration (Agent 2 D0 ready) |
-| T064 | Agent 1 | Policy evaluator + `outputFilterFor` | Pending integration (Agent 1) |
-| T065 | Agent 1 | Guard events + AES-GCM excerpts + 7d/90d | Pending integration (Agent 1) |
-| T066 | Agent 3 | Gateway/pipeline/cache/MCP/support hooks | Pending integration (Agent 3) |
-| T067 | Agent 3 | Support runtime adapter + trusted role context | Pending integration (Agent 3) |
-| T068 | Agent 1 | Admin router + scope cleanup | Pending integration (Agent 1) |
+| T054–T058, T060–T068 | Agents 1–3 | Foundation, detectors, stream guard, policies, events, gateway/MCP/support hooks, admin router | Integrated prerequisites imported (`be11bcfe`..`bbd8792f`); Agent 4 E2E/RBAC/secret-leak/bench GREEN against integrated runtime (1 open `turso-read-cache.test.ts` trigger-list item for Agent 1/Reviewer) |
+| T059 | Agent 4 | Real HTTP E2E across 4 wires + Gemini array + RBAC + secret-leak | **GREEN (`guard-e2e.test.ts` 17/17, `guard-permissions.test.ts` 5/5, `guard-secret-leak.test.ts` 1/1)** |
 | T069 | Agent 4 | UI tests (`output-guard.test.tsx`) | **GREEN (8/8)** |
-| T070 | Agent 4 | Native EN/VI UI (`OutputGuard`, Editor, Tester, Events) | **GREEN** |
-| T071 | Agent 4 | Benchmark (`guard-bench.test.ts`) + `regression.test.ts` | **Bench authored (RED); `regression.test.ts` GREEN (14/14)** |
+| T070 | Agent 4 | Native EN/VI UI (`OutputGuard`, Editor, Tester, Events) | **GREEN (`check:i18n` PASS, 0 ESLint errors on Agent 4 files, `build` PASS)** |
+| T071 | Agent 4 | Benchmark (`guard-bench.test.ts`) + `regression.test.ts` | **GREEN (`guard-bench.test.ts` 2/2, `regression.test.ts` 14/14)** |
 
 ---
 
