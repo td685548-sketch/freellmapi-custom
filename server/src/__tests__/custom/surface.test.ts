@@ -36,6 +36,7 @@ const FULL_METHOD_GATES: Array<[string, string]> = [
   ['/api/admin/users', 'manage_users'],
   ['/api/admin/registration-requests', 'manage_requests'],
   ['/api/thruline', 'manage_x_gateway'],
+  ['/api/ai-platform', 'manage_ai_platform'],
 ];
 
 // Shared configuration and credential-minting surfaces: reads stay open because

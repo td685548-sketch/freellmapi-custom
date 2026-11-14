@@ -74,7 +74,23 @@ function hasCredential(req: Request, route: Route): boolean {
   }
 }
 
+const INTERNAL_HEADER = 'x-ai-platform-internal';
+
+/**
+ * T014 — Strip the internal loopback header from any request that did NOT
+ * arrive on a direct loopback socket.  This prevents an external caller from
+ * forging `x-ai-platform-internal` to influence platform-internal behaviour.
+ * The request is still processed normally (auth check is NOT skipped).
+ * Must be called BEFORE the credential/auth check.
+ */
+export function stripInternalHeaders(req: Request): void {
+  if (!isDirectLoopback(req)) {
+    delete req.headers[INTERNAL_HEADER];
+  }
+}
+
 export function preparseGuard(req: Request, res: Response, next: NextFunction): void {
+  stripInternalHeaders(req);
   if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') { next(); return; }
   const size = bodyBytes(req);
   if (size === null || size <= largeBodyThresholdBytes()) { next(); return; }

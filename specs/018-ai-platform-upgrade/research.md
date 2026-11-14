@@ -7,7 +7,7 @@ Mọi mục dưới đây dựa trên việc đọc mã ngày 2026-11-13. Chỗ 
 - **Decision**: Một lời gọi `runPreRequest(req, res, profile, endUser)` trong `server/src/middleware/profile-gate.ts`, ngay sau bước chèn tri thức hiện có.
 - **Rationale**: Cổng này đã là nơi chạy lọc nội dung (`screenContent`), hội thoại (`applyConversation`), trả lời nhanh (`answerQuickly`), chèn tri thức (`injectKnowledge`) và hạn mức người dùng cuối, trước khi handler upstream đọc `req.body`. Nó đã có `profile` và `endUser`.
 - **Alternatives considered**: Sửa từng handler `routes/*.ts` (bốn điểm chạm vào mã upstream, vi phạm nguyên tắc VI). Middleware riêng ở `app.ts` (phải tự phân giải lại client key).
-- **Giới hạn**: Yêu cầu dùng khóa hợp nhất hoặc khóa cá nhân (không phải `sk-cp-…`) không đi qua nhánh profile. Các trụ cột theo client key vì thế chỉ áp dụng cho client key và support tenant, đúng phạm vi spec.
+- **Giới hạn**: Yêu cầu dùng khóa hợp nhất hoặc khóa cá nhân (không phải `sk-cp-…`) không đi qua nhánh profile. Ngoài ra, đã xác minh tại `server/src/custom/register.ts` (T016) rằng `profileInferenceGate` chỉ gắn trên `['/v1', '/v1beta']`; các đường dẫn `/thruline/v1` KHÔNG đi qua `profileInferenceGate` và được giữ nguyên không mở rộng auth/scope. Các trụ cột theo client key vì thế chỉ áp dụng cho `/v1/*` và `/v1beta/*` dùng client key (và support tenant), đúng phạm vi spec.
 
 ## R2. Nơi đặt biến đổi phía câu trả lời
 
@@ -98,6 +98,8 @@ Mọi mục dưới đây dựa trên việc đọc mã ngày 2026-11-13. Chỗ 
 - **Hủy**: `AbortController` cho mỗi lần chạy; sự kiện `close` của kết nối người gọi và lệnh hủy từ dashboard cùng kích hoạt; lời gọi loopback và MCP nhận tín hiệu.
 
 ## R11. Quyền, audit, sao lưu
+
+- **Xóa scope (T030, quyết định foundation)**: `purgeScope()` là helper lớp ứng dụng, xóa đúng prefix settings bằng so sánh literal; foundation không đăng ký SQL UDF và không tạo trigger gọi hàm JavaScript này. Không tạo trigger tham chiếu các bảng pillar chưa tồn tại. Migration từng pillar sau này phải sở hữu SQL cleanup/trigger cho các bảng của chính nó khi profile bị xóa, hoặc bổ sung hook ứng dụng trong đợt được cấp ownership tương ứng. Không coi việc tự động dọn dữ liệu pillar khi xóa profile là đã triển khai trong foundation.
 
 - **Quyền**: nhóm cha `manage_ai_platform` trong `shared/permissions.ts`; `custom/permission-actions.ts` ủy quyền cho `aiPlatformPermission()` trong module mới để tệp custom cũ chỉ thêm một nhánh. Đường dẫn chưa ánh xạ trả về quyền cha (FR-003), theo đúng quy ước đã ghi ở đầu `permissionForAction`.
 - **Audit**: `auditMiddleware` đã ghi mọi thao tác ghi thành công dưới `/api`; chỉ cần `describeRoute` nhận diện vùng `ai-platform`, và `summarize` phải che các trường `authorization`, `headers`, `token`, `secret` (cần xác minh danh sách che hiện có, T028).

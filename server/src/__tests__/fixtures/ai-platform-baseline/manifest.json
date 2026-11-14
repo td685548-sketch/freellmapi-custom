@@ -1,0 +1,47 @@
+{
+  "capturedAt": "2026-11-13T17:34:06.727Z",
+  "baseCommit": "17328a176bd02b7510c51d7a458d038e16848a0b",
+  "caseCount": 14,
+  "cases": [
+    "openai-chat-nonstream-enriched.json",
+    "openai-chat-stream-enriched.json",
+    "openai-chat-nonstream-plain.json",
+    "anthropic-nonstream-enriched.json",
+    "anthropic-stream-enriched.json",
+    "anthropic-nonstream-plain.json",
+    "responses-nonstream-enriched.json",
+    "responses-stream-enriched.json",
+    "responses-nonstream-plain.json",
+    "gemini-nonstream-enriched.json",
+    "gemini-stream-enriched.json",
+    "gemini-nonstream-plain.json",
+    "auth-unified-openai.json",
+    "auth-user-openai.json"
+  ],
+  "reviewVerification": {
+    "baseSourceCommit": "17328a176bd02b7510c51d7a458d038e16848a0b",
+    "fixtureCommit": "cd78c3508e12a48ae3dd364eeb6869ef78e67167",
+    "helperCommit": "2d8818d0c0796b22f0b7f7d7900d27554696ffc7",
+    "command": "node node_modules/vitest/vitest.mjs run src/__tests__/custom/ai-platform/regression.test.ts --pool=forks --fileParallelism=false",
+    "method": "Immutable git archive of base source plus only the T002 helper and frozen T005 test/fixtures; CAPTURE_BASELINE was not enabled.",
+    "result": "14 passed; compared existing fixtures without regenerating them.",
+    "coverage": "Normalized provider request payload, response status/body and Content-Type; not a full response-header or raw-byte certification.",
+    "sha256ByFixture": {
+      "openai-chat-nonstream-enriched.json": "538dd08067268f4d677d430e3733b79016e3efcaa53bdf3cd3b1dd9d51a6604a",
+      "openai-chat-stream-enriched.json": "d84204bbad6fdc55698f3addb06191b5bac79737de2c69d860d46e27d3467f3d",
+      "openai-chat-nonstream-plain.json": "6d3d0eba5f56903cb420fac86988f5a7f632862b7b517aa6b5b4d01d02ed71c6",
+      "anthropic-nonstream-enriched.json": "cca3b5dbc0abce0bfcbda112ffa66a379b73d9544eb132fdd0c6bd8f186b0480",
+      "anthropic-stream-enriched.json": "654987efe4e97e5919f2f4583c53966b80ae072e7df44999493f211ecfc19169",
+      "anthropic-nonstream-plain.json": "f570602ef0ddc626de884800b9066706ef50681293d9cf8443b450dace0c010a",
+      "responses-nonstream-enriched.json": "5a676686ff8793a0904ece85a577e8077b4a5ffa446464002d640faa4b7c8cae",
+      "responses-stream-enriched.json": "9e1a8e4212e0207926d759f31e6ca32028db97a88ac040b192ce8b0538b6f562",
+      "responses-nonstream-plain.json": "173b67c4797ff7f6578ade1c0f99cde33c331d4fa67363fec41c0989f5524480",
+      "gemini-nonstream-enriched.json": "233d840a172b1dc11b9cca68941d64d86f0f5a896b209889a7533be02b20ff5a",
+      "gemini-stream-enriched.json": "157a7ad0473107863cbb4c78377ac6dc06695e72668daf63819efa740b49f287",
+      "gemini-nonstream-plain.json": "1c305da58fd0088fca5afd8830e8906a318d9f2b90b5473897ea5536e87e3cc6",
+      "auth-unified-openai.json": "47b305e9bb963baed57cd14e73895f7a297bb55994eb192cff537f3d25f25a02",
+      "auth-user-openai.json": "1b5a52097e47f82dea60c95994b657dbeb59cd00a1d330a0607a29b53c130397"
+    },
+    "hashSource": "Exact fixture Git blobs at fixtureCommit; independent of checkout line endings."
+  }
+}

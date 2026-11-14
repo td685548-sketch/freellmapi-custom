@@ -11,6 +11,8 @@ import { CLIENT_PROFILE_KEY_PREFIX } from '../lib/system-prompt.js';
 import { profileForGate } from '../services/profile-usage.js';
 import { checkUserRateLimit } from '../services/user-quotas.js';
 import { extractInferenceToken } from './user-rate-limit.js';
+import { runPreRequest } from '../custom/ai-platform/pipeline.js';
+import { captureInternalCall } from '../custom/ai-platform/loopback.js';
 
 /**
  * Attributes /v1 and /v1beta traffic made with a client-profile key (`sk-cp-…`) to
@@ -23,6 +25,7 @@ import { extractInferenceToken } from './user-rate-limit.js';
  * authentication, which rejects them exactly as before.
  */
 export function profileInferenceGate(req: Request, res: Response, next: NextFunction): void {
+  captureInternalCall(req);
   const token = extractInferenceToken(req);
   if (!token || !token.startsWith(CLIENT_PROFILE_KEY_PREFIX)) return next();
 
@@ -51,7 +54,12 @@ export function profileInferenceGate(req: Request, res: Response, next: NextFunc
     // A ready answer ends the request here (a stored conversation still records it).
     if (answerQuickly(req, res, profile.id, profile.quickAnswers)) return;
     if (profile.knowledge.enabled) injectKnowledge(req, profile.id, profile.knowledge.maxChars);
-    next();
+    // Pipeline composition boundary (T029): call AI platform pre-request hook before next().
+    // With all flags off, the promise resolves without changing the request/response.
+    runPreRequest(req, res, profile, endUser).then(result => {
+      if (result === 'handled') return;
+      next();
+    }).catch(err => next(err));
   };
   // The end user's own allowance before the key's, so a refused end user does not touch the key's totals.
   const quota = () => enforceEndUserQuota(profile.id, endUser, profile.endUserQuota, res, tokens)

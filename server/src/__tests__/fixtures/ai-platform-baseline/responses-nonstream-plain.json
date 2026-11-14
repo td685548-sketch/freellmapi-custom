@@ -1,0 +1,58 @@
+{
+  "id": "responses-nonstream-plain",
+  "wire": "responses",
+  "stream": false,
+  "authKind": "profile",
+  "upstream": {
+    "method": "POST",
+    "path": "/openai/v1/chat/completions",
+    "query": {},
+    "bodyJson": {
+      "model": "groq/compound",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Hello plain responses"
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "contentType": "application/json",
+    "bodyJson": {
+      "id": "<id>",
+      "object": "response",
+      "created_at": 0,
+      "status": "completed",
+      "model": "groq/compound",
+      "output": [
+        {
+          "type": "message",
+          "id": "<id>",
+          "status": "completed",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "baseline-ok",
+              "annotations": []
+            }
+          ]
+        }
+      ],
+      "output_text": "baseline-ok",
+      "usage": {
+        "input_tokens": 12,
+        "input_tokens_details": {
+          "cached_tokens": 0
+        },
+        "output_tokens": 4,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 16
+      }
+    }
+  }
+}

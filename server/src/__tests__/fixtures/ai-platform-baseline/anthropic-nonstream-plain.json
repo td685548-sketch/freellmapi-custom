@@ -1,0 +1,43 @@
+{
+  "id": "anthropic-nonstream-plain",
+  "wire": "anthropic",
+  "stream": false,
+  "authKind": "profile",
+  "upstream": {
+    "method": "POST",
+    "path": "/openai/v1/chat/completions",
+    "query": {},
+    "bodyJson": {
+      "model": "groq/compound",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Hello plain anthropic"
+        }
+      ],
+      "max_tokens": 128
+    }
+  },
+  "response": {
+    "status": 200,
+    "contentType": "application/json",
+    "bodyJson": {
+      "id": "<id>",
+      "type": "message",
+      "role": "assistant",
+      "model": "groq/compound",
+      "content": [
+        {
+          "type": "text",
+          "text": "baseline-ok"
+        }
+      ],
+      "stop_reason": "end_turn",
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 12,
+        "output_tokens": 4
+      }
+    }
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "id": "openai-chat-nonstream-plain",
+  "wire": "openai-chat",
+  "stream": false,
+  "authKind": "profile",
+  "upstream": {
+    "method": "POST",
+    "path": "/openai/v1/chat/completions",
+    "query": {},
+    "bodyJson": {
+      "model": "groq/compound",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Hello plain openai"
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "contentType": "application/json",
+    "bodyJson": {
+      "execution_id": "<execution_id>",
+      "id": "<id>",
+      "object": "chat.completion",
+      "created": 0,
+      "model": "groq/compound",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "baseline-ok"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 12,
+        "completion_tokens": 4,
+        "total_tokens": 16
+      },
+      "_routed_via": {
+        "platform": "groq",
+        "model": "groq/compound"
+      }
+    }
+  }
+}

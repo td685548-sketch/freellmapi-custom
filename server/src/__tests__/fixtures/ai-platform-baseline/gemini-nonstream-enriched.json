@@ -1,0 +1,60 @@
+{
+  "id": "gemini-nonstream-enriched",
+  "wire": "gemini",
+  "stream": false,
+  "authKind": "profile",
+  "upstream": {
+    "method": "POST",
+    "path": "/v1beta/models/gemma-4-31b-it:generateContent",
+    "query": {},
+    "bodyJson": {
+      "contents": [
+        {
+          "role": "user",
+          "parts": [
+            {
+              "text": "Enforced shop prompt.\n\nCaller gemini system.\nReference material from this website. Use it when it answers the question; if it does not, answer normally. Do not mention that you were given it.\n\n### Giao hàng\nPhí giao hàng toàn quốc là 30.000đ, miễn phí cho đơn từ 500.000đ."
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "parts": [
+            {
+              "text": "Phí giao hàng bao nhiêu?"
+            }
+          ]
+        }
+      ],
+      "generationConfig": {
+        "maxOutputTokens": 8192
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "contentType": "application/json",
+    "bodyJson": {
+      "candidates": [
+        {
+          "content": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "baseline-ok"
+              }
+            ]
+          },
+          "finishReason": "STOP",
+          "index": 0
+        }
+      ],
+      "usageMetadata": {
+        "promptTokenCount": 12,
+        "candidatesTokenCount": 4,
+        "totalTokenCount": 16
+      },
+      "modelVersion": "gemma-4-31b-it"
+    }
+  }
+}

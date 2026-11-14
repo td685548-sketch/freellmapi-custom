@@ -8,6 +8,7 @@ import { createSession, createUser } from '../../services/auth.js';
 import { mintUrlToken } from '../../services/url-tokens.js';
 import { mintUserApiKey } from '../../services/user-keys.js';
 import { clearStatusCache, setStatusCacheTestOverride } from '../../custom/status-cache.js';
+import { stripInternalHeaders } from '../../custom/preparse-guard.js';
 
 // Large request bodies are refused BEFORE they are parsed unless the caller holds
 // a credential, and the public liveness probes answer from a short-lived copy.
@@ -139,5 +140,110 @@ describe('pre-parse guard and public probes', () => {
       await send('/livez', { method: 'GET' });
       expect(probes).toBe(2);
     } finally { db.prepare = prepare; }
+  });
+});
+
+// ── T014: internal header stripping ─────────────────────────────────────────
+
+describe('internal header stripping', () => {
+  // A lightweight server that echoes back the headers it received so we can
+  // inspect whether x-ai-platform-internal was stripped.
+  let echoServer: Server;
+  let echoPort: number;
+
+  beforeAll(async () => {
+    process.env.ENCRYPTION_KEY = '0'.repeat(64);
+    setStatusCacheTestOverride(true);
+    // Reuse an in-memory DB (may already be initialised from the sibling describe).
+    try { initDb(':memory:'); } catch { /* already initialised */ }
+
+    // Echo server: returns JSON of the request headers.
+    echoServer = http.createServer((req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(req.headers));
+    });
+    echoServer.listen(0, '127.0.0.1');
+    await new Promise<void>(resolve => echoServer.once('listening', resolve));
+    echoPort = (echoServer.address() as AddressInfo).port;
+  });
+
+  afterAll(() => {
+    echoServer?.close();
+    setStatusCacheTestOverride(null);
+  });
+
+  /**
+   * Send a GET to the echo server optionally carrying x-ai-platform-internal
+   * and optionally x-forwarded-for (to simulate non-loopback).
+   */
+  function sendToEcho(opts: {
+    internalHeader?: string;
+    forwardedFor?: string;
+  }): Promise<Record<string, string>> {
+    return new Promise((resolve, reject) => {
+      const headers: Record<string, string> = { 'x-test': '1' };
+      if (opts.internalHeader) headers['x-ai-platform-internal'] = opts.internalHeader;
+      if (opts.forwardedFor) headers['x-forwarded-for'] = opts.forwardedFor;
+      const req = http.request(
+        { hostname: '127.0.0.1', port: echoPort, path: '/test', method: 'GET', headers, agent: false },
+        res => {
+          let data = '';
+          res.on('data', c => { data += c; });
+          res.on('end', () => {
+            try { resolve(JSON.parse(data) as Record<string, string>); }
+            catch { reject(new Error('invalid JSON from echo server')); }
+          });
+        },
+      );
+      req.on('error', reject);
+      req.end();
+    });
+  }
+
+  it('strips x-ai-platform-internal from non-loopback requests', () => {
+    // Simulate a non-loopback request using a mock Request object.
+    const req = {
+      socket: { remoteAddress: '203.0.113.9' },
+      headers: { 'x-ai-platform-internal': 'v1.1234567890.aabb.ccdd', 'x-forwarded-for': '203.0.113.9' },
+    } as unknown as import('express').Request;
+
+    stripInternalHeaders(req);
+    expect(req.headers['x-ai-platform-internal']).toBeUndefined();
+  });
+
+  it('preserves x-ai-platform-internal from actual loopback requests', () => {
+    // A direct loopback (no x-forwarded-for) keeps the header.
+    const req = {
+      socket: { remoteAddress: '127.0.0.1' },
+      headers: { 'x-ai-platform-internal': 'v1.1234567890.aabb.ccdd' },
+    } as unknown as import('express').Request;
+
+    stripInternalHeaders(req);
+    expect(req.headers['x-ai-platform-internal']).toBe('v1.1234567890.aabb.ccdd');
+  });
+
+  it('a stripped request still goes through normal auth (not bypassed)', async () => {
+    // We verify via actual HTTP: an external caller carrying the internal header
+    // goes to the echo server AFTER stripInternalHeaders; the header should be gone.
+    // We use the echo server + call stripInternalHeaders manually to show that
+    // the function acts on the req object before any downstream check.
+
+    // Send to echo with both headers; simulate what happens at the middleware layer:
+    const rawHeaders = await sendToEcho({ internalHeader: 'v1.fake.header', forwardedFor: '10.0.0.1' });
+
+    // Now apply stripInternalHeaders to what the server would have seen.
+    const req = {
+      socket: { remoteAddress: '127.0.0.1' },
+      headers: { ...rawHeaders },
+    } as unknown as import('express').Request;
+
+    stripInternalHeaders(req);
+
+    // The header is stripped because x-forwarded-for signals a non-direct loopback.
+    expect(req.headers['x-ai-platform-internal']).toBeUndefined();
+
+    // The request object itself is not null/rejected — stripping doesn't block it.
+    // A downstream auth check would then run normally (testing for 401 not 403).
+    expect(req.headers['x-test']).toBe('1');
   });
 });

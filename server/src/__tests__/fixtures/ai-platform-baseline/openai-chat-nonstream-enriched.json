@@ -1,0 +1,70 @@
+{
+  "id": "openai-chat-nonstream-enriched",
+  "wire": "openai-chat",
+  "stream": false,
+  "authKind": "profile",
+  "upstream": {
+    "method": "POST",
+    "path": "/openai/v1/chat/completions",
+    "query": {},
+    "bodyJson": {
+      "model": "groq/compound",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Enforced shop prompt."
+        },
+        {
+          "role": "system",
+          "content": [
+            {
+              "type": "text",
+              "text": "Caller system context.",
+              "cache_control": {
+                "type": "ephemeral"
+              }
+            }
+          ]
+        },
+        {
+          "role": "system",
+          "content": "Reference material from this website. Use it when it answers the question; if it does not, answer normally. Do not mention that you were given it.\n\n### Giao hàng\nPhí giao hàng toàn quốc là 30.000đ, miễn phí cho đơn từ 500.000đ."
+        },
+        {
+          "role": "user",
+          "content": "Phí giao hàng bao nhiêu?"
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "contentType": "application/json",
+    "bodyJson": {
+      "execution_id": "<execution_id>",
+      "id": "<id>",
+      "object": "chat.completion",
+      "created": 0,
+      "model": "groq/compound",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "baseline-ok"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 12,
+        "completion_tokens": 4,
+        "total_tokens": 16
+      },
+      "_routed_via": {
+        "platform": "groq",
+        "model": "groq/compound"
+      }
+    }
+  }
+}

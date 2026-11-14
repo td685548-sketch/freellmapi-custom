@@ -27,7 +27,7 @@ export interface AuditEntry {
 const WRITE = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 /** Not changes an operator audits: signing in and out, and the Playground saving its chats. */
 const SKIP = /^\/api\/(?:auth|conversations|playground)(?:\/|$)/;
-const SECRET = /pass(?:word)?|secret|token|api[-_]?key|^key$|^keys$|private|credential|cookie|authorization|encrypted|^value$|^code$/i;
+const SECRET = /pass(?:word)?|secret|token|api[-_]?key|^key$|^keys$|private|credential|cookie|authorization|encrypted|^value$|^code$|^headers$|^args$/i;
 const MAX_STRING = 200;
 const MAX_SUMMARY = 2_000;
 const KEEP_DAYS = 180;

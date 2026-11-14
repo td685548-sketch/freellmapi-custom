@@ -2,7 +2,7 @@
 
 Nguyên tắc: không có trường hay header bắt buộc mới. Client không biết các bổ sung này tiếp tục chạy đúng. Khi trụ cột tương ứng tắt, không header hay trường nào dưới đây xuất hiện và thân trả lời giống hệt bản trước từng byte.
 
-Giao thức áp dụng: `POST /v1/chat/completions`, `POST /v1/messages`, `POST /v1/responses`, `POST /v1beta/models/{model}:generateContent` và `:streamGenerateContent`, cùng các đường tương ứng dưới `/thruline/v1` nếu đi qua cùng cổng (xác minh ở T016).
+Giao thức áp dụng: `POST /v1/chat/completions`, `POST /v1/messages`, `POST /v1/responses`, `POST /v1beta/models/{model}:generateContent` và `:streamGenerateContent`. Đã xác minh (T016): `profileInferenceGate` chỉ gắn tại `['/v1', '/v1beta']` trong `server/src/custom/register.ts`; các đường dẫn `/thruline/v1` KHÔNG đi qua `profileInferenceGate` nên không thuộc phạm vi áp dụng của cổng profile.
 
 ## Thứ tự xử lý cố định (FR-008)
 
