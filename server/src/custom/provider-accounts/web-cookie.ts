@@ -12,6 +12,7 @@ import { contentToString, estimateInputTokens } from '../../lib/content.js';
 import { BaseProvider, providerHttpError, type CompletionOptions, type KeyValidationResult } from '../../providers/base.js';
 import type { QuotaObservationContext } from '../../services/provider-quota.js';
 import { runChatGptWebChat } from './chatgpt-web-chat.js';
+import { runGeminiWebChat, streamGeminiWebChat } from './gemini-web-chat.js';
 import { runDeepSeekWebChat, streamDeepSeekWebChat } from './deepseek-web-chat.js';
 import {
   fetchChatGptWebAccessToken,
@@ -292,6 +293,9 @@ export class WebCookieProvider extends BaseProvider {
     if (this.providerId === 'chatgpt-web') {
       return this.chatGptWebCompletion(apiKey, messages, modelId, options);
     }
+    if (this.providerId === 'gemini-web') {
+      return this.geminiWebCompletion(apiKey, messages, modelId, options);
+    }
     if (this.providerId === 'deepseek-web') {
       return this.deepSeekWebCompletion(apiKey, messages, modelId, options);
     }
@@ -425,6 +429,35 @@ export class WebCookieProvider extends BaseProvider {
         id: chatGptId,
         object: 'chat.completion.chunk',
         created: chatGptCreated,
+        model: modelId,
+        choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+      };
+      return;
+    }
+
+    if (this.providerId === 'gemini-web') {
+      const geminiId = this.makeId();
+      const geminiCreated = Math.floor(Date.now() / 1000);
+      for await (const delta of streamGeminiWebChat({
+        credential: apiKey,
+        messages,
+        modelId,
+        baseUrl: this.baseUrl,
+        platform: this.platform,
+        options,
+      })) {
+        yield {
+          id: geminiId,
+          object: 'chat.completion.chunk',
+          created: geminiCreated,
+          model: modelId,
+          choices: [{ index: 0, delta, finish_reason: null }],
+        };
+      }
+      yield {
+        id: geminiId,
+        object: 'chat.completion.chunk',
+        created: geminiCreated,
         model: modelId,
         choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
       };
@@ -644,6 +677,43 @@ export class WebCookieProvider extends BaseProvider {
             content,
             ...(reasoning_content ? { reasoning_content } : {}),
           },
+          finish_reason: 'stop',
+        },
+      ],
+      usage: {
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        total_tokens: promptTokens + completionTokens,
+      },
+    };
+  }
+
+  /** Non-streaming Gemini Web turn (/app SNlM0e -> StreamGenerate). */
+  private async geminiWebCompletion(
+    apiKey: string,
+    messages: ChatMessage[],
+    modelId: string,
+    options?: CompletionOptions,
+  ): Promise<ChatCompletionResponse> {
+    const content = await runGeminiWebChat({
+      credential: apiKey,
+      messages,
+      modelId,
+      baseUrl: this.baseUrl,
+      platform: this.platform,
+      options,
+    });
+    const promptTokens = estimateInputTokens(messages);
+    const completionTokens = Math.max(1, Math.ceil(content.length / 4));
+    return {
+      id: this.makeId(),
+      object: 'chat.completion',
+      created: Math.floor(Date.now() / 1000),
+      model: modelId,
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content },
           finish_reason: 'stop',
         },
       ],
