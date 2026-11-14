@@ -1,0 +1,303 @@
+{
+  "version": 1,
+  "phase": "US2 MCP Client",
+  "baseSha": "1d0efd55fd6b5d978d6dd7de06c2b83f87d5fd0a",
+  "foundationMergeSha": "1d0efd55fd6b5d978d6dd7de06c2b83f87d5fd0a",
+  "foundationPr": 48,
+  "branch": "codex/ai-platform-mcp-core",
+  "sharedContractFile": "shared/ai-platform-mcp.ts",
+  "protocolVersion": "2025-06-18",
+  "supportedProtocolVersions": ["2025-06-18"],
+  "enums": {
+    "McpAuthKind": ["none", "bearer", "header"],
+    "McpServerStatus": ["unknown", "ok", "error", "paused"],
+    "McpToolState": ["pending", "allowed", "blocked", "missing"],
+    "McpToolEffect": ["read", "write"],
+    "McpToolCallStatus": [
+      "ok",
+      "tool_error",
+      "timeout",
+      "too_large",
+      "blocked",
+      "transport_error",
+      "awaiting_approval",
+      "rejected"
+    ],
+    "McpApprovalStatus": [
+      "pending",
+      "approved",
+      "executing",
+      "succeeded",
+      "failed",
+      "unknown",
+      "rejected",
+      "expired"
+    ],
+    "McpTransportErrorCode": [
+      "timeout",
+      "unsafe_url",
+      "http",
+      "protocol",
+      "too_large"
+    ],
+    "ScopeKind": ["profile", "support_tenant", "agent"]
+  },
+  "paginationAndLimits": {
+    "slugRegex": "^[a-z0-9-]{1,32}$",
+    "slugMaxChars": 32,
+    "nameMaxChars": 120,
+    "urlMaxChars": 2048,
+    "headerNameMaxChars": 128,
+    "secretMaxChars": 4096,
+    "exposedToolNameMaxChars": 64,
+    "minTimeoutMs": 1000,
+    "defaultTimeoutMs": 20000,
+    "maxTimeoutMs": 120000,
+    "minResultBytes": 1024,
+    "defaultMaxResultBytes": 262144,
+    "maxResultBytes": 1048576,
+    "minConcurrency": 1,
+    "defaultMaxConcurrency": 4,
+    "maxConcurrency": 32,
+    "minRounds": 1,
+    "defaultMaxRounds": 8,
+    "maxRounds": 20,
+    "maxRedirects": 3,
+    "maxToolPages": 100,
+    "maxSseFrameBytes": 1048576,
+    "circuitBreakerThreshold": 5,
+    "circuitBreakerBaseMs": 60000,
+    "circuitBreakerMaxMs": 900000,
+    "callLogMaxBytes": 8192,
+    "approvalTtlHours": 24,
+    "defaultListLimit": 50,
+    "maxListLimit": 200,
+    "maxDecisionNoteChars": 500,
+    "maxAllowedOrigins": 100,
+    "defaultRetentionDays": 30
+  },
+  "envelopes": {
+    "GET /api/ai-platform/mcp/servers": "{ servers: McpServerView[] }",
+    "POST /api/ai-platform/mcp/servers": "{ server: McpServerView }",
+    "PATCH /api/ai-platform/mcp/servers/:id": "{ server: McpServerView }",
+    "DELETE /api/ai-platform/mcp/servers/:id": "{ ok: true } | 409 { error: { type, code: 'in_use', message, details: McpInUseErrorDetails } }",
+    "POST /api/ai-platform/mcp/servers/:id/test": "{ ok: boolean, protocolVersion?: string, serverInfo?: Record<string, unknown>, toolCount?: number, error?: string }",
+    "POST /api/ai-platform/mcp/servers/:id/sync": "{ added: number, changed: number, missing: number, unchanged: number }",
+    "GET /api/ai-platform/mcp/servers/:id/tools": "{ tools: McpToolView[] }",
+    "PATCH /api/ai-platform/mcp/tools/:id": "{ tool: McpToolView }",
+    "GET /api/ai-platform/mcp/bindings/:scope": "{ binding: McpBindingView }",
+    "PUT /api/ai-platform/mcp/bindings/:scope": "{ binding: McpBindingView }",
+    "GET /api/ai-platform/mcp/calls": "{ calls: McpCallView[], nextBefore: string | null }",
+    "GET /api/ai-platform/mcp/allowed-internal-hosts": "{ origins: string[] }",
+    "PUT /api/ai-platform/mcp/allowed-internal-hosts": "{ origins: string[] }",
+    "GET /api/ai-platform/approvals": "{ approvals: McpApprovalView[] }",
+    "POST /api/ai-platform/approvals/:id/approve": "{ approval: McpApprovalView } | 409 { error: { type, code: 'already_decided', message } }",
+    "POST /api/ai-platform/approvals/:id/reject": "{ approval: McpApprovalView } | 409 { error: { type, code: 'already_decided', message } }"
+  },
+  "ddl": {
+    "migrationFile": "server/src/db/migrations/20261113_110000_custom_ai_mcp_client.ts",
+    "tables": {
+      "custom_ai_mcp_servers": {
+        "columns": {
+          "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+          "slug": "TEXT NOT NULL UNIQUE",
+          "name": "TEXT NOT NULL",
+          "url": "TEXT NOT NULL",
+          "auth_kind": "TEXT NOT NULL DEFAULT 'none'",
+          "auth_header_name": "TEXT NULL",
+          "auth_ciphertext": "TEXT NULL",
+          "auth_iv": "TEXT NULL",
+          "auth_tag": "TEXT NULL",
+          "enabled": "INTEGER NOT NULL DEFAULT 1",
+          "timeout_ms": "INTEGER NOT NULL DEFAULT 20000",
+          "max_result_bytes": "INTEGER NOT NULL DEFAULT 262144",
+          "max_concurrency": "INTEGER NOT NULL DEFAULT 4",
+          "status": "TEXT NOT NULL DEFAULT 'unknown'",
+          "last_error": "TEXT NULL",
+          "last_connected_at": "TEXT NULL",
+          "fail_count": "INTEGER NOT NULL DEFAULT 0",
+          "paused_until": "TEXT NULL",
+          "protocol_version": "TEXT NULL",
+          "server_info_json": "TEXT NULL",
+          "created_by": "INTEGER NULL",
+          "created_at": "TEXT NOT NULL DEFAULT (datetime('now'))",
+          "updated_at": "TEXT NOT NULL DEFAULT (datetime('now'))",
+          "revision": "INTEGER NOT NULL DEFAULT 1"
+        },
+        "indexes": ["UNIQUE(slug)"]
+      },
+      "custom_ai_mcp_tools": {
+        "columns": {
+          "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+          "server_id": "INTEGER NOT NULL REFERENCES custom_ai_mcp_servers(id) ON DELETE CASCADE",
+          "name": "TEXT NOT NULL",
+          "description": "TEXT NULL",
+          "input_schema_json": "TEXT NOT NULL",
+          "output_schema_json": "TEXT NULL",
+          "schema_hash": "TEXT NOT NULL",
+          "exposed_name": "TEXT NOT NULL UNIQUE",
+          "state": "TEXT NOT NULL DEFAULT 'pending'",
+          "effect": "TEXT NOT NULL DEFAULT 'write'",
+          "reviewed_by": "INTEGER NULL",
+          "reviewed_at": "TEXT NULL",
+          "missing_since": "TEXT NULL",
+          "created_at": "TEXT NOT NULL DEFAULT (datetime('now'))",
+          "updated_at": "TEXT NOT NULL DEFAULT (datetime('now'))"
+        },
+        "indexes": [
+          "UNIQUE(server_id, name)",
+          "UNIQUE(exposed_name)",
+          "idx_custom_ai_mcp_tools_server_state ON custom_ai_mcp_tools(server_id, state)"
+        ]
+      },
+      "custom_ai_tool_bindings": {
+        "columns": {
+          "tool_id": "INTEGER NOT NULL REFERENCES custom_ai_mcp_tools(id) ON DELETE CASCADE",
+          "scope_kind": "TEXT NOT NULL",
+          "scope_id": "TEXT NOT NULL",
+          "created_at": "TEXT NOT NULL DEFAULT (datetime('now'))"
+        },
+        "primaryKey": ["tool_id", "scope_kind", "scope_id"],
+        "indexes": [
+          "idx_custom_ai_tool_bindings_scope ON custom_ai_tool_bindings(scope_kind, scope_id)"
+        ]
+      },
+      "custom_ai_tool_calls": {
+        "columns": {
+          "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+          "run_id": "TEXT NULL",
+          "execution_key": "TEXT NULL",
+          "scope_kind": "TEXT NOT NULL",
+          "scope_id": "TEXT NOT NULL",
+          "end_user": "TEXT NULL",
+          "server_id": "INTEGER NOT NULL",
+          "tool_name": "TEXT NOT NULL",
+          "args_masked": "TEXT NULL",
+          "result_masked": "TEXT NULL",
+          "status": "TEXT NOT NULL",
+          "duration_ms": "INTEGER NOT NULL DEFAULT 0",
+          "result_bytes": "INTEGER NOT NULL DEFAULT 0",
+          "created_at": "TEXT NOT NULL DEFAULT (datetime('now'))"
+        },
+        "indexes": [
+          "idx_custom_ai_tool_calls_scope_created ON custom_ai_tool_calls(scope_kind, scope_id, created_at)",
+          "idx_custom_ai_tool_calls_created ON custom_ai_tool_calls(created_at)",
+          "UNIQUE(execution_key) WHERE execution_key IS NOT NULL"
+        ]
+      },
+      "custom_ai_approvals": {
+        "columns": {
+          "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+          "execution_key": "TEXT NOT NULL UNIQUE",
+          "run_id": "TEXT NULL",
+          "step_seq": "INTEGER NOT NULL DEFAULT 0",
+          "scope_kind": "TEXT NOT NULL",
+          "scope_id": "TEXT NOT NULL",
+          "end_user": "TEXT NULL",
+          "tool_id": "INTEGER NOT NULL REFERENCES custom_ai_mcp_tools(id) ON DELETE CASCADE",
+          "args_ciphertext": "TEXT NOT NULL",
+          "args_iv": "TEXT NOT NULL",
+          "args_tag": "TEXT NOT NULL",
+          "args_masked": "TEXT NOT NULL",
+          "status": "TEXT NOT NULL DEFAULT 'pending'",
+          "decided_by": "INTEGER NULL",
+          "decided_at": "TEXT NULL",
+          "decision_note": "TEXT NULL",
+          "expires_at": "TEXT NOT NULL",
+          "created_at": "TEXT NOT NULL DEFAULT (datetime('now'))"
+        },
+        "indexes": [
+          "UNIQUE(execution_key)",
+          "idx_custom_ai_approvals_status_expires ON custom_ai_approvals(status, expires_at)",
+          "idx_custom_ai_approvals_scope ON custom_ai_approvals(scope_kind, scope_id, created_at)"
+        ]
+      }
+    },
+    "alterTables": {
+      "client_profiles": [
+        "ai_tools_enabled INTEGER NOT NULL DEFAULT 0",
+        "ai_tool_max_rounds INTEGER NULL"
+      ]
+    }
+  },
+  "privateTransportTypes": {
+    "McpTransportConfig": "{ serverId: number; slug: string; url: string; authKind: McpAuthKind; authHeaderName: string | null; secret: string | null; timeoutMs: number; maxResultBytes: number; maxConcurrency: number; revision: number; credentialGeneration: number }",
+    "McpSession": "{ serverId: number; revision: number; credentialGeneration: number; origin: string; sessionId: string | null; protocolVersion: string; serverInfo: Record<string, unknown> | null }",
+    "McpTransportError": "class McpTransportError extends Error { readonly code: McpTransportErrorCode; readonly status?: number }"
+  },
+  "symbols": {
+    "agent1": {
+      "server/src/custom/ai-platform/mcp-client/registry.ts": [
+        "listServers(): McpServerView[]",
+        "createServer(input: McpServerInput, actorId: number | null): Promise<McpServerView>",
+        "updateServer(id: number, patch: McpServerPatch, actorId: number | null): Promise<McpServerView>",
+        "deleteServer(id: number, opts?: { force?: boolean }): McpDeleteServerResponse",
+        "testServer(id: number, signal?: AbortSignal): Promise<McpTestServerResponse>",
+        "syncServerTools(id: number, actorId: number | null, signal?: AbortSignal): Promise<McpSyncServerResponse>",
+        "listServerTools(serverId: number): McpToolView[]",
+        "reviewTool(toolId: number, patch: McpToolReviewPatch, actorId: number | null): McpToolView",
+        "getServerTransportConfig(serverId: number): McpTransportConfig",
+        "assertToolExecutable(toolId: number, expectedSchemaHash?: string): { tool: BoundTool; config: McpTransportConfig }",
+        "recordServerOutcome(serverId: number, outcome: { ok: true; protocolVersion?: string; serverInfo?: Record<string, unknown> } | { ok: false; error: string }): McpServerView"
+      ],
+      "server/src/custom/ai-platform/mcp-client/bindings.ts": [
+        "validateScope(scope: Scope): Scope",
+        "getBindings(scope: Scope): McpBindingView",
+        "setBindings(scope: Scope, input: McpBindingPutInput): McpBindingView",
+        "toolsForScope(scope: Scope, callerTools?: ChatToolDefinition[]): BoundTool[]"
+      ],
+      "server/src/custom/ai-platform/mcp-client/calls.ts": [
+        "recordToolCall(input: { runId?: string | null; executionKey?: string | null; scope: Scope; endUser: string | null; serverId: number; toolName: string; argsMasked: string | null; resultMasked: string | null; status: McpToolCallStatus; durationMs: number; resultBytes: number }): McpCallView",
+        "listToolCalls(filter?: { scope?: Scope; serverId?: number; status?: McpToolCallStatus; before?: string; limit?: number }): McpCallsResponse",
+        "pruneToolCalls(now?: Date): number"
+      ]
+    },
+    "agent2": {
+      "server/src/custom/ai-platform/mcp-client/transport.ts": [
+        "class McpTransportError extends Error",
+        "mcpInitialize(config: McpTransportConfig, signal: AbortSignal): Promise<McpSession>",
+        "mcpListTools(config: McpTransportConfig, session: McpSession, signal: AbortSignal): Promise<McpToolDescriptor[]>",
+        "mcpCallTool(config: McpTransportConfig, session: McpSession, name: string, args: unknown, signal: AbortSignal, opts?: { retryOn404?: boolean }): Promise<McpCallToolResult>"
+      ],
+      "server/src/custom/ai-platform/mcp-client/executor.ts": [
+        "executeReadTool(ctx: ToolContext, tool: BoundTool, args: unknown): Promise<ToolExecutionResult>",
+        "executeClaimedWrite(ctx: { approvalId: number; executionKey: string; scope: Scope; endUser: string | null; role?: string; runId?: string | null; toolId: number; args: unknown; signal: AbortSignal }): Promise<{ ok: boolean; status: 'succeeded' | 'failed' | 'unknown'; resultMasked: string; error?: string; durationMs: number; resultBytes: number }>"
+      ],
+      "server/src/custom/ai-platform/mcp-client/tools.ts": [
+        "executeTool(ctx: ToolContext, tool: BoundTool, args: unknown): Promise<ToolExecutionResult>"
+      ]
+    },
+    "agent3": {
+      "server/src/custom/ai-platform/orchestrator/approvals.ts": [
+        "requestToolApproval(ctx: ToolContext, tool: BoundTool, args: unknown): Promise<{ approvalId: number; executionKey: string }>",
+        "listApprovals(filter?: { status?: McpApprovalStatus; scope?: Scope; limit?: number }): McpApprovalView[]",
+        "approveAction(id: number, actorId: number | null, input?: McpApprovalDecisionInput): Promise<McpApprovalView>",
+        "rejectAction(id: number, actorId: number | null, input?: McpApprovalDecisionInput): McpApprovalView",
+        "expireApprovals(now?: Date): number"
+      ],
+      "server/src/custom/ai-platform/mcp-client/tool-loop.ts": [
+        "runToolLoop(req: Request, input: { scope: Scope; messages: ChatMessage[]; model: string; callerTools: ChatToolDefinition[]; maxRounds: number; signal: AbortSignal; runId?: string; turnId?: string; endUser?: string | null; role?: string }): Promise<McpLoopResult>"
+      ],
+      "server/src/custom/ai-platform/mcp-client/admission.ts": [
+        "prepareMcpTakeover(req: Request, profile: GateProfile, endUser: string | null): McpTakeoverPlan | null"
+      ],
+      "server/src/custom/ai-platform/mcp-client/messages.ts": [
+        "toLoopbackMessages(wire: Wire, body: unknown): ChatMessage[] | null"
+      ],
+      "server/src/custom/ai-platform/mcp-client/respond.ts": [
+        "sendMcpLoopResult(res: Response, wire: Wire, stream: boolean, result: McpLoopResult, model: string): void"
+      ],
+      "server/src/custom/ai-platform/mcp-client/router.ts": [
+        "mcpAdminRouter: Router"
+      ]
+    },
+    "agent4": {
+      "client/src/custom/ai-platform/mcp-api.ts": [
+        "Uses shared DTOs from @freellmapi/shared/ai-platform-mcp.js"
+      ],
+      "client/src/custom/ai-platform/mcp-strings.ts": [
+        "Typed EN/VI labels for MCP management and approvals"
+      ]
+    }
+  }
+}
