@@ -176,5 +176,21 @@ describe('Output Guard Admin Router (T068)', () => {
     });
     expect(res.status).toBe(409);
     expect((res.json.error as { code: string }).code).toBe('pillar_disabled');
+
+    // Local dry-run /test succeeds even when flag is off
+    const localTest = await api('POST', '/api/ai-platform/output-guard/profile/1/test', token, {
+      text: 'hello world',
+    });
+    expect(localTest.status).toBe(200);
+    expect(localTest.json.action).toBe('pass');
+
+    // Overview reports outputGuard ready=true and keeps unimplemented pillars ready=false
+    const overview = await api('GET', '/api/ai-platform/overview', token);
+    expect(overview.status).toBe(200);
+    const pillars = overview.json.pillars as Record<string, { ready: boolean }>;
+    expect(pillars.outputGuard.ready).toBe(true);
+    expect(pillars.mcpClient.ready).toBe(true);
+    expect(pillars.prompts.ready).toBe(false);
+    expect(pillars.retrieval.ready).toBe(false);
   });
 });

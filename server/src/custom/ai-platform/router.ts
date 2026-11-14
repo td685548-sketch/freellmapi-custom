@@ -82,14 +82,19 @@ aiPlatformRouter.get('/overview', requirePerm('view_ai_platform'), (_req, res) =
   const retention = readRetention();
   const pillars = Object.fromEntries(
     PILLARS.map((pillar) => {
-      const ready = pillar === 'mcpClient';
-      const summary = ready
-        ? flags[pillar]
-          ? 'MCP client runtime active.'
-          : 'MCP client ready (disabled by default).'
-        : flags[pillar]
-          ? 'Enabled in foundation mode (pillar engine not yet installed).'
-          : 'Disabled by default.';
+      const ready = pillar === 'mcpClient' || pillar === 'outputGuard';
+      const summary =
+        pillar === 'mcpClient'
+          ? flags[pillar]
+            ? 'MCP client runtime active.'
+            : 'MCP client ready (disabled by default).'
+          : pillar === 'outputGuard'
+            ? flags[pillar]
+              ? 'Output guard runtime active.'
+              : 'Output guard ready (disabled by default).'
+            : flags[pillar]
+              ? 'Enabled in foundation mode (pillar engine not yet installed).'
+              : 'Disabled by default.';
       return [pillar, { enabled: flags[pillar], ready, summary }];
     }),
   ) as AiPlatformOverviewResponse['pillars'];

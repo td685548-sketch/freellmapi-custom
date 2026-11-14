@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_GUARD_DETECTORS,
   DEFAULT_GUARD_POLICY_BASE,
@@ -12,7 +12,8 @@ import {
   purgeGuardScope,
   upsertPolicy,
 } from '../../../custom/ai-platform/output-guard/store.js';
-import { evaluateOutput, outputFilterFor } from '../../../custom/ai-platform/output-guard/policy.js';
+import { evaluateOutput, outputFilterFor, setPolicy, testPolicy } from '../../../custom/ai-platform/output-guard/policy.js';
+import * as guardEvents from '../../../custom/ai-platform/output-guard/events.js';
 import { resetGuardEventRateLimitForTests } from '../../../custom/ai-platform/output-guard/events.js';
 
 function seedProfile(id: number, name = `profile-${id}`): void {
@@ -184,5 +185,164 @@ describe('output-guard/store & policy', () => {
       .prepare("SELECT action, end_user FROM custom_ai_guard_events WHERE scope_id = '1'")
       .all() as Array<{ action: string; end_user: string }>;
     expect(events).toEqual([{ action: 'bypassed', end_user: 'u1' }]);
+
+    // Untrusted role must NOT bypass
+    const untrusted = await evaluateOutput(
+      { kind: 'profile', id: '1' },
+      'Clean output',
+      {
+        trustedRole: null,
+        role: 'support_admin',
+        endUser: 'u2',
+        wire: 'openai-chat',
+        stream: false,
+        systemPrompt: null,
+      },
+    );
+    expect(untrusted).toEqual({ action: 'pass', text: 'Clean output' });
+  });
+
+  it('setPolicy rejects ReDoS / slow regex with 422 before writing to DB', async () => {
+    const redosInput = makeInput({
+      mode: 'block',
+      detectors: {
+        ...structuredClone(DEFAULT_GUARD_DETECTORS),
+        patterns: {
+          enabled: true,
+          rules: [{ id: 'r1', name: 'evil', pattern: '(a+)+$', flags: '' }],
+        },
+      },
+    });
+
+    await expect(setPolicy({ kind: 'profile', id: '1' }, redosInput, 1)).rejects.toMatchObject({
+      status: 422,
+    });
+    expect(getEffectivePolicy({ kind: 'profile', id: '1' }).revision).toBe(0);
+  });
+
+  it('evaluates log mode unchanged, PII mask without whole-response block, and block precedence', async () => {
+    setFlags({ outputGuard: true });
+    // Log mode: returns original text even on keyword + PII
+    await setPolicy(
+      { kind: 'profile', id: '1' },
+      makeInput({
+        mode: 'log',
+        detectors: {
+          ...structuredClone(DEFAULT_GUARD_DETECTORS),
+          keywords: { enabled: true, terms: ['forbidden'] },
+          pii: { enabled: true, action: 'mask' },
+        },
+        revision: 0,
+      }),
+      1,
+    );
+
+    const logRes = await evaluateOutput(
+      { kind: 'profile', id: '1' },
+      'This is forbidden and email test@example.com',
+      { endUser: 'u1', wire: 'openai-chat', stream: false, systemPrompt: null },
+    );
+    expect(logRes.action).toBe('logged');
+    expect(logRes.text).toBe('This is forbidden and email test@example.com');
+
+    // Block mode with PII mask only -> masked (not blocked)
+    await setPolicy(
+      { kind: 'profile', id: '1' },
+      makeInput({
+        mode: 'block',
+        detectors: {
+          ...structuredClone(DEFAULT_GUARD_DETECTORS),
+          keywords: { enabled: true, terms: ['forbidden'] },
+          pii: { enabled: true, action: 'mask' },
+        },
+        revision: 1,
+      }),
+      1,
+    );
+
+    const maskRes = await evaluateOutput(
+      { kind: 'profile', id: '1' },
+      'Contact test@example.com for help',
+      { endUser: 'u1', wire: 'openai-chat', stream: false, systemPrompt: null },
+    );
+    expect(maskRes.action).toBe('masked');
+    expect(maskRes.text).not.toContain('test@example.com');
+
+    // Block mode with both PII + keyword -> block wins precedence
+    const blockRes = await evaluateOutput(
+      { kind: 'profile', id: '1' },
+      'forbidden contact test@example.com',
+      { endUser: 'u1', wire: 'openai-chat', stream: false, systemPrompt: null },
+    );
+    expect(blockRes.action).toBe('blocked');
+    expect(blockRes.text).toBe(DEFAULT_GUARD_POLICY_BASE.replacementText);
+  });
+
+  it('snapshots policy per response and never leaks raw output if event recording throws', async () => {
+    setFlags({ outputGuard: true });
+    await setPolicy(
+      { kind: 'profile', id: '1' },
+      makeInput({
+        mode: 'block',
+        detectors: {
+          ...structuredClone(DEFAULT_GUARD_DETECTORS),
+          keywords: { enabled: true, terms: ['secret'] },
+        },
+        replacementText: 'BLOCKED_SAFE',
+        revision: 0,
+      }),
+      1,
+    );
+
+    const filter = outputFilterFor(
+      { kind: 'profile', id: '1' },
+      { endUser: 'u1', wire: 'openai-chat', stream: true, systemPrompt: null },
+    );
+    expect(filter).not.toBeNull();
+
+    // Update policy to 'off' after filter was created; active filter keeps snapshot
+    await setPolicy({ kind: 'profile', id: '1' }, makeInput({ mode: 'off', revision: 1 }), 1);
+
+    const spy = vi.spyOn(guardEvents, 'recordGuardEvent').mockImplementation(() => {
+      throw new Error('db write error');
+    });
+    try {
+      const delta = filter!.onDelta('contains secret word');
+      expect(delta.stop?.replacement).toBe('BLOCKED_SAFE');
+      expect(delta.emit).toBe('');
+    } finally {
+      spy.mockRestore();
+      filter!.dispose?.();
+    }
+  });
+
+  it('testPolicy runs dry-run without writing events and ignores simulated role bypass', async () => {
+    await setPolicy(
+      { kind: 'profile', id: '1' },
+      makeInput({
+        mode: 'block',
+        bypassRoles: ['admin'],
+        detectors: {
+          ...structuredClone(DEFAULT_GUARD_DETECTORS),
+          keywords: { enabled: true, terms: ['banned'] },
+        },
+        revision: 0,
+      }),
+      1,
+    );
+
+    const res = await testPolicy(
+      { kind: 'profile', id: '1' },
+      { text: 'this has banned term', role: 'admin' },
+      { systemPrompt: null },
+    );
+    expect(res.action).toBe('blocked');
+    expect(res.triggered.some((t) => t.detector === 'keywords')).toBe(true);
+    expect(res.warnings?.length).toBeGreaterThan(0);
+
+    const count = (
+      getDb().prepare('SELECT COUNT(*) AS c FROM custom_ai_guard_events').get() as { c: number }
+    ).c;
+    expect(count).toBe(0);
   });
 });
