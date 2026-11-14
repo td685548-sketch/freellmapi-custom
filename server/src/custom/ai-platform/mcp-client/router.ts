@@ -17,6 +17,7 @@ import {
 import { parseScopeParam } from '../scope.js';
 import { getBindings, setBindings } from './bindings.js';
 import { listToolCalls } from './calls.js';
+import { maybeRunMcpMaintenance } from './maintenance.js';
 import {
   createServer,
   deleteServer,
@@ -138,7 +139,7 @@ function sendMcpError(res: Response, err: unknown): void {
     error: {
       type: 'internal_error',
       code: 'internal_error',
-      message: err instanceof Error ? err.message : 'Internal server error.',
+      message: 'Internal server error.',
     },
   });
 }
@@ -390,6 +391,7 @@ mcpAdminRouter.get('/mcp/calls', requirePerm('view_mcp_servers'), (req, res) => 
         ? req.query.before.trim()
         : undefined;
     const limit = parseBoundLimit(req.query.limit);
+    maybeRunMcpMaintenance();
     const result = listToolCalls({ scope, serverId, status, before, limit });
     res.json(result);
   } catch (err) {
@@ -436,6 +438,7 @@ mcpAdminRouter.get('/approvals', requirePerm('approve_ai_actions'), (req, res) =
         ? (req.query.status.trim() as McpApprovalStatus)
         : undefined;
     const limit = parseBoundLimit(req.query.limit);
+    maybeRunMcpMaintenance();
     res.json({ approvals: listApprovals({ status, scope, limit }) });
   } catch (err) {
     sendMcpError(res, err);

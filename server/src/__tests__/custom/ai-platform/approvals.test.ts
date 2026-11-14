@@ -381,4 +381,164 @@ describe('MCP Approvals (T039/T047)', () => {
       await fake.close();
     }
   });
+
+  it('F01: scrubs opaque server credentials and sensitive keys in argsMasked, decisionNote, and error without role bypass', async () => {
+    const profileId = createProfile('f01-profile');
+    const secretVal = 'opaque-vault-credential-9988776655';
+    const server = await createServer(
+      {
+        slug: 'f01-srv',
+        name: 'F01 Server',
+        url: 'https://mcp.example.com/v1',
+        authKind: 'bearer',
+        secret: secretVal,
+      },
+      1,
+    );
+    await syncServerTools(server.id, 1, undefined, makeFakeTransport('Refund order'));
+    const refundTool = listServerTools(server.id)[0]!;
+    reviewTool(refundTool.id, { state: 'allowed', effect: 'write' }, 1);
+    setBindings({ kind: 'profile', id: String(profileId) }, { toolIds: [refundTool.id], enabled: true });
+
+    const boundTool = {
+      toolId: refundTool.id,
+      serverId: server.id,
+      serverSlug: server.slug,
+      name: refundTool.name,
+      exposedName: refundTool.exposedName,
+      description: refundTool.description,
+      inputSchema: refundTool.inputSchema,
+      outputSchema: refundTool.outputSchema,
+      schemaHash: refundTool.schemaHash,
+      effect: 'write' as const,
+      timeoutMs: server.timeoutMs,
+      maxResultBytes: server.maxResultBytes,
+      maxConcurrency: server.maxConcurrency,
+    };
+
+    const ac = new AbortController();
+    const { approvalId } = await requestToolApproval(
+      { scope: { kind: 'profile', id: String(profileId) }, endUser: null, turnId: 't-f01', stepSeq: 1, signal: ac.signal },
+      boundTool,
+      { orderId: 'ORD-F01', password: 'user-pw-123', tokenEcho: secretVal },
+    );
+
+    const viewBefore = listApprovals().find((a) => a.id === approvalId)!;
+    expect(viewBefore.argsMasked).not.toContain('user-pw-123');
+    expect(viewBefore.argsMasked).not.toContain(secretVal);
+
+    const failExecutor: WriteApprovalExecutor = {
+      async executeClaimedWrite() {
+        return {
+          ok: false,
+          status: 'failed',
+          resultMasked: `leaked ${secretVal}`,
+          error: `upstream rejected ${secretVal}`,
+          durationMs: 12,
+          resultBytes: 25,
+        };
+      },
+    };
+    const after = await approveAction(approvalId, 1, { note: `approved with ${secretVal}` }, failExecutor);
+    expect(after.decisionNote ?? '').not.toContain(secretVal);
+    expect(after.error ?? '').not.toContain(secretVal);
+    expect(after.resultMasked ?? '').not.toContain(secretVal);
+  });
+
+  it('F03 & F04: blocks dispatch even after re-review when schema/URL changes or scope binding is disabled', async () => {
+    const profileId = createProfile('f03-f04-profile');
+    const { server, refundTool, boundTool } = await setupBoundWriteTool(profileId);
+    const ac = new AbortController();
+
+    const { approvalId: aSchema } = await requestToolApproval(
+      { scope: { kind: 'profile', id: String(profileId) }, endUser: null, turnId: 't-f03-1', stepSeq: 1, signal: ac.signal },
+      boundTool,
+      { orderId: 'ORD-F03-1' },
+    );
+
+    // Sync changed description, then RE-REVIEW to allowed: old approval MUST still be blocked!
+    await syncServerTools(server.id, 1, undefined, makeFakeTransport('Changed refund semantics'));
+    reviewTool(refundTool.id, { state: 'allowed', effect: 'write' }, 1);
+
+    let dispatches = 0;
+    const executor: WriteApprovalExecutor = {
+      async executeClaimedWrite() {
+        dispatches += 1;
+        return { ok: true, status: 'succeeded', resultMasked: 'ok', durationMs: 1, resultBytes: 2 };
+      },
+    };
+
+    await expect(approveAction(aSchema, 1, undefined, executor)).rejects.toMatchObject({ status: 409 });
+    expect(dispatches).toBe(0);
+
+    // New approval with current schema, then disable scope binding -> F04 must block!
+    const updatedTool = listServerTools(server.id)[0]!;
+    const { approvalId: aBind } = await requestToolApproval(
+      { scope: { kind: 'profile', id: String(profileId) }, endUser: null, turnId: 't-f04-1', stepSeq: 1, signal: ac.signal },
+      { ...boundTool, description: updatedTool.description, schemaHash: updatedTool.schemaHash },
+      { orderId: 'ORD-F04-1' },
+    );
+    setBindings({ kind: 'profile', id: String(profileId) }, { toolIds: [updatedTool.id], enabled: false });
+
+    await expect(approveAction(aBind, 1, undefined, executor)).rejects.toMatchObject({ status: 409 });
+    expect(dispatches).toBe(0);
+  });
+
+  it('F08: projects resultMasked/error onto McpApprovalView and transitions custom_ai_tool_calls out of awaiting_approval', async () => {
+    const profileId = createProfile('f08-profile');
+    const { server, refundTool, boundTool } = await setupBoundWriteTool(profileId);
+    const ac = new AbortController();
+
+    const executionKey = 'exec-f08-1';
+    const { approvalId } = await requestToolApproval(
+      { scope: { kind: 'profile', id: String(profileId) }, endUser: null, turnId: 't-f08', stepSeq: 1, signal: ac.signal },
+      boundTool,
+      { orderId: 'ORD-F08' },
+    );
+    // Simulate runtime recording awaiting_approval row with matching executionKey
+    const { recordToolCall } = await import('../../../custom/ai-platform/mcp-client/calls.js');
+    recordToolCall({
+      executionKey,
+      scope: { kind: 'profile', id: String(profileId) },
+      endUser: null,
+      serverId: server.id,
+      toolName: refundTool.name,
+      argsMasked: '{"orderId":"ORD-F08"}',
+      resultMasked: null,
+      status: 'awaiting_approval',
+      durationMs: 0,
+      resultBytes: 0,
+    });
+    // Ensure approval links to the same execution_key if generated internally
+    const appRow = getDb().prepare('SELECT execution_key FROM custom_ai_approvals WHERE id = ?').get(approvalId) as {
+      execution_key: string;
+    };
+    getDb()
+      .prepare('UPDATE custom_ai_tool_calls SET execution_key = ? WHERE execution_key = ?')
+      .run(appRow.execution_key, executionKey);
+
+    const executor: WriteApprovalExecutor = {
+      async executeClaimedWrite() {
+        return {
+          ok: true,
+          status: 'succeeded',
+          resultMasked: '{"refunded":true}',
+          durationMs: 42,
+          resultBytes: 17,
+        };
+      },
+    };
+    const approved = await approveAction(approvalId, 1, undefined, executor);
+    expect(approved.status).toBe('succeeded');
+    expect(approved.resultMasked).toBe('{"refunded":true}');
+    expect(approved.durationMs).toBe(42);
+    expect(approved.resultBytes).toBe(17);
+    expect(approved.executedAt).toBeTruthy();
+
+    const callRow = getDb()
+      .prepare('SELECT status, result_masked FROM custom_ai_tool_calls WHERE execution_key = ?')
+      .get(appRow.execution_key) as { status: string; result_masked: string | null };
+    expect(callRow.status).toBe('ok');
+    expect(callRow.result_masked).toBe('{"refunded":true}');
+  });
 });

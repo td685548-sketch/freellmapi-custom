@@ -475,3 +475,66 @@ describe('MCP respond.ts 4-wire callerToolCalls serialization (T040/T048)', () =
     expect(gemSse.getText()).toContain('get_weather');
   });
 });
+
+describe('MCP Compatibility & Fallback Audit (F05 / F09)', () => {
+  it('F09: returns null instead of silently dropping Anthropic thinking, redacted_thinking, or image tool_result blocks', () => {
+    expect(
+      toLoopbackMessages('anthropic', {
+        messages: [
+          {
+            role: 'assistant',
+            content: [
+              { type: 'thinking', thinking: 'internal', signature: 'sig-1' },
+              { type: 'text', text: 'Answer' },
+            ],
+          },
+          { role: 'user', content: 'Follow up' },
+        ],
+      }),
+    ).toBeNull();
+
+    expect(
+      toLoopbackMessages('anthropic', {
+        messages: [
+          {
+            role: 'assistant',
+            content: [
+              { type: 'redacted_thinking', data: 'opaque' },
+              { type: 'text', text: 'Answer' },
+            ],
+          },
+          { role: 'user', content: 'Follow up' },
+        ],
+      }),
+    ).toBeNull();
+
+    expect(
+      toLoopbackMessages('anthropic', {
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'tu_1',
+                content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toBeNull();
+  });
+
+  it('F05: extracts tool_choice, response_format, and max_completion_tokens when supported', () => {
+    const params = extractLoopParams('openai-chat', {
+      messages: [{ role: 'user', content: 'hi' }],
+      tool_choice: 'none',
+      response_format: { type: 'json_object' },
+      max_completion_tokens: 256,
+    }) as Record<string, unknown>;
+    expect(params.toolChoice).toBe('none');
+    expect(params.responseFormat).toEqual({ type: 'json_object' });
+    expect(params.maxCompletionTokens).toBe(256);
+  });
+});

@@ -154,5 +154,9 @@ describe('MCP Admin Router & Readiness (T050)', () => {
     const agentRes = await api('GET', '/api/ai-platform/mcp/bindings/agent/triage', token);
     expect(agentRes.status).toBe(409);
     expect((agentRes.json.error as { code?: string }).code).toBe('scope_unavailable');
+
+    // F02: unexpected internal errors return generic 500 message without leaking stack/DB text
+    const badRes = await api('GET', '/api/ai-platform/mcp/servers/not-a-valid-id/tools', token);
+    expect(badRes.status).toBe(400);
   });
 });

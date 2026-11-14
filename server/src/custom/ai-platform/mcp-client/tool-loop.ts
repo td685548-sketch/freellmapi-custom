@@ -211,6 +211,7 @@ export async function runToolLoop(
       ...(input.params ? { safeParams: input.params } : {}),
       ...(input.endUser !== undefined ? { endUser: input.endUser } : {}),
       ...(input.runId ? { runId: input.runId } : {}),
+      skipEnrichment: true,
       depth: 0,
       signal: input.signal,
     });

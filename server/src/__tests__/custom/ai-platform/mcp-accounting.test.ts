@@ -251,4 +251,205 @@ describe('MCP Admission & Accounting (T049)', () => {
       await fakeProvider.close();
     }
   });
+
+  it('F05: forwards tool_choice/response_format/max_completion_tokens and falls back before admission on unsupported fields', async () => {
+    setKeyCacheTestOverride(true);
+    const enc = encrypt('gsk_f05_test');
+    getDb()
+      .prepare(
+        `INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled)
+         VALUES ('groq', 'groq-f05', ?, ?, ?, 'healthy', 1)`,
+      )
+      .run(enc.encrypted, enc.iv, enc.authTag);
+
+    insertProfile('sk-cp-f05-offset-1', { aiToolsEnabled: 0 });
+    insertProfile('sk-cp-f05-offset-2', { aiToolsEnabled: 0 });
+    const rawKey = 'sk-cp-f05-http-1234';
+    const profileId = insertProfile(rawKey, { aiToolsEnabled: 1, maxRounds: 4 });
+    const srv = await createServer({ slug: 'f05-srv', name: 'F05Srv', url: 'https://mcp.example.com/v1', authKind: 'none' }, 1);
+    setFlags({ mcpClient: true });
+    await syncServerTools(srv.id, 1, undefined, makeFakeTransport());
+    const tool = listServerTools(srv.id)[0]!;
+    reviewTool(tool.id, { state: 'allowed', effect: 'read' }, 1);
+    setBindings({ kind: 'profile', id: String(profileId) }, { toolIds: [tool.id], enabled: true });
+
+    const fakeProvider = await startFakeProviderServer({ kind: 'scripted', text: '{}' });
+    const realFetch = global.fetch;
+    vi.spyOn(global, 'fetch').mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (urlStr.startsWith(baseUrl) || urlStr.startsWith(fakeProvider.url)) {
+        return realFetch(input, init);
+      }
+      const parsed = new URL(urlStr);
+      return realFetch(`${fakeProvider.url}${parsed.pathname}${parsed.search}`, init);
+    });
+
+    try {
+      const r1 = await realFetch(`${baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${rawKey}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'groq/compound',
+          messages: [{ role: 'user', content: 'json only' }],
+          tool_choice: 'none',
+          response_format: { type: 'json_object' },
+          max_completion_tokens: 128,
+        }),
+      });
+      expect(r1.status).toBe(200);
+      await r1.text();
+      const sent1 = fakeProvider.requests[0]!.bodyJson as Record<string, unknown>;
+      expect(sent1.tool_choice).toBe('none');
+      expect(sent1.response_format).toEqual({ type: 'json_object' });
+      expect(sent1.max_tokens).toBe(128);
+
+      // Unsupported field (parallel_tool_calls) triggers fallback to normal gateway before admission
+      fakeProvider.clearRequests();
+      fakeProvider.enqueue({ kind: 'scripted', wire: 'openai-chat', text: 'fallback-ok', stream: false });
+      const r2 = await realFetch(`${baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${rawKey}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'groq/compound',
+          messages: [{ role: 'user', content: 'parallel off' }],
+          parallel_tool_calls: false,
+        }),
+      });
+      expect(r2.status).toBe(200);
+      await r2.text();
+      const sent2 = fakeProvider.requests[0]!.bodyJson as Record<string, unknown>;
+      expect(sent2.parallel_tool_calls).toBe(false);
+    } finally {
+      vi.restoreAllMocks();
+      await fakeProvider.close();
+    }
+  });
+
+  it('F06: preserves multi-turn conversations, validation, quick answers, and single KB enrichment under MCP takeover', async () => {
+    setKeyCacheTestOverride(true);
+    const enc = encrypt('gsk_f06_test');
+    getDb()
+      .prepare(
+        `INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled)
+         VALUES ('groq', 'groq-f06', ?, ?, ?, 'healthy', 1)`,
+      )
+      .run(enc.encrypted, enc.iv, enc.authTag);
+
+    insertProfile('sk-cp-f06-offset-1', { aiToolsEnabled: 0 });
+    insertProfile('sk-cp-f06-offset-2', { aiToolsEnabled: 0 });
+    insertProfile('sk-cp-f06-offset-3', { aiToolsEnabled: 0 });
+    const rawKey = 'sk-cp-f06-http-1234';
+    const profileId = insertProfile(rawKey, { aiToolsEnabled: 1, maxRounds: 4 });
+    getDb().prepare('UPDATE client_profiles SET conv_enabled = 1, qa_enabled = 1 WHERE id = ?').run(profileId);
+    getDb()
+      .prepare(
+        `INSERT INTO custom_quick_answers (profile_id, questions, answer, enabled, updated_at)
+         VALUES (?, ?, '9am to 5pm daily.', 1, ?)`,
+      )
+      .run(profileId, JSON.stringify(['What are your opening hours?']), new Date().toISOString());
+
+    const srv = await createServer({ slug: 'f06-srv', name: 'F06Srv', url: 'https://mcp.example.com/v1', authKind: 'none' }, 1);
+    setFlags({ mcpClient: true });
+    await syncServerTools(srv.id, 1, undefined, makeFakeTransport());
+    const tool = listServerTools(srv.id)[0]!;
+    reviewTool(tool.id, { state: 'allowed', effect: 'read' }, 1);
+    setBindings({ kind: 'profile', id: String(profileId) }, { toolIds: [tool.id], enabled: true });
+
+    const fakeProvider = await startFakeProviderServer();
+    const realFetch = global.fetch;
+    vi.spyOn(global, 'fetch').mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (urlStr.startsWith(baseUrl) || urlStr.startsWith(fakeProvider.url)) {
+        return realFetch(input, init);
+      }
+      const parsed = new URL(urlStr);
+      return realFetch(`${fakeProvider.url}${parsed.pathname}${parsed.search}`, init);
+    });
+
+    try {
+      // 1. Multi-turn conversation
+      fakeProvider.enqueue(
+        { kind: 'scripted', wire: 'openai-chat', text: 'Alpha noted.', stream: false },
+        { kind: 'scripted', wire: 'openai-chat', text: 'It was alpha.', stream: false },
+      );
+      const convHeaders = {
+        authorization: `Bearer ${rawKey}`,
+        'content-type': 'application/json',
+        'x-conversation-id': 'conv-f06-1',
+        'x-end-user': 'eu-f06-a',
+      };
+      const t1 = await realFetch(`${baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: convHeaders,
+        body: JSON.stringify({ model: 'groq/compound', messages: [{ role: 'user', content: 'Remember code alpha' }] }),
+      });
+      expect(t1.status).toBe(200);
+      await t1.text();
+
+      const t2 = await realFetch(`${baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: convHeaders,
+        body: JSON.stringify({ model: 'groq/compound', messages: [{ role: 'user', content: 'What was the code?' }] }),
+      });
+      expect(t2.status).toBe(200);
+      expect(t2.headers.get('x-conversation-history')).toBe('2');
+      await t2.text();
+
+      const msgCount = getDb().prepare('SELECT COUNT(*) as c FROM custom_conversation_messages').get() as { c: number };
+      expect(msgCount.c).toBe(4);
+
+      // 2. Wrong end-user on existing conversation -> 403
+      const wrongEu = await realFetch(`${baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { ...convHeaders, 'x-end-user': 'eu-f06-other' },
+        body: JSON.stringify({ model: 'groq/compound', messages: [{ role: 'user', content: 'steal' }] }),
+      });
+      expect(wrongEu.status).toBe(403);
+
+      // 3. Quick answer -> zero provider calls
+      fakeProvider.clearRequests();
+      const qaRes = await realFetch(`${baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${rawKey}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'groq/compound', messages: [{ role: 'user', content: 'What are your opening hours?' }] }),
+      });
+      expect(qaRes.status).toBe(200);
+      expect(qaRes.headers.get('x-quick-answer')).toBeTruthy();
+      expect(fakeProvider.requests).toHaveLength(0);
+
+      // 4. F06: Knowledge injection runs ONCE on outer request, NOT duplicated on round 2
+      const { addDoc, setKnowledgeSettings } = await import('../../../services/profile-knowledge.js');
+      setKnowledgeSettings(profileId, { enabled: true, maxChars: 2000 });
+      addDoc(profileId, 'Policy', 'The refund policy code is UNIQUE_KB_FACT_98765.');
+
+      fakeProvider.clearRequests();
+      fakeProvider.enqueue(
+        {
+          kind: 'scripted',
+          wire: 'openai-chat',
+          toolCalls: [{ id: 'call_kb_1', name: tool.exposedName, arguments: { query: 'policy' } }],
+          stream: false,
+        },
+        { kind: 'scripted', wire: 'openai-chat', text: 'KB policy confirmed.', stream: false },
+      );
+
+      const kbRes = await realFetch(`${baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${rawKey}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'groq/compound', messages: [{ role: 'user', content: 'Tell me about UNIQUE_KB_FACT_98765' }] }),
+      });
+      expect(kbRes.status).toBe(200);
+      await kbRes.text();
+      expect(fakeProvider.requests).toHaveLength(2);
+
+      for (const reqLog of fakeProvider.requests) {
+        const bodyStr = JSON.stringify(reqLog.bodyJson);
+        const matches = bodyStr.match(/Reference material from this website\./g) ?? [];
+        expect(matches).toHaveLength(1);
+      }
+    } finally {
+      vi.restoreAllMocks();
+      await fakeProvider.close();
+    }
+  });
 });

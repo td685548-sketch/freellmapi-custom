@@ -7,9 +7,12 @@ import type {
 
 export interface LoopSafeParams {
   maxTokens?: number;
+  maxCompletionTokens?: number;
   temperature?: number;
   topP?: number;
   stop?: string | string[];
+  toolChoice?: unknown;
+  responseFormat?: unknown;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -38,22 +41,27 @@ function convertOpenAiMessage(item: unknown): ChatMessage | null {
   return out;
 }
 
-function convertAnthropicSystem(system: unknown): ChatMessage | null {
+function convertAnthropicSystem(system: unknown): { ok: true; msg: ChatMessage | null } | { ok: false } {
+  if (system === undefined || system === null) return { ok: true, msg: null };
   if (typeof system === 'string') {
-    return system.length > 0 ? { role: 'system', content: system } : null;
+    return { ok: true, msg: system.length > 0 ? { role: 'system', content: system } : null };
   }
   if (Array.isArray(system)) {
-    const parts = system
-      .map((b) => asRecord(b))
-      .filter((b): b is Record<string, unknown> => Boolean(b && b.type === 'text' && typeof b.text === 'string'))
-      .map((b) => ({
-        type: 'text' as const,
-        text: b.text as string,
+    const parts: Array<{ type: 'text'; text: string; cache_control?: unknown }> = [];
+    for (const raw of system) {
+      const b = asRecord(raw);
+      if (!b || b.type !== 'text' || typeof b.text !== 'string') {
+        return { ok: false };
+      }
+      parts.push({
+        type: 'text',
+        text: b.text,
         ...(b.cache_control !== undefined ? { cache_control: b.cache_control } : {}),
-      }));
-    return parts.length > 0 ? { role: 'system', content: parts as ChatMessage['content'] } : null;
+      });
+    }
+    return { ok: true, msg: parts.length > 0 ? { role: 'system', content: parts as ChatMessage['content'] } : null };
   }
-  return null;
+  return { ok: false };
 }
 
 function convertAnthropicPart(block: Record<string, unknown>): Record<string, unknown> | null {
@@ -83,7 +91,8 @@ function convertAnthropicMessages(body: Record<string, unknown>): ChatMessage[] 
   if (!Array.isArray(body.messages)) return null;
   const out: ChatMessage[] = [];
   const sys = convertAnthropicSystem(body.system);
-  if (sys) out.push(sys);
+  if (!sys.ok) return null;
+  if (sys.msg) out.push(sys.msg);
 
   for (const raw of body.messages) {
     const msg = asRecord(raw);
@@ -112,7 +121,8 @@ function convertAnthropicMessages(body: Record<string, unknown>): ChatMessage[] 
           });
         } else {
           const converted = convertAnthropicPart(block);
-          if (converted) textParts.push(converted);
+          if (!converted) return null;
+          textParts.push(converted);
         }
       }
       const content =
@@ -135,15 +145,22 @@ function convertAnthropicMessages(body: Record<string, unknown>): ChatMessage[] 
       const block = asRecord(item);
       if (!block) return null;
       if (block.type === 'tool_result' && typeof block.tool_use_id === 'string') {
-        const resultText =
-          typeof block.content === 'string'
-            ? block.content
-            : Array.isArray(block.content)
-              ? block.content
-                  .map((c) => (asRecord(c)?.text as string | undefined) ?? '')
-                  .filter(Boolean)
-                  .join('\n')
-              : JSON.stringify(block.content ?? '');
+        let resultText = '';
+        if (typeof block.content === 'string') {
+          resultText = block.content;
+        } else if (Array.isArray(block.content)) {
+          const textChunks: string[] = [];
+          for (const c of block.content) {
+            const cRec = asRecord(c);
+            if (!cRec || cRec.type !== 'text' || typeof cRec.text !== 'string') {
+              return null;
+            }
+            textChunks.push(cRec.text);
+          }
+          resultText = textChunks.join('\n');
+        } else if (block.content !== undefined && block.content !== null) {
+          resultText = JSON.stringify(block.content);
+        }
         out.push({
           role: 'tool',
           tool_call_id: block.tool_use_id,
@@ -351,26 +368,31 @@ export function toLoopbackMessages(wire: Wire, body: unknown): ChatMessage[] | n
   return null;
 }
 
-/** Extracts caller-declared tool definitions in canonical OpenAI Chat format. */
-export function extractCallerTools(wire: Wire, body: unknown): ChatToolDefinition[] {
+/**
+ * Extracts caller-declared tool definitions in canonical OpenAI Chat format.
+ * Returns `null` if `tools` contains an unsupported tool type (forcing normal-gateway fallback).
+ */
+export function extractCallerToolsOrNull(wire: Wire, body: unknown): ChatToolDefinition[] | null {
   const obj = asRecord(body);
-  if (!obj || !Array.isArray(obj.tools)) return [];
+  if (!obj || obj.tools === undefined || obj.tools === null) return [];
+  if (!Array.isArray(obj.tools)) return null;
   const out: ChatToolDefinition[] = [];
 
   if (wire === 'openai-chat') {
     for (const item of obj.tools) {
       const t = asRecord(item);
       const fn = asRecord(t?.function);
-      if (t?.type === 'function' && fn && typeof fn.name === 'string') {
-        out.push({
-          type: 'function',
-          function: {
-            name: fn.name,
-            ...(typeof fn.description === 'string' ? { description: fn.description } : {}),
-            ...(asRecord(fn.parameters) ? { parameters: fn.parameters as Record<string, unknown> } : {}),
-          },
-        });
+      if (!t || t.type !== 'function' || !fn || typeof fn.name !== 'string') {
+        return null;
       }
+      out.push({
+        type: 'function',
+        function: {
+          name: fn.name,
+          ...(typeof fn.description === 'string' ? { description: fn.description } : {}),
+          ...(asRecord(fn.parameters) ? { parameters: fn.parameters as Record<string, unknown> } : {}),
+        },
+      });
     }
     return out;
   }
@@ -378,16 +400,16 @@ export function extractCallerTools(wire: Wire, body: unknown): ChatToolDefinitio
   if (wire === 'anthropic') {
     for (const item of obj.tools) {
       const t = asRecord(item);
-      if (t && typeof t.name === 'string') {
-        out.push({
-          type: 'function',
-          function: {
-            name: t.name,
-            ...(typeof t.description === 'string' ? { description: t.description } : {}),
-            ...(asRecord(t.input_schema) ? { parameters: t.input_schema as Record<string, unknown> } : {}),
-          },
-        });
-      }
+      if (!t || typeof t.name !== 'string') return null;
+      if (t.type !== undefined && t.type !== 'custom') return null;
+      out.push({
+        type: 'function',
+        function: {
+          name: t.name,
+          ...(typeof t.description === 'string' ? { description: t.description } : {}),
+          ...(asRecord(t.input_schema) ? { parameters: t.input_schema as Record<string, unknown> } : {}),
+        },
+      });
     }
     return out;
   }
@@ -395,16 +417,17 @@ export function extractCallerTools(wire: Wire, body: unknown): ChatToolDefinitio
   if (wire === 'responses') {
     for (const item of obj.tools) {
       const t = asRecord(item);
-      if (t?.type === 'function' && typeof t.name === 'string') {
-        out.push({
-          type: 'function',
-          function: {
-            name: t.name,
-            ...(typeof t.description === 'string' ? { description: t.description } : {}),
-            ...(asRecord(t.parameters) ? { parameters: t.parameters as Record<string, unknown> } : {}),
-          },
-        });
+      if (!t || t.type !== 'function' || typeof t.name !== 'string') {
+        return null;
       }
+      out.push({
+        type: 'function',
+        function: {
+          name: t.name,
+          ...(typeof t.description === 'string' ? { description: t.description } : {}),
+          ...(asRecord(t.parameters) ? { parameters: t.parameters as Record<string, unknown> } : {}),
+        },
+      });
     }
     return out;
   }
@@ -412,58 +435,249 @@ export function extractCallerTools(wire: Wire, body: unknown): ChatToolDefinitio
   if (wire === 'gemini') {
     for (const item of obj.tools) {
       const group = asRecord(item);
-      if (!group || !Array.isArray(group.functionDeclarations)) continue;
+      if (!group) return null;
+      const keys = Object.keys(group);
+      if (keys.some((k) => k !== 'functionDeclarations') || !Array.isArray(group.functionDeclarations)) {
+        return null;
+      }
       for (const declRaw of group.functionDeclarations) {
         const decl = asRecord(declRaw);
-        if (decl && typeof decl.name === 'string') {
-          out.push({
-            type: 'function',
-            function: {
-              name: decl.name,
-              ...(typeof decl.description === 'string' ? { description: decl.description } : {}),
-              ...(asRecord(decl.parameters) ? { parameters: decl.parameters as Record<string, unknown> } : {}),
-            },
-          });
-        }
+        if (!decl || typeof decl.name !== 'string') return null;
+        out.push({
+          type: 'function',
+          function: {
+            name: decl.name,
+            ...(typeof decl.description === 'string' ? { description: decl.description } : {}),
+            ...(asRecord(decl.parameters) ? { parameters: decl.parameters as Record<string, unknown> } : {}),
+          },
+        });
       }
     }
+    return out;
   }
 
   return out;
 }
 
-/** Extracts supported generation parameters safely across the 4 wire protocols. */
-export function extractLoopParams(wire: Wire, body: unknown): LoopSafeParams {
+/** Extracts caller-declared tool definitions in canonical OpenAI Chat format. */
+export function extractCallerTools(wire: Wire, body: unknown): ChatToolDefinition[] {
+  return extractCallerToolsOrNull(wire, body) ?? [];
+}
+
+function normalizeOpenAiToolChoice(raw: unknown): { ok: true; value?: unknown } | { ok: false } {
+  if (raw === undefined || raw === null) return { ok: true };
+  if (raw === 'auto' || raw === 'none' || raw === 'required') return { ok: true, value: raw };
+  const rec = asRecord(raw);
+  const fn = asRecord(rec?.function);
+  if (rec?.type === 'function' && fn && typeof fn.name === 'string') {
+    return { ok: true, value: { type: 'function', function: { name: fn.name } } };
+  }
+  return { ok: false };
+}
+
+function normalizeOpenAiResponseFormat(raw: unknown): { ok: true; value?: unknown } | { ok: false } {
+  if (raw === undefined || raw === null) return { ok: true };
+  const rec = asRecord(raw);
+  if (!rec || typeof rec.type !== 'string') return { ok: false };
+  if (rec.type === 'text' || rec.type === 'json_object' || rec.type === 'json_schema') {
+    return { ok: true, value: raw };
+  }
+  return { ok: false };
+}
+
+function hasAnyDefined(obj: Record<string, unknown>, keys: string[]): boolean {
+  return keys.some((k) => obj[k] !== undefined && obj[k] !== null);
+}
+
+/**
+ * Extracts supported generation parameters safely across the 4 wire protocols.
+ * Returns `null` when the request carries parameters or structured options that
+ * cannot be faithfully forwarded through the canonical OpenAI Chat loopback.
+ */
+export function extractLoopParamsOrNull(wire: Wire, body: unknown): LoopSafeParams | null {
   const obj = asRecord(body);
-  if (!obj) return {};
+  if (!obj) return null;
+
+  if (wire === 'openai-chat') {
+    if (
+      hasAnyDefined(obj, [
+        'functions',
+        'function_call',
+        'parallel_tool_calls',
+        'modalities',
+        'audio',
+        'prediction',
+        'reasoning_effort',
+        'logprobs',
+        'top_logprobs',
+        'logit_bias',
+        'seed',
+        'service_tier',
+        'store',
+      ])
+    ) {
+      return null;
+    }
+    if (obj.n !== undefined && obj.n !== null && obj.n !== 1) return null;
+    const tc = normalizeOpenAiToolChoice(obj.tool_choice);
+    if (!tc.ok) return null;
+    const rf = normalizeOpenAiResponseFormat(obj.response_format);
+    if (!rf.ok) return null;
+    const stop =
+      typeof obj.stop === 'string' || Array.isArray(obj.stop)
+        ? (obj.stop as string | string[])
+        : undefined;
+    return {
+      ...(typeof obj.max_tokens === 'number' ? { maxTokens: obj.max_tokens } : {}),
+      ...(typeof obj.max_completion_tokens === 'number'
+        ? { maxCompletionTokens: obj.max_completion_tokens }
+        : {}),
+      ...(typeof obj.temperature === 'number' ? { temperature: obj.temperature } : {}),
+      ...(typeof obj.top_p === 'number' ? { topP: obj.top_p } : {}),
+      ...(stop !== undefined ? { stop } : {}),
+      ...(tc.value !== undefined ? { toolChoice: tc.value } : {}),
+      ...(rf.value !== undefined ? { responseFormat: rf.value } : {}),
+    };
+  }
+
+  if (wire === 'anthropic') {
+    if (
+      hasAnyDefined(obj, [
+        'thinking',
+        'metadata',
+        'container',
+        'mcp_servers',
+        'context_management',
+        'output_config',
+        'output_format',
+      ])
+    ) {
+      return null;
+    }
+    let toolChoice: unknown;
+    if (obj.tool_choice !== undefined && obj.tool_choice !== null) {
+      const tc = asRecord(obj.tool_choice);
+      if (!tc || typeof tc.type !== 'string') return null;
+      if (tc.type === 'auto') toolChoice = 'auto';
+      else if (tc.type === 'any') toolChoice = 'required';
+      else if (tc.type === 'none') toolChoice = 'none';
+      else if (tc.type === 'tool' && typeof tc.name === 'string') {
+        toolChoice = { type: 'function', function: { name: tc.name } };
+      } else {
+        return null;
+      }
+    }
+    const stop = Array.isArray(obj.stop_sequences) ? (obj.stop_sequences as string[]) : undefined;
+    return {
+      ...(typeof obj.max_tokens === 'number' ? { maxTokens: obj.max_tokens } : {}),
+      ...(typeof obj.temperature === 'number' ? { temperature: obj.temperature } : {}),
+      ...(typeof obj.top_p === 'number' ? { topP: obj.top_p } : {}),
+      ...(stop !== undefined ? { stop } : {}),
+      ...(toolChoice !== undefined ? { toolChoice } : {}),
+    };
+  }
+
+  if (wire === 'responses') {
+    if (
+      hasAnyDefined(obj, [
+        'previous_response_id',
+        'conversation',
+        'reasoning',
+        'truncation',
+        'include',
+        'background',
+        'parallel_tool_calls',
+      ])
+    ) {
+      return null;
+    }
+    let toolChoice: unknown;
+    if (obj.tool_choice !== undefined && obj.tool_choice !== null) {
+      if (obj.tool_choice === 'auto' || obj.tool_choice === 'none' || obj.tool_choice === 'required') {
+        toolChoice = obj.tool_choice;
+      } else {
+        const tc = asRecord(obj.tool_choice);
+        if (tc?.type === 'function' && typeof tc.name === 'string') {
+          toolChoice = { type: 'function', function: { name: tc.name } };
+        } else {
+          return null;
+        }
+      }
+    }
+    let responseFormat: unknown;
+    if (obj.text !== undefined && obj.text !== null) {
+      const textObj = asRecord(obj.text);
+      const fmt = asRecord(textObj?.format);
+      if (!fmt || typeof fmt.type !== 'string') return null;
+      if (fmt.type === 'text' || fmt.type === 'json_object') {
+        responseFormat = { type: fmt.type };
+      } else if (fmt.type === 'json_schema' && typeof fmt.name === 'string' && asRecord(fmt.schema)) {
+        responseFormat = {
+          type: 'json_schema',
+          json_schema: {
+            name: fmt.name,
+            schema: fmt.schema,
+            ...(typeof fmt.strict === 'boolean' ? { strict: fmt.strict } : {}),
+          },
+        };
+      } else {
+        return null;
+      }
+    }
+    return {
+      ...(typeof obj.max_output_tokens === 'number' ? { maxTokens: obj.max_output_tokens } : {}),
+      ...(typeof obj.temperature === 'number' ? { temperature: obj.temperature } : {}),
+      ...(typeof obj.top_p === 'number' ? { topP: obj.top_p } : {}),
+      ...(toolChoice !== undefined ? { toolChoice } : {}),
+      ...(responseFormat !== undefined ? { responseFormat } : {}),
+    };
+  }
 
   if (wire === 'gemini') {
+    if (hasAnyDefined(obj, ['cachedContent', 'safetySettings'])) {
+      return null;
+    }
+    let toolChoice: unknown;
+    if (obj.toolConfig !== undefined && obj.toolConfig !== null) {
+      const tc = asRecord(obj.toolConfig);
+      const fcc = asRecord(tc?.functionCallingConfig);
+      if (!fcc || typeof fcc.mode !== 'string') return null;
+      const allowedNames = Array.isArray(fcc.allowedFunctionNames) ? fcc.allowedFunctionNames : undefined;
+      if (fcc.mode === 'AUTO' && !allowedNames) toolChoice = 'auto';
+      else if (fcc.mode === 'NONE') toolChoice = 'none';
+      else if (fcc.mode === 'ANY' && !allowedNames) toolChoice = 'required';
+      else if (fcc.mode === 'ANY' && allowedNames?.length === 1 && typeof allowedNames[0] === 'string') {
+        toolChoice = { type: 'function', function: { name: allowedNames[0] } };
+      } else {
+        return null;
+      }
+    }
     const gen = asRecord(obj.generationConfig) ?? {};
+    let responseFormat: unknown;
+    if (gen.responseSchema !== undefined && gen.responseSchema !== null) {
+      return null;
+    }
+    if (gen.responseMimeType !== undefined && gen.responseMimeType !== null) {
+      if (gen.responseMimeType === 'application/json') {
+        responseFormat = { type: 'json_object' };
+      } else if (gen.responseMimeType !== 'text/plain') {
+        return null;
+      }
+    }
     return {
       ...(typeof gen.maxOutputTokens === 'number' ? { maxTokens: gen.maxOutputTokens } : {}),
       ...(typeof gen.temperature === 'number' ? { temperature: gen.temperature } : {}),
       ...(typeof gen.topP === 'number' ? { topP: gen.topP } : {}),
       ...(Array.isArray(gen.stopSequences) ? { stop: gen.stopSequences as string[] } : {}),
+      ...(toolChoice !== undefined ? { toolChoice } : {}),
+      ...(responseFormat !== undefined ? { responseFormat } : {}),
     };
   }
 
-  const maxTokens =
-    typeof obj.max_tokens === 'number'
-      ? obj.max_tokens
-      : typeof obj.max_output_tokens === 'number'
-        ? obj.max_output_tokens
-        : undefined;
-  const stop =
-    typeof obj.stop === 'string' || Array.isArray(obj.stop)
-      ? (obj.stop as string | string[])
-      : Array.isArray(obj.stop_sequences)
-        ? (obj.stop_sequences as string[])
-        : undefined;
+  return {};
+}
 
-  return {
-    ...(maxTokens !== undefined ? { maxTokens } : {}),
-    ...(typeof obj.temperature === 'number' ? { temperature: obj.temperature } : {}),
-    ...(typeof obj.top_p === 'number' ? { topP: obj.top_p } : {}),
-    ...(stop !== undefined ? { stop } : {}),
-  };
+/** Extracts supported generation parameters safely across the 4 wire protocols. */
+export function extractLoopParams(wire: Wire, body: unknown): LoopSafeParams {
+  return extractLoopParamsOrNull(wire, body) ?? {};
 }

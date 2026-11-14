@@ -12,8 +12,8 @@ import { detectWire } from '../wire/detect.js';
 import { requestedModel } from '../wire/extract.js';
 import { toolsForScope } from './bindings.js';
 import {
-  extractCallerTools,
-  extractLoopParams,
+  extractCallerToolsOrNull,
+  extractLoopParamsOrNull,
   toLoopbackMessages,
   type LoopSafeParams,
 } from './messages.js';
@@ -57,7 +57,12 @@ export function prepareMcpTakeover(
   const messages = toLoopbackMessages(detected.wire, req.body);
   if (!messages) return null;
 
-  const callerTools = extractCallerTools(detected.wire, req.body);
+  const callerTools = extractCallerToolsOrNull(detected.wire, req.body);
+  if (!callerTools) return null;
+
+  const params = extractLoopParamsOrNull(detected.wire, req.body);
+  if (!params) return null;
+
   const scope: Scope = { kind: 'profile', id: String(profile.id) };
 
   let tools;
@@ -75,7 +80,6 @@ export function prepareMcpTakeover(
     MCP_LIMITS.minRounds,
     Math.min(MCP_LIMITS.maxRounds, profile.aiToolMaxRounds ?? MCP_LIMITS.defaultMaxRounds),
   );
-  const params = extractLoopParams(detected.wire, req.body);
 
   const plan: McpTakeoverPlan = {
     scope,
@@ -89,6 +93,16 @@ export function prepareMcpTakeover(
 
   preparedPlans.set(req, { plan, messages, params, endUser });
   return plan;
+}
+
+/** Refreshes canonical messages after outer knowledge enrichment. */
+export function refreshMcpTakeoverMessages(req: Request): void {
+  const prepared = preparedPlans.get(req);
+  if (!prepared) return;
+  const refreshed = toLoopbackMessages(prepared.plan.wire, req.body);
+  if (refreshed) {
+    prepared.messages = refreshed;
+  }
 }
 
 /** Consumes the private per-request takeover plan prepared before quota admission. */

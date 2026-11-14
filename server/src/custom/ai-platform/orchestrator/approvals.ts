@@ -14,8 +14,18 @@ import { isPillarEnabled } from '../flags.js';
 import { maskData, maskText } from '../masking.js';
 import { normalizeScope } from '../scope.js';
 import { validateScope } from '../mcp-client/bindings.js';
-import { recordToolCall } from '../mcp-client/calls.js';
+import {
+  assertApprovalExecutable,
+  captureApprovalSnapshot,
+} from '../mcp-client/approval-safety.js';
+import { recordToolCall, transitionToolCallOutcome } from '../mcp-client/calls.js';
+import { CURRENT_OWNER_INSTANCE_ID } from '../mcp-client/maintenance.js';
 import { assertToolExecutable } from '../mcp-client/registry.js';
+import {
+  sanitizeMcpError,
+  sanitizeMcpText,
+  sanitizeMcpValue,
+} from '../mcp-client/sanitize.js';
 import {
   McpConflictError,
   McpNotFoundError,
@@ -43,6 +53,13 @@ interface ApprovalRow {
   decision_note: string | null;
   expires_at: string;
   created_at: string;
+  owner_instance_id?: string | null;
+  snapshot_json?: string | null;
+  result_masked?: string | null;
+  error_text?: string | null;
+  duration_ms?: number | null;
+  result_bytes?: number | null;
+  executed_at?: string | null;
   tool_name?: string | null;
   exposed_name?: string | null;
   server_id?: number | null;
@@ -95,6 +112,11 @@ function toApprovalView(row: ApprovalRow): McpApprovalView {
     decisionNote: row.decision_note,
     expiresAt: row.expires_at,
     createdAt: row.created_at,
+    resultMasked: row.result_masked ?? null,
+    error: row.error_text ?? null,
+    executedAt: row.executed_at ?? null,
+    durationMs: row.duration_ms ?? null,
+    resultBytes: row.result_bytes ?? null,
   };
 }
 
@@ -130,8 +152,44 @@ function validateNote(note?: string): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function maskArgsString(scope: Scope, args: unknown, role?: string): string {
-  const masked = maskData(scope, args ?? {}, role);
+function collectServerSecrets(serverId?: number | null): string[] {
+  const db = getDb();
+  const rows = (
+    serverId != null
+      ? db
+          .prepare(
+            `SELECT auth_ciphertext, auth_iv, auth_tag
+               FROM custom_ai_mcp_servers
+              WHERE id = ? AND auth_ciphertext IS NOT NULL`,
+          )
+          .all(serverId)
+      : db
+          .prepare(
+            `SELECT auth_ciphertext, auth_iv, auth_tag
+               FROM custom_ai_mcp_servers
+              WHERE auth_ciphertext IS NOT NULL`,
+          )
+          .all()
+  ) as Array<{ auth_ciphertext: string; auth_iv: string | null; auth_tag: string | null }>;
+
+  const secrets: string[] = [];
+  for (const row of rows) {
+    if (!row.auth_ciphertext || !row.auth_iv || !row.auth_tag) continue;
+    try {
+      const val = decrypt(row.auth_ciphertext, row.auth_iv, row.auth_tag);
+      if (val && val.length >= 6) secrets.push(val);
+    } catch {
+      // Ignore undecryptable rows when collecting redaction needles.
+    }
+  }
+  return secrets;
+}
+
+function maskArgsString(scope: Scope, args: unknown, serverId?: number | null): string {
+  const secrets = collectServerSecrets(serverId);
+  // F01: Never bypass sensitive-key/credential scrubbing via caller role.
+  const scrubbed = sanitizeMcpValue(args ?? {}, secrets);
+  const masked = maskData(scope, scrubbed);
   const raw = JSON.stringify(masked) ?? '{}';
   const buf = Buffer.from(raw, 'utf8');
   if (buf.length <= MCP_LIMITS.callLogMaxBytes) return raw;
@@ -196,7 +254,13 @@ export async function requestToolApproval(
 
   const serializedArgs = JSON.stringify(args ?? {});
   const encrypted = encrypt(serializedArgs);
-  const argsMasked = maskArgsString(norm, args, ctx.role);
+  const argsMasked = maskArgsString(norm, args, tool.serverId);
+  const snapshot = await captureApprovalSnapshot({
+    toolId: tool.toolId,
+    scopeKind: norm.kind,
+    scopeId: norm.id,
+  });
+  const snapshotJson = JSON.stringify(snapshot);
   const expiresAt = new Date(Date.now() + MCP_LIMITS.approvalTtlHours * 3600_000).toISOString();
   const now = new Date().toISOString();
 
@@ -205,8 +269,8 @@ export async function requestToolApproval(
       `INSERT INTO custom_ai_approvals (
         execution_key, run_id, step_seq, scope_kind, scope_id, end_user,
         tool_id, args_ciphertext, args_iv, args_tag, args_masked,
-        status, expires_at, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+        status, expires_at, created_at, snapshot_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
     )
     .run(
       executionKey,
@@ -222,6 +286,7 @@ export async function requestToolApproval(
       argsMasked,
       expiresAt,
       now,
+      snapshotJson,
     );
 
   return { approvalId: Number(res.lastInsertRowid), executionKey };
@@ -232,6 +297,7 @@ export function listApprovals(filter?: {
   scope?: Scope;
   limit?: number;
 }): McpApprovalView[] {
+  expireApprovals();
   const db = getDb();
   const clauses: string[] = [];
   const params: unknown[] = [];
@@ -292,11 +358,28 @@ export async function approveAction(
     throw new McpPillarDisabledError();
   }
 
-  const note = validateNote(input?.note);
+  const rawNote = validateNote(input?.note);
   const db = getDb();
   const nowIso = new Date().toISOString();
 
-  // Claim pending -> approved -> executing atomically in a transaction; zero I/O inside.
+  expireApprovals(new Date(nowIso));
+  const initialRow = selectApprovalById(id);
+  if (!initialRow) {
+    throw new McpNotFoundError(`Approval ${id} not found.`);
+  }
+  if (initialRow.status !== 'pending') {
+    throw new McpConflictError('already_decided', `Approval ${id} is already '${initialRow.status}'.`);
+  }
+
+  // F03/F04: Validate immutable approval snapshot (schema, URL, credential gen, tool review, scope, binding) before claim.
+  await assertApprovalExecutable(initialRow.snapshot_json);
+
+  const serverSecrets = collectServerSecrets(initialRow.server_id);
+  const note = rawNote
+    ? maskText({ kind: initialRow.scope_kind, id: initialRow.scope_id }, sanitizeMcpText(rawNote, serverSecrets))
+    : null;
+
+  // Claim pending -> executing atomically in a transaction; zero I/O inside.
   const claimed = db.transaction((): ApprovalRow => {
     expireApprovals(new Date(nowIso));
 
@@ -306,6 +389,9 @@ export async function approveAction(
     }
     if (row.status !== 'pending') {
       throw new McpConflictError('already_decided', `Approval ${id} is already '${row.status}'.`);
+    }
+    if (row.snapshot_json !== initialRow.snapshot_json) {
+      throw new McpConflictError('snapshot_changed', `Approval ${id} snapshot changed during claim.`);
     }
 
     const scope: Scope = { kind: row.scope_kind, id: row.scope_id };
@@ -330,10 +416,11 @@ export async function approveAction(
             SET status = 'executing',
                 decided_by = ?,
                 decided_at = ?,
-                decision_note = ?
+                decision_note = ?,
+                owner_instance_id = ?
           WHERE id = ? AND status = 'pending'`,
       )
-      .run(actorId, nowIso, note, id);
+      .run(actorId, nowIso, note, CURRENT_OWNER_INSTANCE_ID, id);
 
     if (updated.changes === 0) {
       throw new McpConflictError('already_decided', `Approval ${id} was already claimed.`);
@@ -347,13 +434,25 @@ export async function approveAction(
     const raw = decrypt(claimed.args_ciphertext, claimed.args_iv, claimed.args_tag);
     parsedArgs = JSON.parse(raw);
   } catch {
-    db.prepare(`UPDATE custom_ai_approvals SET status = 'failed' WHERE id = ? AND status = 'executing'`).run(id);
+    db.prepare(`UPDATE custom_ai_approvals SET status = 'failed', error_text = ? WHERE id = ? AND status = 'executing'`).run(
+      'Failed to decrypt approval arguments.',
+      id,
+    );
+    transitionToolCallOutcome(claimed.execution_key, {
+      status: 'tool_error',
+      errorText: 'Failed to decrypt approval arguments.',
+    });
     throw new McpConflictError('decrypt_failed', 'Failed to decrypt approval arguments.');
   }
 
   const resolvedExecutor = await resolveExecutor(executor);
   const ac = new AbortController();
   let finalStatus: 'succeeded' | 'failed' | 'unknown' = 'unknown';
+  let resultMasked: string | null = null;
+  let errorText: string | null = null;
+  let durationMs: number | null = null;
+  let resultBytes: number | null = null;
+  const executedAt = new Date().toISOString();
 
   try {
     const outcome = await resolvedExecutor.executeClaimedWrite({
@@ -367,16 +466,38 @@ export async function approveAction(
       signal: ac.signal,
     });
     finalStatus = outcome.status;
-  } catch {
+    resultMasked = outcome.resultMasked
+      ? maskText({ kind: claimed.scope_kind, id: claimed.scope_id }, sanitizeMcpText(outcome.resultMasked, serverSecrets))
+      : null;
+    errorText = outcome.error ? sanitizeMcpText(outcome.error, serverSecrets) : null;
+    durationMs = outcome.durationMs ?? null;
+    resultBytes = outcome.resultBytes ?? null;
+  } catch (err) {
     // If dispatch threw after leaving our process boundary, treat as uncertain 'unknown'.
     finalStatus = 'unknown';
+    errorText = sanitizeMcpError(err, serverSecrets);
   }
 
   db.prepare(
     `UPDATE custom_ai_approvals
-        SET status = ?
+        SET status = ?,
+            result_masked = ?,
+            error_text = ?,
+            duration_ms = ?,
+            result_bytes = ?,
+            executed_at = ?
       WHERE id = ? AND status = 'executing'`,
-  ).run(finalStatus, id);
+  ).run(finalStatus, resultMasked, errorText, durationMs, resultBytes, executedAt, id);
+
+  const journalStatus =
+    finalStatus === 'succeeded' ? 'ok' : finalStatus === 'failed' ? 'tool_error' : 'unknown';
+  transitionToolCallOutcome(claimed.execution_key, {
+    status: journalStatus,
+    resultMasked,
+    errorText,
+    durationMs,
+    resultBytes,
+  });
 
   return toApprovalView(selectApprovalById(id)!);
 }
@@ -386,7 +507,7 @@ export async function rejectAction(
   actorId: number | null,
   input?: McpApprovalDecisionInput,
 ): Promise<McpApprovalView> {
-  const note = validateNote(input?.note);
+  const rawNote = validateNote(input?.note);
   const db = getDb();
   const nowIso = new Date().toISOString();
 
@@ -400,6 +521,11 @@ export async function rejectAction(
     if (row.status !== 'pending') {
       throw new McpConflictError('already_decided', `Approval ${id} is already '${row.status}'.`);
     }
+
+    const serverSecrets = collectServerSecrets(row.server_id);
+    const note = rawNote
+      ? maskText({ kind: row.scope_kind, id: row.scope_id }, sanitizeMcpText(rawNote, serverSecrets))
+      : null;
 
     const res = db
       .prepare(
@@ -419,7 +545,15 @@ export async function rejectAction(
     return selectApprovalById(id)!;
   })();
 
-  if (updatedRow.server_id != null && updatedRow.tool_name) {
+  const resultMasked = updatedRow.decision_note ?? 'Rejected by reviewer';
+  const transitioned = transitionToolCallOutcome(updatedRow.execution_key, {
+    status: 'rejected',
+    resultMasked,
+    durationMs: 0,
+    resultBytes: 0,
+  });
+
+  if (!transitioned && updatedRow.server_id != null && updatedRow.tool_name) {
     const scope: Scope = { kind: updatedRow.scope_kind, id: updatedRow.scope_id };
     recordToolCall({
       runId: updatedRow.run_id,
@@ -429,7 +563,7 @@ export async function rejectAction(
       serverId: updatedRow.server_id,
       toolName: updatedRow.tool_name,
       argsMasked: updatedRow.args_masked,
-      resultMasked: note ? maskText(scope, note) : 'Rejected by reviewer',
+      resultMasked,
       status: 'rejected',
       durationMs: 0,
       resultBytes: 0,
