@@ -5,6 +5,7 @@ import type {
 } from '@freellmapi/shared/ai-platform-mcp.js';
 import { maskText } from '../masking.js';
 import { requestToolApproval } from '../orchestrator/approvals.js';
+import { assertScopeEffective } from './approval-safety.js';
 import { validateScope } from './bindings.js';
 import { recordToolCall } from './calls.js';
 import {
@@ -15,6 +16,7 @@ import {
   validateArgsAgainstSchema,
 } from './executor.js';
 import { assertToolExecutable } from './registry.js';
+import { sanitizeMcpError } from './sanitize.js';
 
 export async function executeTool(
   ctx: ToolContext,
@@ -67,12 +69,15 @@ export async function executeTool(
   }
 
   let verifiedTool: BoundTool;
+  let serverSecret: string | null = null;
   try {
+    await assertScopeEffective(normScope.kind, normScope.id);
     const checked = assertToolExecutable(tool.toolId, tool.schemaHash);
     verifiedTool = checked.tool;
+    serverSecret = checked.config.secret;
   } catch (err) {
     const durationMs = Date.now() - startedAt;
-    const msg = maskText(normScope, err instanceof Error ? err.message : 'Tool blocked.', ctx.role);
+    const msg = maskText(normScope, sanitizeMcpError(err), ctx.role);
     recordToolCall({
       runId: ctx.runId ?? null,
       scope: normScope,
@@ -94,6 +99,8 @@ export async function executeTool(
     };
   }
 
+  const sanitizedArgsMasked = maskArgsForLog(normScope, args, serverSecret, ctx.role);
+
   if (verifiedTool.effect === 'read') {
     return executeReadTool(ctx, verifiedTool, args);
   }
@@ -108,7 +115,7 @@ export async function executeTool(
       role: ctx.role,
       serverId: verifiedTool.serverId,
       toolName: verifiedTool.exposedName,
-      argsMasked,
+      argsMasked: sanitizedArgsMasked,
       resultMasked: schemaCheck.reason,
       status: 'tool_error',
       durationMs,
@@ -136,7 +143,7 @@ export async function executeTool(
     role: ctx.role,
     serverId: verifiedTool.serverId,
     toolName: verifiedTool.exposedName,
-    argsMasked,
+    argsMasked: sanitizedArgsMasked,
     resultMasked: JSON.stringify({ status: 'awaiting_approval', approval_id: approvalId }),
     status: 'awaiting_approval',
     durationMs: Date.now() - startedAt,

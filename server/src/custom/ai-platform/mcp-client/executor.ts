@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import type { Scope } from '@freellmapi/shared/ai-platform.js';
 import {
   type BoundTool,
+  type McpJournalOutcomeStatus,
   type McpToolCallStatus,
   type ToolContext,
   type ToolExecutionErrorType,
@@ -10,10 +11,23 @@ import {
 import { getDb } from '../../../db/index.js';
 import { maskData, maskText } from '../masking.js';
 import { normalizeScope } from '../scope.js';
+import {
+  assertApprovalExecutable,
+  assertScopeEffective,
+} from './approval-safety.js';
 import { validateScope } from './bindings.js';
-import { recordToolCall } from './calls.js';
+import {
+  getToolCallByExecutionKey,
+  recordToolCall,
+  transitionToolCallOutcome,
+} from './calls.js';
 import { assertToolExecutable, recordServerOutcome } from './registry.js';
-import { canonicalJson, type McpTransportConfig } from './store.js';
+import {
+  sanitizeMcpError,
+  sanitizeMcpText,
+  scrubSensitiveKeys,
+} from './sanitize.js';
+import { canonicalJson, McpConflictError, McpServiceError, type McpTransportConfig } from './store.js';
 import {
   McpTransportError,
   computeOperationDeadlineMs,
@@ -21,40 +35,16 @@ import {
   mcpInitialize,
 } from './transport.js';
 
-const SENSITIVE_KEY_RE =
-  /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-auth-token|x-goog-api-key|secret|token|password|apiKey|api_key|accessToken|access_token)$/i;
-
-function scrubSecretEcho(text: string, secret: string | null | undefined): string {
-  let out = String(text ?? '');
-  if (secret && secret.length > 0) {
-    out = out.split(secret).join('[redacted]');
-  }
-  out = out.replace(/\bBearer\s+[A-Za-z0-9._-]{6,}\b/gi, 'Bearer [redacted]');
-  return out;
-}
-
-function scrubSensitiveKeys(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(scrubSensitiveKeys);
-  if (value && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value)) {
-      out[k] = SENSITIVE_KEY_RE.test(k) ? '[redacted]' : scrubSensitiveKeys(v);
-    }
-    return out;
-  }
-  return value;
-}
-
 export function maskArgsForLog(
   scope: Scope,
   args: unknown,
   secret: string | null | undefined,
   role?: string,
 ): string {
-  const scrubbed = scrubSensitiveKeys(args ?? {});
+  const scrubbed = scrubSensitiveKeys(args ?? {}, [secret]);
   const maskedObj = maskData(scope, scrubbed, role);
   const raw = JSON.stringify(maskedObj);
-  return scrubSecretEcho(maskText(scope, raw, role), secret);
+  return sanitizeMcpText(maskText(scope, raw, role), [secret]);
 }
 
 function maskTextForOutput(
@@ -63,7 +53,63 @@ function maskTextForOutput(
   secret: string | null | undefined,
   role?: string,
 ): string {
-  return scrubSecretEcho(maskText(scope, text, role), secret);
+  return sanitizeMcpText(maskText(scope, text, role), [secret]);
+}
+
+class PreDispatchBlockedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PreDispatchBlockedError';
+  }
+}
+
+function isPreDispatchBlock(err: unknown): boolean {
+  return (
+    err instanceof PreDispatchBlockedError ||
+    err instanceof McpConflictError ||
+    err instanceof McpServiceError
+  );
+}
+
+function persistClaimedWriteOutcome(params: {
+  runId: string | null;
+  executionKey: string;
+  scope: Scope;
+  endUser: string | null;
+  role?: string;
+  serverId: number;
+  toolName: string;
+  argsMasked: string;
+  resultMasked: string;
+  errorText?: string | null;
+  status: McpJournalOutcomeStatus;
+  durationMs: number;
+  resultBytes: number;
+}): void {
+  if (getToolCallByExecutionKey(params.executionKey)) {
+    transitionToolCallOutcome(params.executionKey, {
+      status: params.status,
+      resultMasked: params.resultMasked,
+      errorText: params.errorText ?? null,
+      durationMs: params.durationMs,
+      resultBytes: params.resultBytes,
+    });
+    return;
+  }
+  recordToolCall({
+    runId: params.runId,
+    executionKey: params.executionKey,
+    scope: params.scope,
+    endUser: params.endUser,
+    role: params.role,
+    serverId: params.serverId,
+    toolName: params.toolName,
+    argsMasked: params.argsMasked,
+    resultMasked: params.resultMasked,
+    status: params.status,
+    durationMs: params.durationMs,
+    resultBytes: params.resultBytes,
+  });
 }
 
 function wrapUntrustedToolResult(serverSlug: string, toolName: string, content: string): string {
@@ -138,7 +184,7 @@ export function isToolBoundToScope(toolId: number, scope: Scope): boolean {
 }
 
 function mapTransportErrorToStatus(err: McpTransportError): {
-  callStatus: McpToolCallStatus;
+  callStatus: McpJournalOutcomeStatus;
   errorType: ToolExecutionErrorType;
 } {
   if (err.code === 'timeout') {
@@ -221,6 +267,7 @@ export async function executeReadTool(
   let verifiedTool: BoundTool;
   let config: McpTransportConfig;
   try {
+    await assertScopeEffective(normScope.kind, normScope.id);
     const checked = assertToolExecutable(tool.toolId, tool.schemaHash);
     verifiedTool = checked.tool;
     config = checked.config;
@@ -229,7 +276,7 @@ export async function executeReadTool(
     }
   } catch (err) {
     const durationMs = Date.now() - startedAt;
-    const msg = maskText(normScope, err instanceof Error ? err.message : 'Tool blocked.', ctx.role);
+    const msg = maskText(normScope, sanitizeMcpError(err), ctx.role);
     recordToolCall({
       runId: ctx.runId ?? null,
       executionKey,
@@ -279,15 +326,28 @@ export async function executeReadTool(
   }
 
   try {
+    const readGuard = async () => {
+      await assertScopeEffective(normScope.kind, normScope.id);
+      if (!isToolBoundToScope(verifiedTool.toolId, normScope)) {
+        throw new PreDispatchBlockedError('Tool is no longer bound to the active scope.');
+      }
+      const latest = assertToolExecutable(verifiedTool.toolId, verifiedTool.schemaHash);
+      if (latest.tool.effect !== 'read') {
+        throw new PreDispatchBlockedError('Tool effect changed to write.');
+      }
+    };
     const deadlineAtMs = computeOperationDeadlineMs(config.timeoutMs);
-    const session = await mcpInitialize(config, ctx.signal, { deadlineAtMs });
+    const session = await mcpInitialize(config, ctx.signal, {
+      deadlineAtMs,
+      preDispatchGuard: readGuard,
+    });
     const res = await mcpCallTool(
       config,
       session,
       verifiedTool.name,
       schemaCheck.normalized,
       ctx.signal,
-      { retryOn404: true, deadlineAtMs },
+      { retryOn404: true, deadlineAtMs, preDispatchGuard: readGuard },
     );
     const durationMs = Date.now() - startedAt;
     recordServerOutcome(config.serverId, {
@@ -387,7 +447,7 @@ export async function executeClaimedWrite(ctx: {
 
   const claimRow = getDb()
     .prepare(
-      `SELECT id, status, tool_id, execution_key, scope_kind, scope_id
+      `SELECT id, status, tool_id, execution_key, scope_kind, scope_id, snapshot_json
          FROM custom_ai_approvals
         WHERE id = ? AND execution_key = ? AND tool_id = ? AND scope_kind = ? AND scope_id = ?`,
     )
@@ -397,7 +457,7 @@ export async function executeClaimedWrite(ctx: {
       ctx.toolId,
       normScope.kind,
       normScope.id,
-    ) as { id: number; status: string } | undefined;
+    ) as { id: number; status: string; snapshot_json: string | null } | undefined;
 
   if (!claimRow || claimRow.status !== 'executing') {
     const msg = 'Approval claim is missing or not in executing state.';
@@ -413,18 +473,35 @@ export async function executeClaimedWrite(ctx: {
 
   let verifiedTool: BoundTool;
   let config: McpTransportConfig;
+  let snapshotSchemaHash: string;
+  let snapshotServerUrl: string;
+  let snapshotCredGen: number;
   try {
     validateScope(normScope);
-    if (!isToolBoundToScope(ctx.toolId, normScope)) {
-      throw new Error('Tool is no longer bound to scope.');
+    const snapshot = await assertApprovalExecutable(claimRow.snapshot_json);
+    if (
+      snapshot.toolId !== ctx.toolId ||
+      snapshot.scopeKind !== normScope.kind ||
+      snapshot.scopeId !== normScope.id
+    ) {
+      throw new PreDispatchBlockedError('Approval snapshot does not match execution claim.');
     }
-    const checked = assertToolExecutable(ctx.toolId);
+    const checked = assertToolExecutable(ctx.toolId, snapshot.schemaHash);
     verifiedTool = checked.tool;
     config = checked.config;
+    if (
+      config.url !== snapshot.serverUrl ||
+      config.credentialGeneration !== snapshot.credentialGeneration
+    ) {
+      throw new PreDispatchBlockedError('MCP server identity or credentials changed after approval.');
+    }
+    snapshotSchemaHash = snapshot.schemaHash;
+    snapshotServerUrl = snapshot.serverUrl;
+    snapshotCredGen = snapshot.credentialGeneration;
   } catch (err) {
     const durationMs = Date.now() - startedAt;
-    const msg = maskText(normScope, err instanceof Error ? err.message : 'Tool blocked.', ctx.role);
-    recordToolCall({
+    const msg = maskText(normScope, sanitizeMcpError(err), ctx.role);
+    persistClaimedWriteOutcome({
       runId: ctx.runId ?? null,
       executionKey: ctx.executionKey,
       scope: normScope,
@@ -434,6 +511,7 @@ export async function executeClaimedWrite(ctx: {
       toolName: `tool#${ctx.toolId}`,
       argsMasked: maskArgsForLog(normScope, ctx.args, null, ctx.role),
       resultMasked: msg,
+      errorText: msg,
       status: 'blocked',
       durationMs,
       resultBytes: 0,
@@ -452,7 +530,7 @@ export async function executeClaimedWrite(ctx: {
   const schemaCheck = validateArgsAgainstSchema(verifiedTool.inputSchema, ctx.args);
   if (!schemaCheck.ok) {
     const durationMs = Date.now() - startedAt;
-    recordToolCall({
+    persistClaimedWriteOutcome({
       runId: ctx.runId ?? null,
       executionKey: ctx.executionKey,
       scope: normScope,
@@ -462,6 +540,7 @@ export async function executeClaimedWrite(ctx: {
       toolName: verifiedTool.exposedName,
       argsMasked,
       resultMasked: schemaCheck.reason,
+      errorText: schemaCheck.reason,
       status: 'tool_error',
       durationMs,
       resultBytes: 0,
@@ -477,15 +556,52 @@ export async function executeClaimedWrite(ctx: {
   }
 
   try {
+    const writeGuard = async () => {
+      const latestClaim = getDb()
+        .prepare(
+          `SELECT status, snapshot_json
+             FROM custom_ai_approvals
+            WHERE id = ? AND execution_key = ? AND tool_id = ? AND scope_kind = ? AND scope_id = ?`,
+        )
+        .get(
+          ctx.approvalId,
+          ctx.executionKey,
+          ctx.toolId,
+          normScope.kind,
+          normScope.id,
+        ) as { status: string; snapshot_json: string | null } | undefined;
+      if (!latestClaim || latestClaim.status !== 'executing') {
+        throw new PreDispatchBlockedError('Approval claim is no longer in executing state.');
+      }
+      const latestSnap = await assertApprovalExecutable(latestClaim.snapshot_json);
+      if (
+        latestSnap.schemaHash !== snapshotSchemaHash ||
+        latestSnap.serverUrl !== snapshotServerUrl ||
+        latestSnap.credentialGeneration !== snapshotCredGen
+      ) {
+        throw new PreDispatchBlockedError('Approval snapshot changed before dispatch.');
+      }
+      const latestChecked = assertToolExecutable(ctx.toolId, snapshotSchemaHash);
+      if (
+        latestChecked.config.url !== snapshotServerUrl ||
+        latestChecked.config.credentialGeneration !== snapshotCredGen
+      ) {
+        throw new PreDispatchBlockedError('MCP server identity changed before dispatch.');
+      }
+    };
+
     const deadlineAtMs = computeOperationDeadlineMs(config.timeoutMs);
-    const session = await mcpInitialize(config, ctx.signal, { deadlineAtMs });
+    const session = await mcpInitialize(config, ctx.signal, {
+      deadlineAtMs,
+      preDispatchGuard: writeGuard,
+    });
     const res = await mcpCallTool(
       config,
       session,
       verifiedTool.name,
       schemaCheck.normalized,
       ctx.signal,
-      { retryOn404: false, deadlineAtMs },
+      { retryOn404: false, deadlineAtMs, preDispatchGuard: writeGuard },
     );
     const durationMs = Date.now() - startedAt;
     recordServerOutcome(config.serverId, {
@@ -495,7 +611,7 @@ export async function executeClaimedWrite(ctx: {
     });
 
     const maskedContent = maskTextForOutput(normScope, res.content, config.secret, ctx.role);
-    recordToolCall({
+    persistClaimedWriteOutcome({
       runId: ctx.runId ?? null,
       executionKey: ctx.executionKey,
       scope: normScope,
@@ -505,6 +621,7 @@ export async function executeClaimedWrite(ctx: {
       toolName: verifiedTool.exposedName,
       argsMasked,
       resultMasked: maskedContent,
+      errorText: res.isError ? maskedContent : null,
       status: res.isError ? 'tool_error' : 'ok',
       durationMs,
       resultBytes: res.bytes,
@@ -530,15 +647,47 @@ export async function executeClaimedWrite(ctx: {
     };
   } catch (err) {
     const durationMs = Date.now() - startedAt;
+    if (isPreDispatchBlock(err)) {
+      const maskedBlock = maskTextForOutput(
+        normScope,
+        sanitizeMcpError(err, [config.secret]),
+        config.secret,
+        ctx.role,
+      );
+      persistClaimedWriteOutcome({
+        runId: ctx.runId ?? null,
+        executionKey: ctx.executionKey,
+        scope: normScope,
+        endUser: ctx.endUser,
+        role: ctx.role,
+        serverId: verifiedTool.serverId,
+        toolName: verifiedTool.exposedName,
+        argsMasked,
+        resultMasked: maskedBlock,
+        errorText: maskedBlock,
+        status: 'blocked',
+        durationMs,
+        resultBytes: 0,
+      });
+      return {
+        ok: false,
+        status: 'failed',
+        resultMasked: maskedBlock,
+        error: maskedBlock,
+        durationMs,
+        resultBytes: 0,
+      };
+    }
+
     const transportErr =
       err instanceof McpTransportError
         ? err
-        : new McpTransportError('http', err instanceof Error ? err.message : 'Transport failure');
+        : new McpTransportError('http', sanitizeMcpError(err, [config.secret]));
     const maskedErr = maskTextForOutput(normScope, transportErr.message, config.secret, ctx.role);
     recordServerOutcome(config.serverId, { ok: false, error: maskedErr });
 
     const { callStatus } = mapTransportErrorToStatus(transportErr);
-    recordToolCall({
+    persistClaimedWriteOutcome({
       runId: ctx.runId ?? null,
       executionKey: ctx.executionKey,
       scope: normScope,
@@ -548,6 +697,7 @@ export async function executeClaimedWrite(ctx: {
       toolName: verifiedTool.exposedName,
       argsMasked,
       resultMasked: maskedErr,
+      errorText: maskedErr,
       status: callStatus,
       durationMs,
       resultBytes: 0,

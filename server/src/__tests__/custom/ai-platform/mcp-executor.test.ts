@@ -10,10 +10,12 @@ import {
   syncServerTools,
 } from '../../../custom/ai-platform/mcp-client/registry.js';
 import { setBindings, toolsForScope } from '../../../custom/ai-platform/mcp-client/bindings.js';
-import { listToolCalls } from '../../../custom/ai-platform/mcp-client/calls.js';
+import { captureApprovalSnapshot } from '../../../custom/ai-platform/mcp-client/approval-safety.js';
+import { getToolCallByExecutionKey, listToolCalls, recordToolCall } from '../../../custom/ai-platform/mcp-client/calls.js';
 import {
   executeClaimedWrite,
   executeReadTool,
+  maskArgsForLog,
 } from '../../../custom/ai-platform/mcp-client/executor.js';
 import {
   startFakeMcpHttpServer,
@@ -199,16 +201,21 @@ describe('MCP Executor (X0)', () => {
     expect(missingClaim.status).toBe('failed');
     expect(fakeServer.getDispatchCount('tools/call')).toBe(0);
 
-    // Insert executing approval row
+    // Insert executing approval row with immutable snapshot
+    const snapshot = await captureApprovalSnapshot({
+      toolId: refundRow.id,
+      scopeKind: 'profile',
+      scopeId: String(profileId),
+    });
     const expiresAt = new Date(Date.now() + 3600_000).toISOString();
     const ins = db
       .prepare(
         `INSERT INTO custom_ai_approvals (
           execution_key, run_id, step_seq, scope_kind, scope_id, end_user,
-          tool_id, args_ciphertext, args_iv, args_tag, args_masked, status, expires_at
-        ) VALUES ('exec-key-1', NULL, 1, 'profile', ?, NULL, ?, 'c', 'i', 't', '{}', 'executing', ?)`,
+          tool_id, args_ciphertext, args_iv, args_tag, args_masked, snapshot_json, status, expires_at
+        ) VALUES ('exec-key-1', NULL, 1, 'profile', ?, NULL, ?, 'c', 'i', 't', '{}', ?, 'executing', ?)`,
       )
-      .run(String(profileId), refundRow.id, expiresAt);
+      .run(String(profileId), refundRow.id, JSON.stringify(snapshot), expiresAt);
     const approvalId = Number(ins.lastInsertRowid);
 
     // Disconnect mid-write -> returns unknown, dispatched exactly once (no retry)
@@ -225,5 +232,143 @@ describe('MCP Executor (X0)', () => {
     expect(uncertain.ok).toBe(false);
     expect(uncertain.status).toBe('unknown');
     expect(fakeServer.getDispatchCount('tools/call')).toBe(1);
+  });
+
+  it('F01/F03/F04/F08: enforces snapshot/scope guard before dispatch, scrubs opaque secrets, and transitions awaiting_approval journal rows', async () => {
+    const opaqueSecret = 'opaque-executor-secret-9981';
+
+    const srv = await createServer(
+      {
+        slug: 'orders-fixes',
+        name: 'Orders Fixes',
+        url: fakeServer.url,
+        authKind: 'bearer',
+        secret: opaqueSecret,
+      },
+      1,
+    );
+    await syncServerTools(srv.id, 1);
+    const db = getDb();
+    const refundRow = db
+      .prepare("SELECT id FROM custom_ai_mcp_tools WHERE server_id = ? AND name = 'refund_order'")
+      .get(srv.id) as { id: number };
+    reviewTool(refundRow.id, { state: 'allowed', effect: 'write' }, 1);
+    setBindings(scope, { toolIds: [refundRow.id], enabled: true });
+
+    // F01: maskArgsForLog scrubs opaque secrets and nested sensitive keys even with admin role
+    const masked = maskArgsForLog(
+      scope,
+      {
+        order_id: 'ORD-1',
+        nested: { credential: 'nested-secret-val', passwd: 'pw-1', note: `echo:${opaqueSecret}` },
+      },
+      opaqueSecret,
+      'admin',
+    );
+    expect(masked).not.toContain(opaqueSecret);
+    expect(masked).not.toContain('nested-secret-val');
+    expect(masked).not.toContain('pw-1');
+
+    const snapshot = await captureApprovalSnapshot({
+      toolId: refundRow.id,
+      scopeKind: 'profile',
+      scopeId: String(profileId),
+    });
+    const expiresAt = new Date(Date.now() + 3600_000).toISOString();
+
+    // F03: Missing snapshot fails closed before dispatch
+    const insMissingSnap = db
+      .prepare(
+        `INSERT INTO custom_ai_approvals (
+          execution_key, run_id, step_seq, scope_kind, scope_id, end_user,
+          tool_id, args_ciphertext, args_iv, args_tag, args_masked, status, expires_at
+        ) VALUES ('exec-no-snap', NULL, 1, 'profile', ?, NULL, ?, 'c', 'i', 't', '{}', 'executing', ?)`,
+      )
+      .run(String(profileId), refundRow.id, expiresAt);
+    const noSnapRes = await executeClaimedWrite({
+      approvalId: Number(insMissingSnap.lastInsertRowid),
+      executionKey: 'exec-no-snap',
+      scope,
+      endUser: null,
+      toolId: refundRow.id,
+      args: { order_id: 'ORD-1', amount: 10 },
+      signal: new AbortController().signal,
+    });
+    expect(noSnapRes.ok).toBe(false);
+    expect(fakeServer.getDispatchCount('tools/call')).toBe(0);
+
+    // F04: Scope binding disabled before dispatch (with valid snapshot) -> blocked, no dispatch
+    const insRevoked = db
+      .prepare(
+        `INSERT INTO custom_ai_approvals (
+          execution_key, run_id, step_seq, scope_kind, scope_id, end_user,
+          tool_id, args_ciphertext, args_iv, args_tag, args_masked, snapshot_json, status, expires_at
+        ) VALUES ('exec-revoked', NULL, 1, 'profile', ?, NULL, ?, 'c', 'i', 't', '{}', ?, 'executing', ?)`,
+      )
+      .run(String(profileId), refundRow.id, JSON.stringify(snapshot), expiresAt);
+    setBindings(scope, { toolIds: [refundRow.id], enabled: false });
+    const revokedRes = await executeClaimedWrite({
+      approvalId: Number(insRevoked.lastInsertRowid),
+      executionKey: 'exec-revoked',
+      scope,
+      endUser: null,
+      toolId: refundRow.id,
+      args: { order_id: 'ORD-1', amount: 10 },
+      signal: new AbortController().signal,
+    });
+    expect(revokedRes.ok).toBe(false);
+    expect(fakeServer.getDispatchCount('tools/call')).toBe(0);
+
+    // Re-enable binding for F08 test
+    setBindings(scope, { toolIds: [refundRow.id], enabled: true });
+
+    // F08: Existing awaiting_approval journal row transitions to terminal 'ok' with masked result
+    const execKey = 'exec-f08-ok';
+    recordToolCall({
+      executionKey: execKey,
+      scope,
+      endUser: null,
+      serverId: srv.id,
+      toolName: 'orders-fixes:refund_order',
+      argsMasked: '{"order_id":"ORD-8"}',
+      resultMasked: JSON.stringify({ status: 'awaiting_approval', approval_id: 1 }),
+      status: 'awaiting_approval',
+      durationMs: 1,
+      resultBytes: 0,
+    });
+    const insOk = db
+      .prepare(
+        `INSERT INTO custom_ai_approvals (
+          execution_key, run_id, step_seq, scope_kind, scope_id, end_user,
+          tool_id, args_ciphertext, args_iv, args_tag, args_masked, snapshot_json, status, expires_at
+        ) VALUES (?, NULL, 1, 'profile', ?, NULL, ?, 'c', 'i', 't', '{}', ?, 'executing', ?)`,
+      )
+      .run(execKey, String(profileId), refundRow.id, JSON.stringify(snapshot), expiresAt);
+
+    fakeServer.setConfig({
+      onToolCall: () => ({
+        content: [{ type: 'text', text: `Refunded ORD-8 (${opaqueSecret})` }],
+        isError: false,
+      }),
+    });
+    const okRes = await executeClaimedWrite({
+      approvalId: Number(insOk.lastInsertRowid),
+      executionKey: execKey,
+      scope,
+      endUser: null,
+      toolId: refundRow.id,
+      args: { order_id: 'ORD-8', amount: 20 },
+      signal: new AbortController().signal,
+    });
+    expect(okRes.ok).toBe(true);
+    expect(okRes.status).toBe('succeeded');
+    expect(okRes.resultMasked).toContain('Refunded ORD-8');
+    expect(okRes.resultMasked).not.toContain(opaqueSecret);
+    expect(fakeServer.getDispatchCount('tools/call')).toBe(1);
+
+    const journalRow = getToolCallByExecutionKey(execKey);
+    expect(journalRow?.status).toBe('ok');
+    expect(journalRow?.resultMasked).toContain('Refunded ORD-8');
+    expect(journalRow?.resultMasked).not.toContain(opaqueSecret);
   });
 });

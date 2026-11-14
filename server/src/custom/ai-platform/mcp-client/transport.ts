@@ -31,6 +31,7 @@ export interface McpTransportOptions {
   fetchFn?: typeof fetch;
   retryOn404?: boolean;
   deadlineAtMs?: number;
+  preDispatchGuard?: () => void | Promise<void>;
 }
 
 interface JsonRpcResponse {
@@ -476,6 +477,10 @@ async function dispatchJsonRpc(
       isDeadlineExpired() ? 'timeout' : 'http',
       isDeadlineExpired() ? 'MCP request timed out.' : 'MCP request aborted.',
     );
+  }
+
+  if (opts?.preDispatchGuard) {
+    await opts.preDispatchGuard();
   }
 
   let res: Response;
