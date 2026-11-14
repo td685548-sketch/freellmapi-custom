@@ -13,7 +13,7 @@ import { CLIENT_PROFILE_KEY_PREFIX } from '../lib/system-prompt.js';
 import { profileForGate } from '../services/profile-usage.js';
 import { checkUserRateLimit } from '../services/user-quotas.js';
 import { extractInferenceToken } from './user-rate-limit.js';
-import { runPreRequest } from '../custom/ai-platform/pipeline.js';
+import { installOutputGuardIfNeeded, runPreRequest } from '../custom/ai-platform/pipeline.js';
 import { captureInternalCall, isEnrichmentAlreadyApplied, isInternalCall } from '../custom/ai-platform/loopback.js';
 import { prepareMcpTakeover, refreshMcpTakeoverMessages } from '../custom/ai-platform/mcp-client/admission.js';
 
@@ -74,6 +74,10 @@ export function profileInferenceGate(req: Request, res: Response, next: NextFunc
       }
     }
   }
+
+  // Install output guard idempotently before any early-handled response
+  // (quick answers, MCP takeover, exact cache hit, or normal provider).
+  installOutputGuardIfNeeded(req, res, profile, endUser);
 
   // T049 / F05 / F06 / F09: Prepare MCP server-side takeover BEFORE outer RPM/quota admission.
   // Only a safely convertible takeover skips outer quota; each inner round settles once.

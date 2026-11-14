@@ -5,6 +5,47 @@ import { GatewayCallError, isInternalCall } from './loopback.js';
 import { consumeMcpTakeoverPlan } from './mcp-client/admission.js';
 import { sendMcpLoopResult } from './mcp-client/respond.js';
 import { runToolLoop } from './mcp-client/tool-loop.js';
+import { buildProfileGuardContext, type ProfileGuardContext } from './output-guard/context.js';
+import { detectWire } from './wire/detect.js';
+import { installInterceptor, type OutputFilter } from './wire/interceptor.js';
+
+export type OutputFilterProvider = (ctx: ProfileGuardContext) => OutputFilter | null;
+
+let registeredFilterProvider: OutputFilterProvider | null = null;
+
+/**
+ * Registers the policy-backed `outputFilterFor` adapter once `output-guard/policy.ts`
+ * is integrated, avoiding missing-module errors during S0.
+ */
+export function registerOutputFilterProvider(provider: OutputFilterProvider | null): void {
+  registeredFilterProvider = provider;
+}
+
+/**
+ * Idempotently installs the output guard interceptor on `res` before any early-handled
+ * response (`answerQuickly`, `sendMcpLoopResult`, exact cache hit, or normal provider).
+ * Skips verified internal loopback subcalls and returns immediately when `outputGuard` is off.
+ */
+export function installOutputGuardIfNeeded(
+  req: Request,
+  res: Response,
+  profile: GateProfile,
+  endUser: string | null,
+): void {
+  const flags = getFlags();
+  if (!flags.outputGuard) return;
+  if (isInternalCall(req) !== null) return;
+  if (!registeredFilterProvider) return;
+
+  const detected = detectWire(req);
+  if (!detected) return;
+
+  const ctx = buildProfileGuardContext(req, profile, endUser, detected.wire, detected.stream);
+  const filter = registeredFilterProvider(ctx);
+  if (filter) {
+    installInterceptor(req, res, detected.wire, [filter]);
+  }
+}
 
 /**
  * T029 / T049 — Pipeline composition boundary (FR-008 fixed order).
@@ -97,7 +138,8 @@ export async function runPreRequest(
   }
 
   // 8. SLOT: promptCache (per-provider cache breakpoints)
-  // 10. SLOT: outputGuard / response interceptor (only when filters are non-empty)
+  // 10. SLOT: outputGuard / response interceptor (idempotent; also installed before early handlers)
+  installOutputGuardIfNeeded(req, res, _profile, _endUser);
 
   return 'continue';
 }
