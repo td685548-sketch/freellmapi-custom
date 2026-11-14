@@ -43,6 +43,7 @@ import { statusCache } from './status-cache.js';
 import { analyticsMemo } from './analytics-memo.js';
 import { xGatewayRouter } from './x-gateway/router.js';
 import { xGatewayConsoleRouter } from './x-gateway/console-router.js';
+import { PLAYGROUND_MEDIA_PATH, xPlaygroundMediaRouter } from './x-gateway/playground-media.js';
 import { xSkillsPublicRouter } from './x-gateway/skills-router.js';
 import { getConfigSnapshot } from './x-gateway/config.js';
 import { providerAccountsRouter } from './provider-accounts/router.js';
@@ -177,6 +178,11 @@ export function registerCustomRoutes(app: Express): void {
   // MiProxy dynamic webhook endpoint for automated proxy updates. It authenticates with its own
   // token, so it is mounted ahead of the session gate that covers the rest of /api/thruline.
   app.use(['/api/proxy-webhook', '/api/thruline/proxy-webhook'], proxyWebhookRouter);
+
+  // Cached provider images (see playground-media.ts): a generated picture is
+  // served from an unguessable capability id, because an <img> tag cannot send
+  // the session token. Mounted before the /api/thruline gate for that reason.
+  app.use(`/api/thruline${PLAYGROUND_MEDIA_PATH}`, xPlaygroundMediaRouter);
 
   // Granular route-level permission gates for upstream-mounted endpoints
   for (const gate of PERMISSION_GATES) installGate(app, gate);

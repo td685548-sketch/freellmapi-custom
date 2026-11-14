@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   extractGeminiImages,
   extractGeminiSessionTokens,
@@ -7,6 +7,11 @@ import {
   stripGeminiPlaceholders,
 } from '../../custom/provider-accounts/gemini-web-chat.js';
 import { WebCookieProvider } from '../../custom/provider-accounts/web-cookie.js';
+import { readPlaygroundMedia } from '../../custom/x-gateway/playground-media.js';
+import { initDb } from '../../db/index.js';
+
+/** Minimal PNG payload; only the byte round-trip matters here. */
+const IMAGE_BYTES = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
 
 function streamFromLines(lines: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
@@ -21,6 +26,11 @@ function streamFromLines(lines: string[]): ReadableStream<Uint8Array> {
 }
 
 describe('gemini-web executor', () => {
+  beforeEach(() => {
+    // The image rewrite persists bytes, so every test gets its own database.
+    initDb(':memory:');
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -201,6 +211,9 @@ describe('gemini-web executor', () => {
           { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } },
         );
       }
+      if (url === 'https://lh3.googleusercontent.com/gen-1') {
+        return new Response(IMAGE_BYTES, { status: 200, headers: { 'Content-Type': 'image/png' } });
+      }
       throw new Error(`Unexpected URL: ${url}`);
     });
 
@@ -219,7 +232,11 @@ describe('gemini-web executor', () => {
     const content = completion.choices[0]?.message?.content ?? '';
     expect(content).not.toContain('http://googleusercontent.com');
     expect(content).toContain('Đây là ảnh:');
-    expect(content).toContain('[![Argon](https://lh3.googleusercontent.com/gen-1)](https://lh3.googleusercontent.com/gen-1)');
+    const mediaUrl = /!\[Argon\]\((\/api\/thruline\/playground\/media\/[a-f0-9]{32})\)/.exec(content);
+    expect(mediaUrl).not.toBeNull();
+    const stored = readPlaygroundMedia(mediaUrl![1].split('/').pop()!);
+    expect(stored?.contentType).toBe('image/png');
+    expect(stored?.bytes.equals(IMAGE_BYTES)).toBe(true);
   });
 
   it('accepts an image-only reply with no text', async () => {
@@ -245,6 +262,9 @@ describe('gemini-web executor', () => {
           headers: { 'Content-Type': 'application/json; charset=utf-8' },
         });
       }
+      if (url === 'https://lh3.googleusercontent.com/gen-3') {
+        return new Response(IMAGE_BYTES, { status: 200, headers: { 'Content-Type': 'image/png' } });
+      }
       throw new Error(`Unexpected URL: ${url}`);
     });
 
@@ -259,7 +279,56 @@ describe('gemini-web executor', () => {
       [{ role: 'user', content: 'Tạo ảnh' }],
       'gemini-image',
     );
-    expect(completion.choices[0]?.message?.content).toContain('https://lh3.googleusercontent.com/gen-3');
+    const content = completion.choices[0]?.message?.content ?? '';
+    expect(content).toMatch(/!\[Generated image\]\(\/api\/thruline\/playground\/media\/[a-f0-9]{32}\)/);
+  });
+
+  it('falls back to a plain link when the image cannot be downloaded', async () => {
+    const entry = [
+      [null, null, null, [null, null, 'Argon', 'https://lh3.googleusercontent.com/gen-9']],
+      ['image-id-9'],
+    ];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url === 'https://gemini.google.com/app') {
+        return new Response('<script>{"SNlM0e":"snl_tok_1"}</script>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html' },
+        });
+      }
+      if (url.startsWith('https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate')) {
+        const candidate = [
+          'rc_1',
+          ['Đây là ảnh:\nhttp://googleusercontent.com/image_generation_content/0_9\n'],
+          null, null, null, null, null, null, null, null, null, null,
+          [null, null, null, null, null, null, null, [[entry]]],
+        ];
+        const inner = JSON.stringify([null, null, null, null, [candidate]]);
+        return new Response(streamFromLines([")]}'", '90', JSON.stringify([['wrb.fr', null, inner]])]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        });
+      }
+      if (url === 'https://lh3.googleusercontent.com/gen-9') {
+        return new Response('nope', { status: 403 });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const provider = new WebCookieProvider({
+      providerId: 'gemini-web',
+      name: 'Gemini Web',
+      baseUrl: 'https://gemini.google.com/app',
+    });
+
+    const completion = await provider.chatCompletion(
+      '__Secure-1PSID=test_psid_image_fail',
+      [{ role: 'user', content: 'Tạo ảnh' }],
+      'gemini-image',
+    );
+    const content = completion.choices[0]?.message?.content ?? '';
+    expect(content).toContain('[Argon](https://lh3.googleusercontent.com/gen-9)');
+    expect(content).not.toContain('/playground/media/');
   });
 
   it('throws 401 when Gemini /app redirects to accounts.google.com', async () => {
