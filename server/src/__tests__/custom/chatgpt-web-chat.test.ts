@@ -118,4 +118,74 @@ describe('ChatGPT Web chat over plain HTTP', () => {
     expect(normalizeChatGptWebCookie('QUJDRA==')).toBe('__Secure-next-auth.session-token=QUJDRA==');
     expect(normalizeChatGptWebCookie('sso=abc; sso-rw=def')).toBe('sso=abc; sso-rw=def');
   });
+
+  it('uploads base64 images and sends multimodal_text with image_asset_pointer', async () => {
+    // Minimal 1x1 PNG header + bytes
+    const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const uploadUrl = 'https://files.oaiusercontent.com/upload/file-123?sig=abc';
+    let uploadedBytes = 0;
+
+    vi.mocked(proxyFetch).mockImplementation(async (url, init) => {
+      const target = String(url);
+      if (target.endsWith('/api/auth/session')) return json({ accessToken: 'access-token' });
+      if (target.endsWith('/sentinel/chat-requirements/prepare')) return json({ prepare_token: 'prepare-token' });
+      if (target.endsWith('/sentinel/chat-requirements')) return json({ token: 'requirements-token' });
+      if (target.endsWith('/backend-api/files')) {
+        const body = JSON.parse(String(init?.body));
+        expect(body.use_case).toBe('multimodal');
+        expect(body.mime_type).toBe('image/png');
+        return json({ file_id: 'file-123', upload_url: uploadUrl });
+      }
+      if (target === uploadUrl) {
+        expect(init?.method).toBe('PUT');
+        uploadedBytes = (init?.body as Uint8Array).byteLength;
+        return new Response('', { status: 201 });
+      }
+      if (target.endsWith('/backend-api/files/process_upload_stream')) {
+        const body = JSON.parse(String(init?.body));
+        expect(body.file_id).toBe('file-123');
+        return json({ status: 'success' });
+      }
+      if (target.endsWith('/backend-api/f/conversation/prepare')) {
+        const body = JSON.parse(String(init?.body));
+        expect(body.partial_query.content.content_type).toBe('multimodal_text');
+        return json({ conduit_token: 'conduit-token' });
+      }
+      if (target.endsWith('/backend-api/f/conversation')) {
+        const body = JSON.parse(String(init?.body));
+        const msg = body.messages[0];
+        expect(msg.content.content_type).toBe('multimodal_text');
+        expect(msg.content.parts[0]).toMatchObject({
+          content_type: 'image_asset_pointer',
+          asset_pointer: 'sediment://file-123',
+          width: 1,
+          height: 1,
+        });
+        expect(msg.content.parts[1]).toBe('What is in this image?');
+        expect(msg.metadata.attachments[0]).toMatchObject({
+          id: 'file-123',
+          mime_type: 'image/png',
+          width: 1,
+          height: 1,
+        });
+        return sse([JSON.stringify({ conversation_id: CONVERSATION_ID, message: { content: { parts: ['A 1x1 pixel'] } } })]);
+      }
+      if (target.endsWith(`/backend-api/conversation/${CONVERSATION_ID}`)) {
+        return conversationDocument(true, 'A 1x1 pixel');
+      }
+      return new Response('unexpected', { status: 500 });
+    });
+
+    await expect(runChatGptWebChat({
+      credential: '__Secure-next-auth.session-token=test-cookie',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'What is in this image?' },
+          { type: 'image_url', image_url: { url: `data:image/png;base64,${pngBase64}` } },
+        ],
+      }],
+    })).resolves.toBe('A 1x1 pixel');
+    expect(uploadedBytes).toBeGreaterThan(0);
+  });
 });

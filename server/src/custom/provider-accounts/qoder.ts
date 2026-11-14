@@ -461,6 +461,95 @@ export class QoderProvider extends BaseProvider {
     const creds = await this.resolveCredentials(apiKey, options?.signal);
     const qoderKey = modelId.replace(/^(?:qoder|qoder-cn|qd)\//, '');
     const modelConfig = await this.getModelConfig(creds, qoderKey, options?.signal);
+    const inferenceBase = this.region === 'cn'
+      ? this.chatBase
+      : (creds.authToken.startsWith('jt-') ? this.chatBaseAlt : this.chatBase);
+
+    const uploadQoderImage = async (dataUrl: string): Promise<string> => {
+      const match = /^data:image\/(png|jpe?g|webp|gif);base64,([A-Za-z0-9+/=\s]+)$/i.exec(dataUrl);
+      if (!match) return dataUrl;
+      const ext = match[1].toLowerCase() === 'jpeg' ? 'jpg' : match[1].toLowerCase();
+      const mime = `image/${match[1].toLowerCase() === 'jpg' ? 'jpeg' : match[1].toLowerCase()}`;
+      const imageBuf = Buffer.from(match[2].replace(/\s/g, ''), 'base64');
+      const boundary = `----freellmapiQoder${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
+      const head = Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="image.${ext}"\r\nContent-Type: ${mime}\r\n\r\n`,
+      );
+      const tail = Buffer.from(`\r\n--${boundary}--\r\n`);
+      const body = Buffer.concat([head, imageBuf, tail]);
+      const uploadUrl = `${inferenceBase}/algo/api/v2/image/upload?request_id=${crypto.randomUUID()}`;
+      const uploadCosy = buildCosyHeaders(body, uploadUrl, {
+        userId: creds.userId,
+        authToken: creds.authToken,
+        machineId: deriveMachineId(creds.userId),
+      });
+      try {
+        const res = await this.fetchWithTimeout(
+          uploadUrl,
+          {
+            method: 'PUT',
+            headers: {
+              ...uploadCosy,
+              Accept: 'application/json',
+              'Content-Type': `multipart/form-data; boundary=${boundary}`,
+              'Content-Length': String(body.length),
+              'AI-CLIENT-TIMESTAMP': String(Math.floor(Date.now() / 1000)),
+              'Accept-Encoding': 'identity',
+            },
+            body,
+          },
+          30_000,
+          { signal: options?.signal },
+        );
+        if (res.ok) {
+          const json = (await res.json().catch(() => null)) as Record<string, any> | null;
+          const result = (json?.result && typeof json.result === 'object' ? json.result : json) as Record<string, any> | null;
+          const uploaded = result?.imageUrls?.[0] ?? result?.image_urls?.[0]
+            ?? result?.imageUrl ?? result?.image_url ?? result?.url ?? result?.ossUrl ?? result?.oss_url;
+          if (typeof uploaded === 'string' && uploaded) return uploaded;
+        }
+      } catch {
+        // Fall through to inline fallback for small images
+      }
+      if (imageBuf.length <= 128 * 1024) return dataUrl;
+      throw new Error('Qoder image upload failed.');
+    };
+
+    const normalizeQoderContent = async (content: ChatMessage['content']): Promise<unknown> => {
+      if (typeof content === 'string') return content;
+      if (!Array.isArray(content)) return contentToString(content);
+      const blocks: Array<Record<string, unknown>> = [];
+      const textParts: string[] = [];
+      let hasImage = false;
+      for (const item of content) {
+        if (!item || typeof item !== 'object') continue;
+        const p = item as unknown as Record<string, unknown>;
+        let imageUrl: string | null = null;
+        if (p.type === 'image_url') {
+          imageUrl = typeof p.image_url === 'string'
+            ? p.image_url
+            : ((p.image_url as { url?: unknown } | undefined)?.url as string | undefined) ?? null;
+        } else if (p.type === 'image' && p.source && typeof p.source === 'object') {
+          const src = p.source as Record<string, unknown>;
+          if (src.type === 'base64' && typeof src.data === 'string') {
+            imageUrl = `data:${typeof src.media_type === 'string' ? src.media_type : 'image/png'};base64,${src.data}`;
+          } else if (typeof src.url === 'string') {
+            imageUrl = src.url;
+          }
+        }
+        if (imageUrl) {
+          const resolvedUrl = imageUrl.startsWith('data:image/') ? await uploadQoderImage(imageUrl) : imageUrl;
+          blocks.push({ type: 'image_url', image_url: { url: resolvedUrl } });
+          hasImage = true;
+        } else if (typeof p.text === 'string' && p.text) {
+          if (hasImage || blocks.length) blocks.push({ type: 'text', text: p.text });
+          else textParts.push(p.text);
+        }
+      }
+      if (!hasImage) return textParts.join('\n');
+      if (textParts.length) blocks.unshift({ type: 'text', text: textParts.join('\n') });
+      return blocks;
+    };
 
     let systemText = '';
     const filteredMessages: Array<{ role: string; content: unknown }> = [];
@@ -470,11 +559,12 @@ export class QoderProvider extends BaseProvider {
       if (m.role === 'system') {
         systemText = (systemText ? systemText + '\n\n' : '') + contentToString(m.content);
       } else {
-        const text = contentToString(m.content);
+        const normalizedContent = await normalizeQoderContent(m.content);
+        const text = contentToString(m.content) || (Array.isArray(normalizedContent) ? 'Describe or analyze this image.' : '');
         if (m.role === 'user') lastUserText = text;
         filteredMessages.push({
           role: m.role,
-          content: m.content,
+          content: normalizedContent,
         });
       }
     }
@@ -531,9 +621,6 @@ export class QoderProvider extends BaseProvider {
     const rawJson = JSON.stringify(payload);
     const encodedBody = qoderEncodeBody(rawJson);
 
-    const inferenceBase = this.region === 'cn'
-      ? this.chatBase
-      : (creds.authToken.startsWith('jt-') ? this.chatBaseAlt : this.chatBase);
     const requestUrl = `${inferenceBase}/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1`;
     const cosyHeaders = buildCosyHeaders(encodedBody, requestUrl, {
       userId: creds.userId,

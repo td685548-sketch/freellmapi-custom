@@ -426,6 +426,7 @@ async function requestPowChallenge(
   auth: DeepSeekAuthContext,
   platform: Platform,
   signal?: AbortSignal,
+  targetPath = '/api/v0/chat/completion',
 ): Promise<DeepSeekPowChallenge> {
   const resp = await dsFetch(
     `${origin}/api/v0/chat/create_pow_challenge`,
@@ -435,7 +436,7 @@ async function requestPowChallenge(
         ...buildAuthHeaders(auth, false),
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ target_path: '/api/v0/chat/completion' }),
+      body: JSON.stringify({ target_path: targetPath }),
     },
     REQUEST_TIMEOUT_MS,
     platform,
@@ -449,7 +450,119 @@ async function requestPowChallenge(
   if (!challenge || typeof challenge !== 'object') {
     throw new DeepSeekWebChatError('DeepSeek create_pow_challenge returned invalid challenge');
   }
-  return { ...challenge, target_path: '/api/v0/chat/completion' } as DeepSeekPowChallenge;
+  return { ...challenge, target_path: targetPath } as DeepSeekPowChallenge;
+}
+
+interface ExtractedDeepSeekImage {
+  fileName: string;
+  mimeType: string;
+  data: Buffer;
+}
+
+function extractDeepSeekImages(messages: ChatMessage[]): ExtractedDeepSeekImage[] {
+  const images: ExtractedDeepSeekImage[] = [];
+  for (const message of messages) {
+    if (!Array.isArray(message.content)) continue;
+    for (const part of message.content) {
+      if (!part || typeof part !== 'object') continue;
+      const p = part as unknown as Record<string, unknown>;
+      const type = typeof p.type === 'string' ? p.type.toLowerCase() : '';
+      let url: string | undefined;
+      if (type === 'image_url') {
+        url = typeof p.image_url === 'string'
+          ? p.image_url
+          : (p.image_url as { url?: unknown } | undefined)?.url as string | undefined;
+      } else if (type === 'input_image') {
+        url = typeof p.image_url === 'string' ? p.image_url : (typeof p.url === 'string' ? p.url : undefined);
+      } else if (type === 'image' && typeof p.source === 'string') {
+        url = p.source;
+      }
+      if (!url) continue;
+      const match = /^data:image\/(png|jpe?g|webp|gif);base64,([A-Za-z0-9+/=\s]+)$/i.exec(url);
+      if (!match) {
+        throw new DeepSeekWebChatError('DeepSeek Web images must be base64 data URLs (PNG, JPEG, WebP, or GIF)', 400);
+      }
+      const rawExt = match[1].toLowerCase();
+      const ext = rawExt === 'jpeg' ? 'jpg' : rawExt;
+      const mimeType = `image/${rawExt === 'jpg' ? 'jpeg' : rawExt}`;
+      images.push({
+        fileName: `image-${images.length + 1}.${ext}`,
+        mimeType,
+        data: Buffer.from(match[2].replace(/\s/g, ''), 'base64'),
+      });
+    }
+  }
+  return images;
+}
+
+async function uploadDeepSeekFiles(
+  images: ExtractedDeepSeekImage[],
+  origin: string,
+  auth: DeepSeekAuthContext,
+  platform: Platform,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  const fileIds: string[] = [];
+  for (const image of images) {
+    const powChallenge = await requestPowChallenge(origin, auth, platform, signal, '/api/v0/file/upload_file');
+    const powHeader = solveDeepSeekPowHeader(powChallenge);
+    const boundary = `----freellmapiDs${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
+    const head = Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${image.fileName}"\r\nContent-Type: ${image.mimeType}\r\n\r\n`,
+    );
+    const tail = Buffer.from(`\r\n--${boundary}--\r\n`);
+    const body = Buffer.concat([head, image.data, tail]);
+
+    const uploadResp = await dsFetch(
+      `${origin}/api/v0/file/upload_file`,
+      {
+        method: 'POST',
+        headers: {
+          ...buildAuthHeaders(auth, true),
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+          'X-Ds-Pow-Response': powHeader,
+          'X-Client-Timezone-Offset': String(new Date().getTimezoneOffset() * -60),
+        },
+        body,
+      },
+      REQUEST_TIMEOUT_MS,
+      platform,
+      signal,
+    );
+    if (!uploadResp.ok) {
+      throw new DeepSeekWebChatError(`DeepSeek file upload failed (HTTP ${uploadResp.status})`, uploadResp.status);
+    }
+    const uploadJson = (await uploadResp.json().catch(() => null)) as Record<string, any> | null;
+    const biz = uploadJson?.data?.biz_data ?? uploadJson?.biz_data;
+    const fileId = typeof biz?.id === 'string' ? biz.id : '';
+    if (!fileId) {
+      throw new DeepSeekWebChatError('DeepSeek file upload returned no file id', 502);
+    }
+
+    let status = String(biz?.status ?? '').toUpperCase();
+    for (let attempt = 0; attempt < 15 && status !== 'SUCCESS'; attempt++) {
+      if (status === 'ERROR' || status === 'FAILED') {
+        throw new DeepSeekWebChatError('DeepSeek failed to process uploaded image', 502);
+      }
+      await new Promise<void>(resolve => setTimeout(resolve, 1_000));
+      const pollResp = await dsFetch(
+        `${origin}/api/v0/file/fetch_files?file_ids=${encodeURIComponent(fileId)}`,
+        { method: 'GET', headers: buildAuthHeaders(auth, false) },
+        REQUEST_TIMEOUT_MS,
+        platform,
+        signal,
+      );
+      if (pollResp.ok) {
+        const pollJson = (await pollResp.json().catch(() => null)) as Record<string, any> | null;
+        const files = pollJson?.data?.biz_data?.files ?? pollJson?.biz_data?.files;
+        if (Array.isArray(files) && files[0]) {
+          status = String(files[0].status ?? '').toUpperCase();
+        }
+      }
+    }
+    fileIds.push(fileId);
+  }
+  return fileIds;
 }
 
 export interface DeepSeekWebChatOptions {
@@ -476,10 +589,14 @@ export async function* streamDeepSeekWebChat(
   const signal = opts.options?.signal;
   const timeoutMs = opts.options?.timeoutMs ?? COMPLETION_TIMEOUT_MS;
 
+  const images = extractDeepSeekImages(opts.messages);
   const auth = await acquireAuth(origin, cred, platform, signal);
   const sessionId = await createSession(origin, auth, platform, signal);
 
   try {
+    const refFileIds = images.length > 0
+      ? await uploadDeepSeekFiles(images, origin, auth, platform, signal)
+      : [];
     const powChallenge = await requestPowChallenge(origin, auth, platform, signal);
     const powHeader = solveDeepSeekPowHeader(powChallenge);
 
@@ -487,7 +604,8 @@ export async function* streamDeepSeekWebChat(
     const modelType = m.includes('pro') || m.includes('expert') ? 'expert' : 'default';
     const thinkingEnabled = isThinkingModel(opts.modelId) || Boolean(opts.options?.reasoning_effort);
     const searchEnabled = isSearchModel(opts.modelId);
-    const prompt = buildConversationPrompt(opts.messages);
+    const rawPrompt = buildConversationPrompt(opts.messages);
+    const prompt = rawPrompt.trim() || (refFileIds.length > 0 ? 'Describe or analyze this image.' : '');
 
     const resp = await dsFetch(
       `${origin}/api/v0/chat/completion`,
@@ -504,7 +622,7 @@ export async function* streamDeepSeekWebChat(
           parent_message_id: null,
           model_type: modelType,
           prompt,
-          ref_file_ids: [],
+          ref_file_ids: refFileIds,
           thinking_enabled: thinkingEnabled,
           search_enabled: searchEnabled,
           preempt: false,
