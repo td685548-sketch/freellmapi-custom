@@ -9,6 +9,9 @@
 
 import type { Server } from 'node:http';
 import zlib from 'node:zlib';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../../../app.js';
 import { resetFlagsCacheForTests, setFlags } from '../../../custom/ai-platform/flags.js';
@@ -29,6 +32,7 @@ describe('MCP secret leak prevention (T053 / F01 / F02)', () => {
   let primaryToken: string;
   let viewerToken: string;
   let profileId: number;
+  let fixtureDirectory: string;
 
   async function call(path: string, token?: string, method = 'GET', body?: unknown) {
     const res = await fetch(`${base}${path}`, {
@@ -45,7 +49,8 @@ describe('MCP secret leak prevention (T053 / F01 / F02)', () => {
 
   beforeAll(async () => {
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
-    initDb(':memory:');
+    fixtureDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'freellmapi-mcp-secrets-'));
+    initDb(path.join(fixtureDirectory, 'fixture.db'));
     resetFlagsCacheForTests();
     setFlags({ mcpClient: true });
 
@@ -105,6 +110,10 @@ describe('MCP secret leak prevention (T053 / F01 / F02)', () => {
       getDb().close();
     } catch {
       /* already closed */
+    }
+    if (path.dirname(path.resolve(fixtureDirectory)) === path.resolve(os.tmpdir()) &&
+        path.basename(fixtureDirectory).startsWith('freellmapi-mcp-secrets-')) {
+      fs.rmSync(fixtureDirectory, { recursive: true, force: true });
     }
   });
 

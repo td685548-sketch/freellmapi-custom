@@ -571,20 +571,28 @@ export function getSafeUndiciDispatcher(options?: {
   trustedOrigin?: boolean;
   signal?: AbortSignal;
   timedOut?: () => boolean;
+  /** Addresses already validated for this exact request hop. */
+  resolvedIps?: readonly string[];
 }): Agent {
   return new Agent({
     maxRedirections: 0,
     connect: {
       lookup: (hostname, lookupOpts, callback) => {
         raceWithAbort(
-          resolveAndValidateHost(hostname, options),
+          options?.resolvedIps
+            ? Promise.resolve([...options.resolvedIps])
+            : resolveAndValidateHost(hostname, options),
           options?.signal,
           options?.timedOut ?? (() => false),
         )
           .then((ips) => {
             const chosen = ips[0];
             const family = chosen.includes(':') ? 6 : 4;
-            callback(null, chosen, family);
+            if (lookupOpts.all) {
+              callback(null, [{ address: chosen, family }]);
+            } else {
+              callback(null, chosen, family);
+            }
           })
           .catch((err) => {
             callback(err as Error, '', 4);
@@ -646,6 +654,8 @@ export async function safeFetch(
     dnsResolver?: (host: string) => Promise<string[]>;
     signal?: AbortSignal;
     timeoutMs?: number;
+    /** Revalidate authorization after DNS, before each network dispatch. */
+    beforeDispatch?: () => Promise<void>;
   },
 ): Promise<Response> {
   const fetchImpl = options?.fetchFn ?? globalThis.fetch;
@@ -687,12 +697,20 @@ export async function safeFetch(
         throw abortError(op.timedOut());
       }
 
+      // Do not resolve again after this guard: connect uses the validated IPs.
+      // An authorization change during DNS/redirect handling must block I/O.
+      if (options?.beforeDispatch) {
+        await raceWithAbort(options.beforeDispatch(), op.signal, op.timedOut);
+      }
+      if (op.signal?.aborted) throw abortError(op.timedOut());
+
       const dispatcher = getSafeUndiciDispatcher({
         allowLocalhost: options?.allowLocalhost,
         dnsResolver: options?.dnsResolver,
         trustedOrigin,
         signal: op.signal,
         timedOut: op.timedOut,
+        resolvedIps: validation.resolvedIps,
       });
 
       const mergedInit: RequestInit & { dispatcher?: Agent } = {

@@ -19,7 +19,7 @@ import {
   captureApprovalSnapshot,
 } from '../mcp-client/approval-safety.js';
 import { recordToolCall, transitionToolCallOutcome } from '../mcp-client/calls.js';
-import { CURRENT_OWNER_INSTANCE_ID } from '../mcp-client/maintenance.js';
+import { CURRENT_OWNER_INSTANCE_ID } from '../mcp-client/owner-instance.js';
 import { assertToolExecutable } from '../mcp-client/registry.js';
 import {
   sanitizeMcpError,
@@ -177,7 +177,7 @@ function collectServerSecrets(serverId?: number | null): string[] {
     if (!row.auth_ciphertext || !row.auth_iv || !row.auth_tag) continue;
     try {
       const val = decrypt(row.auth_ciphertext, row.auth_iv, row.auth_tag);
-      if (val && val.length >= 6) secrets.push(val);
+      if (val.length > 0) secrets.push(val);
     } catch {
       // Ignore undecryptable rows when collecting redaction needles.
     }

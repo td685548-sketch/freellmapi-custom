@@ -9,6 +9,12 @@ import {
 } from '../../../custom/ai-platform/mcp-client/sanitize.js';
 
 describe('MCP sanitizer (F02)', () => {
+  it('redacts short, whitespace-bearing and JSON-escaped configured credentials', () => {
+    for (const credential of ['q', 'zY9!q', ' x ', 'q"\\z\n']) {
+      expect(scrubCredentialEcho(`prefix:${credential}:suffix`, [credential])).toBe('prefix:[REDACTED]:suffix');
+      expect(scrubCredentialEcho(JSON.stringify({ echo: credential }), [credential])).not.toContain(JSON.stringify(credential).slice(1, -1));
+    }
+  });
   it('redacts opaque credentials without sk-/Bearer prefix in text, nested objects, and errors', () => {
     const opaqueCred = 'vault-opaque-987654321-xyz';
 

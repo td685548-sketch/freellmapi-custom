@@ -18,6 +18,7 @@ import {
   maybeRunMcpMaintenance,
   resetMcpMaintenanceForTests,
 } from '../../../custom/ai-platform/mcp-client/maintenance.js';
+import { createOwnerInstanceId } from '../../../custom/ai-platform/mcp-client/owner-instance.js';
 
 function makeFakeTransport(): McpTransportClient {
   return {
@@ -57,12 +58,50 @@ describe('MCP Lifecycle Maintenance (L01)', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
     resetFlagsCacheForTests();
     try {
       getDb().close();
     } catch {
       /* already closed */
     }
+  });
+
+  it('reconciles a proven dead local owner and its journal without touching live, remote or legacy owners', async () => {
+    const srv = await createServer({ slug: 'owner-test', name: 'Owners', url: 'https://mcp.example.com', authKind: 'none' }, null);
+    await syncServerTools(srv.id, null, undefined, makeFakeTransport());
+    const tool = listServerTools(srv.id)[0]!;
+    const deadPid = process.pid + 1000;
+    const livePid = process.pid + 2000;
+    vi.spyOn(process, 'kill').mockImplementation((pid) => {
+      if (pid === deadPid) throw Object.assign(new Error('No process'), { code: 'ESRCH' });
+      return true;
+    });
+    const owners = {
+      dead: createOwnerInstanceId(deadPid),
+      live: createOwnerInstanceId(livePid),
+      remote: `mcp-v2:${Buffer.from('remote-host').toString('base64url')}:${deadPid}:00000000-0000-0000-0000-000000000000`,
+      legacy: 'mcp-1234-unknown-host',
+      current: createOwnerInstanceId(),
+    };
+    for (const [key, owner] of Object.entries(owners)) {
+      getDb().prepare(`INSERT INTO custom_ai_approvals
+        (execution_key, scope_kind, scope_id, tool_id, args_ciphertext, args_iv, args_tag, args_masked, status, expires_at, owner_instance_id)
+        VALUES (?, 'profile', '1', ?, 'cipher', 'iv', 'tag', '{}', 'executing', '2099-01-01T00:00:00Z', ?)`
+      ).run(key, tool.id, owner);
+      recordToolCall({ executionKey: key, scope: { kind: 'profile', id: '1' }, endUser: null,
+        serverId: srv.id, toolName: tool.name, argsMasked: '{}', resultMasked: null,
+        status: 'awaiting_approval', durationMs: 0, resultBytes: 0 });
+    }
+    const result = maybeRunMcpMaintenance({ force: true });
+    expect(result.reconciledExecuting).toBe(1);
+    for (const key of Object.keys(owners)) {
+      expect(getDb().prepare('SELECT status FROM custom_ai_approvals WHERE execution_key = ?').get(key))
+        .toEqual({ status: key === 'dead' ? 'unknown' : 'executing' });
+      expect(getDb().prepare('SELECT status FROM custom_ai_tool_calls WHERE execution_key = ?').get(key))
+        .toEqual({ status: key === 'dead' ? 'unknown' : 'awaiting_approval' });
+    }
+    expect(maybeRunMcpMaintenance({ force: true }).reconciledExecuting).toBe(0);
   });
 
   it('throttles maintenance frequency and expires stale pending approvals + prunes old tool calls', async () => {

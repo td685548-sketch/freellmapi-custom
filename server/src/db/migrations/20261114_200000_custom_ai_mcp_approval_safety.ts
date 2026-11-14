@@ -25,7 +25,6 @@ function dropColumnIfExists(db: Db, table: string, column: string): void {
 
 export function up(db: Db): void {
   addColumnIfMissing(db, 'custom_ai_mcp_servers', 'server_revision', 'INTEGER NOT NULL DEFAULT 1');
-  addColumnIfMissing(db, 'custom_ai_mcp_servers', 'credential_generation', 'INTEGER NOT NULL DEFAULT 1');
 
   addColumnIfMissing(db, 'custom_ai_approvals', 'snapshot_json', 'TEXT');
   addColumnIfMissing(db, 'custom_ai_approvals', 'result_masked', 'TEXT');
@@ -51,6 +50,5 @@ export function down(db: Db): void {
   dropColumnIfExists(db, 'custom_ai_approvals', 'result_masked');
   dropColumnIfExists(db, 'custom_ai_approvals', 'snapshot_json');
 
-  dropColumnIfExists(db, 'custom_ai_mcp_servers', 'credential_generation');
   dropColumnIfExists(db, 'custom_ai_mcp_servers', 'server_revision');
 }

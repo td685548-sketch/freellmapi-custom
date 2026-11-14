@@ -479,11 +479,10 @@ async function dispatchJsonRpc(
     );
   }
 
-  if (opts?.preDispatchGuard) {
-    await opts.preDispatchGuard();
-  }
-
   let res: Response;
+  // Retain the guard's typed error rather than wrapping it as an uncertain
+  // transport failure: no tool request has been sent when authorization fails.
+  let dispatchBlocked: { error: unknown } | undefined;
   try {
     res = await safeFetch(
       config.url,
@@ -504,9 +503,20 @@ async function dispatchJsonRpc(
         dnsResolver: opts?.dnsResolver,
         fetchFn: opts?.fetchFn,
         signal,
+        beforeDispatch: opts?.preDispatchGuard
+          ? async () => {
+              try {
+                await opts.preDispatchGuard!();
+              } catch (error) {
+                dispatchBlocked = { error };
+                throw error;
+              }
+            }
+          : undefined,
       },
     );
   } catch (err) {
+    if (dispatchBlocked) throw dispatchBlocked.error;
     if (err instanceof McpTransportError) throw err;
     if (signal.aborted || isDeadlineExpired()) {
       throw new McpTransportError(

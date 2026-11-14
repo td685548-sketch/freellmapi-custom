@@ -1,16 +1,11 @@
-import crypto from 'node:crypto';
 import { getDb } from '../../../db/index.js';
 import { expireApprovals } from '../orchestrator/approvals.js';
-import { pruneToolCalls } from './calls.js';
+import { pruneToolCalls, transitionToolCallOutcome } from './calls.js';
+import { CURRENT_OWNER_INSTANCE_ID, isOwnerDefinitelyDead } from './owner-instance.js';
+
+export { CURRENT_OWNER_INSTANCE_ID } from './owner-instance.js';
 
 export const MCP_MAINTENANCE_INTERVAL_MS = 60_000;
-
-/**
- * Unique identifier for the current server process instance so stale `executing`
- * rows from an earlier process can be reconciled to `unknown` without touching
- * active work in the current process or another live instance.
- */
-export const CURRENT_OWNER_INSTANCE_ID = `mcp-${process.pid}-${crypto.randomUUID()}`;
 
 let lastMaintenanceAtMs = 0;
 
@@ -38,26 +33,39 @@ function hasOwnerInstanceColumn(): boolean {
 }
 
 /**
- * Reconciles `executing` approvals left behind by an earlier process instance
- * (`owner_instance_id IS NOT NULL AND owner_instance_id != currentOwnerId`) to `unknown`
- * without ever re-dispatching them or sweeping live in-flight approvals.
+ * Reconciles only demonstrably dead processes on this host. Remote and legacy
+ * owner IDs are left for operator reconciliation; they are never redispatched.
  */
 export function reconcileStaleExecutingApprovals(
   currentOwnerId: string = CURRENT_OWNER_INSTANCE_ID,
 ): number {
   if (!hasOwnerInstanceColumn()) return 0;
   try {
-    const res = getDb()
+    const db = getDb();
+    const candidates = db
       .prepare(
-        `UPDATE custom_ai_approvals
-            SET status = 'unknown',
-                error_text = COALESCE(error_text, 'Process restarted while write execution outcome was unknown.')
+        `SELECT id, execution_key, owner_instance_id FROM custom_ai_approvals
           WHERE status = 'executing'
             AND owner_instance_id IS NOT NULL
             AND owner_instance_id != ?`,
       )
-      .run(currentOwnerId);
-    return res.changes;
+      .all(currentOwnerId) as Array<{ id: number; execution_key: string; owner_instance_id: string }>;
+    return db.transaction(() => {
+      let changed = 0;
+      for (const row of candidates) {
+        if (!isOwnerDefinitelyDead(row.owner_instance_id)) continue;
+        const message = 'Execution owner exited before the write outcome was recorded.';
+        const result = db.prepare(
+          `UPDATE custom_ai_approvals SET status = 'unknown', error_text = COALESCE(error_text, ?)
+            WHERE id = ? AND status = 'executing' AND owner_instance_id = ?`,
+        ).run(message, row.id, row.owner_instance_id);
+        if (result.changes > 0) {
+          transitionToolCallOutcome(row.execution_key, { status: 'unknown', errorText: message });
+          changed += result.changes;
+        }
+      }
+      return changed;
+    })();
   } catch {
     return 0;
   }

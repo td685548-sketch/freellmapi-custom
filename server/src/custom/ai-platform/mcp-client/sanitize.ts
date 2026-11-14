@@ -10,10 +10,11 @@ function normalizeSecrets(secretValues?: readonly (string | null | undefined)[])
   const seen = new Set<string>();
   for (const raw of secretValues) {
     if (typeof raw !== 'string') continue;
-    const trimmed = raw.trim();
-    if (trimmed.length >= 6) {
-      seen.add(trimmed);
-    }
+    if (raw.length === 0) continue;
+    seen.add(raw);
+    // JSON text can escape quotes, backslashes and control characters. Scrub
+    // both representations without trimming the credential used on the wire.
+    seen.add(JSON.stringify(raw).slice(1, -1));
   }
   return Array.from(seen).sort((a, b) => b.length - a.length);
 }

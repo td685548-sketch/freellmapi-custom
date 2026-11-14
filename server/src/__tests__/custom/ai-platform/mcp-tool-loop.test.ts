@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Request, Response } from 'express';
 import { getDb, initDb } from '../../../db/index.js';
 import { resetFlagsCacheForTests, setFlags } from '../../../custom/ai-platform/flags.js';
-import { toLoopbackMessages, extractLoopParams } from '../../../custom/ai-platform/mcp-client/messages.js';
+import { toLoopbackMessages, extractLoopParams, extractLoopParamsOrNull, extractCallerToolsOrNull } from '../../../custom/ai-platform/mcp-client/messages.js';
 import { sendMcpLoopResult } from '../../../custom/ai-platform/mcp-client/respond.js';
 import { runToolLoop, type ToolLoopDeps } from '../../../custom/ai-platform/mcp-client/tool-loop.js';
 import type { BoundTool, McpLoopResult } from '@freellmapi/shared/ai-platform-mcp.js';
@@ -536,5 +536,23 @@ describe('MCP Compatibility & Fallback Audit (F05 / F09)', () => {
     expect(params.toolChoice).toBe('none');
     expect(params.responseFormat).toEqual({ type: 'json_object' });
     expect(params.maxCompletionTokens).toBe(256);
+  });
+});
+
+
+describe('Lossless request options before MCP admission', () => {
+  it('falls back for unknown top-level and nested generation controls on every wire', () => {
+    expect(extractLoopParamsOrNull('openai-chat', { model: 'auto', vendor_control: true })).toBeNull();
+    expect(extractLoopParamsOrNull('anthropic', { model: 'auto', top_k: 40 })).toBeNull();
+    expect(extractLoopParamsOrNull('responses', { input: 'hello', text: { format: { type: 'text' }, verbosity: 'low' } })).toBeNull();
+    expect(extractLoopParamsOrNull('gemini', { contents: [], generationConfig: { topK: 40 } })).toBeNull();
+    expect(extractLoopParamsOrNull('gemini', { contents: [], toolConfig: { functionCallingConfig: { mode: 'AUTO' }, retrievalConfig: {} } })).toBeNull();
+  });
+
+  it('keeps strict caller tools and falls back instead of discarding tool metadata', () => {
+    const functionDefinition = { name: 'caller_fn', parameters: { type: 'object' }, strict: true };
+    expect(extractCallerToolsOrNull('openai-chat', { tools: [{ type: 'function', function: functionDefinition }] })?.[0]?.function.strict).toBe(true);
+    expect(extractCallerToolsOrNull('responses', { tools: [{ type: 'function', ...functionDefinition }] })?.[0]?.function.strict).toBe(true);
+    expect(extractCallerToolsOrNull('anthropic', { tools: [{ name: 'caller_fn', input_schema: {}, cache_control: { type: 'ephemeral' } }] })).toBeNull();
   });
 });

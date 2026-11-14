@@ -335,6 +335,11 @@ export async function executeReadTool(
       if (latest.tool.effect !== 'read') {
         throw new PreDispatchBlockedError('Tool effect changed to write.');
       }
+      if (latest.config.revision !== config.revision ||
+          latest.config.url !== config.url ||
+          latest.config.credentialGeneration !== config.credentialGeneration) {
+        throw new PreDispatchBlockedError('MCP server configuration changed before dispatch.');
+      }
     };
     const deadlineAtMs = computeOperationDeadlineMs(config.timeoutMs);
     const session = await mcpInitialize(config, ctx.signal, {
@@ -392,14 +397,17 @@ export async function executeReadTool(
     };
   } catch (err) {
     const durationMs = Date.now() - startedAt;
+    const blocked = isPreDispatchBlock(err);
     const transportErr =
       err instanceof McpTransportError
         ? err
         : new McpTransportError('http', err instanceof Error ? err.message : 'Transport failure');
     const maskedErr = maskTextForOutput(normScope, transportErr.message, config.secret, ctx.role);
-    recordServerOutcome(config.serverId, { ok: false, error: maskedErr });
+    if (!blocked) recordServerOutcome(config.serverId, { ok: false, error: maskedErr });
 
-    const { callStatus, errorType } = mapTransportErrorToStatus(transportErr);
+    const { callStatus, errorType } = blocked
+      ? { callStatus: 'blocked' as const, errorType: 'blocked' as const }
+      : mapTransportErrorToStatus(transportErr);
     recordToolCall({
       runId: ctx.runId ?? null,
       executionKey,

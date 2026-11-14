@@ -50,6 +50,8 @@ export interface LoopbackRequest {
     maxCompletionTokens?: number;
     toolChoice?: unknown;
     responseFormat?: unknown;
+    frequencyPenalty?: number;
+    presencePenalty?: number;
   };
   skipEnrichment?: boolean;
   endUser?: string | null;
@@ -270,6 +272,8 @@ export async function callGateway(
   if (body.safeParams?.stop !== undefined) reqBody['stop'] = body.safeParams.stop;
   if (body.safeParams?.toolChoice !== undefined) reqBody['tool_choice'] = body.safeParams.toolChoice;
   if (body.safeParams?.responseFormat !== undefined) reqBody['response_format'] = body.safeParams.responseFormat;
+  if (body.safeParams?.frequencyPenalty !== undefined) reqBody['frequency_penalty'] = body.safeParams.frequencyPenalty;
+  if (body.safeParams?.presencePenalty !== undefined) reqBody['presence_penalty'] = body.safeParams.presencePenalty;
   const bodyJson = JSON.stringify(reqBody);
 
   // Stay on loopback even when the incoming socket was addressed through a LAN IP.

@@ -4,6 +4,7 @@ import type {
   ChatToolCall,
   ChatToolDefinition,
 } from '@freellmapi/shared/types.js';
+import { hasUnsupportedFields, hasUnsupportedRequestOptions } from './request-options.js';
 
 export interface LoopSafeParams {
   maxTokens?: number;
@@ -13,6 +14,8 @@ export interface LoopSafeParams {
   stop?: string | string[];
   toolChoice?: unknown;
   responseFormat?: unknown;
+  frequencyPenalty?: number;
+  presencePenalty?: number;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -385,12 +388,15 @@ export function extractCallerToolsOrNull(wire: Wire, body: unknown): ChatToolDef
       if (!t || t.type !== 'function' || !fn || typeof fn.name !== 'string') {
         return null;
       }
+      if (hasUnsupportedFields(t, ['type', 'function']) ||
+          hasUnsupportedFields(fn, ['name', 'description', 'parameters', 'strict'])) return null;
       out.push({
         type: 'function',
         function: {
           name: fn.name,
           ...(typeof fn.description === 'string' ? { description: fn.description } : {}),
           ...(asRecord(fn.parameters) ? { parameters: fn.parameters as Record<string, unknown> } : {}),
+          ...(typeof fn.strict === 'boolean' ? { strict: fn.strict } : {}),
         },
       });
     }
@@ -402,6 +408,7 @@ export function extractCallerToolsOrNull(wire: Wire, body: unknown): ChatToolDef
       const t = asRecord(item);
       if (!t || typeof t.name !== 'string') return null;
       if (t.type !== undefined && t.type !== 'custom') return null;
+      if (hasUnsupportedFields(t, ['type', 'name', 'description', 'input_schema'])) return null;
       out.push({
         type: 'function',
         function: {
@@ -420,12 +427,14 @@ export function extractCallerToolsOrNull(wire: Wire, body: unknown): ChatToolDef
       if (!t || t.type !== 'function' || typeof t.name !== 'string') {
         return null;
       }
+      if (hasUnsupportedFields(t, ['type', 'name', 'description', 'parameters', 'strict'])) return null;
       out.push({
         type: 'function',
         function: {
           name: t.name,
           ...(typeof t.description === 'string' ? { description: t.description } : {}),
           ...(asRecord(t.parameters) ? { parameters: t.parameters as Record<string, unknown> } : {}),
+          ...(typeof t.strict === 'boolean' ? { strict: t.strict } : {}),
         },
       });
     }
@@ -443,6 +452,7 @@ export function extractCallerToolsOrNull(wire: Wire, body: unknown): ChatToolDef
       for (const declRaw of group.functionDeclarations) {
         const decl = asRecord(declRaw);
         if (!decl || typeof decl.name !== 'string') return null;
+        if (hasUnsupportedFields(decl, ['name', 'description', 'parameters'])) return null;
         out.push({
           type: 'function',
           function: {
@@ -497,6 +507,7 @@ function hasAnyDefined(obj: Record<string, unknown>, keys: string[]): boolean {
 export function extractLoopParamsOrNull(wire: Wire, body: unknown): LoopSafeParams | null {
   const obj = asRecord(body);
   if (!obj) return null;
+  if (hasUnsupportedRequestOptions(wire, obj)) return null;
 
   if (wire === 'openai-chat') {
     if (
@@ -534,6 +545,8 @@ export function extractLoopParamsOrNull(wire: Wire, body: unknown): LoopSafePara
         : {}),
       ...(typeof obj.temperature === 'number' ? { temperature: obj.temperature } : {}),
       ...(typeof obj.top_p === 'number' ? { topP: obj.top_p } : {}),
+      ...(typeof obj.frequency_penalty === 'number' ? { frequencyPenalty: obj.frequency_penalty } : {}),
+      ...(typeof obj.presence_penalty === 'number' ? { presencePenalty: obj.presence_penalty } : {}),
       ...(stop !== undefined ? { stop } : {}),
       ...(tc.value !== undefined ? { toolChoice: tc.value } : {}),
       ...(rf.value !== undefined ? { responseFormat: rf.value } : {}),
@@ -558,6 +571,7 @@ export function extractLoopParamsOrNull(wire: Wire, body: unknown): LoopSafePara
     if (obj.tool_choice !== undefined && obj.tool_choice !== null) {
       const tc = asRecord(obj.tool_choice);
       if (!tc || typeof tc.type !== 'string') return null;
+      if (hasUnsupportedFields(tc, ['type', 'name'])) return null;
       if (tc.type === 'auto') toolChoice = 'auto';
       else if (tc.type === 'any') toolChoice = 'required';
       else if (tc.type === 'none') toolChoice = 'none';
@@ -607,6 +621,7 @@ export function extractLoopParamsOrNull(wire: Wire, body: unknown): LoopSafePara
     let responseFormat: unknown;
     if (obj.text !== undefined && obj.text !== null) {
       const textObj = asRecord(obj.text);
+      if (!textObj || hasUnsupportedFields(textObj, ['format'])) return null;
       const fmt = asRecord(textObj?.format);
       if (!fmt || typeof fmt.type !== 'string') return null;
       if (fmt.type === 'text' || fmt.type === 'json_object') {
@@ -642,6 +657,8 @@ export function extractLoopParamsOrNull(wire: Wire, body: unknown): LoopSafePara
       const tc = asRecord(obj.toolConfig);
       const fcc = asRecord(tc?.functionCallingConfig);
       if (!fcc || typeof fcc.mode !== 'string') return null;
+      if (hasUnsupportedFields(tc!, ['functionCallingConfig']) ||
+          hasUnsupportedFields(fcc, ['mode', 'allowedFunctionNames'])) return null;
       const allowedNames = Array.isArray(fcc.allowedFunctionNames) ? fcc.allowedFunctionNames : undefined;
       if (fcc.mode === 'AUTO' && !allowedNames) toolChoice = 'auto';
       else if (fcc.mode === 'NONE') toolChoice = 'none';

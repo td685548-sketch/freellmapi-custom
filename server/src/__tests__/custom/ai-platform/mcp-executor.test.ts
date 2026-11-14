@@ -8,6 +8,7 @@ import {
   reviewTool,
   setAllowedInternalOrigins,
   syncServerTools,
+  updateServer,
 } from '../../../custom/ai-platform/mcp-client/registry.js';
 import { setBindings, toolsForScope } from '../../../custom/ai-platform/mcp-client/bindings.js';
 import { captureApprovalSnapshot } from '../../../custom/ai-platform/mcp-client/approval-safety.js';
@@ -46,6 +47,32 @@ describe('MCP Executor (X0)', () => {
     await fakeServer.close();
     try { getDb().close(); } catch { /* already closed */ }
     vi.restoreAllMocks();
+  });
+
+  it('blocks a stale read configuration when server credentials rotate during initialization', async () => {
+    const srv = await createServer({ slug: 'rotating', name: 'Rotating', url: fakeServer.url,
+      authKind: 'bearer', secret: 'old-opaque-credential' }, null);
+    await syncServerTools(srv.id, null);
+    const row = getDb().prepare("SELECT id FROM custom_ai_mcp_tools WHERE server_id = ? AND name = 'lookup_order'")
+      .get(srv.id) as { id: number };
+    reviewTool(row.id, { state: 'allowed', effect: 'read' }, null);
+    setBindings(scope, { toolIds: [row.id], enabled: true });
+    const realFetch = globalThis.fetch;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const response = await realFetch(input, init);
+      const request = JSON.parse(String(init?.body ?? '{}')) as { method?: string };
+      if (request.method === 'initialize') {
+        await updateServer(srv.id, { revision: srv.revision, secret: 'new-opaque-credential' }, null);
+      }
+      return response;
+    });
+    const result = await executeReadTool({ scope, endUser: null, turnId: 'rotating', stepSeq: 1,
+      signal: new AbortController().signal }, toolsForScope(scope)[0]!, { order_id: 'ORD-1' });
+    expect(result.kind).toBe('error');
+    expect(fakeServer.getDispatchCount('tools/call')).toBe(0);
+    expect(getDb().prepare('SELECT fail_count FROM custom_ai_mcp_servers WHERE id = ?').get(srv.id))
+      .toEqual({ fail_count: 0 });
+    expect(listToolCalls({ scope }).calls[0]?.status).toBe('blocked');
   });
 
   it('executes allowed bound read tool, masks secret echo/PII, wraps untrusted result, and logs once', async () => {
