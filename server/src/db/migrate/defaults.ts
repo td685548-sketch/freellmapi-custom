@@ -270,7 +270,7 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: '20261113_090001_support_evidence.ts', module: supportEvidence },
   { filename: '20261113_100000_custom_ai_platform_base.ts', module: customAiPlatformBase },
   { filename: '20261113_110000_custom_ai_mcp_client.ts', module: customAiMcpClient },
+  { filename: '20261113_120000_custom_ai_output_guard.ts', module: customAiOutputGuard },
   { filename: '20261113_180001_support_service_desk.ts', module: supportServiceDesk },
   { filename: '20261114_200000_custom_ai_mcp_approval_safety.ts', module: customAiMcpApprovalSafety },
-  { filename: '20261113_120000_custom_ai_output_guard.ts', module: customAiOutputGuard },
 ];
