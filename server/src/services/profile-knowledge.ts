@@ -39,7 +39,24 @@ export function tokenize(text: string): string[] {
   return (text.normalize('NFC').toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter(t => t.length >= 2);
 }
 
-interface IndexedChunk { docId: number; title: string; text: string; terms: Map<string, number>; length: number }
+export interface ProfileKnowledgeHit {
+  docId: number;
+  chunkId: number;
+  ord: number;
+  title: string;
+  text: string;
+  score: number;
+}
+
+export interface ProfileKnowledgeChunkRecord {
+  docId: number;
+  chunkId: number;
+  ord: number;
+  title: string;
+  text: string;
+}
+
+interface IndexedChunk { chunkId: number; docId: number; ord: number; title: string; text: string; terms: Map<string, number>; length: number }
 interface ProfileIndex { chunks: IndexedChunk[]; df: Map<string, number>; avgLength: number }
 const indexes = new Map<number, ProfileIndex>();
 
@@ -50,28 +67,30 @@ function indexOf(profileId: number): ProfileIndex {
   const hit = indexes.get(profileId);
   if (hit) return hit;
   const rows = getDb().prepare(`
-    SELECT c.doc_id AS docId, d.title AS title, c.text AS text
+    SELECT c.id AS chunkId, c.doc_id AS docId, c.ord AS ord, d.title AS title, c.text AS text
     FROM custom_knowledge_chunks c JOIN custom_knowledge_docs d ON d.id = c.doc_id
     WHERE c.profile_id = ? ORDER BY c.doc_id, c.ord
-  `).all(profileId) as Array<{ docId: number; title: string; text: string }>;
+  `).all(profileId) as Array<{ chunkId: number; docId: number; ord: number; title: string; text: string }>;
   const df = new Map<string, number>();
   const chunks = rows.map(r => {
     const terms = new Map<string, number>();
     const tokens = tokenize(`${r.title} ${r.text}`);
     for (const t of tokens) terms.set(t, (terms.get(t) ?? 0) + 1);
     for (const t of terms.keys()) df.set(t, (df.get(t) ?? 0) + 1);
-    return { docId: r.docId, title: r.title, text: r.text, terms, length: tokens.length };
+    return { chunkId: r.chunkId, docId: r.docId, ord: r.ord, title: r.title, text: r.text, terms, length: tokens.length };
   });
   const index = { chunks, df, avgLength: chunks.length ? chunks.reduce((n, c) => n + c.length, 0) / chunks.length : 1 };
   indexes.set(profileId, index);
   return index;
 }
 
-/** The passages that best answer `query`, best first, within `maxChars` of passage text. */
-export function searchKnowledge(profileId: number, query: string, maxChars: number): KnowledgeHit[] {
-  const index = indexOf(profileId);
+function scoreBm25(
+  index: ProfileIndex,
+  query: string,
+  maxChunks = Number.POSITIVE_INFINITY,
+): Array<{ c: IndexedChunk; score: number }> {
   const q = [...new Set(tokenize(query))];
-  if (q.length === 0 || index.chunks.length === 0) return [];
+  if (q.length === 0 || index.chunks.length === 0 || maxChunks <= 0) return [];
   const n = index.chunks.length;
   const k1 = 1.2;
   const b = 0.75;
@@ -89,6 +108,12 @@ export function searchKnowledge(profileId: number, query: string, maxChars: numb
   // A passage that shares only a common word with the question is noise next to a strong match.
   const best = scored[0]?.score ?? 0;
   const relevant = scored.filter(x => x.score >= best * MIN_RELATIVE_SCORE);
+  return Number.isFinite(maxChunks) ? relevant.slice(0, Math.floor(maxChunks)) : relevant;
+}
+
+/** The passages that best answer `query`, best first, within `maxChars` of passage text. */
+export function searchKnowledge(profileId: number, query: string, maxChars: number): KnowledgeHit[] {
+  const relevant = scoreBm25(indexOf(profileId), query);
   const hits: KnowledgeHit[] = [];
   let used = 0;
   for (const { c, score } of relevant) {
@@ -97,6 +122,35 @@ export function searchKnowledge(profileId: number, query: string, maxChars: numb
     used += c.text.length;
   }
   return hits;
+}
+
+/** Ranked BM25 passages with chunk identity metadata for hybrid retrieval. */
+export function searchKnowledgeRanked(profileId: number, query: string, maxChunks = 3): ProfileKnowledgeHit[] {
+  if (maxChunks <= 0) return [];
+  const limit = Math.floor(maxChunks);
+  if (limit <= 0) return [];
+  return scoreBm25(indexOf(profileId), query, limit).map(({ c, score }) => ({
+    docId: c.docId,
+    chunkId: c.chunkId,
+    ord: c.ord,
+    title: c.title,
+    text: c.text,
+    score: Math.round(score * 1000) / 1000,
+  }));
+}
+
+/** Lists persisted knowledge chunks for a profile (optionally narrowed to one document). */
+export function listProfileKnowledgeChunks(profileId: number, docId?: number): ProfileKnowledgeChunkRecord[] {
+  const db = getDb();
+  const sql = `
+    SELECT c.doc_id AS docId, c.id AS chunkId, c.ord AS ord, d.title AS title, c.text AS text
+    FROM custom_knowledge_chunks c
+    JOIN custom_knowledge_docs d ON d.id = c.doc_id
+    WHERE c.profile_id = ?${docId !== undefined ? ' AND c.doc_id = ?' : ''}
+    ORDER BY c.doc_id, c.ord, c.id
+  `;
+  const stmt = db.prepare(sql);
+  return (docId !== undefined ? stmt.all(profileId, docId) : stmt.all(profileId)) as ProfileKnowledgeChunkRecord[];
 }
 
 /** The reference block added to a request, or null when nothing matched. */

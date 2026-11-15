@@ -201,32 +201,32 @@
     },
     {
       "id": "q-002",
-      "question": "What should I do if I never received an email confirming my Acme order?",
+      "question": "Nothing showed up in my mailbox after buying — might an alert be sitting in the junk tab?",
       "relevantChunkId": "chunk-001"
     },
     {
       "id": "q-003",
-      "question": "Is there a cap on how many Acme orders a customer can submit per day?",
+      "question": "What is the maximum daily quota of separate checkouts allowed within twenty-four hours?",
       "relevantChunkId": "chunk-001"
     },
     {
       "id": "q-004",
-      "question": "Can I change the delivery address on an Acme order after I have submitted it?",
+      "question": "Am I allowed to fix a typo in where my box goes after finishing my basket?",
       "relevantChunkId": "chunk-002"
     },
     {
       "id": "q-005",
-      "question": "Within what time frame is it possible to edit an Acme order after placing it?",
+      "question": "Right after paying, how short is the grace interval to shrink item counts prior to packing?",
       "relevantChunkId": "chunk-002"
     },
     {
       "id": "q-006",
-      "question": "How do I cancel an Acme order before it has been sent out?",
+      "question": "How can a buyer abort an unshipped transaction prior to warehouse departure?",
       "relevantChunkId": "chunk-003"
     },
     {
       "id": "q-007",
-      "question": "What happens to my payment if I cancel an Acme order successfully?",
+      "question": "How soon does an unpaid checkout expire automatically when funds never clear?",
       "relevantChunkId": "chunk-003"
     },
     {
@@ -236,27 +236,27 @@
     },
     {
       "id": "q-009",
-      "question": "How long does it take to receive a refund from Acme Corp after returning an item?",
+      "question": "After sending back unwanted merchandise, how quickly does the payout hit my card?",
       "relevantChunkId": "chunk-004"
     },
     {
       "id": "q-010",
-      "question": "What happens to the discount I received if I only return part of my Acme order?",
+      "question": "Keeping half my haul and mailing back the rest — how does the promo markdown alter my payout?",
       "relevantChunkId": "chunk-005"
     },
     {
       "id": "q-011",
-      "question": "Will Acme refund me the shipping cost when I send back some items from an order?",
+      "question": "Do freight fees come back when keeping part of a shipment and mailing back just one piece?",
       "relevantChunkId": "chunk-005"
     },
     {
       "id": "q-012",
-      "question": "Do Acme Premium members get their money back faster than regular customers?",
+      "question": "Can paid VIP subscribers collect instant wallet payouts prior to warehouse arrival?",
       "relevantChunkId": "chunk-006"
     },
     {
       "id": "q-013",
-      "question": "What is the provisional credit that Acme offers to Premium subscribers for returns?",
+      "question": "Which costly or dangerous categories cannot receive early wallet payouts for subscribers?",
       "relevantChunkId": "chunk-006"
     },
     {
@@ -266,27 +266,27 @@
     },
     {
       "id": "q-015",
-      "question": "Is free shipping available on Acme orders and what is the minimum purchase amount?",
+      "question": "Above what spend threshold is basic US mainland freight waived, and do outlying islands cost extra?",
       "relevantChunkId": "chunk-007"
     },
     {
       "id": "q-016",
-      "question": "How do I file a claim if my Acme parcel arrives damaged or gets lost in transit?",
+      "question": "My carton went missing or arrived crushed — what deadline applies to seek carrier compensation?",
       "relevantChunkId": "chunk-008"
     },
     {
       "id": "q-017",
-      "question": "What insurance coverage does Acme Corp include on shipments by default?",
+      "question": "What automatic monetary protection covers boxed parcels, and what is the optional upper cap?",
       "relevantChunkId": "chunk-008"
     },
     {
       "id": "q-018",
-      "question": "What time do I need to place my Acme order to have it shipped the same day?",
+      "question": "Before what afternoon clock hour must weekday buying finish to depart that same evening?",
       "relevantChunkId": "chunk-009"
     },
     {
       "id": "q-019",
-      "question": "Are Acme warehouse shipping times affected during the Christmas shopping season?",
+      "question": "Does depot dispatch lag behind schedule during the late-year festive rush?",
       "relevantChunkId": "chunk-009"
     },
     {
@@ -296,27 +296,27 @@
     },
     {
       "id": "q-021",
-      "question": "Why might an Acme order be put on a payment hold and how quickly will I be notified?",
+      "question": "Can buyers settle baskets with digital coins or electronic bank wires, and why might risk checks pause things?",
       "relevantChunkId": "chunk-010"
     },
     {
       "id": "q-022",
-      "question": "When are business invoices sent out and what are the payment terms for Acme corporate accounts?",
+      "question": "When do corporate monthly statements generate, and which spreadsheet or document downloads exist?",
       "relevantChunkId": "chunk-011"
     },
     {
       "id": "q-023",
-      "question": "What penalty does Acme charge business customers who pay invoices late?",
+      "question": "What percentage monthly penalty triggers when enterprise payers go past one month?",
       "relevantChunkId": "chunk-011"
     },
     {
       "id": "q-024",
-      "question": "How does the Acme Credit prepaid balance system work and does it expire?",
+      "question": "Do preloaded store funds ever vanish over time, or can they move to another shopper?",
       "relevantChunkId": "chunk-012"
     },
     {
       "id": "q-025",
-      "question": "Can I use Acme Credit to pay for shipping on my order?",
+      "question": "Which preset dollar tiers exist when buying store wallet vouchers, and can they settle freight?",
       "relevantChunkId": "chunk-012"
     },
     {
@@ -326,27 +326,27 @@
     },
     {
       "id": "q-027",
-      "question": "How quickly does Acme Corp respond to customer support emails?",
+      "question": "Can guests browse self-service how-to articles around the clock without signing into a profile?",
       "relevantChunkId": "chunk-013"
     },
     {
       "id": "q-028",
-      "question": "How do Acme support tickets work and can I reopen a closed ticket?",
+      "question": "How long after closing a helpdesk thread can it still be restarted if my trouble persists?",
       "relevantChunkId": "chunk-014"
     },
     {
       "id": "q-029",
-      "question": "How long does Acme Corp keep records of my past support interactions?",
+      "question": "How long are historical helpdesk transcripts archived, and which team audits poor satisfaction scores?",
       "relevantChunkId": "chunk-014"
     },
     {
       "id": "q-030",
-      "question": "What can I do if I am unhappy with Acme Corp's initial support response?",
+      "question": "Who steps in if front-line help fails to satisfy a complainant wanting higher-tier oversight?",
       "relevantChunkId": "chunk-015"
     },
     {
       "id": "q-031",
-      "question": "What steps does Acme's escalation path involve for unresolved disputes?",
+      "question": "When major monetary grievances drag on, how do regional leads and counsel get involved?",
       "relevantChunkId": "chunk-015"
     },
     {
@@ -356,17 +356,17 @@
     },
     {
       "id": "q-033",
-      "question": "What items are excluded from Acme Corp's standard return policy?",
+      "question": "Are fresh groceries, engraved keepsakes, or opened personal care goods banned from mailing home?",
       "relevantChunkId": "chunk-017"
     },
     {
       "id": "q-034",
-      "question": "If I bought a custom-made item from Acme, can I return it for a refund?",
+      "question": "If a bespoke final-markdown buy arrives faulty from the factory, what remedy remains open?",
       "relevantChunkId": "chunk-017"
     },
     {
       "id": "q-035",
-      "question": "What customs documents should I include when returning a product to Acme from abroad?",
+      "question": "What cross-border paperwork note stops border tariffs when overseas senders mail boxes back?",
       "relevantChunkId": "chunk-018"
     },
     {
@@ -376,12 +376,12 @@
     },
     {
       "id": "q-037",
-      "question": "What happens to my Acme account if I do not log in for a very long time?",
+      "question": "What happens when someone leaves their login dormant for two full years, and how fast is closed history wiped?",
       "relevantChunkId": "chunk-020"
     },
     {
       "id": "q-038",
-      "question": "How much does Acme Premium membership cost and what shipping benefits does it include?",
+      "question": "How much does the paid VIP tier cost monthly or yearly, and can recent leavers rejoin without delay?",
       "relevantChunkId": "chunk-021"
     },
     {
@@ -391,12 +391,12 @@
     },
     {
       "id": "q-040",
-      "question": "Does Acme offer an extended warranty and what extra protection does it provide?",
+      "question": "Does the optional multi-year breakdown plan cover clumsy drops and resale transfers to new owners?",
       "relevantChunkId": "chunk-023"
     },
     {
       "id": "q-041",
-      "question": "If the price of an Acme item drops shortly after I buy it, can I get a price match?",
+      "question": "When shelf tags drop right after checkout, how do shoppers claim a rebate outside flash markdowns?",
       "relevantChunkId": "chunk-024"
     },
     {
@@ -406,12 +406,12 @@
     },
     {
       "id": "q-043",
-      "question": "How many Acme Reward Points do I earn per dollar spent and how do I redeem them?",
+      "question": "At what pace do loyalty credits accumulate per dollar spent, and what minimum balance unlocks vouchers?",
       "relevantChunkId": "chunk-026"
     },
     {
       "id": "q-044",
-      "question": "Do Acme Reward Points earned on a purchase get taken back if I return the item?",
+      "question": "Do accumulated loyalty perks vanish when a shopper reverses or voids their transaction?",
       "relevantChunkId": "chunk-026"
     },
     {
@@ -421,17 +421,17 @@
     },
     {
       "id": "q-046",
-      "question": "How can I request a copy of the personal information Acme Corp holds about me?",
+      "question": "Under European and California privacy rules, how can subscribers download stored records held on them?",
       "relevantChunkId": "chunk-027"
     },
     {
       "id": "q-047",
-      "question": "How do I opt out of advertising cookies on the Acme Corp website?",
+      "question": "How do site visitors shut off targeted browser trackers while keeping essential sessions active?",
       "relevantChunkId": "chunk-028"
     },
     {
       "id": "q-048",
-      "question": "What benefits and pricing tiers are available through Acme Corp's business programme?",
+      "question": "What wholesale discounts and dedicated reps unlock when an enterprise applies with a company tax ID?",
       "relevantChunkId": "chunk-029"
     },
     {
@@ -441,7 +441,7 @@
     },
     {
       "id": "q-050",
-      "question": "Is Acme Corp's website compatible with screen readers and other assistive technologies?",
+      "question": "Do videos include spoken commentary and text subtitles, and can deaf or sightless visitors get relay help?",
       "relevantChunkId": "chunk-031"
     },
     {
@@ -451,7 +451,7 @@
     },
     {
       "id": "q-052",
-      "question": "What happens to my Acme account after several failed login attempts?",
+      "question": "What happens when bad sign-in secrets are typed five times straight in a row?",
       "relevantChunkId": "chunk-032"
     }
   ]

@@ -1,4 +1,6 @@
 import { getDb } from '../../db/index.js';
+import type { Response } from 'express';
+import type { CitationEntry, RetrievalMode } from '@freellmapi/shared/ai-platform-retrieval.js';
 import { invokeSupportRuntimeWebhook } from './support-action-executor.js';
 import { enqueueSupportPartnerEvent } from './support-event-outbox.js';
 import crypto from 'node:crypto';
@@ -33,11 +35,17 @@ import {
   getSupportUserQuotaStatus,
 } from './support-guardrails.js';
 import {
+  listSupportKnowledgeDocs,
   searchSupportKnowledge,
   buildSupportKnowledgeContextPrompt,
   maskSupportSensitiveText,
   maskSupportSensitiveData,
+  type SupportKnowledgeChunkMatch,
 } from './support-knowledge.js';
+import { isPillarEnabled } from '../ai-platform/flags.js';
+import { retrieve } from '../ai-platform/retrieval/hybrid.js';
+import { applyCitationsHeader, formatRetrievalHeader } from '../ai-platform/retrieval/citations.js';
+import { getRetrievalSettingsInternal } from '../ai-platform/retrieval/settings.js';
 import {
   getSupportConversationForUser,
   createOrAppendSupportConversation,
@@ -152,16 +160,28 @@ function truncateToolValue(val: unknown, maxChars: number): unknown {
 // Core Runtime Orchestration
 // ---------------------------------------------------------------------------
 
+export type SupportTurnRuntimeMetadata = SupportRuntimeMetadata & {
+  retrieval?: { modeUsed: RetrievalMode; degraded: boolean };
+  citations?: CitationEntry[];
+};
+
+export type SupportTurnResult = SupportChatCompletionResult & {
+  runtime: SupportTurnRuntimeMetadata;
+  citations?: CitationEntry[];
+};
+
 export async function executeSupportTurn(options: {
   tenant: SupportTenant;
   userContext: SupportUserContext;
   input: SupportRuntimeChatInput;
   outputGuard?: SupportOutputGuardEvaluator;
   hasInferenceCapability?: boolean;
+  res?: Response;
+  citationsOptOut?: boolean;
   generate: (
     context: SupportGenerationContext,
   ) => Promise<SupportChatCompletionResult & { usedFallback?: boolean }>;
-}): Promise<SupportChatCompletionResult & { runtime: SupportRuntimeMetadata }> {
+}): Promise<SupportTurnResult> {
   const { tenant, userContext, input, generate } = options;
 
   // 1. Validate tenant
@@ -352,15 +372,20 @@ export async function executeSupportTurn(options: {
                 },
           )
         : outputSafeCached.choices;
-    return {
+    const replayResult: SupportTurnResult = {
       ...outputSafeCached,
       reply: guardedReplayText,
       choices: guardedChoices,
       runtime: {
-        ...outputSafeCached.runtime,
+        ...(outputSafeCached.runtime as SupportTurnRuntimeMetadata),
         replayed: true,
       },
     };
+    if (replayGuard.action === 'blocked') {
+      delete replayResult.citations;
+      delete replayResult.runtime.citations;
+    }
+    return replayResult;
   }
 
   const turnId = claim.turnId;
@@ -593,14 +618,71 @@ export async function executeSupportTurn(options: {
     // 10b. Assemble Bounded Context (RAG + CRM in off mode; EvidencePack only in required mode)
     let knowledgeDocIds: string[];
     let rawTrustedContext: string;
+    let retrievalInfo: { modeUsed: RetrievalMode; degraded: boolean } | undefined;
+    let retrievalCitations: CitationEntry[] | undefined;
+    let retrievalHeaderValue: string | undefined;
     if (evidencePrep.mode === 'required') {
       knowledgeDocIds = [...new Set(evidencePrep.pack.candidates.map((c) => c.sourceId))];
       rawTrustedContext = evidencePrep.pack.contextPrompt;
     } else {
-      const ragMatches = searchSupportKnowledge(String(tenant.id), lastUserText, userContext.role, {
-        topK: 3,
-      });
-      knowledgeDocIds = ragMatches.map((m) => m.docId);
+      let ragMatches: SupportKnowledgeChunkMatch[];
+      if (isPillarEnabled('retrieval')) {
+        const scope = { kind: 'support_tenant' as const, id: String(tenant.id) };
+        try {
+          const retrievalSettings = getRetrievalSettingsInternal(scope).settings;
+          const retrievalRes = await retrieve(scope, lastUserText, {
+            topK: 3,
+            roles: userContext.role ? [userContext.role] : [],
+            respectPillarFlag: true,
+          });
+          const docsById = new Map(
+            listSupportKnowledgeDocs(String(tenant.id)).map((d) => [d.id, d]),
+          );
+          ragMatches = retrievalRes.hits.map((h) => {
+            const doc = docsById.get(String(h.docId));
+            return {
+              docId: String(h.docId),
+              title: h.title,
+              category: doc?.category ?? 'faq',
+              tags: doc?.tags ?? [],
+              allowedRoles: doc?.allowedRoles ?? (userContext.role ? [userContext.role] : []),
+              snippet: h.text,
+              score: h.score,
+            };
+          });
+          knowledgeDocIds = [...new Set(ragMatches.map((m) => m.docId))];
+          retrievalInfo = {
+            modeUsed: retrievalRes.modeUsed,
+            degraded: retrievalRes.degraded,
+          };
+          retrievalHeaderValue = formatRetrievalHeader(
+            retrievalRes.modeUsed,
+            retrievalRes.degraded,
+          );
+          const reqCitHdr = options.res?.req?.headers?.['x-freellm-citations'];
+          const citHdrVal = Array.isArray(reqCitHdr) ? reqCitHdr[0] : reqCitHdr;
+          const citationsOptOut =
+            Boolean(options.citationsOptOut) ||
+            String(citHdrVal ?? '').trim().toLowerCase() === 'off';
+          if (
+            retrievalSettings.citationsEnabled &&
+            !citationsOptOut &&
+            retrievalRes.citations.length > 0
+          ) {
+            retrievalCitations = retrievalRes.citations;
+          }
+        } catch {
+          ragMatches = searchSupportKnowledge(String(tenant.id), lastUserText, userContext.role, {
+            topK: 3,
+          });
+          knowledgeDocIds = ragMatches.map((m) => m.docId);
+        }
+      } else {
+        ragMatches = searchSupportKnowledge(String(tenant.id), lastUserText, userContext.role, {
+          topK: 3,
+        });
+        knowledgeDocIds = ragMatches.map((m) => m.docId);
+      }
       const ragContextPrompt = buildSupportKnowledgeContextPrompt(ragMatches);
 
       let crmContextPrompt = '';
@@ -1090,7 +1172,17 @@ export async function executeSupportTurn(options: {
     });
 
     // 18. Build Runtime Metadata
-    const runtimeMetadata: SupportRuntimeMetadata = {
+    const activeCitations =
+      retrievalCitations && !isRejectedRequired && !isOutputBlocked && !guardBlocked
+        ? retrievalCitations
+        : undefined;
+    if (retrievalHeaderValue && options.res) {
+      applyCitationsHeader(options.res, activeCitations ?? [], retrievalHeaderValue, {
+        citationsEnabled: Boolean(activeCitations && activeCitations.length > 0),
+      });
+    }
+
+    const runtimeMetadata: SupportTurnRuntimeMetadata = {
       requestId,
       ...(conversationId ? { conversationId } : {}),
       replayed: false,
@@ -1107,6 +1199,8 @@ export async function executeSupportTurn(options: {
       ...(evidenceObj ? { evidence: evidenceObj } : {}),
       output: outputCheck.output,
       ...(intakeMetadata ? { intake: intakeMetadata } : {}),
+      ...(retrievalInfo ? { retrieval: retrievalInfo } : {}),
+      ...(activeCitations && activeCitations.length > 0 ? { citations: activeCitations } : {}),
     };
 
     const maskedGenBase =
@@ -1124,11 +1218,12 @@ export async function executeSupportTurn(options: {
             choices: outputCheck.choices.map(c => ({ ...c, ...(guardBlocked ? { finish_reason: 'content_filter' } : {}) })),
           };
 
-    const finalResult = {
+    const finalResult: SupportTurnResult = {
       ...maskedGenBase,
       reply: commitReply,
       toolTrace: commitToolTrace,
       runtime: runtimeMetadata,
+      ...(activeCitations && activeCitations.length > 0 ? { citations: activeCitations } : {}),
     };
 
     // 19. Complete Turn & Release Lease

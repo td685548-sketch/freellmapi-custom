@@ -52,7 +52,14 @@ export function purgeScope(kind: ScopeKind, id: string): number {
     .prepare('DELETE FROM settings WHERE substr(key, 1, length(?)) = ?')
     .run(prefix, prefix).changes;
 
-  for (const table of ['custom_ai_output_policies', 'custom_ai_guard_events'] as const) {
+  for (const table of [
+    'custom_ai_output_policies',
+    'custom_ai_guard_events',
+    'custom_ai_retrieval_settings',
+    'custom_ai_chunk_embeddings',
+    'custom_ai_index_jobs',
+    'custom_ai_embedding_usage',
+  ] as const) {
     const exists = db
       .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
       .get(table);

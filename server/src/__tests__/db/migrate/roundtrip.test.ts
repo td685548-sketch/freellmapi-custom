@@ -221,6 +221,7 @@ describe('migration round trip', () => {
         '20261113_100000_custom_ai_platform_base.ts',
         '20261113_110000_custom_ai_mcp_client.ts',
         '20261113_120000_custom_ai_output_guard.ts',
+        '20261113_130000_custom_ai_retrieval.ts',
         '20261113_180001_support_service_desk.ts',
         '20261114_090000_custom_playground_media.ts',
         '20261114_200000_custom_ai_mcp_approval_safety.ts',
