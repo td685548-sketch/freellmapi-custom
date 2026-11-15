@@ -443,16 +443,24 @@ describe('Retrieval Pillar Benchmark & Integration (SC-008, SC-010, Slot 6, Admi
     expect(putSettings.status).toBe(200);
     expect(putSettings.body?.settings.mode).toBe('hybrid');
 
-    // Wait for keyword -> hybrid reindex job triggered by PUT before testing explicit POST /reindex conflict
+    // Wait for keyword -> hybrid reindex job triggered by PUT before testing explicit POST /reindex conflict.
+    // Fire both POST /reindex requests concurrently so the 25ms background tick cannot finish an empty-pending
+    // job between sequential HTTP round-trips on busy CI runners.
     await waitForIdle();
-    const reindex1 = await apiCall(`${scopePath}/reindex`, { token: editorToken, method: 'POST' });
-    expect(reindex1.status).toBe(200);
-    const reindex2 = await apiCall<{ error: { code: string } }>(`${scopePath}/reindex`, {
-      token: editorToken,
-      method: 'POST',
-    });
-    expect(reindex2.status).toBe(409);
-    expect(reindex2.body?.error.code).toBe('job_already_running');
+    const [reindexA, reindexB] = await Promise.all([
+      apiCall<{ error?: { code: string } }>(`${scopePath}/reindex`, {
+        token: editorToken,
+        method: 'POST',
+      }),
+      apiCall<{ error?: { code: string } }>(`${scopePath}/reindex`, {
+        token: editorToken,
+        method: 'POST',
+      }),
+    ]);
+    const reindexStatuses = [reindexA.status, reindexB.status].sort((a, b) => a - b);
+    expect(reindexStatuses).toEqual([200, 409]);
+    const conflictReindex = reindexA.status === 409 ? reindexA : reindexB;
+    expect(conflictReindex.body?.error?.code).toBe('job_already_running');
 
     // Wait for reindex job completion
     for (let i = 0; i < 40; i++) {
