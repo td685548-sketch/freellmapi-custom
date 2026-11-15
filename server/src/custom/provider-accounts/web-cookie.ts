@@ -14,6 +14,8 @@ import type { QuotaObservationContext } from '../../services/provider-quota.js';
 import { runChatGptWebChat } from './chatgpt-web-chat.js';
 import { probeGeminiWebSession, runGeminiWebChat, streamGeminiWebChat } from './gemini-web-chat.js';
 import { runDeepSeekWebChat, streamDeepSeekWebChat } from './deepseek-web-chat.js';
+import { generateUcWebImages, mintUcSession } from './uc-web.js';
+import { playgroundMediaUrl, storePlaygroundMedia } from '../x-gateway/playground-media.js';
 import {
   fetchChatGptWebAccessToken,
   normalizeChatGptWebCookie,
@@ -299,6 +301,9 @@ export class WebCookieProvider extends BaseProvider {
     if (this.providerId === 'deepseek-web') {
       return this.deepSeekWebCompletion(apiKey, messages, modelId, options);
     }
+    if (this.providerId === 'uc-web') {
+      return this.ucWebCompletion(apiKey, messages, modelId, options);
+    }
 
     const { pathSuffix, body } = buildWebProviderPayload(this.providerId, messages, modelId, false, options);
     const url = resolveTargetUrl(this.baseUrl, pathSuffix);
@@ -458,6 +463,27 @@ export class WebCookieProvider extends BaseProvider {
         id: geminiId,
         object: 'chat.completion.chunk',
         created: geminiCreated,
+        model: modelId,
+        choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+      };
+      return;
+    }
+
+    if (this.providerId === 'uc-web') {
+      const ucId = this.makeId();
+      const ucCreated = Math.floor(Date.now() / 1000);
+      const content = await this.ucWebImageMarkdown(apiKey, messages, modelId, options);
+      yield {
+        id: ucId,
+        object: 'chat.completion.chunk',
+        created: ucCreated,
+        model: modelId,
+        choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }],
+      };
+      yield {
+        id: ucId,
+        object: 'chat.completion.chunk',
+        created: ucCreated,
         model: modelId,
         choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
       };
@@ -725,6 +751,69 @@ export class WebCookieProvider extends BaseProvider {
     };
   }
 
+  /** Non-streaming UC Web image generation turn (Clerk __client -> /v2/image-gen). */
+  private async ucWebImageMarkdown(
+    apiKey: string,
+    messages: ChatMessage[],
+    modelId: string,
+    options?: CompletionOptions,
+  ): Promise<string> {
+    const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+    const prompt = lastUser ? contentToString(lastUser.content).trim() : '';
+    if (!prompt) {
+      throw Object.assign(new Error('No user prompt provided for UC Web generation'), { status: 400 });
+    }
+
+    const result = await generateUcWebImages({
+      credential: apiKey,
+      prompt,
+      modelId,
+      platform: this.platform,
+      signal: options?.signal,
+      onCredentialUpdate: options?.onCredentialUpdate,
+    });
+
+    return result.data
+      .map((item) => {
+        const bytes = Buffer.from(item.b64_json, 'base64');
+        const mediaId = storePlaygroundMedia(bytes, item.mimeType);
+        const url = mediaId
+          ? playgroundMediaUrl(mediaId)
+          : `data:${item.mimeType};base64,${item.b64_json}`;
+        return `![Generated image](${url})`;
+      })
+      .join('\n\n');
+  }
+
+  private async ucWebCompletion(
+    apiKey: string,
+    messages: ChatMessage[],
+    modelId: string,
+    options?: CompletionOptions,
+  ): Promise<ChatCompletionResponse> {
+    const content = await this.ucWebImageMarkdown(apiKey, messages, modelId, options);
+    const promptTokens = estimateInputTokens(messages);
+    const completionTokens = Math.max(1, Math.ceil(content.length / 4));
+    return {
+      id: this.makeId(),
+      object: 'chat.completion',
+      created: Math.floor(Date.now() / 1000),
+      model: modelId,
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content },
+          finish_reason: 'stop',
+        },
+      ],
+      usage: {
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        total_tokens: promptTokens + completionTokens,
+      },
+    };
+  }
+
   private htmlChallengeError(phase: string): Error {
     return Object.assign(
       new Error(`${this.name} returned an HTML challenge page (${phase}); refresh the web session cookie`),
@@ -739,6 +828,25 @@ export class WebCookieProvider extends BaseProvider {
   ): Promise<KeyValidationResult> {
     if (!apiKey || !apiKey.trim()) {
       return { valid: false, error: 'Empty web session cookie or token' };
+    }
+    if (this.providerId === 'uc-web') {
+      try {
+        await mintUcSession({
+          credential: apiKey,
+          platform: this.platform,
+          onCredentialUpdate: options?.onCredentialUpdate,
+        });
+        return true;
+      } catch (err) {
+        const status = (err as { status?: unknown } | null)?.status;
+        if (status === 401 || status === 403) {
+          return {
+            valid: false,
+            error: err instanceof Error ? err.message : 'UC Web session is not signed in',
+          };
+        }
+        return true;
+      }
     }
     if (this.providerId === 'gemini-web') {
       try {
@@ -760,7 +868,7 @@ export class WebCookieProvider extends BaseProvider {
         return true;
       }
     }
-    // Only ChatGPT Web and Gemini Web expose a cheap session probe. Other
+    // Only ChatGPT Web, Gemini Web, and UC Web expose a cheap session probe. Other
     // webCookie providers have no unauthenticated endpoint to validate against.
     if (this.providerId !== 'chatgpt-web') return true;
 

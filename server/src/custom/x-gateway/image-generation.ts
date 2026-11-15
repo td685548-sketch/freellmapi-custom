@@ -1,6 +1,7 @@
 import { getXGatewayProvider } from '../provider-accounts/catalog.js';
 import { generateChatGptWebImages } from '../provider-accounts/chatgpt-web-image.js';
-import type { AccountRow } from '../provider-accounts/store.js';
+import { updateAccountCredential, type AccountRow } from '../provider-accounts/store.js';
+import { generateUcWebImages } from '../provider-accounts/uc-web.js';
 import { proxyFetch } from '../../lib/proxy.js';
 
 export interface ImageGenerationInput {
@@ -21,7 +22,7 @@ export interface ImageGenerationResult {
 }
 
 export function isUnsupportedWebImageProvider(provider: string): boolean {
-  if (provider === 'chatgpt-web') return false;
+  if (provider === 'chatgpt-web' || provider === 'uc-web') return false;
   const entry = getXGatewayProvider(provider);
   return entry?.category === 'webCookie' || provider.endsWith('-web');
 }
@@ -126,6 +127,24 @@ export async function executeImageGeneration(input: ImageGenerationInput): Promi
       platform: account.platform,
     });
     return { result, usageUnits: Math.max(1, n) };
+  }
+
+  if (account.provider === 'uc-web') {
+    let expectedCipher = account.encrypted_key;
+    const result = await generateUcWebImages({
+      credential,
+      prompt,
+      modelId,
+      size,
+      resolution: typeof extraBody?.resolution === 'string' ? extraBody.resolution : undefined,
+      platform: account.platform,
+      onCredentialUpdate: (nextCredential) => {
+        if (updateAccountCredential(account.id, nextCredential, expectedCipher)) {
+          expectedCipher = '';
+        }
+      },
+    });
+    return { result, usageUnits: Math.max(1, result.data.length) };
   }
 
   if (isUnsupportedWebImageProvider(account.provider)) {
