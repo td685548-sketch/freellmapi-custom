@@ -17,6 +17,7 @@ import {
 } from '../../../services/embeddings.js';
 import { listProfileKnowledgeChunks } from '../../../services/profile-knowledge.js';
 import * as supportKnowledge from '../../x-gateway/support-knowledge.js';
+import { isPillarEnabled } from '../flags.js';
 import { normalizeScope } from '../scope.js';
 import {
   getIndexGeneration,
@@ -274,7 +275,12 @@ function getActiveJobRow(norm: Scope): IndexJobRow | undefined {
     .get(norm.kind, norm.id) as IndexJobRow | undefined;
 }
 
+function shouldRunBackgroundTick(): boolean {
+  return isPillarEnabled('retrieval') || testEmbeddingsRunner !== null;
+}
+
 function scheduleTick(delayMs = 25): void {
+  if (!shouldRunBackgroundTick()) return;
   if (pendingTickTimer) return;
   pendingTickTimer = setTimeout(() => {
     pendingTickTimer = null;
@@ -284,6 +290,7 @@ function scheduleTick(delayMs = 25): void {
 }
 
 async function drainBackgroundTick(): Promise<void> {
+  if (!shouldRunBackgroundTick()) return;
   if (activeDrainPromise) {
     return activeDrainPromise;
   }
