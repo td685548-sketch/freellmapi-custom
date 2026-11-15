@@ -6,6 +6,7 @@ import type {
   SupportDeskInternalConversationIntake,
 } from '@freellmapi/shared/support-service-desk.js';
 import { sanitizeSupportEvidenceConversation } from './support-evidence-runtime.js';
+import { sanitizeSupportConversationOutput } from './support-output-runtime.js';
 import { hydrateSupportConversationIntake } from './support-service-desk-runtime.js';
 import {
   onHumanReplyLifecycle,
@@ -184,14 +185,17 @@ export function listSupportConversations(
     })
     .map((conv) =>
       Number.isInteger(numericTenantId) && numericTenantId > 0
-        ? hydrateSupportConversationIntake({
+        ? sanitizeSupportConversationOutput({
             tenantId: numericTenantId,
-            conversation: sanitizeSupportEvidenceConversation({
+            conversation: hydrateSupportConversationIntake({
               tenantId: numericTenantId,
-              conversation: conv,
+              conversation: sanitizeSupportEvidenceConversation({
+                tenantId: numericTenantId,
+                conversation: conv,
+                viewerRole: conv.userRole,
+              }),
               viewerRole: conv.userRole,
             }),
-            viewerRole: conv.userRole,
           })
         : conv,
     );
@@ -223,14 +227,17 @@ export function getSupportConversationForUser(
 
   const numericTenantId = Number(tid);
   if (Number.isInteger(numericTenantId) && numericTenantId > 0) {
-    return hydrateSupportConversationIntake({
+    return sanitizeSupportConversationOutput({
       tenantId: numericTenantId,
-      conversation: sanitizeSupportEvidenceConversation({
+      conversation: hydrateSupportConversationIntake({
         tenantId: numericTenantId,
-        conversation: found,
+        conversation: sanitizeSupportEvidenceConversation({
+          tenantId: numericTenantId,
+          conversation: found,
+          viewerRole: requester.role,
+        }),
         viewerRole: requester.role,
       }),
-      viewerRole: requester.role,
     });
   }
 

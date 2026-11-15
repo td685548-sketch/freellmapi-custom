@@ -36,9 +36,12 @@ describe('migration 20261114_200000_custom_ai_mcp_approval_safety', () => {
         .map((c) => (c as { name: string }).name);
       expect(callCols).toEqual(expect.arrayContaining(['error_text', 'updated_at']));
 
-      // Roll back just this migration
+      // Roll back through this migration even when later migrations have been added.
       db.prepare("INSERT INTO custom_ai_mcp_servers (slug, name, url, credential_generation) VALUES ('rollback', 'Rollback', 'https://mcp.example.test', 7)").run();
-      await runMigrations(db, 'down');
+      while (db.prepare('SELECT 1 FROM migrations WHERE filename = ?')
+        .get('20261114_200000_custom_ai_mcp_approval_safety.ts')) {
+        await runMigrations(db, 'down');
+      }
       expect(db.prepare("SELECT credential_generation FROM custom_ai_mcp_servers WHERE slug = 'rollback'").get()).toEqual({ credential_generation: 7 });
       const approvalColsAfterDown = db
         .prepare("PRAGMA table_info('custom_ai_approvals')")

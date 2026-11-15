@@ -8,4 +8,5 @@ export interface PlaygroundRequest {
   messages: { role: 'system' | 'user' | 'assistant'; content: PlaygroundContent }[];
   temperature?: number;
   max_tokens?: number;
+  reasoning_effort?: 'low' | 'medium' | 'high';
 }

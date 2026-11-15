@@ -14,6 +14,7 @@ import { useSupportGovernanceStrings } from '../support-governance-strings'
 import { useSupportIntegrationStrings } from '../support-integration-strings'
 import { useSupportEvidenceStrings } from '../support-evidence-strings'
 import { useSupportServiceDeskStrings } from '../support-service-desk-strings'
+import { useSupportOutputStrings } from '../support-output-strings'
 import { useShellStrings } from '../shell-strings'
 
 export interface NavItem { to: string; label: string; icon: LucideIcon }
@@ -34,6 +35,7 @@ export function useNavGroups(): NavGroup[] {
   const integration = useSupportIntegrationStrings()
   const evidence = useSupportEvidenceStrings()
   const desk = useSupportServiceDeskStrings()
+  const output = useSupportOutputStrings()
   const sh = useShellStrings()
   const session = useUserSession()
   const canView = session.hasPermission('view_keys')
@@ -65,6 +67,7 @@ export function useNavGroups(): NavGroup[] {
       { to: '/thruline/support-knowledge', label: evidence.nav, icon: BookOpen },
       { to: '/thruline/support-ops', label: ops.nav, icon: LifeBuoy },
       { to: '/thruline/support-guardrails', label: gov.nav, icon: ShieldCheck },
+      { to: '/thruline/support-output', label: output.nav, icon: ShieldCheck },
     ] },
     { id: 'monitor', label: sh.groupMonitor, items: [
       ...(canUsage ? [{ to: '/thruline/quota', label: 'Quota', icon: Gauge }] : []),

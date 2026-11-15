@@ -8,6 +8,7 @@ import {
   stripGeminiPlaceholders,
 } from '../../custom/provider-accounts/gemini-web-chat.js';
 import { rotateGeminiWebAccountsOnce } from '../../custom/provider-accounts/gemini-web-keepalive.js';
+import { resolveAccountProvider } from '../../custom/provider-accounts/execution.js';
 import { accountRow, createApiKeyAccount } from '../../custom/provider-accounts/store.js';
 import { WebCookieProvider } from '../../custom/provider-accounts/web-cookie.js';
 import { readPlaygroundMedia } from '../../custom/x-gateway/playground-media.js';
@@ -588,5 +589,83 @@ describe('gemini-web executor', () => {
     const updated = accountRow(id);
     const decrypted = decrypt(updated.encrypted_key, updated.iv, updated.auth_tag);
     expect(decrypted).toBe('__Secure-1PSID=bg_psid; __Secure-1PSIDTS=bg_ts_2');
+  });
+
+  it('validateKey probes gemini-web /app, rotates stale cookies with Origin/Referer, and persists updated cookie', async () => {
+    const id = createApiKeyAccount({
+      provider: 'gemini-web',
+      label: 'My Gemini Validate',
+      key: '__Secure-1PSID=val_psid; __Secure-1PSIDTS=val_ts_1',
+    });
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const headers = new Headers(init?.headers);
+      if (url === 'https://gemini.google.com/app') {
+        const cookie = headers.get('Cookie') ?? '';
+        if (cookie.includes('__Secure-1PSIDTS=val_ts_2')) {
+          return new Response('<script>{"SNlM0e":"snl_ok"}</script>', {
+            status: 200,
+            headers: { 'Content-Type': 'text/html' },
+          });
+        }
+        return new Response('<html>Sign in</html>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html' },
+        });
+      }
+      if (url === 'https://accounts.google.com/RotateCookies') {
+        expect(headers.get('Origin')).toBe('https://accounts.google.com');
+        expect(headers.get('Referer')).toBe('https://accounts.google.com/');
+        return new Response(')]}\'\n[1]', {
+          status: 200,
+          headers: {
+            'Set-Cookie': '__Secure-1PSIDTS=val_ts_2; Path=/; Secure',
+          },
+        });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const row = accountRow(id);
+    const provider = resolveAccountProvider(row);
+    expect(provider).toBeDefined();
+    const res = await provider!.validateKey('');
+    expect(res).toBe(true);
+
+    const updated = accountRow(id);
+    const decrypted = decrypt(updated.encrypted_key, updated.iv, updated.auth_tag);
+    expect(decrypted).toBe('__Secure-1PSID=val_psid; __Secure-1PSIDTS=val_ts_2');
+  });
+
+  it('validateKey returns invalid when gemini-web /app lacks SNlM0e even after RotateCookies', async () => {
+    const id = createApiKeyAccount({
+      provider: 'gemini-web',
+      label: 'My Gemini Expired',
+      key: '__Secure-1PSID=dead_psid; __Secure-1PSIDTS=dead_ts',
+    });
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url === 'https://gemini.google.com/app') {
+        return new Response('<html>Sign in</html>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html' },
+        });
+      }
+      if (url === 'https://accounts.google.com/RotateCookies') {
+        return new Response('Unauthorized', { status: 401 });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const row = accountRow(id);
+    const provider = resolveAccountProvider(row);
+    expect(provider).toBeDefined();
+    const res = await provider!.validateKey('');
+    expect(res).toEqual({
+      valid: false,
+      error: expect.stringContaining('SNlM0e'),
+    });
   });
 });

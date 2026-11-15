@@ -32,6 +32,14 @@ import {
   createOrAppendSupportConversation,
 } from '../../custom/x-gateway/support-workflows.js';
 import type { SupportChatCompletionResult } from '../../custom/x-gateway/support-router.js';
+import {
+  DEFAULT_GUARD_DETECTORS,
+  DEFAULT_GUARD_POLICY_BASE,
+} from '@freellmapi/shared/ai-platform-output-guard.js';
+import { resetFlagsCacheForTests, setFlags } from '../../custom/ai-platform/flags.js';
+import { setPolicy } from '../../custom/ai-platform/output-guard/policy.js';
+import { resetGuardEventRateLimitForTests } from '../../custom/ai-platform/output-guard/events.js';
+import { up as upOutputGuardMigration } from '../../db/migrations/20261113_120000_custom_ai_output_guard.js';
 
 let db: Db;
 
@@ -1001,5 +1009,118 @@ describe('Support Runtime: review regression boundaries', () => {
     const saved = db.prepare('SELECT value FROM settings WHERE key = ?').get('x_gateway_support_actions_v1') as { value: string } | undefined;
     expect(saved ? JSON.parse(saved.value)[String(tenant.id)] : []).toEqual([]);
     expect(db.prepare('SELECT COUNT(*) AS n FROM x_support_action_executions').get()).toEqual({ n: 0 });
+  });
+
+  it('evaluates outputGuard before masking and persistence, updates choices, and defaults hasInferenceCapability to false', async () => {
+    const tenant = createTestTenant();
+    const userContext = createTestUserContext(tenant.id);
+    const seen: Array<{ text: string; role: string; hasCap: boolean }> = [];
+
+    const blocked = await executeSupportTurn({
+      tenant,
+      userContext,
+      input: {
+        tenantKey: tenant.publicKey,
+        requestId: 'guard-block-1',
+        messages: [{ role: 'user', content: 'Tell me secret' }],
+      },
+      outputGuard: (_scope, text, ctx) => {
+        seen.push({ text, role: ctx.role, hasCap: ctx.hasInferenceCapability });
+        return { action: 'blocked', text: '[SUPPORT_BLOCKED]', reason: 'keywords' };
+      },
+      generate: async () => ({
+        ...resultFor(userContext),
+        reply: 'Raw secret email alice@example.com',
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content: 'Raw secret email alice@example.com' },
+            finish_reason: 'stop',
+          },
+        ],
+      }),
+    });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toEqual({
+      text: 'Raw secret email alice@example.com',
+      role: userContext.role,
+      hasCap: false,
+    });
+    expect(blocked.reply).toBe('[SUPPORT_BLOCKED]');
+    expect(blocked.choices[0]?.message.content).toBe('[SUPPORT_BLOCKED]');
+    expect(blocked.choices[0]?.finish_reason).toBe('content_filter');
+
+    // Replay path also runs outputGuard
+    const replayed = await executeSupportTurn({
+      tenant,
+      userContext,
+      input: {
+        tenantKey: tenant.publicKey,
+        requestId: 'guard-block-1',
+        messages: [{ role: 'user', content: 'Tell me secret' }],
+      },
+      outputGuard: (_scope, _text) => ({ action: 'blocked', text: '[REPLAY_BLOCKED]', reason: 'keywords' }),
+      generate: async () => {
+        throw new Error('Should not call generate on replay');
+      },
+    });
+    expect(replayed.runtime.replayed).toBe(true);
+    expect(replayed.reply).toBe('[REPLAY_BLOCKED]');
+    expect(replayed.choices[0]?.finish_reason).toBe('content_filter');
+  });
+
+  it('blocks support reply through real policy.ts evaluateOutput without a mock evaluator', async () => {
+    upOutputGuardMigration(db);
+    resetFlagsCacheForTests();
+    resetGuardEventRateLimitForTests();
+    setFlags({ outputGuard: true });
+
+    const tenant = createTestTenant();
+    const userContext = createTestUserContext(tenant.id);
+
+    await setPolicy(
+      { kind: 'support_tenant', id: String(tenant.id) },
+      {
+        mode: 'block',
+        detectors: {
+          ...structuredClone(DEFAULT_GUARD_DETECTORS),
+          keywords: { enabled: true, terms: ['REAL_POLICY_SECRET'] },
+        },
+        replacementText: '[BLOCKED_BY_REAL_POLICY]',
+        failMode: DEFAULT_GUARD_POLICY_BASE.failMode,
+        bypassRoles: [],
+        holdChars: DEFAULT_GUARD_POLICY_BASE.holdChars,
+        maxDelayMs: DEFAULT_GUARD_POLICY_BASE.maxDelayMs,
+        revision: 0,
+      },
+      null,
+    );
+
+    const res = await executeSupportTurn({
+      tenant,
+      userContext,
+      input: {
+        tenantKey: tenant.publicKey,
+        requestId: 'real-policy-block-1',
+        messages: [{ role: 'user', content: 'Hello' }],
+      },
+      generate: async () => ({
+        ...resultFor(userContext),
+        reply: 'Here is REAL_POLICY_SECRET for you.',
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content: 'Here is REAL_POLICY_SECRET for you.' },
+            finish_reason: 'stop',
+          },
+        ],
+      }),
+    });
+
+    resetFlagsCacheForTests();
+    expect(res.reply).toBe('[BLOCKED_BY_REAL_POLICY]');
+    expect(res.choices[0]?.message.content).toBe('[BLOCKED_BY_REAL_POLICY]');
+    expect(res.choices[0]?.finish_reason).toBe('content_filter');
   });
 });

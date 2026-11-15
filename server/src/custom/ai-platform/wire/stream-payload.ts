@@ -1,15 +1,28 @@
+export type GuardTerminalMeta = { action: 'pass' | 'logged' | 'masked' | 'blocked'; reason?: string };
+
 /** Rewrite textual snapshots too: Responses repeats output in several lifecycle events. */
 export function rewriteResponsesFrame(frame: string, text: string): string {
   const lines = frame.split(/\r?\n/);
   const data = lines.filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n');
   if (!data || data.trim() === '[DONE]') return frame;
   const value: unknown = JSON.parse(data);
+  let replacedOutputText = false;
   const visit = (node: unknown): void => {
     if (Array.isArray(node)) { node.forEach(visit); return; }
     if (!node || typeof node !== 'object') return;
     const obj = node as Record<string, unknown>;
-    if ((obj.type === 'output_text' || obj.type === 'response.output_text.done') && typeof obj.text === 'string' && obj.text.length > 0) obj.text = text;
+    if (
+      (obj.type === 'output_text' || obj.type === 'text' || obj.type === 'response.output_text.done') &&
+      typeof obj.text === 'string' &&
+      obj.text.length > 0
+    ) {
+      obj.text = replacedOutputText ? '' : text;
+      replacedOutputText = true;
+    }
     if (typeof obj.output_text === 'string' && obj.output_text.length > 0) obj.output_text = text;
+    if (typeof obj.delta === 'string' && obj.type === 'response.output_text.delta' && obj.delta.length > 0) {
+      obj.delta = text;
+    }
     for (const key of ['response', 'output', 'item', 'part', 'content']) visit(obj[key]);
   };
   visit(value);

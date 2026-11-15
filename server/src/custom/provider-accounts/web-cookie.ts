@@ -12,7 +12,7 @@ import { contentToString, estimateInputTokens } from '../../lib/content.js';
 import { BaseProvider, providerHttpError, type CompletionOptions, type KeyValidationResult } from '../../providers/base.js';
 import type { QuotaObservationContext } from '../../services/provider-quota.js';
 import { runChatGptWebChat } from './chatgpt-web-chat.js';
-import { runGeminiWebChat, streamGeminiWebChat } from './gemini-web-chat.js';
+import { probeGeminiWebSession, runGeminiWebChat, streamGeminiWebChat } from './gemini-web-chat.js';
 import { runDeepSeekWebChat, streamDeepSeekWebChat } from './deepseek-web-chat.js';
 import { generateUcWebImages, mintUcSession } from './uc-web.js';
 import { playgroundMediaUrl, storePlaygroundMedia } from '../x-gateway/playground-media.js';
@@ -821,13 +821,21 @@ export class WebCookieProvider extends BaseProvider {
     );
   }
 
-  override async validateKey(apiKey: string): Promise<KeyValidationResult> {
+  override async validateKey(
+    apiKey: string,
+    _quotaContext?: QuotaObservationContext,
+    options?: { onCredentialUpdate?: (nextCredential: string) => void },
+  ): Promise<KeyValidationResult> {
     if (!apiKey || !apiKey.trim()) {
       return { valid: false, error: 'Empty web session cookie or token' };
     }
     if (this.providerId === 'uc-web') {
       try {
-        await mintUcSession({ credential: apiKey, platform: this.platform });
+        await mintUcSession({
+          credential: apiKey,
+          platform: this.platform,
+          onCredentialUpdate: options?.onCredentialUpdate,
+        });
         return true;
       } catch (err) {
         const status = (err as { status?: unknown } | null)?.status;
@@ -840,8 +848,28 @@ export class WebCookieProvider extends BaseProvider {
         return true;
       }
     }
-    // Only ChatGPT Web and UC Web expose a cheap session probe. Other webCookie providers
-    // have no unauthenticated endpoint to validate against.
+    if (this.providerId === 'gemini-web') {
+      try {
+        await probeGeminiWebSession({
+          credential: apiKey,
+          baseUrl: this.baseUrl,
+          platform: this.platform,
+          onCredentialUpdate: options?.onCredentialUpdate,
+        });
+        return true;
+      } catch (err) {
+        const status = (err as { status?: unknown } | null)?.status;
+        if (status === 401 || status === 403) {
+          return {
+            valid: false,
+            error: err instanceof Error ? err.message : 'Gemini Web session is not signed in',
+          };
+        }
+        return true;
+      }
+    }
+    // Only ChatGPT Web, Gemini Web, and UC Web expose a cheap session probe. Other
+    // webCookie providers have no unauthenticated endpoint to validate against.
     if (this.providerId !== 'chatgpt-web') return true;
 
     try {

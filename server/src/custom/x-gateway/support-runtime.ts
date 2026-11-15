@@ -22,6 +22,11 @@ import {
   prepareSupportEvidenceTurn,
   SAFE_EVIDENCE_NOTICES,
 } from './support-evidence-runtime.js';
+import { restoreSupportOutputCitationMarkers } from './support-output-citations.js';
+import {
+  evaluateAndApplySupportOutputToTurn,
+  sanitizeSupportReplayResult,
+} from './support-output-runtime.js';
 import {
   evaluateSupportInputGuardrails,
   applySupportQuotaDelta,
@@ -48,6 +53,12 @@ import { SupportDeskError } from './support-service-desk-store.js';
 import { buildCustomerMemoryPrompt } from './support-crm-webhooks.js';
 import { listSupportTools, listSupportDbSources } from './support-store.js';
 import { buildAllowedToolsForContext } from './support-connectors.js';
+import {
+  buildSupportGuardContext,
+  guardSupportReply,
+  type SupportOutputGuardEvaluator,
+  type SupportOutputGuardResult,
+} from '../ai-platform/output-guard/support-adapter.js';
 import {
   getSupportRuntimePolicy,
   claimSupportTurn,
@@ -145,6 +156,8 @@ export async function executeSupportTurn(options: {
   tenant: SupportTenant;
   userContext: SupportUserContext;
   input: SupportRuntimeChatInput;
+  outputGuard?: SupportOutputGuardEvaluator;
+  hasInferenceCapability?: boolean;
   generate: (
     context: SupportGenerationContext,
   ) => Promise<SupportChatCompletionResult & { usedFallback?: boolean }>;
@@ -302,10 +315,49 @@ export async function executeSupportTurn(options: {
       role: userContext.role,
       cachedResponse: claim.cachedResponse as SupportChatCompletionResult & { runtime: SupportRuntimeMetadata },
     });
+    const outputSafeCached = sanitizeSupportReplayResult({
+      tenantId: tenant.id,
+      cachedResponse: cached,
+    });
+    const replayGuardCtx = buildSupportGuardContext({
+      tenantId: tenant.id,
+      verified: isSigned,
+      role: userContext.role,
+      userId: userContext.userId,
+      systemPrompt: tenant.systemPrompt,
+      hasInferenceCapability: options.hasInferenceCapability,
+    });
+    const replayGuard = await guardSupportReply({
+      text: outputSafeCached.reply || '',
+      context: replayGuardCtx,
+      evaluator: options.outputGuard,
+    });
+    const guardedReplayText =
+      replayGuard.action === 'blocked' || replayGuard.action === 'masked'
+        ? maskSupportSensitiveText(String(tenant.id), replayGuard.text, userContext.role).masked
+        : outputSafeCached.reply;
+    const guardedChoices =
+      replayGuard.action === 'blocked' || replayGuard.action === 'masked'
+        ? (outputSafeCached.choices ?? []).map((c, idx) =>
+            idx === 0
+              ? {
+                  ...c,
+                  message: { ...c.message, content: guardedReplayText },
+                  ...(replayGuard.action === 'blocked' ? { finish_reason: 'content_filter' } : {}),
+                }
+              : {
+                  ...c,
+                  message: { ...c.message, content: '' },
+                  ...(replayGuard.action === 'blocked' ? { finish_reason: 'content_filter' } : {}),
+                },
+          )
+        : outputSafeCached.choices;
     return {
-      ...cached,
+      ...outputSafeCached,
+      reply: guardedReplayText,
+      choices: guardedChoices,
       runtime: {
-        ...cached.runtime,
+        ...outputSafeCached.runtime,
         replayed: true,
       },
     };
@@ -389,6 +441,25 @@ export async function executeSupportTurn(options: {
 
     // 10. Zero-model abstention short-circuit when required mode has no matches
     if (evidencePrep.mode === 'required' && evidencePrep.shouldAbstain) {
+      const abstentionGuardCtx = buildSupportGuardContext({
+        tenantId: tenant.id,
+        verified: isSigned,
+        role: userContext.role,
+        userId: userContext.userId,
+        systemPrompt: tenant.systemPrompt,
+        hasInferenceCapability: options.hasInferenceCapability,
+      });
+      const abstentionGuard = await guardSupportReply({
+        text: SAFE_EVIDENCE_NOTICES.no_matches,
+        context: abstentionGuardCtx,
+        evaluator: options.outputGuard,
+      });
+      const guardedAbstentionText =
+        abstentionGuard.action === 'blocked' || abstentionGuard.action === 'masked'
+          ? maskSupportSensitiveText(String(tenant.id), abstentionGuard.text, userContext.role).masked
+          : SAFE_EVIDENCE_NOTICES.no_matches;
+      const abstentionFinishReason = abstentionGuard.action === 'blocked' ? 'content_filter' : 'stop';
+
       return getDb().transaction(() => {
         assertSupportTurnActive(turnId, tenant.id, input.conversationId);
         const quotaStatus = applySupportQuotaDelta(String(tenant.id), {
@@ -463,14 +534,31 @@ export async function executeSupportTurn(options: {
           userRole: userContext.role,
         });
 
-        const safeNotice = SAFE_EVIDENCE_NOTICES.no_matches;
+        const safeNotice = guardedAbstentionText;
+        const outputCheck = evaluateAndApplySupportOutputToTurn({
+          tenantId: tenant.id,
+          operationId: turnId,
+          reply: safeNotice,
+          choices: [
+            {
+              index: 0,
+              message: { role: 'assistant', content: safeNotice },
+              finish_reason: abstentionFinishReason,
+            },
+          ],
+          toolTrace: [],
+          evidence,
+          replySource: 'knowledge_abstention',
+          db: getDb(),
+        });
+
         const runtimeMetadata: SupportRuntimeMetadata = {
           requestId,
           ...(conversationId ? { conversationId } : {}),
           replayed: false,
-          replySource: 'knowledge_abstention',
+          replySource: outputCheck.replySource,
           knowledgeDocIds: [],
-          redactionCount: totalRedactions,
+          redactionCount: totalRedactions + outputCheck.redactionCount,
           quota: {
             requestsUsed: currentQuota.requestsUsed,
             tokensUsed: currentQuota.tokensUsed,
@@ -478,24 +566,19 @@ export async function executeSupportTurn(options: {
             accounting: 'actual',
           },
           pendingActions: [],
-          evidence,
+          evidence: outputCheck.evidence ?? evidence,
+          output: outputCheck.output,
           ...(intakeMetadata ? { intake: intakeMetadata } : {}),
         };
 
         const finalResult: SupportChatCompletionResult & { runtime: SupportRuntimeMetadata } = {
-          reply: safeNotice,
+          reply: outputCheck.reply,
           userContext,
           allowedTools: [],
-          toolTrace: [],
+          toolTrace: outputCheck.toolTrace,
           modelUsed: null,
           usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-          choices: [
-            {
-              index: 0,
-              message: { role: 'assistant', content: safeNotice },
-              finish_reason: 'stop',
-            },
-          ],
+          choices: outputCheck.choices.map(c => ({ ...c, finish_reason: outputCheck.output.action === 'block' ? 'content_filter' : abstentionFinishReason })),
           runtime: runtimeMetadata,
         };
 
@@ -715,7 +798,34 @@ export async function executeSupportTurn(options: {
         : null;
 
     const rawOutputReply = evidenceFinal ? evidenceFinal.canonicalReply : genResult.reply || '';
-    const maskedReplyRes = maskSupportSensitiveText(String(tenant.id), rawOutputReply, userContext.role);
+    const outputGuardCtx = buildSupportGuardContext({
+      tenantId: tenant.id,
+      verified: isSigned,
+      role: userContext.role,
+      userId: userContext.userId,
+      systemPrompt: tenant.systemPrompt,
+      trustedContext,
+      hasInferenceCapability: options.hasInferenceCapability,
+      signal: abortController.signal,
+    });
+    const outputGuardRes: SupportOutputGuardResult = await guardSupportReply({
+      text: rawOutputReply,
+      context: outputGuardCtx,
+      evaluator: options.outputGuard,
+    });
+    const guardedRawReply =
+      outputGuardRes.action === 'blocked' || outputGuardRes.action === 'masked'
+        ? outputGuardRes.text
+        : rawOutputReply;
+    const sourcesChangedGuardRes =
+      evidencePrep.mode === 'required'
+        ? await guardSupportReply({
+            text: SAFE_EVIDENCE_NOTICES.sources_changed,
+            context: outputGuardCtx,
+            evaluator: options.outputGuard,
+          })
+        : null;
+    const maskedReplyRes = maskSupportSensitiveText(String(tenant.id), guardedRawReply, userContext.role);
     totalRedactions += maskedReplyRes.redactionCount;
     const finalReply = maskedReplyRes.masked;
 
@@ -756,6 +866,9 @@ export async function executeSupportTurn(options: {
     let rejectedReason: 'invalid_citations' | 'sources_changed' | undefined;
     let commitReply = finalReply;
 
+    let guardBlocked = outputGuardRes.action === 'blocked';
+    const guardModified = outputGuardRes.action === 'blocked' || outputGuardRes.action === 'masked';
+
     if (evidencePrep.mode === 'required' && evidenceFinal) {
       const freshPolicy = getSupportEvidencePolicy(tenant.id);
       const freshSnapshotId = getSupportEvidenceSnapshotId({
@@ -771,9 +884,15 @@ export async function executeSupportTurn(options: {
       if (snapshotOrPolicyChanged) {
         isRejectedRequired = true;
         rejectedReason = 'sources_changed';
+        guardBlocked = sourcesChangedGuardRes?.action === 'blocked';
+        const fallbackRaw =
+          sourcesChangedGuardRes &&
+          (sourcesChangedGuardRes.action === 'blocked' || sourcesChangedGuardRes.action === 'masked')
+            ? sourcesChangedGuardRes.text
+            : SAFE_EVIDENCE_NOTICES.sources_changed;
         commitReply = maskSupportSensitiveText(
           String(tenant.id),
-          SAFE_EVIDENCE_NOTICES.sources_changed,
+          fallbackRaw,
           userContext.role,
         ).masked;
         evidenceObj = {
@@ -806,6 +925,72 @@ export async function executeSupportTurn(options: {
       }
     }
 
+    // 15b. Apply 020 Output Policy synchronously inside the final DB transaction
+    const maskedGen = isRejectedRequired || isRequiredMode
+      ? undefined
+      : maskSupportSensitiveData(String(tenant.id), genResult, userContext.role).masked;
+
+    const outputCheck = evaluateAndApplySupportOutputToTurn({
+      tenantId: tenant.id,
+      operationId: turnId,
+      reply: commitReply,
+      choices: guardModified
+        ? [{ index: 0, message: { role: 'assistant', content: commitReply }, finish_reason: guardBlocked ? 'content_filter' : 'stop' }]
+        : maskedGen?.choices,
+      toolTrace: maskedToolTrace,
+      evidence: evidenceObj,
+      replySource: isRejectedRequired ? 'knowledge_abstention' : 'model',
+      db: getDb(),
+      revalidateEvidence:
+        evidencePrep.mode === 'required'
+          ? (nextReply) => {
+              const freshPolicy = getSupportEvidencePolicy(tenant.id);
+              const reval = finalizeSupportEvidenceTurn({
+                tenantId: tenant.id,
+                role: evidencePrep.role,
+                policy: freshPolicy,
+                pack: evidencePrep.pack,
+                rawReply: restoreSupportOutputCitationMarkers(nextReply, evidenceObj?.citations ?? []),
+              });
+              if (reval.accepted) {
+                return {
+                  accepted: true,
+                  canonicalReply: reval.canonicalReply,
+                  citations: reval.citations,
+                };
+              }
+              return {
+                accepted: false,
+                canonicalReply: maskSupportSensitiveText(
+                  String(tenant.id),
+                  reval.canonicalReply,
+                  userContext.role,
+                ).masked,
+                citations: [],
+                abstainedEvidence: {
+                  requestId,
+                  status: 'abstained',
+                  reason: reval.reason,
+                  policyVersion: freshPolicy.version,
+                  snapshotId: reval.currentSnapshotId,
+                  citations: [],
+                },
+              };
+            }
+          : undefined,
+    });
+
+    commitReply = outputCheck.reply;
+    const commitToolTrace = outputCheck.toolTrace;
+    evidenceObj = outputCheck.evidence;
+    totalRedactions += outputCheck.redactionCount;
+    const isOutputBlocked = outputCheck.output.action === 'block';
+    if (!isOutputBlocked && outputCheck.replySource === 'knowledge_abstention') {
+      isRejectedRequired = true;
+      rejectedReason =
+        evidenceObj?.reason === 'sources_changed' ? 'sources_changed' : 'invalid_citations';
+    }
+
     // 16. Persist Conversation Messages (exactly 1 customer message and at most 1 AI response)
     const internalIntake = getInternalIntakeForGate(intakeGate);
     if (isSigned) {
@@ -831,7 +1016,7 @@ export async function executeSupportTurn(options: {
       const customerMessageId = conv.messages[conv.messages.length - 1]?.id ?? '';
       let assistantMessageId: string | null = null;
 
-      if (commitReply && !isRejectedRequired) {
+      if (commitReply && (!isRejectedRequired || isOutputBlocked)) {
         const afterAi = createOrAppendSupportConversation(String(tenant.id), {
           conversationId,
           userId: userContext.userId,
@@ -842,7 +1027,7 @@ export async function executeSupportTurn(options: {
             senderName: 'AI Support',
             senderRole: 'assistant',
             content: commitReply,
-            toolTrace: maskedToolTrace.map((tr) => ({
+            toolTrace: commitToolTrace.map((tr) => ({
               toolName: tr.name || tr.toolName || 'tool',
               status: tr.error ? 'error' : 'success',
               durationMs: tr.durationMs,
@@ -909,7 +1094,7 @@ export async function executeSupportTurn(options: {
       requestId,
       ...(conversationId ? { conversationId } : {}),
       replayed: false,
-      replySource: isRejectedRequired ? 'knowledge_abstention' : 'model',
+      replySource: outputCheck.replySource,
       knowledgeDocIds,
       redactionCount: totalRedactions,
       quota: {
@@ -920,43 +1105,29 @@ export async function executeSupportTurn(options: {
       },
       pendingActions,
       ...(evidenceObj ? { evidence: evidenceObj } : {}),
+      output: outputCheck.output,
       ...(intakeMetadata ? { intake: intakeMetadata } : {}),
     };
 
-    const maskedGenBase = isRejectedRequired
-      ? {
-          userContext: maskSupportSensitiveData(String(tenant.id), genResult.userContext, userContext.role).masked,
-          allowedTools: [] as typeof genResult.allowedTools,
-          modelUsed: genResult.modelUsed,
-          usage: genResult.usage,
-          choices: [
-            {
-              index: 0,
-              message: { role: 'assistant' as const, content: commitReply },
-              finish_reason: 'stop',
-            },
-          ],
-        }
-      : {
-          ...maskSupportSensitiveData(String(tenant.id), genResult, userContext.role).masked,
-          ...(isRequiredMode
-            ? {
-                allowedTools: [] as typeof genResult.allowedTools,
-                choices: [
-                  {
-                    index: 0,
-                    message: { role: 'assistant' as const, content: commitReply },
-                    finish_reason: 'stop',
-                  },
-                ],
-              }
-            : {}),
-        };
+    const maskedGenBase =
+      isRejectedRequired || isOutputBlocked
+        ? {
+            userContext: maskSupportSensitiveData(String(tenant.id), genResult.userContext, userContext.role).masked,
+            allowedTools: [] as typeof genResult.allowedTools,
+            modelUsed: genResult.modelUsed,
+            usage: genResult.usage,
+            choices: outputCheck.choices.map(c => ({ ...c, ...(guardBlocked ? { finish_reason: 'content_filter' } : {}) })),
+          }
+        : {
+            ...(maskedGen ?? maskSupportSensitiveData(String(tenant.id), genResult, userContext.role).masked),
+            ...(isRequiredMode ? { allowedTools: [] as typeof genResult.allowedTools } : {}),
+            choices: outputCheck.choices.map(c => ({ ...c, ...(guardBlocked ? { finish_reason: 'content_filter' } : {}) })),
+          };
 
     const finalResult = {
       ...maskedGenBase,
       reply: commitReply,
-      toolTrace: maskedToolTrace,
+      toolTrace: commitToolTrace,
       runtime: runtimeMetadata,
     };
 

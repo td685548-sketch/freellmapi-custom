@@ -1,6 +1,6 @@
 export interface ChatImage { id: string; name: string; url: string }
 export interface ChatTurn {
-  id: string; role: 'user' | 'assistant'; content: string; images?: ChatImage[]; meta?: string;
+  id: string; role: 'user' | 'assistant'; content: string; reasoning?: string; images?: ChatImage[]; meta?: string;
 }
 export interface ChatSession {
   id: string; title: string; model: string; messages: ChatTurn[]; updatedAt: number;
@@ -32,10 +32,11 @@ export function loadChats(userId: number): ChatSession[] {
         && typeof m.id === 'string' && ['user', 'assistant'].includes(m.role) && typeof m.content === 'string')))
       .slice(0, 20).map(c => ({
         ...c,
-        messages: c.messages.map(({ id, role, content, meta, images }) => ({
+        messages: c.messages.map(({ id, role, content, reasoning, meta, images }) => ({
           id,
           role,
           content,
+          ...(typeof reasoning === 'string' && reasoning.length > 0 ? { reasoning } : {}),
           meta,
           ...(sanitizeImageMeta(images) ? { images: sanitizeImageMeta(images) } : {}),
         })),

@@ -285,7 +285,11 @@ export abstract class BaseProvider {
     quotaContext?: QuotaObservationContext,
   ): AsyncGenerator<ChatCompletionChunk>;
 
-  abstract validateKey(apiKey: string, quotaContext?: QuotaObservationContext): Promise<KeyValidationResult>;
+  abstract validateKey(
+    apiKey: string,
+    quotaContext?: QuotaObservationContext,
+    options?: { onCredentialUpdate?: (nextCredential: string) => void },
+  ): Promise<KeyValidationResult>;
 
   /**
    * Optional quota/balance probe (#1403). Providers whose API exposes a

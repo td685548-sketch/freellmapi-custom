@@ -43,6 +43,7 @@ const SupportGovernance = lazyPage(() => import('./pages/SupportGovernance'))
 const SupportIntegration = lazyPage(() => import('./pages/SupportIntegration'))
 const SupportKnowledgeStudio = lazyPage(() => import('./pages/SupportKnowledgeStudio'))
 const SupportServiceDesk = lazyPage(() => import('./pages/SupportServiceDesk'))
+const SupportOutput = lazyPage(() => import('./pages/SupportOutput'))
 const Overview = lazyPage(() => import('./pages/Overview'))
 
 const RAIL_KEY = 'x-gateway.sidebar-collapsed'
@@ -122,6 +123,7 @@ function XGatewayShell() {
         <Route path="support-knowledge" element={<SupportKnowledgeStudio />} />
         <Route path="support-ops" element={<SupportEnterprise />} />
         <Route path="support-guardrails" element={<SupportGovernance />} />
+        <Route path="support-output" element={<SupportOutput />} />
         <Route path="tools" element={<CLITools />} />
         <Route path="skills" element={<SkillsHub />} />
         <Route path="translator" element={<TranslatorInspector />} />

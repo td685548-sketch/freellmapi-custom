@@ -1,0 +1,266 @@
+{
+  "version": 2,
+  "phase": "Delivery stage 3 / US3 / tasks Phase 5 (T054-T071)",
+  "baseSha": "92a4f520cd01cc33f403d5f1bbd30ec98a6d569d",
+  "mcpPr": 52,
+  "mcpMergeSha": "d1e0a03badea3c19fc60200a13155a1eb420b12e",
+  "branch": "codex/ai-platform-output-guard-core",
+  "sharedContractFile": "shared/ai-platform-output-guard.ts",
+  "units": {
+    "characters": "UTF-16 code units (string.length) for holdChars, replacementText, keywords, patterns, maxLength, and excerptMaxChars",
+    "bytes": "UTF-8 bytes for maxStreamBufferBytes (4 MiB = 4194304 bytes)",
+    "durations": "milliseconds for maxDelayMs, externalTimeoutMs, patternEvalBudgetMs, patternRuntimeBudgetMs, eventRateLimitWindowMs; days for excerptTtlDays and eventsRetentionDays"
+  },
+  "enums": {
+    "ScopeKind": ["profile", "support_tenant", "agent"],
+    "GuardMode": ["off", "log", "block"],
+    "GuardFailMode": ["allow", "block"],
+    "GuardPiiAction": ["mask", "block"],
+    "GuardDetectorId": ["keywords", "patterns", "promptLeak", "pii", "maxLength", "moderation", "judge"],
+    "GuardEventAction": ["logged", "blocked", "masked", "bypassed", "check_failed"],
+    "GuardEvalAction": ["pass", "logged", "masked", "blocked"],
+    "GuardWire": ["openai-chat", "anthropic", "responses", "gemini", "support"],
+    "GuardBufferingReason": ["none", "streaming_window", "unbounded_pattern", "custom_pattern", "external_detector", "non_stream"],
+    "GuardAllowedPatternFlags": ["i", "m", "u", "s"]
+  },
+  "defaults": {
+    "mode": "off",
+    "failMode": "allow",
+    "holdChars": 200,
+    "maxDelayMs": 300,
+    "replacementText": "This response was blocked by the output guard.",
+    "bypassRoles": [],
+    "revisionUnsaved": 0,
+    "defaultEndUserRole": "user",
+    "detectors": {
+      "keywords": { "enabled": true, "terms": [] },
+      "patterns": { "enabled": false, "rules": [] },
+      "promptLeak": { "enabled": true, "minShingles": 2 },
+      "pii": { "enabled": true, "action": "mask" },
+      "maxLength": { "enabled": false, "chars": 20000 },
+      "moderation": { "enabled": false },
+      "judge": { "enabled": false, "model": "auto", "criteria": "" }
+    }
+  },
+  "limits": {
+    "maxKeywords": 200,
+    "keywordMaxChars": 80,
+    "maxPatterns": 20,
+    "patternMaxChars": 200,
+    "patternIdMaxChars": 64,
+    "patternNameMaxChars": 120,
+    "patternEvalBudgetMs": 5,
+    "patternRuntimeBudgetMs": 25,
+    "patternEvalSampleChars": 10000,
+    "minHoldChars": 0,
+    "defaultHoldChars": 200,
+    "maxHoldChars": 2000,
+    "minDelayMs": 0,
+    "defaultMaxDelayMs": 300,
+    "maxDelayMs": 2000,
+    "replacementMaxChars": 1000,
+    "maxBypassRoles": 20,
+    "bypassRoleMaxChars": 64,
+    "minShingles": 1,
+    "defaultMinShingles": 2,
+    "maxMinShingles": 20,
+    "shingleWords": 12,
+    "minLengthChars": 1,
+    "defaultMaxLengthChars": 20000,
+    "hardMaxLengthChars": 1000000,
+    "judgeModelMaxChars": 128,
+    "judgeCriteriaMaxChars": 2000,
+    "judgeMaxOutputTokens": 256,
+    "externalTimeoutMs": 10000,
+    "excerptMaxChars": 500,
+    "excerptTtlDays": 7,
+    "eventsRetentionDays": 90,
+    "defaultListLimit": 50,
+    "maxListLimit": 200,
+    "maxTestTextChars": 100000,
+    "eventRateLimitWindowMs": 60000,
+    "eventRateLimitMaxPerKey": 10,
+    "eventRateLimitMaxKeys": 10000,
+    "maxStreamBufferBytes": 4194304
+  },
+  "api": {
+    "basePath": "/api/ai-platform",
+    "routeRegistrationOrder": [
+      "GET /output-guard/events",
+      "GET /output-guard/events/:id/excerpt",
+      "GET /output-guard/:scopeKind/:scopeId",
+      "PUT /output-guard/:scopeKind/:scopeId",
+      "POST /output-guard/:scopeKind/:scopeId/test"
+    ],
+    "endpoints": {
+      "GET /api/ai-platform/output-guard/:scope": {
+        "permission": "view_output_guard",
+        "response": "{ policy: GuardPolicyView }",
+        "notes": "Returns effective default with revision=0 without DB write if unsaved. 404 if profile/support-tenant missing; 409 scope_unavailable for agent."
+      },
+      "PUT /api/ai-platform/output-guard/:scope": {
+        "permission": "edit_output_guard",
+        "request": "GuardPolicyInput",
+        "response": "{ policy: GuardPolicyView }",
+        "errors": {
+          "404": "scope_not_found",
+          "409_scope": "scope_unavailable (agent before US7)",
+          "409_revision": "{ error: { type: 'conflict', code: 'revision_conflict', message, current: GuardPolicyView } }",
+          "422": "validation_error | unsafe_pattern"
+        },
+        "notes": "Works even when outputGuard pillar flag is false. Validates regexes before transaction; rechecks revision inside transaction."
+      },
+      "POST /api/ai-platform/output-guard/:scope/test": {
+        "permission": "view_output_guard",
+        "request": "{ text: string, role?: string, policy?: GuardPolicyInput, includeExternal?: boolean }",
+        "response": "{ action: GuardEvalAction, triggered: [{ detector, match }], maskedText: string, buffering: boolean, bufferingReason: GuardBufferingReason, warnings?: string[] }",
+        "errors": {
+          "409": "pillar_disabled when includeExternal=true and outputGuard flag is false",
+          "422": "validation_error | unsafe_pattern"
+        },
+        "notes": "Dry-run only: never writes custom_ai_guard_events or excerpts. Simulated role does not grant runtime bypass."
+      },
+      "GET /api/ai-platform/output-guard/events": {
+        "permission": "view_output_guard",
+        "query": "scope?, detector?, action?, before?, limit?",
+        "response": "{ events: GuardEventView[], nextBefore: string | null }",
+        "notes": "Metadata only; never returns excerpt, match, ciphertext, iv, tag, systemPrompt, or credentials."
+      },
+      "GET /api/ai-platform/output-guard/events/:id/excerpt": {
+        "permission": "view_guard_excerpts",
+        "response": "{ excerpt: string, expiresAt: string }",
+        "errors": {
+          "403": "missing_permission",
+          "404": "not_found (missing event or no excerpt)",
+          "410": "excerpt_expired (checked on read path even before sweeper runs)"
+        },
+        "notes": "Audits every authorized read without placing plaintext excerpt in audit summary."
+      }
+    }
+  },
+  "ddl": {
+    "migrationFile": "server/src/db/migrations/20261113_120000_custom_ai_output_guard.ts",
+    "tables": {
+      "custom_ai_output_policies": {
+        "primaryKey": ["scope_kind", "scope_id"],
+        "columns": {
+          "scope_kind": "TEXT NOT NULL",
+          "scope_id": "TEXT NOT NULL",
+          "mode": "TEXT NOT NULL DEFAULT 'off'",
+          "detectors_json": "TEXT NOT NULL",
+          "replacement_text": "TEXT NOT NULL",
+          "fail_mode": "TEXT NOT NULL DEFAULT 'allow'",
+          "bypass_roles_json": "TEXT NOT NULL DEFAULT '[]'",
+          "hold_chars": "INTEGER NOT NULL DEFAULT 200",
+          "max_delay_ms": "INTEGER NOT NULL DEFAULT 300",
+          "revision": "INTEGER NOT NULL DEFAULT 1",
+          "updated_by": "INTEGER",
+          "updated_at": "TEXT NOT NULL DEFAULT (datetime('now'))"
+        }
+      },
+      "custom_ai_guard_events": {
+        "primaryKey": ["id"],
+        "columns": {
+          "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+          "scope_kind": "TEXT NOT NULL",
+          "scope_id": "TEXT NOT NULL",
+          "end_user": "TEXT",
+          "detector": "TEXT NOT NULL",
+          "action": "TEXT NOT NULL",
+          "wire": "TEXT NOT NULL",
+          "streamed": "INTEGER NOT NULL DEFAULT 0",
+          "run_id": "TEXT",
+          "excerpt_ciphertext": "TEXT",
+          "excerpt_iv": "TEXT",
+          "excerpt_tag": "TEXT",
+          "excerpt_expires_at": "TEXT",
+          "created_at": "TEXT NOT NULL DEFAULT (datetime('now'))"
+        },
+        "indexes": [
+          "idx_custom_ai_guard_events_scope_created ON (scope_kind, scope_id, created_at)",
+          "idx_custom_ai_guard_events_expires ON (excerpt_expires_at)",
+          "idx_custom_ai_guard_events_created ON (created_at)"
+        ]
+      }
+    },
+    "triggers": [
+      "trg_client_profiles_delete_output_guard AFTER DELETE ON client_profiles: deletes exact (scope_kind='profile', scope_id=CAST(OLD.id AS TEXT)) from custom_ai_output_policies and custom_ai_guard_events"
+    ]
+  },
+  "internalSignatures": {
+    "core": {
+      "store.ts": {
+        "getStoredPolicy": "(scope: Scope) => GuardPolicyRow | null",
+        "getEffectivePolicy": "(scope: Scope) => GuardPolicyView",
+        "upsertPolicy": "(scope: Scope, input: GuardPolicyInput, actorId: number | null) => GuardPolicyView",
+        "purgeGuardScope": "(kind: ScopeKind, id: string) => number",
+        "assertScopeExists": "(scope: Scope) => void",
+        "GuardStoreError": "class Error { status: number; code: GuardErrorCode; details?: unknown }"
+      },
+      "events.ts": {
+        "recordGuardEvent": "(input: RecordGuardEventInput) => { recorded: boolean; id?: number; throttled?: boolean }",
+        "listGuardEvents": "(query: GuardEventsQuery) => GuardEventsListResponse",
+        "getGuardExcerpt": "(id: number, now?: Date) => GuardEventExcerptResponse",
+        "pruneGuardEvents": "(now?: Date) => { purgedExcerpts: number; prunedEvents: number }",
+        "resetGuardEventRateLimitForTests": "() => void"
+      },
+      "policy.ts": {
+        "GuardEvalContext": "{ req?: Request; signal?: AbortSignal; role?: string; trustedRole?: string | null; endUser: string | null; wire: GuardWire; stream: boolean; systemPrompt: string | null; runId?: string; canCallGateway?: boolean }",
+        "outputFilterFor": "(scope: Scope, ctx: GuardEvalContext) => OutputFilter | null",
+        "evaluateOutput": "(scope: Scope, text: string, ctx: GuardEvalContext) => Promise<GuardEvaluateResult>",
+        "testPolicy": "(scope: Scope, req: GuardTestRequest, ctx: { req?: Request; signal?: AbortSignal; systemPrompt: string | null; canCallGateway?: boolean }) => Promise<GuardTestResponse>"
+      },
+      "maintenance.ts": {
+        "maybeRunGuardMaintenance": "(options?: { now?: Date; force?: boolean; minIntervalMs?: number }) => { ran: boolean; purgedExcerpts: number; prunedEvents: number }",
+        "resetGuardMaintenanceForTests": "() => void"
+      }
+    },
+    "detectors_agent2": {
+      "pattern-validator.ts": {
+        "validatePatternRule": "(rule: GuardPatternRule) => Promise<{ ok: true } | { ok: false; reason: string; code: 'validation_error' | 'unsafe_pattern' }>",
+        "validatePatternsConfig": "(config: GuardPatternsConfig) => Promise<{ ok: true } | { ok: false; reason: string; code: 'validation_error' | 'unsafe_pattern' }>",
+        "evaluatePatternInWorker": "(rule: GuardPatternRule, text: string, budgetMs?: number) => Promise<{ matched: boolean; match?: string; index?: number; timedOut?: boolean }>"
+      },
+      "detectors.ts": {
+        "LocalDetectorHit": "{ detector: 'keywords' | 'patterns' | 'promptLeak' | 'pii' | 'maxLength'; action: 'block' | 'mask'; match: string; index: number; endIndex: number }",
+        "LocalDetectorResult": "{ action: 'pass' | 'masked' | 'blocked'; hits: LocalDetectorHit[]; maskedText: string; reason?: GuardDetectorId; bufferingReason: GuardBufferingReason; checkFailed?: boolean }",
+        "evaluateLocalDetectors": "(scope: Scope, text: string, policy: GuardPolicyView, opts: { systemPrompt: string | null; role?: string; signal?: AbortSignal }) => Promise<LocalDetectorResult>",
+        "analyzeStreamingCapability": "(policy: GuardPolicyView) => { canIncrementalStream: boolean; bufferingReason: GuardBufferingReason }"
+      },
+      "external.ts": {
+        "ExternalCheckResult": "{ action: 'pass' | 'blocked' | 'check_failed'; triggered: Array<{ detector: 'moderation' | 'judge'; match: string }>; reason?: 'moderation' | 'judge'; errorCode?: string }",
+        "evaluateExternalDetectors": "(policy: GuardPolicyView, text: string, ctx: { req?: Request; signal?: AbortSignal; endUser: string | null; canCallGateway?: boolean }) => Promise<ExternalCheckResult>"
+      },
+      "moderation.ts": {
+        "runModerations": "(..., options?: { signal?: AbortSignal; sanitizeError?: boolean }) => Promise<...>"
+      }
+    },
+    "runtime_agent3": {
+      "stream-guard.ts": {
+        "StreamGuardCallbacks": "{ evaluateIncremental?: (fullText: string, emittedLen: number) => Promise<GuardEvaluateResult>; evaluateFull: (fullText: string) => Promise<GuardEvaluateResult>; onTerminal?: (meta: GuardTerminalMeta) => void }",
+        "createStreamGuardFilter": "(policy: GuardPolicyView, callbacks: StreamGuardCallbacks) => OutputFilter"
+      },
+      "context.ts": {
+        "resolveGuardContext": "(req: Request, profile: { id: number; systemPrompt?: string | null }, wire: Wire, stream: boolean, endUser: string | null) => GuardEvalContext",
+        "resolveSupportGuardContext": "(tenantId: string, opts: { role?: string; trustedRole?: string | null; endUser?: string | null; systemPrompt?: string | null; signal?: AbortSignal; runId?: string }) => GuardEvalContext"
+      },
+      "support-adapter.ts": {
+        "guardSupportOutput": "(tenantId: string, text: string, ctx: GuardEvalContext) => Promise<GuardEvaluateResult>"
+      },
+      "wire/interceptor.ts": {
+        "OutputFilter": "Additive sink/timer/dispose lifecycle: attachSink?(sink: OutputFilterSink): void; flush?(): Promise<void> | void; dispose?(): void; guardMeta?: GuardTerminalMeta",
+        "terminalGuardField": "{ guard: GuardTerminalMeta } placed on final openai-chat chunk, responses response.completed/incomplete, anthropic message_delta/message_stop, gemini final candidate/chunk"
+      }
+    }
+  },
+  "semantics": {
+    "precedence": "block > masked > logged > pass",
+    "flagOff": "outputFilterFor returns null; evaluateOutput returns { action: 'pass', text }; no header; no events; CRUD local still works; /test with includeExternal=true returns 409 pillar_disabled",
+    "modeOff": "same no-op on inference as flagOff",
+    "modeLog": "returns original text unchanged even on PII or blocking detector hits; records 'logged' events",
+    "piiMask": "replaces PII in-place using masking.ts; keeps original finish_reason unless another blocking detector triggers",
+    "bypass": "only trustedRole in bypassRoles bypasses evaluation and records 'bypassed' event; untrusted header/body role is ignored",
+    "customPatterns": "All enabled regex rules require full buffering and execute in an isolated worker before any response text is emitted; bufferingReason is custom_pattern",
+    "externalFailure": "records 'check_failed' event and applies policy.failMode ('allow' -> pass/continue, 'block' -> block with replacementText)"
+  }
+}

@@ -3,7 +3,7 @@ import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
-import { listModerationModels, resolveModel } from '../../services/moderation.js';
+import { listModerationModels, resolveModel, runModerations } from '../../services/moderation.js';
 import { clearLastHealthyStampState } from '../../services/health.js';
 
 // POST /v1/moderations (#…): OpenAI-compatible content-moderation shim that
@@ -242,5 +242,28 @@ describe('POST /v1/moderations route', () => {
     expect(Number(res.headers.get('retry-after'))).toBeGreaterThan(0);
     // The capped key must never be called.
     expect(calls).toEqual([]);
+  });
+
+  it('supports optional AbortSignal and sanitizeError for guard callers without breaking route callers', async () => {
+    insertKey('openai');
+    const origFetch = global.fetch;
+    vi.spyOn(global, 'fetch').mockImplementation(async (url: any, init?: any) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr.startsWith('http://127.0.0.1')) return origFetch(url, init);
+      return new Response('SENSITIVE_REMOTE_BODY_SECRET', { status: 500 });
+    });
+
+    await expect(
+      runModerations(undefined, ['sensitive answer'], { sanitizeError: true, guardCall: true }),
+    ).rejects.toThrow(/All moderation providers failed/);
+
+    const errRow = getDb().prepare("SELECT error FROM requests WHERE request_type = 'moderation' ORDER BY id DESC LIMIT 1").get() as { error: string | null };
+    expect(errRow?.error ?? '').not.toContain('SENSITIVE_REMOTE_BODY_SECRET');
+
+    const ac = new AbortController();
+    ac.abort();
+    await expect(
+      runModerations(undefined, ['x'], { signal: ac.signal, sanitizeError: true, guardCall: true }),
+    ).rejects.toMatchObject({ status: 499 });
   });
 });

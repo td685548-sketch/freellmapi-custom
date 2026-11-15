@@ -39,13 +39,28 @@ export function parseScopeParam(kindRaw: string, idRaw: string): Scope {
 }
 
 /**
- * Purges scope-owned AI platform state in `settings` (prefix `ai_platform_scope_<kind>_<id>_*`).
- * Never deletes global flags/retention or other scopes, and does not reference unmigrated pillar tables.
+ * Purges scope-owned AI platform state in `settings` (prefix `ai_platform_scope_<kind>_<id>_*`)
+ * and output-guard scope tables (`custom_ai_output_policies`, `custom_ai_guard_events`).
+ * Never deletes global flags/retention, MCP config, or other scopes, and checks table existence
+ * before touching pillar tables.
  */
 export function purgeScope(kind: ScopeKind, id: string): number {
   const norm = normalizeScope({ kind, id });
   const db = getDb();
   const prefix = `ai_platform_scope_${norm.kind}_${norm.id}_`;
-  const result = db.prepare('DELETE FROM settings WHERE substr(key, 1, length(?)) = ?').run(prefix, prefix);
-  return result.changes;
+  let total = db
+    .prepare('DELETE FROM settings WHERE substr(key, 1, length(?)) = ?')
+    .run(prefix, prefix).changes;
+
+  for (const table of ['custom_ai_output_policies', 'custom_ai_guard_events'] as const) {
+    const exists = db
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .get(table);
+    if (exists) {
+      total += db
+        .prepare(`DELETE FROM ${table} WHERE scope_kind = ? AND scope_id = ?`)
+        .run(norm.kind, norm.id).changes;
+    }
+  }
+  return total;
 }

@@ -22,6 +22,7 @@ const schema = z.object({
   messages: z.array(z.object({ role: z.enum(['system', 'user', 'assistant']), content }).strict()).min(1).max(100),
   temperature: z.number().min(0).max(2).optional(),
   max_tokens: z.number().int().min(1).max(32_768).optional(),
+  reasoning_effort: z.enum(['low', 'medium', 'high']).optional(),
 }).strict();
 
 // Mounted behind the console's session and use_x_gateway gate. The catalog
