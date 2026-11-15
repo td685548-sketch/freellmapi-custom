@@ -319,6 +319,8 @@ export async function rotateGeminiCookies(
           headers: {
             'Content-Type': 'application/json',
             Cookie: cookieHeader,
+            Origin: 'https://accounts.google.com',
+            Referer: 'https://accounts.google.com/',
             'User-Agent': BROWSER_USER_AGENT,
           },
           body: ROTATE_COOKIES_BODY,
@@ -443,7 +445,7 @@ async function fetchGeminiSession(
 
     if (shouldRotateAndRetry) {
       sessionCache.delete(`${origin}::${activeCookie}`);
-      const rotated = await rotateGeminiCookies(activeCookie, platform, externalSignal);
+      const rotated = await rotateGeminiCookies(activeCookie, platform, externalSignal, { force: true });
       if (rotated.rotated) {
         recordRotatedCookie(activeCookie, rotated.cookieHeader, origin, opts?.onCredentialUpdate);
         activeCookie = rotated.cookieHeader;
@@ -937,7 +939,7 @@ export async function* streamGeminiWebChat(
     }
 
     if (shouldRetryWithFreshSession) {
-      const rotated = await rotateGeminiCookies(activeCookie, platform, opts.options?.signal);
+      const rotated = await rotateGeminiCookies(activeCookie, platform, opts.options?.signal, { force: true });
       if (rotated.rotated) {
         recordRotatedCookie(activeCookie, rotated.cookieHeader, origin, onCredentialUpdate);
         activeCookie = rotated.cookieHeader;
@@ -953,6 +955,24 @@ export async function* streamGeminiWebChat(
       session = sessionResult.session;
     }
   }
+}
+
+export async function probeGeminiWebSession(opts: {
+  credential: string;
+  baseUrl?: string;
+  platform?: Platform;
+  signal?: AbortSignal;
+  onCredentialUpdate?: (next: string) => void;
+}): Promise<void> {
+  const cookieHeader = normalizeGeminiWebCookie(opts.credential);
+  const origin = resolveOrigin(opts.baseUrl);
+  await fetchGeminiSession(
+    cookieHeader,
+    origin,
+    opts.platform ?? 'custom',
+    opts.signal,
+    { forceRefresh: true, onCredentialUpdate: opts.onCredentialUpdate },
+  );
 }
 
 export async function runGeminiWebChat(opts: GeminiWebChatOptions): Promise<string> {
