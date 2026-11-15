@@ -4,6 +4,8 @@
  */
 
 import crypto from 'node:crypto';
+import { getDb } from '../../db/index.js';
+import { restoreSupportOutputCitationMarkers, retainSupportOutputCitationText } from './support-output-citations.js';
 import {
   SUPPORT_DESK_LIMITS,
   type SupportDeskCopilotDraft,
@@ -16,6 +18,11 @@ import {
   type SupportEvidencePolicy,
   type SupportEvidenceRole,
 } from '@freellmapi/shared/support-evidence.js';
+import { SUPPORT_OUTPUT_BLOCK_NOTICE } from '@freellmapi/shared/support-output.js';
+import {
+  evaluateSupportCopilotArtifacts,
+  validateSupportCopilotJobRead,
+} from './support-output-runtime.js';
 import {
   claimSupportDeskCopilot,
   failSupportDeskCopilot,
@@ -292,7 +299,29 @@ export async function generateSupportAgentCopilot(params: {
       );
     }
 
-    return { ...claim.result, replayed: true };
+    let outputRead: ReturnType<typeof validateSupportCopilotJobRead>;
+    try {
+      outputRead = validateSupportCopilotJobRead({ tenantId, job: claim.result });
+    } catch (err: unknown) {
+      const e = err as { status?: number; code?: string; message?: string };
+      throw new SupportDeskError(
+        e.status || 503,
+        e.code || 'output_policy_unavailable',
+        e.message || 'Output policy validation failed.',
+      );
+    }
+    if (outputRead.status === 'policy_changed') {
+      throw new SupportDeskError(
+        409,
+        'output_policy_changed',
+        'Output policy changed since Copilot draft generation.',
+      );
+    }
+    if (outputRead.status === 'blocked') {
+      throw new SupportDeskError(422, 'output_blocked', SUPPORT_OUTPUT_BLOCK_NOTICE);
+    }
+
+    return { ...outputRead.job, replayed: true };
   }
 
   if (claim.status === 'running') {
@@ -792,38 +821,171 @@ export async function generateSupportAgentCopilot(params: {
     return staleResult;
   }
 
-  // 10. Persist completed result
-  const completedResult: SupportDeskCopilotResult = {
-    jobId,
-    requestId,
-    conversationId,
-    status: 'completed',
-    summary: maskSupportSensitiveText(String(tenantId), summaryVal.canonicalReply, role).masked,
-    summaryCitations: summaryVal.citations,
-    drafts: validatedDrafts,
-    conversationSnapshot: initialConversationSnapshot,
-    evidenceSnapshot: initialEvidenceSnapshot,
-    policyVersion: evidencePolicy.version,
-    modelUsed: pipelineResult.modelUsed || tenant.defaultModel || 'auto',
-    usage: {
-      promptTokens: totalPromptTokens,
-      completionTokens: totalCompletionTokens,
-      totalTokens: totalPromptTokens + totalCompletionTokens,
-      accounting,
-    },
-    replayed: false,
-    createdAt: new Date().toISOString(),
-  };
+  // 9b. Evaluate 020 Output Policy across masked summary + all drafts as one decision before persistence
+  const finalized = getDb().transaction((): SupportDeskCopilotResult | { error: SupportDeskError } | null => {
+    const maskedSummary = maskSupportSensitiveText(String(tenantId), summaryVal.canonicalReply, role).masked;
+    let copilotEval: ReturnType<typeof evaluateSupportCopilotArtifacts>;
+    try {
+      copilotEval = evaluateSupportCopilotArtifacts({
+        tenantId,
+        operationId: jobId,
+        summary: maskedSummary,
+        summaryCitations: summaryVal.citations,
+        drafts: validatedDrafts,
+        recordEvent: true,
+      });
+    } catch (err: unknown) {
+      const e = err as { status?: number; code?: string; message?: string };
+      const code = e.code || 'output_policy_unavailable';
+      failSupportDeskCopilot({
+        tenantId,
+        actorId,
+        jobId,
+        leaseToken,
+        code,
+      });
+      // Commit the failed, fenced job before reporting the policy error.
+      return { error: new SupportDeskError(
+        e.status || 503,
+        code,
+        e.message || 'Output policy evaluation failed.',
+      ) };
+    }
 
-  finishSupportDeskCopilot({
-    tenantId,
-    actorId,
-    jobId,
-    leaseToken,
-    result: completedResult,
-  });
+    if (copilotEval.decision.action === 'block') {
+      failSupportDeskCopilot({
+        tenantId,
+        actorId,
+        jobId,
+        leaseToken,
+        code: 'output_blocked',
+      });
+      return null;
+    }
 
-  return completedResult;
+    let finalSummary = copilotEval.summary;
+    let finalSummaryCitations = copilotEval.summaryCitations;
+    let finalDrafts = copilotEval.drafts;
+
+    if (copilotEval.decision.action === 'redact') {
+      let revalFailed = false;
+      if (finalSummary !== maskedSummary) {
+        const sumReval = validateSupportEvidenceReply({
+          tenantId,
+          role,
+          policy: currentEvPolicy,
+          pack,
+          reply: restoreSupportOutputCitationMarkers(finalSummary, summaryVal.citations),
+        });
+        if (!sumReval.valid || sumReval.citations.length < 1 || sumReval.citations.length > 5) {
+          revalFailed = true;
+        } else {
+          finalSummary = sumReval.canonicalReply;
+          finalSummaryCitations = retainSupportOutputCitationText(sumReval.citations, copilotEval.summaryCitations);
+        }
+      }
+      if (!revalFailed) {
+        const nextDrafts: SupportDeskCopilotDraft[] = [];
+        for (let i = 0; i < finalDrafts.length; i += 1) {
+          const d = finalDrafts[i];
+          if (d.text !== validatedDrafts[i].text) {
+            const dReval = validateSupportEvidenceReply({
+              tenantId,
+              role,
+              policy: currentEvPolicy,
+              pack,
+              reply: restoreSupportOutputCitationMarkers(d.text, validatedDrafts[i].citations),
+            });
+            if (!dReval.valid || dReval.citations.length < 1 || dReval.citations.length > 5) {
+              revalFailed = true;
+              break;
+            }
+            nextDrafts.push({
+              tone: d.tone,
+              text: dReval.canonicalReply,
+              citations: retainSupportOutputCitationText(dReval.citations, d.citations),
+            });
+          } else {
+            nextDrafts.push(d);
+          }
+        }
+        finalDrafts = nextDrafts;
+      }
+
+      if (revalFailed) {
+        const abstainedResult: SupportDeskCopilotResult = {
+          jobId,
+          requestId,
+          conversationId,
+          status: 'abstained',
+          reason: 'invalid_result',
+          summary: '',
+          drafts: [],
+          summaryCitations: [],
+          conversationSnapshot: initialConversationSnapshot,
+          evidenceSnapshot: initialEvidenceSnapshot,
+          policyVersion: currentEvPolicy.version,
+          output: copilotEval.output,
+          modelUsed: pipelineResult.modelUsed || tenant.defaultModel || 'auto',
+          usage: {
+            promptTokens: totalPromptTokens,
+            completionTokens: totalCompletionTokens,
+            totalTokens: totalPromptTokens + totalCompletionTokens,
+            accounting,
+          },
+          replayed: false,
+          createdAt: new Date().toISOString(),
+        };
+        finishSupportDeskCopilot({
+          tenantId,
+          actorId,
+          jobId,
+          leaseToken,
+          result: abstainedResult,
+        });
+        return abstainedResult;
+      }
+    }
+
+    // 10. Persist completed result
+    const completedResult: SupportDeskCopilotResult = {
+      jobId,
+      requestId,
+      conversationId,
+      status: 'completed',
+      summary: finalSummary,
+      summaryCitations: finalSummaryCitations,
+      drafts: finalDrafts,
+      conversationSnapshot: initialConversationSnapshot,
+      evidenceSnapshot: initialEvidenceSnapshot,
+      policyVersion: evidencePolicy.version,
+      output: copilotEval.output,
+      modelUsed: pipelineResult.modelUsed || tenant.defaultModel || 'auto',
+      usage: {
+        promptTokens: totalPromptTokens,
+        completionTokens: totalCompletionTokens,
+        totalTokens: totalPromptTokens + totalCompletionTokens,
+        accounting,
+      },
+      replayed: false,
+      createdAt: new Date().toISOString(),
+    };
+
+    finishSupportDeskCopilot({
+      tenantId,
+      actorId,
+      jobId,
+      leaseToken,
+      result: completedResult,
+    });
+
+    return completedResult;
+  })();
+  if (finalized === null) {
+    throw new SupportDeskError(422, 'output_blocked', SUPPORT_OUTPUT_BLOCK_NOTICE);
+  }
+  if ('error' in finalized) throw finalized.error;
+  return finalized;
 }
 
 /**
@@ -888,8 +1050,30 @@ export function readSupportAgentCopilotJob(params: {
     );
   }
 
+  let outputRead: ReturnType<typeof validateSupportCopilotJobRead>;
+  try {
+    outputRead = validateSupportCopilotJobRead({ tenantId, job });
+  } catch (err: unknown) {
+    const e = err as { status?: number; code?: string; message?: string };
+    throw new SupportDeskError(
+      e.status || 503,
+      e.code || 'output_policy_unavailable',
+      e.message || 'Output policy validation failed.',
+    );
+  }
+  if (outputRead.status === 'policy_changed') {
+    throw new SupportDeskError(
+      409,
+      'output_policy_changed',
+      'Output policy changed since Copilot draft generation.',
+    );
+  }
+  if (outputRead.status === 'blocked') {
+    throw new SupportDeskError(422, 'output_blocked', SUPPORT_OUTPUT_BLOCK_NOTICE);
+  }
+
   return {
-    ...job,
+    ...outputRead.job,
     replayed: true,
   };
 }

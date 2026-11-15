@@ -4,6 +4,7 @@
  */
 
 import type { SupportAnswerEvidence } from './support-evidence.js';
+import type { SupportOutputMetadata } from './support-output.js';
 
 export interface SupportRuntimePolicy {
   allowedModels: string[]; // extra requested model selectors; default [] permits tenant.defaultModel only
@@ -32,13 +33,14 @@ export interface SupportRuntimeMetadata {
   requestId: string;
   conversationId?: string; // absent only for compatible stateless unsigned guest requests
   replayed: boolean;
-  replySource: 'model' | 'knowledge_abstention';
+  replySource: 'model' | 'knowledge_abstention' | 'output_policy_notice';
   knowledgeDocIds: string[]; // only role-visible docs, no full snippets/raw CRM
   redactionCount: number;
   quota: { requestsUsed: number; tokensUsed: number; resetAt: string; accounting: 'actual' | 'estimated' };
   pendingActions: Array<{ id: string; toolName: string; executionStatus: SupportActionExecutionStatus }>;
   evidence?: SupportAnswerEvidence;
   intake?: { schemaHash: string; submittedAt: string };
+  output?: SupportOutputMetadata;
 }
 
 export interface SupportIntegrationCheck {

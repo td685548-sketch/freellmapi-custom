@@ -71,6 +71,9 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
   }
   if (parent === 'manage_x_gateway') {
     if (path.startsWith('/api/thruline/support')) {
+      if (/^\/api\/thruline\/support\/tenants\/[^/]+\/output-(?:policy(?:\/preview)?|events)$/.test(path)) {
+        return 'edit_x_settings';
+      }
       if (read || path.endsWith('/simulate-chat') || path.endsWith('/mint-token') || path.endsWith('/test') || path.endsWith('/query-test')) {
         return 'use_x_gateway';
       }
