@@ -87,6 +87,7 @@ import * as supportEvidence from '../migrations/20261113_090001_support_evidence
 import * as customAiPlatformBase from '../migrations/20261113_100000_custom_ai_platform_base.js';
 import * as customAiMcpClient from '../migrations/20261113_110000_custom_ai_mcp_client.js';
 import * as customAiOutputGuard from '../migrations/20261113_120000_custom_ai_output_guard.js';
+import * as customAiRetrieval from '../migrations/20261113_130000_custom_ai_retrieval.js';
 import * as customAiMcpApprovalSafety from '../migrations/20261114_200000_custom_ai_mcp_approval_safety.js';
 import * as supportServiceDesk from '../migrations/20261113_180001_support_service_desk.js';
 import * as modelMonthlyUsage from '../migrations/20261111_000001_model_monthly_usage.js';
@@ -273,6 +274,7 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: '20261113_100000_custom_ai_platform_base.ts', module: customAiPlatformBase },
   { filename: '20261113_110000_custom_ai_mcp_client.ts', module: customAiMcpClient },
   { filename: '20261113_120000_custom_ai_output_guard.ts', module: customAiOutputGuard },
+  { filename: '20261113_130000_custom_ai_retrieval.ts', module: customAiRetrieval },
   { filename: '20261113_180001_support_service_desk.ts', module: supportServiceDesk },
   { filename: '20261114_090000_custom_playground_media.ts', module: playgroundMedia },
   { filename: '20261114_200000_custom_ai_mcp_approval_safety.ts', module: customAiMcpApprovalSafety },

@@ -53,6 +53,7 @@ import { geminiRouter } from './x-gateway/gemini-router.js';
 import { xGatewayOllamaRouter } from './x-gateway/ollama-router.js';
 import { proxyWebhookRouter } from './proxy-webhook/router.js';
 import { aiPlatformRouter } from './ai-platform/router.js';
+import { startIndexWorker } from './ai-platform/retrieval/indexer.js';
 
 // Everything this fork adds to the HTTP surface is wired here, so upstream's
 // app.ts keeps a handful of added lines instead of edited mount statements.
@@ -237,4 +238,7 @@ export function registerCustomRoutes(app: Express): void {
   // AI Platform admin API — mounted after auth/permission gates (gate is in PERMISSION_GATES above).
   // Implementation routers (flags, overview, etc.) will be added in later tasks.
   app.use('/api/ai-platform', requireAuth, requireActionPermission('manage_ai_platform'), aiPlatformRouter);
+
+  // Start background semantic retrieval indexing worker (unref'd timer; idempotent).
+  startIndexWorker();
 }

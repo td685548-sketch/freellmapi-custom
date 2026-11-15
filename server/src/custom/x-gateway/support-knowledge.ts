@@ -1,5 +1,6 @@
-import { randomUUID } from 'node:crypto';
+import crypto, { randomUUID } from 'node:crypto';
 import { getDb } from '../../db/index.js';
+import { onDocumentChanged, onDocumentDeleted } from '../ai-platform/retrieval/indexer.js';
 
 const KNOWLEDGE_KEY = 'x_gateway_support_knowledge_v1';
 const MASKING_KEY = 'x_gateway_support_masking_v1';
@@ -30,6 +31,25 @@ export interface SupportKnowledgeChunkMatch {
   allowedRoles: string[];
   snippet: string;
   score: number;
+}
+
+export interface SupportKnowledgeChunkRecord {
+  docId: string;
+  chunkId: number;
+  ord: number;
+  title: string;
+  text: string;
+  roles: string[];
+}
+
+export interface SupportKnowledgeRankedHit {
+  docId: string;
+  chunkId: number;
+  ord: number;
+  title: string;
+  text: string;
+  score: number;
+  roles: string[];
 }
 
 export type SupportBuiltinMaskDetector = 'email' | 'phone' | 'credit_card' | 'api_key';
@@ -133,6 +153,7 @@ export function upsertSupportKnowledgeDoc(
   else docs.push(doc);
   store[tid] = docs;
   writeStore(KNOWLEDGE_KEY, store);
+  void onDocumentChanged({ kind: 'support_tenant', id: tid }, doc.id).catch(() => {});
   return doc;
 }
 
@@ -144,6 +165,7 @@ export function deleteSupportKnowledgeDoc(tenantId: string, docId: string): bool
   if (next.length === docs.length) return false;
   store[tid] = next;
   writeStore(KNOWLEDGE_KEY, store);
+  void onDocumentDeleted({ kind: 'support_tenant', id: tid }, docId).catch(() => {});
   return true;
 }
 
@@ -229,6 +251,81 @@ function truncate(s: string): string {
   return t.length <= SNIPPET_MAX ? t : `${t.slice(0, SNIPPET_MAX - 1).trimEnd()}…`;
 }
 
+function splitSupportDocChunks(content: string): string[] {
+  return String(content ?? '').split(/\n\s*\n/).map((c) => c.trim()).filter(Boolean);
+}
+
+function supportChunkId(docId: string, ord: number): number {
+  const digest = crypto.createHash('sha256').update(String(docId)).digest();
+  const docHash = digest.readUInt32BE(0) || 1;
+  return docHash * 65_536 + Math.max(0, Math.floor(ord));
+}
+
+export function listSupportKnowledgeChunks(tenantId: string, docId?: string): SupportKnowledgeChunkRecord[] {
+  const out: SupportKnowledgeChunkRecord[] = [];
+  for (const doc of listSupportKnowledgeDocs(tenantId)) {
+    if (doc.enabled === false) continue;
+    if (docId !== undefined && doc.id !== docId) continue;
+    const roles = Array.isArray(doc.allowedRoles) ? [...doc.allowedRoles] : [];
+    const chunks = splitSupportDocChunks(doc.content);
+    for (let ord = 0; ord < chunks.length; ord += 1) {
+      const text = chunks[ord]!;
+      out.push({
+        docId: String(doc.id),
+        chunkId: supportChunkId(String(doc.id), ord),
+        ord,
+        title: doc.title,
+        text,
+        roles,
+      });
+    }
+  }
+  return out;
+}
+
+export function searchSupportKnowledgeRanked(
+  tenantId: string,
+  query: string,
+  role?: string,
+  opts?: { topK?: number },
+): SupportKnowledgeRankedHit[] {
+  // SECURITY: role/enabled filtering happens strictly before any scoring.
+  const visible = listSupportKnowledgeDocs(tenantId).filter(
+    (doc) =>
+      doc.enabled !== false &&
+      (role === undefined ||
+        (Array.isArray(doc.allowedRoles) &&
+          (doc.allowedRoles.includes('*') || doc.allowedRoles.includes(role)))),
+  );
+  const qTokens = new Set(tokenize(String(query ?? '')));
+  if (qTokens.size === 0) return [];
+
+  const hits: SupportKnowledgeRankedHit[] = [];
+  for (const doc of visible) {
+    const titleScore = overlap(qTokens, doc.title) * 3;
+    const tagScore = overlap(qTokens, (doc.tags ?? []).join(' ')) * 2;
+    const chunks = splitSupportDocChunks(doc.content);
+    const roles = Array.isArray(doc.allowedRoles) ? [...doc.allowedRoles] : [];
+    for (let ord = 0; ord < chunks.length; ord += 1) {
+      const text = chunks[ord]!;
+      const chunkScore = overlap(qTokens, text);
+      const score = titleScore + tagScore + chunkScore;
+      if (score <= 0) continue;
+      hits.push({
+        docId: String(doc.id),
+        chunkId: supportChunkId(String(doc.id), ord),
+        ord,
+        title: doc.title,
+        text,
+        score,
+        roles,
+      });
+    }
+  }
+  hits.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title) || a.ord - b.ord);
+  return hits.slice(0, Math.max(1, opts?.topK ?? 5));
+}
+
 export function searchSupportKnowledge(
   tenantId: string,
   query: string,
@@ -250,7 +347,7 @@ export function searchSupportKnowledge(
   for (const doc of visible) {
     const titleScore = overlap(qTokens, doc.title) * 3;
     const tagScore = overlap(qTokens, (doc.tags ?? []).join(' ')) * 2;
-    const chunks = doc.content.split(/\n\s*\n/).map((c) => c.trim()).filter(Boolean);
+    const chunks = splitSupportDocChunks(doc.content);
     let contentScore = 0;
     let best = { score: 0, text: '' };
     for (const chunk of chunks) {

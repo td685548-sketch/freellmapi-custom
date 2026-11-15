@@ -165,7 +165,12 @@ describe('Turso SELECT result cache', () => {
     const withTriggers = fs.readdirSync(dir)
       .filter(f => /CREATE\s+TRIGGER/i.test(fs.readFileSync(path.join(dir, f), 'utf8')));
     // If this fails, add the trigger's written tables to TRIGGER_SIDE_EFFECTS in db/turso.ts.
-    expect(withTriggers).toEqual(['20260914_000001_key_monthly_usage.ts', '20261111_000001_model_monthly_usage.ts', '20261113_120000_custom_ai_output_guard.ts']);
+    expect(withTriggers).toEqual([
+      '20260914_000001_key_monthly_usage.ts',
+      '20261111_000001_model_monthly_usage.ts',
+      '20261113_120000_custom_ai_output_guard.ts',
+      '20261113_130000_custom_ai_retrieval.ts',
+    ]);
   });
 });
 

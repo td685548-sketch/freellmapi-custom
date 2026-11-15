@@ -16,16 +16,17 @@ import { Routes, Route, NavLink } from 'react-router-dom';
 import { useCustomT } from '../i18n/use-custom-t';
 import { useAdministrativeAccess } from '../use-administrative-access';
 import { useUserSession } from '../use-session';
+import { Knowledge } from './pages/Knowledge';
 import { McpServers } from './pages/McpServers';
 import { OutputGuard } from './pages/OutputGuard';
 import { Overview } from './pages/Overview';
+import { KNOWLEDGE_NAV_HEADING } from './knowledge-strings';
 import {
   NAV_AI_PLATFORM,
   NO_ACCESS,
   NOT_IMPLEMENTED_YET,
   MCP_SERVERS_HEADING,
   OUTPUT_GUARD_HEADING,
-  KNOWLEDGE_HEADING,
   PROMPT_CACHE_HEADING,
   FLOWS_HEADING,
   RUNS_HEADING,
@@ -49,9 +50,8 @@ const NAV_ITEMS = [
   { to: 'overview', labelKey: 'Platform overview' as const },
 ] as const;
 
-// Future screens — links shown but pages are placeholders until US4–US7 ship.
+// Future screens — links shown but pages are placeholders until US5–US7 ship.
 const FUTURE_NAV_ITEMS = [
-  { to: 'knowledge', labelKey: KNOWLEDGE_HEADING },
   { to: 'prompt-cache', labelKey: PROMPT_CACHE_HEADING },
   { to: 'flows', labelKey: FLOWS_HEADING },
   { to: 'runs', labelKey: RUNS_HEADING },
@@ -76,9 +76,12 @@ export function AiPlatformApp() {
     can('view_output_guard') ||
     can('edit_output_guard') ||
     can('view_guard_excerpts');
+  const canViewKnowledge = isPrimary || can('view_retrieval');
+  const canEditKnowledge = isPrimary || can('edit_retrieval');
+  const canKnowledge = canViewKnowledge || canEditKnowledge;
 
   // Guard: no sensitive query when user lacks access.
-  if (!canOverview && !canMcp && !canOutputGuard) {
+  if (!canOverview && !canMcp && !canOutputGuard && !canKnowledge) {
     return (
       <div className="p-6">
         <p className="text-sm text-muted-foreground">{tc(NO_ACCESS)}</p>
@@ -90,11 +93,27 @@ export function AiPlatformApp() {
     <Routes>
       <Route
         path="/ai-platform/*"
-        element={<AiPlatformShell canOverview={canOverview} canMcp={canMcp} canOutputGuard={canOutputGuard} />}
+        element={
+          <AiPlatformShell
+            canOverview={canOverview}
+            canMcp={canMcp}
+            canOutputGuard={canOutputGuard}
+            canViewKnowledge={canViewKnowledge}
+            canEditKnowledge={canEditKnowledge}
+          />
+        }
       />
       <Route
         path="*"
-        element={<AiPlatformShell canOverview={canOverview} canMcp={canMcp} canOutputGuard={canOutputGuard} />}
+        element={
+          <AiPlatformShell
+            canOverview={canOverview}
+            canMcp={canMcp}
+            canOutputGuard={canOutputGuard}
+            canViewKnowledge={canViewKnowledge}
+            canEditKnowledge={canEditKnowledge}
+          />
+        }
       />
     </Routes>
   );
@@ -104,13 +123,31 @@ function AiPlatformShell({
   canOverview,
   canMcp,
   canOutputGuard,
+  canViewKnowledge,
+  canEditKnowledge,
 }: {
   canOverview: boolean;
   canMcp: boolean;
   canOutputGuard: boolean;
+  canViewKnowledge: boolean;
+  canEditKnowledge: boolean;
 }) {
   const tc = useCustomT();
-  const defaultElement = canOverview ? <Overview /> : canMcp ? <McpServers /> : <OutputGuard />;
+  const canKnowledge = canViewKnowledge || canEditKnowledge;
+  const defaultElement = canOverview ? (
+    <Overview />
+  ) : canMcp ? (
+    <McpServers />
+  ) : canOutputGuard ? (
+    <OutputGuard />
+  ) : (
+    <Knowledge
+      canView={canViewKnowledge}
+      canEdit={canEditKnowledge}
+      canReindex={canEditKnowledge}
+      canQuery={canViewKnowledge}
+    />
+  );
 
   return (
     <div className="flex gap-6">
@@ -160,6 +197,20 @@ function AiPlatformShell({
               {tc(OUTPUT_GUARD_HEADING)}
             </NavLink>
           )}
+          {canKnowledge && (
+            <NavLink
+              to="knowledge"
+              className={({ isActive }) =>
+                `block px-3 py-2 rounded-md text-sm transition-colors ${
+                  isActive
+                    ? 'bg-primary/10 text-primary font-medium'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                }`
+              }
+            >
+              {tc(KNOWLEDGE_NAV_HEADING)}
+            </NavLink>
+          )}
           {/* Future screens — rendered as nav links but go to placeholder pages */}
           {FUTURE_NAV_ITEMS.map(({ to, labelKey }) => (
             <NavLink
@@ -186,9 +237,25 @@ function AiPlatformShell({
           <Route path="overview" element={<Overview />} />
           <Route path="mcp" element={<McpServers />} />
           <Route path="output-guard" element={<OutputGuard />} />
+          <Route
+            path="knowledge"
+            element={
+              canKnowledge ? (
+                <Knowledge
+                  canView={canViewKnowledge}
+                  canEdit={canEditKnowledge}
+                  canReindex={canEditKnowledge}
+                  canQuery={canViewKnowledge}
+                />
+              ) : (
+                <div className="p-6">
+                  <p className="text-sm text-muted-foreground">{tc(NO_ACCESS)}</p>
+                </div>
+              )
+            }
+          />
 
-          {/* Future US4–US7 screens — placeholder until implemented */}
-          <Route path="knowledge" element={<NotImplemented title={tc(KNOWLEDGE_HEADING)} />} />
+          {/* Future US5–US7 screens — placeholder until implemented */}
           <Route path="prompt-cache" element={<NotImplemented title={tc(PROMPT_CACHE_HEADING)} />} />
           <Route path="flows" element={<NotImplemented title={tc(FLOWS_HEADING)} />} />
           <Route path="runs" element={<NotImplemented title={tc(RUNS_HEADING)} />} />

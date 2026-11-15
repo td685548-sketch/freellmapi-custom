@@ -11,6 +11,12 @@ import {
 
 export type GuardAction = 'pass' | 'logged' | 'masked' | 'blocked';
 
+export interface OutputFilterContext {
+  wire: Wire;
+  blocked: boolean;
+  action: GuardAction;
+}
+
 export interface OutputFilterSink {
   emitDelta(text: string): void;
   stop(replacement: string, reason: string, action?: 'blocked'): void;
@@ -35,6 +41,7 @@ export interface OutputFilter {
   onComplete?(full: string):
     | Promise<{ replaceWith?: string; reason?: string; action?: GuardAction }>
     | { replaceWith?: string; reason?: string; action?: GuardAction };
+  onResponseObject?(body: Record<string, unknown>, ctx: OutputFilterContext): Record<string, unknown> | void;
   onUsage?(usage: unknown): void;
   attach?(sink: OutputFilterSink): void;
   dispose?(): void;
@@ -42,8 +49,14 @@ export interface OutputFilter {
   failClosed?: boolean;
 }
 
+interface InstalledInterceptorState {
+  wire: Wire;
+  filters: OutputFilter[];
+  sink: OutputFilterSink;
+}
+
 const MAX_BUFFER_BYTES = 4 * 1024 * 1024;
-const installedResponses = new WeakSet<Response>();
+const installedResponses = new WeakMap<Response, InstalledInterceptorState>();
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -523,19 +536,35 @@ function toBuffer(chunk: unknown, encoding?: BufferEncoding): Buffer {
  * Installs a protocol-aware response interceptor on `res` for the given filters.
  * Idempotent per `res`. When `filters` is empty, returns immediately without modifying `res`.
  */
-export function installInterceptor(_req: Request, res: Response, wire: Wire, filters: OutputFilter[]): void {
+export function installInterceptor(_req: Request, res: Response, wire: Wire, incomingFilters: OutputFilter[]): void {
+  if (incomingFilters.length === 0) return;
+  const existing = installedResponses.get(res);
+  if (existing) {
+    for (const filter of incomingFilters) {
+      if (!existing.filters.some((f) => f.name === filter.name)) {
+        existing.filters.push(filter);
+        filter.attach?.(existing.sink);
+      }
+    }
+    return;
+  }
+
+  const filters: OutputFilter[] = [];
+  for (const filter of incomingFilters) {
+    if (!filters.some((f) => f.name === filter.name)) {
+      filters.push(filter);
+    }
+  }
   if (filters.length === 0) return;
-  if (installedResponses.has(res)) return;
-  installedResponses.add(res);
 
   const origWrite = res.write.bind(res);
   const origEnd = res.end.bind(res);
   const origJson = res.json.bind(res);
   const origSend = typeof res.send === 'function' ? res.send.bind(res) : null;
 
-  const hasGuardFilter = filters.some((f) => f.isOutputGuard || f.name === 'output-guard');
-  const anyFailClosed = filters.some((f) => f.failClosed === true);
-  const anyBuffering = filters.some((f) => f.buffering === true);
+  const hasGuardFilter = (): boolean => filters.some((f) => f.isOutputGuard || f.name === 'output-guard');
+  const anyFailClosed = (): boolean => filters.some((f) => f.failClosed === true);
+  const anyBuffering = (): boolean => filters.some((f) => f.buffering === true);
 
   let sendingRaw = false;
   let closed = false;
@@ -586,7 +615,7 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
   };
 
   const writeRaw = (chunk: unknown, encOrCb?: BufferEncoding | ((err?: Error | null) => void), cb?: (err?: Error | null) => void): boolean => {
-    if (hasGuardFilter && !streamActiveHeaderSet && !res.headersSent) {
+    if (hasGuardFilter() && !streamActiveHeaderSet && !res.headersSent) {
       setGuardHeader(res, 'active');
       streamActiveHeaderSet = true;
     }
@@ -613,7 +642,7 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
   const sink: OutputFilterSink = {
     emitDelta(text: string) {
       if (stopped || closed || finalized || text.length === 0) return;
-      if (hasGuardFilter && !streamActiveHeaderSet && !res.headersSent) {
+      if (hasGuardFilter() && !streamActiveHeaderSet && !res.headersSent) {
         setGuardHeader(res, 'active');
         streamActiveHeaderSet = true;
       }
@@ -624,21 +653,23 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
       stopped = true;
       finalized = true;
       noteOutcome('blocked', reason);
-      if (hasGuardFilter && !streamActiveHeaderSet && !res.headersSent) {
+      if (hasGuardFilter() && !streamActiveHeaderSet && !res.headersSent) {
         setGuardHeader(res, 'active');
         streamActiveHeaderSet = true;
       }
-      origWrite(buildStreamStopFrames(wire, replacement, lastModel || 'unknown', hasGuardFilter ? guardOutcome : undefined));
+      origWrite(buildStreamStopFrames(wire, replacement, lastModel || 'unknown', hasGuardFilter() ? guardOutcome : undefined));
       endRaw();
       disposeAll();
     },
     fail(reason?: string) {
       if (stopped || closed || finalized) return;
-      if (anyFailClosed) {
+      if (anyFailClosed()) {
         sink.stop('', reason ?? 'guard_failed', 'blocked');
       }
     },
   };
+
+  installedResponses.set(res, { wire, filters, sink });
 
   for (const f of filters) {
     f.attach?.(sink);
@@ -683,6 +714,31 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
     return { text, blocked, action, reason };
   };
 
+  const applyResponseObjectHooks = (
+    targetObj: Record<string, unknown>,
+    ctx: OutputFilterContext,
+  ): { obj: Record<string, unknown>; mutated: boolean } => {
+    if (ctx.blocked || ctx.action === 'blocked') {
+      return { obj: targetObj, mutated: false };
+    }
+    if (!filters.some((f) => typeof f.onResponseObject === 'function')) {
+      return { obj: targetObj, mutated: false };
+    }
+    const baselineJson = JSON.stringify(targetObj);
+    let currentObj: Record<string, unknown> = targetObj;
+    let returnedNewObject = false;
+    for (const f of filters) {
+      if (!f.onResponseObject) continue;
+      const maybeNext = f.onResponseObject(currentObj, ctx);
+      if (maybeNext && typeof maybeNext === 'object' && !Array.isArray(maybeNext)) {
+        if (maybeNext !== currentObj) returnedNewObject = true;
+        currentObj = maybeNext;
+      }
+    }
+    const mutated = returnedNewObject || JSON.stringify(currentObj) !== baselineJson;
+    return { obj: currentObj, mutated };
+  };
+
   const guardNonStreamObject = (
     obj: Record<string, unknown>,
     deliver: (payload: Record<string, unknown>) => void,
@@ -696,8 +752,14 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
 
       const text = extractNonStreamText(wire, obj);
       if (text === null) {
-        if (hasGuardFilter) setGuardHeader(res, 'pass');
-        onFallbackRaw();
+        if (hasGuardFilter()) setGuardHeader(res, 'pass');
+        const hooked = applyResponseObjectHooks(obj, { wire, blocked: false, action: 'pass' });
+        if (hooked.mutated) {
+          stripStaleBodyHeaders(res);
+          deliver(hooked.obj);
+        } else {
+          onFallbackRaw();
+        }
         return;
       }
 
@@ -734,15 +796,22 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
 
       const hasComplete = !blocked && filters.some((f) => Boolean(f.onComplete));
       if (!hasComplete) {
-        if (hasGuardFilter) {
+        if (hasGuardFilter()) {
           setGuardHeader(res, formatGuardHeader(guardOutcome.action, guardOutcome.reason ?? deltaReason));
         }
-        if (!blocked && currentText === text) {
+        if (blocked || guardOutcome.action === 'blocked') {
+          stripStaleBodyHeaders(res);
+          deliver(replaceNonStreamText(wire, obj, currentText, true));
+          return;
+        }
+        const baseObj = currentText === text ? obj : replaceNonStreamText(wire, obj, currentText, false);
+        const hooked = applyResponseObjectHooks(baseObj, { wire, blocked: false, action: guardOutcome.action });
+        if (currentText === text && !hooked.mutated) {
           onFallbackRaw();
           return;
         }
         stripStaleBodyHeaders(res);
-        deliver(replaceNonStreamText(wire, obj, currentText, blocked));
+        deliver(hooked.obj);
         return;
       }
 
@@ -750,21 +819,29 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
         .then(({ text: finalText, blocked: completeBlocked }) => {
           if (closed) return;
           const isBlocked = blocked || completeBlocked;
-          if (hasGuardFilter) {
+          if (hasGuardFilter()) {
             setGuardHeader(res, formatGuardHeader(guardOutcome.action, guardOutcome.reason));
           }
-          if (!isBlocked && finalText === text) {
+          if (isBlocked || guardOutcome.action === 'blocked') {
+            stripStaleBodyHeaders(res);
+            deliver(replaceNonStreamText(wire, obj, finalText, true));
+            disposeAll();
+            return;
+          }
+          const baseObj = finalText === text ? obj : replaceNonStreamText(wire, obj, finalText, false);
+          const hooked = applyResponseObjectHooks(baseObj, { wire, blocked: false, action: guardOutcome.action });
+          if (finalText === text && !hooked.mutated) {
             onFallbackRaw();
           } else {
             stripStaleBodyHeaders(res);
-            deliver(replaceNonStreamText(wire, obj, finalText, isBlocked));
+            deliver(hooked.obj);
           }
           disposeAll();
         })
         .catch(() => {
           if (closed) return;
-          if (anyFailClosed) {
-            if (hasGuardFilter) setGuardHeader(res, 'blocked;reason=guard_failed');
+          if (anyFailClosed()) {
+            if (hasGuardFilter()) setGuardHeader(res, 'blocked;reason=guard_failed');
             stripStaleBodyHeaders(res);
             deliver(replaceNonStreamText(wire, obj, '', true));
           } else {
@@ -773,8 +850,8 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
           disposeAll();
         });
     } catch {
-      if (anyFailClosed) {
-        if (hasGuardFilter) setGuardHeader(res, 'blocked;reason=guard_failed');
+      if (anyFailClosed()) {
+        if (hasGuardFilter()) setGuardHeader(res, 'blocked;reason=guard_failed');
         stripStaleBodyHeaders(res);
         deliver(replaceNonStreamText(wire, {}, '', true));
       } else {
@@ -793,7 +870,7 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
           sendJsonRaw(JSON.parse(rewritten));
         }).catch(() => {
           if (!closed) {
-            sendJsonRaw(anyFailClosed ? JSON.parse(rewriteGeminiArray([], '', true)) : body);
+            sendJsonRaw(anyFailClosed() ? JSON.parse(rewriteGeminiArray([], '', true)) : body);
           }
           disposeAll();
         });
@@ -802,8 +879,8 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
     }
     const obj = asRecord(body);
     if (!obj) {
-      if (anyFailClosed) {
-        if (hasGuardFilter) setGuardHeader(res, 'blocked;reason=invalid_json');
+      if (anyFailClosed()) {
+        if (hasGuardFilter()) setGuardHeader(res, 'blocked;reason=invalid_json');
         stripStaleBodyHeaders(res);
         return sendJsonRaw(replaceNonStreamText(wire, {}, '', true));
       }
@@ -847,7 +924,7 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
             if (!closed) {
               const fallback = rewriteGeminiArray([], '', true);
               sendRaw(
-                anyFailClosed
+                anyFailClosed()
                   ? (typeof body === 'string' || Buffer.isBuffer(body) ? fallback : JSON.parse(fallback))
                   : body,
               );
@@ -952,7 +1029,7 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
       blocked = result.blocked;
     }
     if (Buffer.byteLength(text) > MAX_BUFFER_BYTES) throw new Error('Filtered stream exceeds buffer limit');
-    if (hasGuardFilter && !res.headersSent) {
+    if (hasGuardFilter() && !res.headersSent) {
       setGuardHeader(res, 'active');
     }
     if (!closed) {
@@ -977,7 +1054,7 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
     if (stopped || closed) return null;
     sseStarted = true;
     try {
-      if (anyBuffering) {
+      if (anyBuffering()) {
         pendingBytes += Buffer.byteLength(rawFrame) + 2;
         if (pendingBytes > MAX_BUFFER_BYTES) throw new Error('Stream buffer limit exceeded');
       }
@@ -989,13 +1066,13 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
         }
       }
       if (dataLines.length === 0) {
-        if (anyFailClosed && rawFrame.split(/\r?\n/).some(line => line.trim()
+        if (anyFailClosed() && rawFrame.split(/\r?\n/).some(line => line.trim()
           && !/^(?:event:|id:|retry:|:)/.test(line))) throw new Error('Invalid SSE framing');
-        if (anyBuffering) { pendingFrames.push({ raw: rawFrame, delta: false }); return null; }
+        if (anyBuffering()) { pendingFrames.push({ raw: rawFrame, delta: false }); return null; }
         return `${rawFrame}\n\n`;
       }
       const flushBeforeTerminal = (): string => {
-        if (anyBuffering) return '';
+        if (anyBuffering()) return '';
         let flushed = '';
         for (const f of filters) {
           if (!f.onBeforeTerminal) continue;
@@ -1005,7 +1082,7 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
             stopped = true;
             noteOutcome('blocked', resTerm.stop.reason);
             disposeAll();
-            return buildStreamStopFrames(wire, resTerm.stop.replacement, lastModel || 'unknown', hasGuardFilter ? guardOutcome : undefined);
+            return buildStreamStopFrames(wire, resTerm.stop.replacement, lastModel || 'unknown', hasGuardFilter() ? guardOutcome : undefined);
           }
           if (resTerm.emit.length > 0) {
             flushed += buildDeltaFrame(wire, resTerm.emit, lastModel || 'unknown');
@@ -1016,7 +1093,7 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
 
       const payloadStr = dataLines.join('\n').trim();
       if (payloadStr === '[DONE]') {
-        if (anyBuffering) {
+        if (anyBuffering()) {
           pendingFrames.push({ raw: rawFrame, delta: false });
           return null;
         }
@@ -1042,13 +1119,13 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
 
       const { text, setText } = extractStreamDelta(wire, obj);
       if (text === null) {
-        if (anyBuffering) {
+        if (anyBuffering()) {
           pendingFrames.push({ raw: rawFrame, delta: false });
           return null;
         }
         let frameOut = wire === 'responses' ? rewriteResponsesFrame(rawFrame, bufferedText) : rawFrame;
         let preTerm = '';
-        if (hasGuardFilter && !terminalGuardEmitted) {
+        if (hasGuardFilter() && !terminalGuardEmitted) {
           const isTerm = attachGuardToTerminalFrame(frameOut, wire, guardOutcome) !== frameOut;
           if (isTerm) {
             preTerm = flushBeforeTerminal();
@@ -1069,24 +1146,24 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
           stopped = true;
           noteOutcome('blocked', d.stop.reason);
           disposeAll();
-          return buildStreamStopFrames(wire, d.stop.replacement, lastModel || 'unknown', hasGuardFilter ? guardOutcome : undefined);
+          return buildStreamStopFrames(wire, d.stop.replacement, lastModel || 'unknown', hasGuardFilter() ? guardOutcome : undefined);
         }
         emitted = d.emit;
       }
 
-      if (anyBuffering || wire === 'responses') {
+      if (anyBuffering() || wire === 'responses') {
         bufferedTextBytes += Buffer.byteLength(emitted);
         if (bufferedTextBytes > MAX_BUFFER_BYTES) throw new Error('Filtered stream exceeds buffer limit');
         bufferedText += emitted;
       }
-      if (anyBuffering) {
+      if (anyBuffering()) {
         pendingFrames.push({ raw: rawFrame, delta: true });
         return null;
       }
 
       if (emitted === text) {
         let frameOut = rawFrame;
-        if (hasGuardFilter && !terminalGuardEmitted) {
+        if (hasGuardFilter() && !terminalGuardEmitted) {
           const withGuard = attachGuardToTerminalFrame(frameOut, wire, guardOutcome);
           if (withGuard !== frameOut) {
             terminalGuardEmitted = true;
@@ -1103,11 +1180,11 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
       rebuiltLines.push(`data: ${JSON.stringify(obj)}`);
       return `${rebuiltLines.join('\n')}\n\n`;
     } catch {
-      if (anyFailClosed) {
+      if (anyFailClosed()) {
         stopped = true;
         noteOutcome('blocked', 'invalid_frame');
         disposeAll();
-        return buildStreamStopFrames(wire, '', lastModel || 'unknown', hasGuardFilter ? guardOutcome : undefined);
+        return buildStreamStopFrames(wire, '', lastModel || 'unknown', hasGuardFilter() ? guardOutcome : undefined);
       }
       passThrough = true;
       return pendingFrames.map(frame => `${frame.raw}\n\n`).join('') + `${rawFrame}\n\n`;
@@ -1161,13 +1238,13 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
 
     const buf = toBuffer(chunk, encoding);
     if (Buffer.byteLength(sseBuffer) + buf.length > MAX_BUFFER_BYTES) {
-      if (anyFailClosed) {
+      if (anyFailClosed()) {
         stopped = true;
         noteOutcome('blocked', 'buffer_overflow');
         disposeAll();
         writeRaw(geminiJson || (wire === 'gemini' && (sseBuffer + buf.toString('utf8')).trimStart().startsWith('['))
           ? rewriteGeminiArray([], '', true)
-          : buildStreamStopFrames(wire, '', lastModel || 'unknown', hasGuardFilter ? guardOutcome : undefined));
+          : buildStreamStopFrames(wire, '', lastModel || 'unknown', hasGuardFilter() ? guardOutcome : undefined));
         callback?.();
         return true;
       }
@@ -1224,8 +1301,8 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
       const buf = toBuffer(actualChunk, encoding);
       if (Buffer.byteLength(sseBuffer) + buf.length > MAX_BUFFER_BYTES) {
         const arrayFormat = geminiJson || (wire === 'gemini' && (sseBuffer + buf.toString('utf8')).trimStart().startsWith('['));
-        const output = anyFailClosed
-          ? (arrayFormat ? rewriteGeminiArray([], '', true) : buildStreamStopFrames(wire, '', lastModel || 'unknown', hasGuardFilter ? guardOutcome : undefined))
+        const output = anyFailClosed()
+          ? (arrayFormat ? rewriteGeminiArray([], '', true) : buildStreamStopFrames(wire, '', lastModel || 'unknown', hasGuardFilter() ? guardOutcome : undefined))
           : Buffer.concat([Buffer.from(pendingFrames.map(frame => `${frame.raw}\n\n`).join('') + sseBuffer), buf]);
         disposeAll();
         endRaw(output);
@@ -1260,7 +1337,7 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
 
     if (!stopped && !closed && detectGeminiJson()) {
       void finishGeminiJson().catch(() => {
-        if (!closed) endRaw(anyFailClosed ? rewriteGeminiArray([], '', true) : sseBuffer);
+        if (!closed) endRaw(anyFailClosed() ? rewriteGeminiArray([], '', true) : sseBuffer);
         disposeAll();
       }).finally(() => callback?.());
       return res;
@@ -1279,13 +1356,13 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
       return res;
     }
 
-    if (anyBuffering) {
+    if (anyBuffering()) {
       void runOnCompleteChain(bufferedText)
         .then(({ text: finalText, blocked }) => {
           if (closed) return;
           if (Buffer.byteLength(finalText) > MAX_BUFFER_BYTES) throw new Error('Filtered stream exceeds buffer limit');
           if (blocked) {
-            writeRaw(buildStreamStopFrames(wire, finalText, lastModel || 'unknown', hasGuardFilter ? guardOutcome : undefined));
+            writeRaw(buildStreamStopFrames(wire, finalText, lastModel || 'unknown', hasGuardFilter() ? guardOutcome : undefined));
           } else {
             let emitted = false;
             for (const frame of pendingFrames) {
@@ -1294,7 +1371,7 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
                 emitted = true;
               } else {
                 let rawOut = wire === 'responses' ? rewriteResponsesFrame(frame.raw, finalText) : frame.raw;
-                if (hasGuardFilter && !terminalGuardEmitted) {
+                if (hasGuardFilter() && !terminalGuardEmitted) {
                   const withGuard = attachGuardToTerminalFrame(rawOut, wire, guardOutcome);
                   if (withGuard !== rawOut) {
                     terminalGuardEmitted = true;
@@ -1311,9 +1388,9 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
         })
         .catch(() => {
           if (closed) return;
-          if (anyFailClosed) {
+          if (anyFailClosed()) {
             noteOutcome('blocked', 'guard_failed');
-            writeRaw(buildStreamStopFrames(wire, '', lastModel || 'unknown', hasGuardFilter ? guardOutcome : undefined));
+            writeRaw(buildStreamStopFrames(wire, '', lastModel || 'unknown', hasGuardFilter() ? guardOutcome : undefined));
           }
           disposeAll();
           endRaw();
@@ -1329,7 +1406,7 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
         .then(({ text: finalText, blocked }) => {
           if (closed) return;
           if (blocked) {
-            writeRaw(buildStreamStopFrames(wire, finalText, lastModel || 'unknown', hasGuardFilter ? guardOutcome : undefined));
+            writeRaw(buildStreamStopFrames(wire, finalText, lastModel || 'unknown', hasGuardFilter() ? guardOutcome : undefined));
           }
           disposeAll();
           endRaw();
@@ -1337,9 +1414,9 @@ export function installInterceptor(_req: Request, res: Response, wire: Wire, fil
         })
         .catch(() => {
           if (closed) return;
-          if (anyFailClosed) {
+          if (anyFailClosed()) {
             noteOutcome('blocked', 'guard_failed');
-            writeRaw(buildStreamStopFrames(wire, '', lastModel || 'unknown', hasGuardFilter ? guardOutcome : undefined));
+            writeRaw(buildStreamStopFrames(wire, '', lastModel || 'unknown', hasGuardFilter() ? guardOutcome : undefined));
           }
           disposeAll();
           endRaw();

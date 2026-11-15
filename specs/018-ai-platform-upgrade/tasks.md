@@ -172,26 +172,26 @@ description: "Task list for AI Platform Upgrade"
 
 ### Tests for User Story 4 ⚠️
 
-- [ ] T072 [P] [US4] Viết test roundtrip migration trong `server/src/__tests__/db/migrate/ai-platform-retrieval.test.ts`
-- [ ] T073 [P] [US4] Viết test kho vector: mã hóa/giải mã BLOB Float32; chuẩn hóa độ dài; chỉ dùng hàng `ready` khớp `model`, `dims`, `content_hash`; làm mới theo `index_generation`; LRU 256 MB; trong `T/retrieval-vector-store.test.ts`
-- [ ] T074 [P] [US4] Viết test indexer: lô 64; lùi theo `embeddingsRetryAfterSec`; tiếp tục sau khởi động lại không lập lại đoạn xong; sửa/xóa tài liệu xóa vector đồng bộ; tối đa một job mỗi phạm vi; trong `T/retrieval-indexer.test.ts`
-- [ ] T075 [P] [US4] Viết test tìm kết hợp: RRF k = 60; `min_score` 0.25; `top_k` 5 tối đa 20; lùi về từ khóa khi embedding lỗi, quá 1.500 ms, chưa có chỉ mục; lọc `allowedRoles`; chế độ `keyword` trả đúng kết quả `searchKnowledge`; trong `T/retrieval-hybrid.test.ts`
-- [ ] T076 [P] [US4] Viết test đánh giá chất lượng trên `retrieval-eval.json`: `hybrid` hơn `keyword` ít nhất 25 điểm phần trăm ở recall@5; trong `T/retrieval-eval.test.ts`
-- [ ] T077 [P] [US4] Viết test trích dẫn: header base64url ≤ 4 KB; trường `citations` chỉ ở trả lời một lần của OpenAI và Responses; `x-freellm-citations: off`; tài liệu không đủ quyền không xuất hiện; trong `T/retrieval-citations.test.ts`
+- [x] T072 [P] [US4] Viết test roundtrip migration trong `server/src/__tests__/db/migrate/ai-platform-retrieval.test.ts`
+- [x] T073 [P] [US4] Viết test kho vector: mã hóa/giải mã BLOB Float32; chuẩn hóa độ dài; chỉ dùng hàng `ready` khớp `model`, `dims`, `content_hash`; làm mới theo `index_generation`; LRU 256 MB; trong `T/retrieval-vector-store.test.ts`
+- [x] T074 [P] [US4] Viết test indexer: lô 64; lùi theo `embeddingsRetryAfterSec`; tiếp tục sau khởi động lại không lập lại đoạn xong; sửa/xóa tài liệu xóa vector đồng bộ; tối đa một job mỗi phạm vi; trong `T/retrieval-indexer.test.ts`
+- [x] T075 [P] [US4] Viết test tìm kết hợp: RRF k = 60; `min_score` 0.25; `top_k` 5 tối đa 20; lùi về từ khóa khi embedding lỗi, quá 1.500 ms, chưa có chỉ mục; lọc `allowedRoles`; chế độ `keyword` trả đúng kết quả `searchKnowledge`; trong `T/retrieval-hybrid.test.ts`
+- [x] T076 [P] [US4] Viết test đánh giá chất lượng trên `retrieval-eval.json`: `hybrid` hơn `keyword` ít nhất 25 điểm phần trăm ở recall@5; trong `T/retrieval-eval.test.ts`
+- [x] T077 [P] [US4] Viết test trích dẫn: header base64url ≤ 4 KB; trường `citations` chỉ ở trả lời một lần của OpenAI và Responses; `x-freellm-citations: off`; tài liệu không đủ quyền không xuất hiện; trong `T/retrieval-citations.test.ts`
 
 ### Implementation for User Story 4
 
-- [ ] T078 [US4] Tạo `M/20261113_130000_custom_ai_retrieval.ts` với `custom_ai_retrieval_settings` (`mode` thuộc `keyword|semantic|hybrid` mặc định `keyword`, `dimensions` mặc định 768), `custom_ai_embeddings`, `custom_ai_index_jobs`, `custom_ai_embedding_usage_daily`
-- [ ] T079 [US4] Mở rộng `server/src/services/profile-knowledge.ts` bằng một hàm xuất mới `searchKnowledgeRanked` trả thứ hạng và điểm BM25 (không đổi `searchKnowledge`); làm tương tự cho `server/src/custom/x-gateway/support-knowledge.ts`
-- [ ] T080 [US4] Cài `S/retrieval/settings.ts` và `S/retrieval/vector-store.ts`
-- [ ] T081 [US4] Cài `S/retrieval/indexer.ts` (`onDocumentChanged`, `onDocumentDeleted`, `startIndexWorker` dùng `runEmbeddings` của `server/src/services/embeddings.ts`) và gọi `startIndexWorker` từ `server/src/custom/register.ts`
-- [ ] T082 [US4] Cài `S/retrieval/hybrid.ts` (`retrieve`) và `S/retrieval/citations.ts` (`citationFilter`)
-- [ ] T083 [US4] Trong `server/src/custom/knowledge-inject.ts`: khi trụ cột bật, dùng `retrieve` thay `searchKnowledge`, đánh dấu khối là tài liệu tham khảo, đăng ký `citationFilter` và header `x-freellm-retrieval`; gọi `onDocumentChanged`/`onDocumentDeleted` từ `server/src/routes/profile-knowledge.ts`
-- [ ] T084 [US4] Trong `server/src/custom/x-gateway/support-runtime.ts`: dùng `retrieve` cho phạm vi `support_tenant` khi trụ cột bật; gọi `onDocumentChanged`/`onDocumentDeleted` từ `upsertSupportKnowledgeDoc`/`deleteSupportKnowledgeDoc`
-- [ ] T085 [US4] Cài `S/retrieval/router.ts` (mọi tuyến `/retrieval/*`) và gắn vào `S/router.ts`
-- [ ] T086 [P] [US4] Viết test giao diện cho cấu hình, thanh tiến độ, công cụ thử truy vấn trong `C/knowledge.test.tsx`
-- [ ] T087 [US4] Cài `C/pages/Knowledge.tsx` (hiển thị điểm, thứ hạng BM25/vector, trạng thái suy giảm), chuỗi tiếng Việt
-- [ ] T088 [US4] Viết bộ đo: 50 trang lập chỉ mục dưới 2 phút với embedding giả lập có độ trễ thực tế; độ trễ chat tăng không quá 10% trong lúc lập; tìm trên 50.000 đoạn dưới 150 ms; trong `T/retrieval-bench.test.ts`; chạy `T/regression.test.ts`
+- [x] T078 [US4] Tạo `M/20261113_130000_custom_ai_retrieval.ts` với `custom_ai_retrieval_settings` (`mode` thuộc `keyword|semantic|hybrid` mặc định `keyword`, `dimensions` mặc định 768), `custom_ai_embeddings`, `custom_ai_index_jobs`, `custom_ai_embedding_usage_daily`
+- [x] T079 [US4] Mở rộng `server/src/services/profile-knowledge.ts` bằng một hàm xuất mới `searchKnowledgeRanked` trả thứ hạng và điểm BM25 (không đổi `searchKnowledge`); làm tương tự cho `server/src/custom/x-gateway/support-knowledge.ts`
+- [x] T080 [US4] Cài `S/retrieval/settings.ts` và `S/retrieval/vector-store.ts`
+- [x] T081 [US4] Cài `S/retrieval/indexer.ts` (`onDocumentChanged`, `onDocumentDeleted`, `startIndexWorker` dùng `runEmbeddings` của `server/src/services/embeddings.ts`) và gọi `startIndexWorker` từ `server/src/custom/register.ts`
+- [x] T082 [US4] Cài `S/retrieval/hybrid.ts` (`retrieve`) và `S/retrieval/citations.ts` (`citationFilter`)
+- [x] T083 [US4] Trong `server/src/custom/knowledge-inject.ts`: khi trụ cột bật, dùng `retrieve` thay `searchKnowledge`, đánh dấu khối là tài liệu tham khảo, đăng ký `citationFilter` và header `x-freellm-retrieval`; gọi `onDocumentChanged`/`onDocumentDeleted` từ `server/src/routes/profile-knowledge.ts`
+- [x] T084 [US4] Trong `server/src/custom/x-gateway/support-runtime.ts`: dùng `retrieve` cho phạm vi `support_tenant` khi trụ cột bật; gọi `onDocumentChanged`/`onDocumentDeleted` từ `upsertSupportKnowledgeDoc`/`deleteSupportKnowledgeDoc`
+- [x] T085 [US4] Cài `S/retrieval/router.ts` (mọi tuyến `/retrieval/*`) và gắn vào `S/router.ts`
+- [x] T086 [P] [US4] Viết test giao diện cho cấu hình, thanh tiến độ, công cụ thử truy vấn trong `C/knowledge.test.tsx`
+- [x] T087 [US4] Cài `C/pages/Knowledge.tsx` (hiển thị điểm, thứ hạng BM25/vector, trạng thái suy giảm), chuỗi tiếng Việt
+- [x] T088 [US4] Viết bộ đo: 50 trang lập chỉ mục dưới 2 phút với embedding giả lập có độ trễ thực tế; độ trễ chat tăng không quá 10% trong lúc lập; tìm trên 50.000 đoạn dưới 150 ms; trong `T/retrieval-bench.test.ts`; chạy `T/regression.test.ts`
 
 **Checkpoint**: US4 đạt và tự kiểm chứng được.
 

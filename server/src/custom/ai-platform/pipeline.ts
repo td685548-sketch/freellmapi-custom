@@ -2,12 +2,13 @@ import type { Request, Response } from 'express';
 import type { GateProfile } from '../../services/profile-usage.js';
 import { getFlags } from './flags.js';
 import { GatewayCallError, isInternalCall } from './loopback.js';
-import { consumeMcpTakeoverPlan } from './mcp-client/admission.js';
+import { consumeMcpTakeoverPlan, refreshMcpTakeoverMessages } from './mcp-client/admission.js';
 import { sendMcpLoopResult } from './mcp-client/respond.js';
 import { runToolLoop } from './mcp-client/tool-loop.js';
 import { buildProfileGuardContext, type ProfileGuardContext } from './output-guard/context.js';
 import { detectWire } from './wire/detect.js';
 import { installInterceptor, type OutputFilter } from './wire/interceptor.js';
+import { injectRetrievedKnowledgeForSlot6 } from '../knowledge-inject.js';
 
 export type OutputFilterProvider = (ctx: ProfileGuardContext) => OutputFilter | null;
 
@@ -97,6 +98,14 @@ export async function runPreRequest(
   // 4. SLOT: orchestrator (flow:<slug> takeover)
   // 5. SLOT: prompts (variable substitution)
   // 6. SLOT: retrieval (semantic RAG injection)
+  if (flags.retrieval) {
+    await injectRetrievedKnowledgeForSlot6(req, res, {
+      profileId: _profile.id,
+      maxChars: _profile.knowledge?.maxChars,
+      knowledgeEnabled: _profile.knowledge?.enabled,
+    });
+    refreshMcpTakeoverMessages(req);
+  }
 
   // 7. SLOT: mcpClient (tool definitions & server-side loop)
   const preparedMcp = flags.mcpClient ? consumeMcpTakeoverPlan(req) : null;

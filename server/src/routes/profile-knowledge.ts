@@ -5,6 +5,7 @@ import { KNOWLEDGE_LIMITS } from '@freellmapi/shared/knowledge.js';
 import {
   addDoc, deleteDoc, docCount, getKnowledgeSettings, knowledgeBlock, listDocs, searchKnowledge, setKnowledgeSettings, updateDoc,
 } from '../services/profile-knowledge.js';
+import { onDocumentChanged, onDocumentDeleted } from '../custom/ai-platform/retrieval/indexer.js';
 
 // A client key's knowledge base. Mounted in custom/register.ts at /api/client-profiles behind the profile
 // permissions: reads (list, search) need view_client_profiles, changes need edit_client_profiles.
@@ -53,6 +54,7 @@ profileKnowledgeRouter.post('/:id/knowledge', (req, res) => {
   if (!parsed.success) { bad(res, `A document needs a title (up to ${L.maxTitle} characters) and content (up to ${L.maxDocChars.toLocaleString('en-US')})`); return; }
   if (docCount(id) >= L.maxDocs) { bad(res, `A key can hold at most ${L.maxDocs} documents`); return; }
   const docId = addDoc(id, parsed.data.title, parsed.data.content);
+  void onDocumentChanged({ kind: 'profile', id: String(id) }, String(docId)).catch(() => {});
   res.status(201).json({ doc: listDocs(id).find(d => d.id === docId) });
 });
 
@@ -64,6 +66,7 @@ profileKnowledgeRouter.put('/:id/knowledge/:docId', (req, res) => {
   const parsed = docSchema.safeParse(req.body ?? {});
   if (!parsed.success) { bad(res, `A document needs a title (up to ${L.maxTitle} characters) and content (up to ${L.maxDocChars.toLocaleString('en-US')})`); return; }
   if (!updateDoc(id, docId, parsed.data.title, parsed.data.content)) { res.status(404).json({ error: { message: 'Document not found' } }); return; }
+  void onDocumentChanged({ kind: 'profile', id: String(id) }, String(docId)).catch(() => {});
   res.json({ doc: listDocs(id).find(d => d.id === docId) });
 });
 
@@ -73,6 +76,7 @@ profileKnowledgeRouter.delete('/:id/knowledge/:docId', (req, res) => {
   const docId = int(req.params.docId);
   if (docId === null) { bad(res, 'Invalid document id'); return; }
   if (!deleteDoc(id, docId)) { res.status(404).json({ error: { message: 'Document not found' } }); return; }
+  void onDocumentDeleted({ kind: 'profile', id: String(id) }, String(docId)).catch(() => {});
   res.json({ success: true });
 });
 
