@@ -1,0 +1,333 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "en-off-unchanged",
+      "description": "off mode returns allow and preserves original leaves untouched",
+      "policy": {
+        "tenantId": 1,
+        "version": 3,
+        "mode": "off",
+        "blockedTerms": [{ "id": "r1", "text": "secret" }],
+        "maxOutputChars": 256,
+        "redactCredentials": true,
+        "updatedAt": "2026-11-15T00:00:00.000Z"
+      },
+      "leaves": [
+        { "path": "reply", "text": "Contains SECRET and sk-1234567890abcdef" }
+      ],
+      "expected": {
+        "action": "allow",
+        "reasons": [],
+        "ruleIds": [],
+        "redactionCount": 0,
+        "policyVersion": 3,
+        "leaves": [
+          { "path": "reply", "text": "Contains SECRET and sk-1234567890abcdef" }
+        ]
+      }
+    },
+    {
+      "id": "en-log-observes-without-mutating",
+      "description": "log mode observes blocked_term, too_long, and credential without modifying leaves",
+      "policy": {
+        "tenantId": 1,
+        "version": 4,
+        "mode": "log",
+        "blockedTerms": [{ "id": "r_secret", "text": "internal secret" }],
+        "maxOutputChars": 256,
+        "redactCredentials": true,
+        "updatedAt": "2026-11-15T00:00:00.000Z"
+      },
+      "leaves": [
+        {
+          "path": "reply",
+          "text": "Here is an INTERNAL   SECRET with Bearer token_12345678 and padding: "
+        },
+        {
+          "path": "trace.0",
+          "text": "01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        }
+      ],
+      "expected": {
+        "action": "observe",
+        "reasons": ["blocked_term", "too_long", "credential"],
+        "ruleIds": ["r_secret"],
+        "redactionCount": 0,
+        "policyVersion": 4,
+        "leaves": [
+          {
+            "path": "reply",
+            "text": "Here is an INTERNAL   SECRET with Bearer token_12345678 and padding: "
+          },
+          {
+            "path": "trace.0",
+            "text": "01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+          }
+        ]
+      }
+    },
+    {
+      "id": "vi-accents-preserved-zero-width-nfkc",
+      "description": "Vietnamese accents are preserved while NFKC, zero-width chars, case, and whitespace normalize",
+      "policy": {
+        "tenantId": 2,
+        "version": 1,
+        "mode": "enforce",
+        "blockedTerms": [
+          { "id": "vi-pw", "text": "mật khẩu nội bộ" }
+        ],
+        "maxOutputChars": 1000,
+        "redactCredentials": false,
+        "updatedAt": "2026-11-15T00:00:00.000Z"
+      },
+      "leaves": [
+        { "path": "reply", "text": "Đây là ＭẬＴ\u200B  ＫＨẨＵ\uFEFF\nNỘI\u200C BỘ của hệ thống." }
+      ],
+      "expected": {
+        "action": "block",
+        "reasons": ["blocked_term"],
+        "ruleIds": ["vi-pw"],
+        "redactionCount": 0,
+        "policyVersion": 1,
+        "leaves": []
+      }
+    },
+    {
+      "id": "vi-accent-mismatch-allowed",
+      "description": "Unaccented text does not match accented Vietnamese rule and preserves original display text",
+      "policy": {
+        "tenantId": 2,
+        "version": 1,
+        "mode": "enforce",
+        "blockedTerms": [
+          { "id": "vi-pw", "text": "mật khẩu" }
+        ],
+        "maxOutputChars": 1000,
+        "redactCredentials": false,
+        "updatedAt": "2026-11-15T00:00:00.000Z"
+      },
+      "leaves": [
+        { "path": "reply", "text": "Xin chào, vui lòng kiểm tra mat khau trên cổng hỗ trợ." }
+      ],
+      "expected": {
+        "action": "allow",
+        "reasons": [],
+        "ruleIds": [],
+        "redactionCount": 0,
+        "policyVersion": 1,
+        "leaves": [
+          { "path": "reply", "text": "Xin chào, vui lòng kiểm tra mat khau trên cổng hỗ trợ." }
+        ]
+      }
+    },
+    {
+      "id": "adversarial-regex-metacharacters-literal",
+      "description": "Regex metacharacters in blockedTerms are matched literally without regex interpretation",
+      "policy": {
+        "tenantId": 1,
+        "version": 2,
+        "mode": "enforce",
+        "blockedTerms": [
+          { "id": "regex-lit", "text": "a.*+?^${}()|[]\\b" }
+        ],
+        "maxOutputChars": 1000,
+        "redactCredentials": false,
+        "updatedAt": "2026-11-15T00:00:00.000Z"
+      },
+      "leaves": [
+        { "path": "reply", "text": "Normal text axxxb should NOT match, only exact literal." }
+      ],
+      "expected": {
+        "action": "allow",
+        "reasons": [],
+        "ruleIds": [],
+        "redactionCount": 0,
+        "policyVersion": 2,
+        "leaves": [
+          { "path": "reply", "text": "Normal text axxxb should NOT match, only exact literal." }
+        ]
+      }
+    },
+    {
+      "id": "adversarial-regex-metacharacters-hit",
+      "description": "Exact literal match of regex metacharacters triggers block",
+      "policy": {
+        "tenantId": 1,
+        "version": 2,
+        "mode": "enforce",
+        "blockedTerms": [
+          { "id": "regex-lit", "text": "a.*+?^${}()|[]\\b" }
+        ],
+        "maxOutputChars": 1000,
+        "redactCredentials": false,
+        "updatedAt": "2026-11-15T00:00:00.000Z"
+      },
+      "leaves": [
+        { "path": "reply", "text": "Leaked pattern: A.*+?^${}()|[]\\B here." }
+      ],
+      "expected": {
+        "action": "block",
+        "reasons": ["blocked_term"],
+        "ruleIds": ["regex-lit"],
+        "redactionCount": 0,
+        "policyVersion": 2,
+        "leaves": []
+      }
+    },
+    {
+      "id": "adversarial-split-across-leaves-no-false-join",
+      "description": "Terms split across separate leaves must not concatenate into a false match",
+      "policy": {
+        "tenantId": 1,
+        "version": 5,
+        "mode": "enforce",
+        "blockedTerms": [
+          { "id": "split-term", "text": "confidential_token" }
+        ],
+        "maxOutputChars": 1000,
+        "redactCredentials": false,
+        "updatedAt": "2026-11-15T00:00:00.000Z"
+      },
+      "leaves": [
+        { "path": "reply", "text": "confidential_" },
+        { "path": "citation.0.excerpt", "text": "token" }
+      ],
+      "expected": {
+        "action": "allow",
+        "reasons": [],
+        "ruleIds": [],
+        "redactionCount": 0,
+        "policyVersion": 5,
+        "leaves": [
+          { "path": "reply", "text": "confidential_" },
+          { "path": "citation.0.excerpt", "text": "token" }
+        ]
+      }
+    },
+    {
+      "id": "enforce-redact-credentials-all-types",
+      "description": "Redacts Bearer, sk-, sk_sup_, sup_ctx_, and PEM private keys while preserving surrounding casing and CRLF",
+      "policy": {
+        "tenantId": 1,
+        "version": 7,
+        "mode": "enforce",
+        "blockedTerms": [],
+        "maxOutputChars": 4000,
+        "redactCredentials": true,
+        "updatedAt": "2026-11-15T00:00:00.000Z"
+      },
+      "leaves": [
+        {
+          "path": "reply",
+          "text": "Xin Chào!\r\nAuth: Bearer eyJhbGciOiJIUzI1NiJ9.payload\r\nKey1: sk-proj-abc12345678\r\nKey2: sk_sup_live98765432\r\nCtx: sup_ctx_session_xyz123"
+        },
+        {
+          "path": "trace.0",
+          "text": "-----BEGIN RSA PRIVATE KEY-----\r\nMIIEowIBAAKCAQEAtest\r\n-----END RSA PRIVATE KEY-----"
+        }
+      ],
+      "expected": {
+        "action": "redact",
+        "reasons": ["credential"],
+        "ruleIds": [],
+        "redactionCount": 5,
+        "policyVersion": 7,
+        "leaves": [
+          {
+            "path": "reply",
+            "text": "Xin Chào!\r\nAuth: Bearer [REDACTED_TOKEN]\r\nKey1: [REDACTED_KEY]\r\nKey2: [REDACTED_KEY]\r\nCtx: [REDACTED_TOKEN]"
+          },
+          {
+            "path": "trace.0",
+            "text": "[REDACTED_PRIVATE_KEY]"
+          }
+        ]
+      }
+    },
+    {
+      "id": "enforce-credential-toggle-false-observes",
+      "description": "Credential findings with redactCredentials=false return observe, not block",
+      "policy": {
+        "tenantId": 1,
+        "version": 8,
+        "mode": "enforce",
+        "blockedTerms": [],
+        "maxOutputChars": 4000,
+        "redactCredentials": false,
+        "updatedAt": "2026-11-15T00:00:00.000Z"
+      },
+      "leaves": [
+        { "path": "reply", "text": "Token is sk_sup_abcdefgh1234" }
+      ],
+      "expected": {
+        "action": "observe",
+        "reasons": ["credential"],
+        "ruleIds": [],
+        "redactionCount": 0,
+        "policyVersion": 8,
+        "leaves": [
+          { "path": "reply", "text": "Token is sk_sup_abcdefgh1234" }
+        ]
+      }
+    },
+    {
+      "id": "stable-ordering-and-dedup-multi-leaf",
+      "description": "Multiple leaves matching overlapping rules deduplicate ruleIds in first-seen order",
+      "policy": {
+        "tenantId": 1,
+        "version": 9,
+        "mode": "log",
+        "blockedTerms": [
+          { "id": "r1", "text": "alpha" },
+          { "id": "r2", "text": "beta" },
+          { "id": "r3", "text": "gamma" }
+        ],
+        "maxOutputChars": 4000,
+        "redactCredentials": false,
+        "updatedAt": "2026-11-15T00:00:00.000Z"
+      },
+      "leaves": [
+        { "path": "leaf.0", "text": "gamma and alpha" },
+        { "path": "leaf.1", "text": "alpha and beta and gamma" }
+      ],
+      "expected": {
+        "action": "observe",
+        "reasons": ["blocked_term"],
+        "ruleIds": ["r1", "r3", "r2"],
+        "redactionCount": 0,
+        "policyVersion": 9,
+        "leaves": [
+          { "path": "leaf.0", "text": "gamma and alpha" },
+          { "path": "leaf.1", "text": "alpha and beta and gamma" }
+        ]
+      }
+    },
+    {
+      "id": "empty-input-allowed",
+      "description": "Empty leaves or empty text are allowed",
+      "policy": {
+        "tenantId": 1,
+        "version": 0,
+        "mode": "enforce",
+        "blockedTerms": [],
+        "maxOutputChars": 256,
+        "redactCredentials": true,
+        "updatedAt": "1970-01-01T00:00:00.000Z"
+      },
+      "leaves": [
+        { "path": "reply", "text": "" }
+      ],
+      "expected": {
+        "action": "allow",
+        "reasons": [],
+        "ruleIds": [],
+        "redactionCount": 0,
+        "policyVersion": 0,
+        "leaves": [
+          { "path": "reply", "text": "" }
+        ]
+      }
+    }
+  ]
+}

@@ -4,6 +4,7 @@
  */
 
 import type { SupportEvidenceCitation, SupportEvidenceRole } from './support-evidence.js';
+import type { SupportOutputMetadata } from './support-output.js';
 
 export type SupportTicketPriority = 'low' | 'medium' | 'high' | 'urgent';
 
@@ -180,6 +181,7 @@ export interface SupportDeskCopilotResult {
   conversationSnapshot: string;
   evidenceSnapshot: string;
   policyVersion: number;
+  output?: SupportOutputMetadata;
   modelUsed: string | null;
   usage: {
     promptTokens: number;
