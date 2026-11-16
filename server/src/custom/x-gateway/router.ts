@@ -43,6 +43,12 @@ import {
   type ComboStrategy,
 } from './combos.js';
 import { getConfigSnapshot, getRouteHealthTtlMinutes } from './config.js';
+import {
+  filterCandidatesByCooldown,
+  recordCandidateFailure,
+  recordCandidateSuccess,
+  resetRouteBackoff,
+} from './route-cooldown.js';
 import { runInGatewayScope } from './context.js';
 import { xGatewayProtocolsRouter } from './protocols.js';
 import { preprocessGatewayMessages } from './token-savers-pipeline.js';
@@ -205,6 +211,23 @@ function resolveRouteModel(provider: string, requested: string): { modelId: stri
   return { modelId, disabled };
 }
 
+function finalizeCandidateRoutes(
+  candidates: CandidateRoute[],
+  extra?: { combo?: ComboRouteInfo },
+): {
+  candidates: CandidateRoute[];
+  combo?: ComboRouteInfo;
+  allRateLimited?: boolean;
+  retryAfterMs?: number;
+} {
+  const filtered = filterCandidatesByCooldown(candidates);
+  return {
+    candidates: filtered.available,
+    ...extra,
+    ...(filtered.allRateLimited ? { allRateLimited: true, retryAfterMs: filtered.retryAfterMs } : {}),
+  };
+}
+
 export function resolveCandidateRoutes(
   requestedModel: string | undefined,
   modality: CandidateModality = 'chat',
@@ -212,6 +235,8 @@ export function resolveCandidateRoutes(
   candidates: CandidateRoute[];
   notFoundError?: string;
   combo?: ComboRouteInfo;
+  allRateLimited?: boolean;
+  retryAfterMs?: number;
 } {
   const rawModel = resolveXGatewayModelAlias(parseModelThinkingSuffix(requestedModel).cleanModel);
   const lower = rawModel.toLowerCase();
@@ -230,7 +255,7 @@ export function resolveCandidateRoutes(
         return bVision - aVision;
       });
     }
-    return { candidates: rotateCandidateAccounts(candidates) };
+    return finalizeCandidateRoutes(rotateCandidateAccounts(candidates));
   }
 
   if (lower.startsWith('combo:')) {
@@ -256,10 +281,10 @@ export function resolveCandidateRoutes(
         }
       }
     });
-    return {
-      candidates: strategy === 'smart' ? sortCandidatesByHealth(rotateCandidateAccounts(candidates)) : rotateCandidateAccounts(candidates),
-      combo: { name: combo.name, strategy, ...resolveComboPolicy(combo) },
-    };
+    return finalizeCandidateRoutes(
+      strategy === 'smart' ? sortCandidatesByHealth(rotateCandidateAccounts(candidates)) : rotateCandidateAccounts(candidates),
+      { combo: { name: combo.name, strategy, ...resolveComboPolicy(combo) } },
+    );
   }
 
   const slashIdx = rawModel.indexOf('/');
@@ -294,7 +319,7 @@ export function resolveCandidateRoutes(
             if (model) candidates.push({ account: entry.account, modelId: model.id });
           }
         }
-        return { candidates: sortCandidatesByHealth(candidates) };
+        return finalizeCandidateRoutes(sortCandidatesByHealth(candidates));
       }
       const route = resolveRouteModel(matchedProvider, suffix);
       if (route.disabled) {
@@ -304,9 +329,9 @@ export function resolveCandidateRoutes(
         };
       }
       const providerAccounts = usable.filter(a => a.provider === matchedProvider);
-      return {
-        candidates: rotateProviderAccounts(providerAccounts).map(account => ({ account, modelId: route.modelId })),
-      };
+      return finalizeCandidateRoutes(
+        rotateProviderAccounts(providerAccounts).map(account => ({ account, modelId: route.modelId })),
+      );
     }
   }
 
@@ -327,12 +352,12 @@ export function resolveCandidateRoutes(
     }
   }
   if (exactMatches.length > 0) {
-    return { candidates: rotateCandidateAccounts(exactMatches) };
+    return finalizeCandidateRoutes(rotateCandidateAccounts(exactMatches));
   }
 
-  return {
-    candidates: rotateProviderAccounts(usable).map(account => ({ account, modelId: rawModel })),
-  };
+  return finalizeCandidateRoutes(
+    rotateProviderAccounts(usable).map(account => ({ account, modelId: rawModel })),
+  );
 }
 
 /*
@@ -384,6 +409,7 @@ export function recordRouteOutcome(key: string, outcome: { latencyMs?: number; e
 
 export function resetRouteHealth(): void {
   routeHealth.clear();
+  resetRouteBackoff();
 }
 
 function isRouteHealthFailing(health: RouteHealth): boolean {
@@ -691,7 +717,7 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
       return false;
     });
     const modality: CandidateModality = hasImage ? 'vision' : 'chat';
-    const { candidates: rawCandidates, notFoundError, combo } = resolveCandidateRoutes(requestedModel, modality);
+    const { candidates: rawCandidates, notFoundError, combo, allRateLimited, retryAfterMs } = resolveCandidateRoutes(requestedModel, modality);
     if (notFoundError) {
       res.status(404).json({
         error: { message: notFoundError, type: 'invalid_request_error', code: 'model_not_found' },
@@ -710,6 +736,19 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
     // provider's warm prompt cache; other strategies keep their own ordering.
     const candidates = applySessionStickiness(augmented, combo, messages);
     if (candidates.length === 0) {
+      if (allRateLimited) {
+        const retryAfterSeconds = Math.max(1, Math.ceil((retryAfterMs ?? 0) / 1000));
+        res.setHeader('Retry-After', String(retryAfterSeconds));
+        res.status(503).json({
+          error: {
+            message: `All matching Thruline provider accounts are temporarily cooling down. Retry after ${retryAfterSeconds}s.`,
+            type: 'service_unavailable',
+            code: 'all_rate_limited',
+            retry_after_ms: retryAfterMs ?? 0,
+          },
+        });
+        return;
+      }
       res.status(503).json({
         error: {
           message: 'No enabled Thruline provider accounts available.',
@@ -803,6 +842,7 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
             return;
           }
           recordRouteOutcome(healthKey(winner.candidate), { latencyMs: winner.latencyMs });
+          recordCandidateSuccess(winner.candidate.account.id, winner.candidate.modelId);
           succeedNonStream(winner);
           for (let i = 0; i < fusionCandidates.length; i += 1) {
             const c = fusionCandidates[i];
@@ -822,7 +862,10 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
           const errMsg = sanitizeProviderErrorMessage(err instanceof Error ? err.message : 'Fusion attempt failed');
           for (let i = 0; i < fusionCandidates.length; i += 1) {
             const candidate = fusionCandidates[i];
-            recordRouteOutcome(healthKey(candidate), { error: true });
+            const classification = recordCandidateFailure(candidate.account.id, candidate.modelId, err);
+            if (!classification.requestScoped) {
+              recordRouteOutcome(healthKey(candidate), { error: true });
+            }
             endUsageRequest(fusionTokens[i], {
               status: 'error',
               provider: candidate.account.provider,
@@ -838,15 +881,18 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
       }
     }
 
+    const skippedProviders = new Set<string>();
     for (const candidate of candidates) {
       if (controller.signal.aborted) return;
       const { account, modelId } = candidate;
+      if (skippedProviders.has(account.provider)) continue;
 
       if (!isStream) {
         const activeToken = beginUsageRequest(account.provider, modelId, fromPlayground);
         try {
           const result = await attemptNonStream(candidate, controller.signal);
           recordRouteOutcome(healthKey(candidate), { latencyMs: result.latencyMs });
+          recordCandidateSuccess(account.id, modelId);
           succeedNonStream(result);
           endUsageRequest(activeToken, { status: 'success', provider: account.provider, model: modelId });
           return;
@@ -855,7 +901,12 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
             cancelUsageRequest(activeToken);
             return;
           }
-          recordRouteOutcome(healthKey(candidate), { error: true });
+          const classification = recordCandidateFailure(account.id, modelId, err);
+          if (classification.requestScoped) {
+            skippedProviders.add(account.provider);
+          } else {
+            recordRouteOutcome(healthKey(candidate), { error: true });
+          }
           const errMsg = sanitizeProviderErrorMessage(err instanceof Error ? err.message : 'Provider error');
           endUsageRequest(activeToken, {
             status: 'error',
@@ -920,6 +971,7 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
 
           const latencyMs = Date.now() - startMs;
           recordRouteOutcome(healthKey(candidate), { latencyMs: Date.now() - streamStartedAt });
+          recordCandidateSuccess(account.id, modelId);
           recordXGatewayKeyUsage(account.id, promptTokens + completionTokens);
           logRequest(
             account.provider,
@@ -947,7 +999,12 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
           cancelUsageRequest(activeToken);
           return;
         }
-        recordRouteOutcome(healthKey(candidate), { error: true });
+        const classification = recordCandidateFailure(account.id, modelId, err);
+        if (classification.requestScoped) {
+          skippedProviders.add(account.provider);
+        } else {
+          recordRouteOutcome(healthKey(candidate), { error: true });
+        }
         const errMsg = sanitizeProviderErrorMessage(err instanceof Error ? err.message : 'Stream interrupted');
         if (res.headersSent) {
           logRequest(
@@ -1315,6 +1372,7 @@ export async function handleXGatewaySearch(req: Request, res: Response): Promise
           throw new Error('Search returned no results.');
         }
         recordRouteOutcome(healthKey(candidate), { latencyMs: Date.now() - startedAt });
+        recordCandidateSuccess(candidate.account.id, candidate.modelId);
         res.status(200).json({
           query,
           model: candidate.modelId,
@@ -1325,7 +1383,10 @@ export async function handleXGatewaySearch(req: Request, res: Response): Promise
         return;
       } catch (err) {
         if (clientGone) return;
-        recordRouteOutcome(healthKey(candidate), { error: true });
+        const classification = recordCandidateFailure(candidate.account.id, candidate.modelId, err);
+        if (!classification.requestScoped) {
+          recordRouteOutcome(healthKey(candidate), { error: true });
+        }
         lastError = err;
       }
     }
