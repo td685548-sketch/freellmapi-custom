@@ -129,6 +129,10 @@ export async function runPreRequest(
   // Valid internal loopback calls bypass orchestrator, MCP loop, and output guard
   // so sub-calls inherit routing/quotas without re-entering platform hooks.
   if (isInternalCall(req) !== null) {
+    // The sub-call still renders the profile's versioned prompt (e.g. each MCP
+    // tool-loop round), so it needs the caller's prompt variables forwarded by
+    // callGateway; without this they fell back to their defaults.
+    if (flags.prompts) capturePromptRequestContext(req, _profile, _endUser);
     return 'continue';
   }
 
