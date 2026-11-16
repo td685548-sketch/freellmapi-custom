@@ -1027,7 +1027,7 @@ export default function AccountUsage() {
                     cursor: 'pointer',
                     border: 'none',
                     background: timeRange === tr ? 'var(--primary, #3b82f6)' : 'transparent',
-                    color: timeRange === tr ? '#fff' : 'inherit',
+                    color: timeRange === tr ? 'var(--primary-foreground, #fff)' : 'inherit',
                   }}
                 >
                   {tr.toUpperCase()}
@@ -1098,7 +1098,7 @@ export default function AccountUsage() {
                 cursor: 'pointer',
                 border: '1px solid var(--border)',
                 background: breakdownTab === tab.id ? 'var(--primary, #3b82f6)' : 'transparent',
-                color: breakdownTab === tab.id ? '#fff' : 'inherit',
+                color: breakdownTab === tab.id ? 'var(--primary-foreground, #fff)' : 'inherit',
               }}
             >
               {tab.label}
@@ -1123,7 +1123,7 @@ export default function AccountUsage() {
                   cursor: 'pointer',
                   border: 'none',
                   background: timeRange === opt.id ? 'var(--primary, #3b82f6)' : 'transparent',
-                  color: timeRange === opt.id ? '#fff' : 'inherit',
+                  color: timeRange === opt.id ? 'var(--primary-foreground, #fff)' : 'inherit',
                 }}
               >
                 {opt.label}
