@@ -291,7 +291,7 @@ description: "Task list for AI Platform Upgrade"
 ## Phase 10: Polish & Cross-Cutting Concerns
 
 - [ ] T132 [P] Viết kịch bản tổng hợp bật cả 6 trụ cột cho một client key và khẳng định thứ tự xử lý theo `contracts/inference-surface.md` trong `T/all-pillars.test.ts`
-- [ ] T133 [P] Hoàn thiện `T/backup-restore.test.ts`: sao lưu và khôi phục toàn bộ bảng `custom_ai_*`; khôi phục thiếu `custom_ai_embeddings` thì chỉ mục tự lập lại; bí mật MCP vẫn ở dạng mã hóa trong bản sao lưu
+- [x] T133 [P] Hoàn thiện `T/backup-restore.test.ts`: sao lưu và khôi phục toàn bộ bảng `custom_ai_*`; khôi phục thiếu `custom_ai_embeddings` thì chỉ mục tự lập lại; bí mật MCP vẫn ở dạng mã hóa trong bản sao lưu — Ghi chú 2026-11-16: thêm `enqueueMissingEmbeddingJobs()` trong `S/retrieval/indexer.ts`; worker nền kiểm tra mỗi 5 phút (và ngay khi khởi động) các scope đã từng được index mà có đoạn văn bản chưa có embedding, rồi xếp job `reindex`. Bảng thực tế tên là `custom_ai_chunk_embeddings`.
 - [ ] T134 [P] Hoàn thiện `T/secret-leak.test.ts` cho mọi trụ cột (log, vết chạy, audit, bản xuất, thông báo lỗi)
 - [ ] T135 Đo thời gian xử lý thêm với mọi công tắc tắt so với mốc T005 (ngưỡng 5%) trong `T/overhead-bench.test.ts`
 - [ ] T136 [P] Viết `docs/ai-platform.md` (thứ tự pipeline, từng trụ cột, giới hạn mặc định, cách tắt) bằng ngôn ngữ kỹ thuật trung tính theo AGENTS.md mục 6, và thêm liên kết từ `docs/README.md`

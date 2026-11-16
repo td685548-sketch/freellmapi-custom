@@ -819,6 +819,62 @@ export async function runPendingIndexJobsUntilIdle(opts?: {
   return processed;
 }
 
+const MISSING_EMBEDDINGS_SWEEP_MS = 5 * 60_000;
+const FAILED_JOB_COOLDOWN_MS = 30 * 60_000;
+let lastMissingEmbeddingsSweepAt = 0;
+
+/**
+ * Queues a reindex for every previously indexed scope that has source chunks
+ * with no embedding row at all — for example after a backup was restored
+ * without `custom_ai_chunk_embeddings`, which is rebuildable and may be left
+ * out of a dump. Chunks that already have a row (ready, error or stale) are
+ * handled by the normal job flow. A scope with an active job is skipped, and
+ * so is one whose latest job failed less than 30 minutes ago, so an
+ * unavailable embeddings provider does not produce a job on every sweep.
+ * Returns the number of jobs queued.
+ */
+export function enqueueMissingEmbeddingJobs(now = Date.now()): number {
+  const db = getDb();
+  const latestJobs = db
+    .prepare(
+      `SELECT j.scope_kind, j.scope_id, j.status, j.updated_at
+         FROM custom_ai_index_jobs j
+         JOIN (SELECT MAX(id) AS id FROM custom_ai_index_jobs GROUP BY scope_kind, scope_id) latest
+           ON latest.id = j.id`,
+    )
+    .all() as Array<{ scope_kind: ScopeKind; scope_id: string; status: IndexJobStatus; updated_at: string }>;
+
+  let queued = 0;
+  for (const job of latestJobs) {
+    if (job.status === 'queued' || job.status === 'running') continue;
+    if (job.status === 'failed' && now - Date.parse(job.updated_at) < FAILED_JOB_COOLDOWN_MS) continue;
+    try {
+      const norm = normalizeScope({ kind: job.scope_kind, id: job.scope_id });
+      const sourceChunks = loadSourceChunks(norm);
+      if (sourceChunks.length === 0) continue;
+      const indexed = new Set(listScopeEmbeddingMeta(norm).map((row) => `${row.docId}:${row.chunkId}`));
+      if (sourceChunks.every((chunk) => indexed.has(`${chunk.docId}:${chunk.chunkId}`))) continue;
+      enqueueReindexJob(norm, 'reindex', { throwOnActive: false });
+      queued++;
+    } catch {
+      // A scope whose owner no longer exists, or a transient read error, is skipped this sweep.
+    }
+  }
+  return queued;
+}
+
+function maybeSweepMissingEmbeddings(): void {
+  if (!shouldRunBackgroundTick()) return;
+  const now = Date.now();
+  if (now - lastMissingEmbeddingsSweepAt < MISSING_EMBEDDINGS_SWEEP_MS) return;
+  lastMissingEmbeddingsSweepAt = now;
+  try {
+    enqueueMissingEmbeddingJobs(now);
+  } catch {
+    // Never crash the worker timer (e.g. DB closed during test teardown).
+  }
+}
+
 /**
  * Starts the background index worker loop (idempotent).
  * Resets any interrupted `'running'` jobs back to `'queued'` so indexing resumes after restarts.
@@ -839,7 +895,9 @@ export function startIndexWorker(intervalMs = 1_500): void {
     // DB may not be initialized if called early; periodic ticks will run once ready.
   }
 
+  lastMissingEmbeddingsSweepAt = 0;
   workerTimer = setInterval(() => {
+    maybeSweepMissingEmbeddings();
     void drainBackgroundTick();
   }, Math.max(25, intervalMs));
   workerTimer.unref?.();
