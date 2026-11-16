@@ -6,8 +6,127 @@ import type { Wire } from './detect.js';
 export type ToolDefinition = ChatToolDefinition;
 
 const volatileBlocks = new WeakSet<object>();
+const volatileTexts = new Set<string>();
+const stableTexts = new Set<string>();
+const MAX_TRACKED_SYSTEM_TEXTS = 5_000;
+const VOLATILE_KNOWLEDGE_PREFIX = 'Reference material from this website.';
+
+interface StringSystemState {
+  stable: string[];
+  caller: string;
+  volatile: string[];
+  lastRendered: string;
+}
+
+const stringSystemSections = new WeakMap<object, Map<'system' | 'instructions', StringSystemState>>();
 
 const GEMINI_MODEL_PATH = /^(\/v1beta\/models\/)([^:?]+)(:(?:stream)?generatecontent)(.*)$/i;
+
+function normalizeSystemText(text: string): string {
+  return text.trim().replace(/\s+/g, ' ');
+}
+
+function addBoundedText(set: Set<string>, text: string): void {
+  if (!text) return;
+  if (set.has(text)) {
+    set.delete(text);
+  }
+  set.add(text);
+  while (set.size > MAX_TRACKED_SYSTEM_TEXTS) {
+    const oldest = set.values().next().value as string | undefined;
+    if (oldest === undefined) break;
+    set.delete(oldest);
+  }
+}
+
+function extractSystemMessageText(msg: unknown): string {
+  if (typeof msg === 'string') return msg;
+  const rec = asRecord(msg);
+  if (!rec) return '';
+  if ('content' in rec) {
+    if (typeof rec.content === 'string') return rec.content;
+    if (Array.isArray(rec.content)) {
+      const parts: string[] = [];
+      for (const item of rec.content) {
+        if (typeof item === 'string') {
+          parts.push(item);
+        } else {
+          const block = asRecord(item);
+          if (block && typeof block.text === 'string') {
+            parts.push(block.text);
+          }
+        }
+      }
+      return parts.join(' ');
+    }
+    return '';
+  }
+  if (typeof rec.text === 'string') return rec.text;
+  return '';
+}
+
+/** Marks a normalized system text block as volatile (e.g. per-query RAG context). */
+export function markVolatileSystemText(text: string): void {
+  const norm = normalizeSystemText(text);
+  if (!norm) return;
+  stableTexts.delete(norm);
+  addBoundedText(volatileTexts, norm);
+}
+
+/** Marks a normalized system text block as stable across requests. */
+export function markStableSystemText(text: string): void {
+  const norm = normalizeSystemText(text);
+  if (!norm) return;
+  volatileTexts.delete(norm);
+  addBoundedText(stableTexts, norm);
+}
+
+/** Returns true if a system message/block is volatile and must stay after cache breakpoints. */
+export function isVolatileSystemMessage(msg: unknown): boolean {
+  if (msg && typeof msg === 'object' && volatileBlocks.has(msg)) {
+    return true;
+  }
+  const norm = normalizeSystemText(extractSystemMessageText(msg));
+  if (!norm) return false;
+  if (stableTexts.has(norm)) return false;
+  if (volatileTexts.has(norm)) return true;
+  return norm.startsWith(VOLATILE_KNOWLEDGE_PREFIX);
+}
+
+function appendToStringSystemField(
+  obj: Record<string, unknown>,
+  field: 'system' | 'instructions',
+  text: string,
+  position: 'stable' | 'volatile',
+): void {
+  const current = typeof obj[field] === 'string' ? (obj[field] as string) : '';
+  let byField = stringSystemSections.get(obj);
+  if (!byField) {
+    byField = new Map();
+    stringSystemSections.set(obj, byField);
+  }
+  let state = byField.get(field);
+  if (!state || state.lastRendered !== current) {
+    state = {
+      stable: [],
+      caller: current,
+      volatile: [],
+      lastRendered: current,
+    };
+    byField.set(field, state);
+  }
+  if (position === 'stable') {
+    markStableSystemText(text);
+    state.stable.push(text);
+  } else {
+    markVolatileSystemText(text);
+    state.volatile.push(text);
+  }
+  const parts = [...state.stable, ...(state.caller ? [state.caller] : []), ...state.volatile];
+  const rendered = parts.join('\n\n');
+  state.lastRendered = rendered;
+  obj[field] = rendered;
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -147,15 +266,17 @@ export function addSystemBlock(
       const entry = { role: 'system', content: text };
       if (position === 'volatile') {
         volatileBlocks.add(entry);
+        markVolatileSystemText(text);
         let at = 0;
         while (at < msgs.length && asRecord(msgs[at])?.role === 'system') at++;
         msgs.splice(at, 0, entry);
       } else {
+        markStableSystemText(text);
         let at = 0;
         while (
           at < msgs.length &&
           asRecord(msgs[at])?.role === 'system' &&
-          !volatileBlocks.has(msgs[at] as object)
+          !isVolatileSystemMessage(msgs[at])
         ) {
           at++;
         }
@@ -170,36 +291,24 @@ export function addSystemBlock(
         const block = { type: 'text', text };
         if (position === 'volatile') {
           volatileBlocks.add(block);
+          markVolatileSystemText(text);
           arr.push(block);
         } else {
+          markStableSystemText(text);
           let at = 0;
-          while (at < arr.length && typeof arr[at] === 'object' && arr[at] !== null && !volatileBlocks.has(arr[at] as object)) {
+          while (at < arr.length && typeof arr[at] === 'object' && arr[at] !== null && !isVolatileSystemMessage(arr[at])) {
             at++;
           }
           arr.splice(at, 0, block);
         }
       } else {
-        const existing = typeof obj.system === 'string' ? obj.system : '';
-        if (!existing) {
-          obj.system = text;
-        } else if (position === 'stable') {
-          obj.system = `${text}\n\n${existing}`;
-        } else {
-          obj.system = `${existing}\n\n${text}`;
-        }
+        appendToStringSystemField(obj, 'system', text, position);
       }
       return;
     }
 
     if (wire === 'responses') {
-      const existing = typeof obj.instructions === 'string' ? obj.instructions : '';
-      if (!existing) {
-        obj.instructions = text;
-      } else if (position === 'stable') {
-        obj.instructions = `${text}\n\n${existing}`;
-      } else {
-        obj.instructions = `${existing}\n\n${text}`;
-      }
+      appendToStringSystemField(obj, 'instructions', text, position);
       return;
     }
 
@@ -210,10 +319,12 @@ export function addSystemBlock(
       const part = { text };
       if (position === 'volatile') {
         volatileBlocks.add(part);
+        markVolatileSystemText(text);
         parts.push(part);
       } else {
+        markStableSystemText(text);
         let at = 0;
-        while (at < parts.length && typeof parts[at] === 'object' && parts[at] !== null && !volatileBlocks.has(parts[at] as object)) {
+        while (at < parts.length && typeof parts[at] === 'object' && parts[at] !== null && !isVolatileSystemMessage(parts[at])) {
           at++;
         }
         parts.splice(at, 0, part);
