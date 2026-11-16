@@ -359,7 +359,7 @@ export function PromptCache() {
 
   if (!canView && !canEdit) {
     return (
-      <div className="p-6" data-testid="prompt-cache-no-permission">
+      <div data-testid="prompt-cache-no-permission">
         <p className="text-sm text-muted-foreground">{tc(CACHE_NO_PERMISSION)}</p>
       </div>
     );
@@ -716,9 +716,9 @@ function PromptCacheContent({
   }, [stats]);
 
   return (
-    <div className="p-6 space-y-6 max-w-5xl" data-testid="prompt-cache-page">
+    <div className="space-y-6" data-testid="prompt-cache-page">
       <header className="space-y-1">
-        <h1 className="text-xl font-semibold">{tc(CACHE_PAGE_TITLE)}</h1>
+        <h2 className="text-lg font-semibold">{tc(CACHE_PAGE_TITLE)}</h2>
         <p className="text-sm text-muted-foreground">{tc(CACHE_PAGE_SUBTITLE)}</p>
       </header>
 
@@ -733,7 +733,7 @@ function PromptCacheContent({
 
       {!canView && canEdit && (
         <div
-          className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+          className="rounded border border-amber-600/30 bg-amber-600/15 dark:bg-amber-400/15 px-3 py-2 text-xs text-amber-700 dark:text-amber-400"
           data-testid="prompt-cache-editor-only-notice"
         >
           {tc(CACHE_EDITOR_ONLY_NOTICE)}
@@ -749,7 +749,7 @@ function PromptCacheContent({
             {tc(CACHE_SETTINGS_LOADING)}
           </p>
         ) : settingsLoadError ? (
-          <div className="flex items-center justify-between gap-2 rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700" role="alert">
+          <div className="flex items-center justify-between gap-2 rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive" role="alert">
             <span>{settingsLoadError}</span>
             <button
               type="button"
@@ -802,7 +802,7 @@ function PromptCacheContent({
 
             {settingsSaveError && (
               <div
-                className="rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700"
+                className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
                 role="alert"
                 data-testid="cache-settings-error"
               >
@@ -812,7 +812,7 @@ function PromptCacheContent({
 
             {settingsSaved && !settingsSaveError && (
               <div
-                className="rounded border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-800"
+                className="rounded border border-emerald-600/30 bg-emerald-600/15 dark:bg-emerald-400/15 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400"
                 data-testid="cache-settings-saved"
               >
                 {tc(CACHE_SETTINGS_SAVED)}
@@ -890,7 +890,7 @@ function PromptCacheContent({
               {tc(CACHE_STATS_LOADING)}
             </p>
           ) : statsError ? (
-            <div className="rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700" role="alert">
+            <div className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive" role="alert">
               {statsError}
             </div>
           ) : (
@@ -985,7 +985,7 @@ function PromptCacheContent({
               {tc(CACHE_CAPABILITIES_LOADING)}
             </p>
           ) : capsLoadError ? (
-            <div className="rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700" role="alert">
+            <div className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive" role="alert">
               {capsLoadError}
             </div>
           ) : capabilities.length === 0 ? (
@@ -1047,7 +1047,7 @@ function PromptCacheContent({
                               disabled={!canEdit || isDeleting}
                               data-testid={`cache-cap-delete-${cap.platform}-${cap.modelPattern}`}
                               onClick={() => void handleDeleteOverride(cap.platform, cap.modelPattern)}
-                              className="rounded border border-red-300 px-2 py-0.5 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-50"
+                              className="rounded border border-destructive/30 px-2 py-0.5 text-[11px] text-destructive hover:bg-destructive/10 disabled:opacity-50"
                             >
                               {isDeleting ? tc(CACHE_OVERRIDE_DELETING_BTN) : tc(CACHE_OVERRIDE_DELETE_BTN)}
                             </button>
@@ -1173,7 +1173,7 @@ function PromptCacheContent({
 
           {overrideError && (
             <div
-              className="rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700"
+              className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
               role="alert"
               data-testid="cache-override-error"
             >
@@ -1183,7 +1183,7 @@ function PromptCacheContent({
 
           {overrideSaved && !overrideError && (
             <div
-              className="rounded border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-800"
+              className="rounded border border-emerald-600/30 bg-emerald-600/15 dark:bg-emerald-400/15 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400"
               data-testid="cache-override-saved"
             >
               {tc(CACHE_OVERRIDE_SAVED)}
@@ -1192,7 +1192,7 @@ function PromptCacheContent({
 
           {overrideDeleted && !overrideError && (
             <div
-              className="rounded border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-800"
+              className="rounded border border-emerald-600/30 bg-emerald-600/15 dark:bg-emerald-400/15 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400"
               data-testid="cache-override-deleted"
             >
               {tc(CACHE_OVERRIDE_DELETED)}

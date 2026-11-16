@@ -225,7 +225,7 @@ export function ApprovalQueue({ canApprove }: ApprovalQueueProps) {
                 )}
 
                 {item.status === 'unknown' && (
-                  <div className="text-xs text-amber-600 dark:text-amber-400">
+                  <div className="text-xs text-amber-700 dark:text-amber-400">
                     {tc(MCP_APPROVAL_UNKNOWN_NOTICE)}
                   </div>
                 )}

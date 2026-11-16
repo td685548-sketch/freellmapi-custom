@@ -14,7 +14,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Permission } from '../../../../shared/user-access';
 import { VI } from '../i18n/vi';
@@ -162,7 +162,7 @@ describe('Output Guard permissions & AiPlatformApp routing', () => {
     actor.perms.add('view_output_guard');
     renderEl(
       <MemoryRouter initialEntries={['/ai-platform/output-guard']}>
-        <AiPlatformApp />
+        <Routes><Route path="/ai-platform/*" element={<AiPlatformApp />} /></Routes>
       </MemoryRouter>,
     );
     await flush();
@@ -177,7 +177,7 @@ describe('Output Guard permissions & AiPlatformApp routing', () => {
     actor.perms.add('manage_ai_platform');
     renderEl(
       <MemoryRouter initialEntries={['/ai-platform/output-guard']}>
-        <AiPlatformApp />
+        <Routes><Route path="/ai-platform/*" element={<AiPlatformApp />} /></Routes>
       </MemoryRouter>,
     );
     await flush();

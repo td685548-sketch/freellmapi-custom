@@ -6,7 +6,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Permission } from '../../../../shared/user-access';
 import { VI } from '../i18n/vi';
@@ -330,7 +330,7 @@ describe('Flows RBAC & AiPlatformApp routing', () => {
     actor.perms = new Set(['manage_ai_platform']);
     renderEl(
       <MemoryRouter initialEntries={['/ai-platform/flows']}>
-        <AiPlatformApp />
+        <Routes><Route path="/ai-platform/*" element={<AiPlatformApp />} /></Routes>
       </MemoryRouter>,
     );
     await flush();
@@ -343,7 +343,7 @@ describe('Flows RBAC & AiPlatformApp routing', () => {
   it('routes /ai-platform/flows and /ai-platform/runs to real Flows and Runs pages when permitted', async () => {
     renderEl(
       <MemoryRouter key="flows-route" initialEntries={['/ai-platform/flows']}>
-        <AiPlatformApp />
+        <Routes><Route path="/ai-platform/*" element={<AiPlatformApp />} /></Routes>
       </MemoryRouter>,
     );
     await flush();
@@ -352,7 +352,7 @@ describe('Flows RBAC & AiPlatformApp routing', () => {
 
     renderEl(
       <MemoryRouter key="runs-route" initialEntries={['/ai-platform/runs']}>
-        <AiPlatformApp />
+        <Routes><Route path="/ai-platform/*" element={<AiPlatformApp />} /></Routes>
       </MemoryRouter>,
     );
     await flush();

@@ -645,7 +645,7 @@ export function Knowledge(props: KnowledgeProps = {}) {
 
   if (!canView && !canEdit && !canReindex && !canQuery) {
     return (
-      <div className="p-6" data-testid="knowledge-no-permission">
+      <div data-testid="knowledge-no-permission">
         <p className="text-sm text-muted-foreground">{tc(KNOWLEDGE_NO_PERMISSION)}</p>
       </div>
     );
@@ -683,7 +683,7 @@ export function Knowledge(props: KnowledgeProps = {}) {
           })}
         </span>
         {job.lastError && (
-          <span className="text-red-600">
+          <span className="text-destructive">
             {tc(KNOWLEDGE_JOB_LAST_ERROR, { error: job.lastError })}
           </span>
         )}
@@ -692,15 +692,15 @@ export function Knowledge(props: KnowledgeProps = {}) {
   );
 
   return (
-    <div className="p-6 space-y-6 max-w-5xl" data-testid="knowledge-page">
+    <div className="space-y-6" data-testid="knowledge-page">
       <header className="space-y-1">
-        <h1 className="text-xl font-semibold">{tc(KNOWLEDGE_PAGE_TITLE)}</h1>
+        <h2 className="text-lg font-semibold">{tc(KNOWLEDGE_PAGE_TITLE)}</h2>
         <p className="text-sm text-muted-foreground">{tc(KNOWLEDGE_PAGE_SUBTITLE)}</p>
       </header>
 
       {!canView && (
         <div
-          className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+          className="rounded border border-amber-600/30 bg-amber-600/15 dark:bg-amber-400/15 px-3 py-2 text-xs text-amber-700 dark:text-amber-400"
           data-testid="knowledge-view-required-notice"
         >
           {tc(KNOWLEDGE_VIEW_REQUIRED)}
@@ -765,7 +765,7 @@ export function Knowledge(props: KnowledgeProps = {}) {
 
       {scopeValidationError && (
         <div
-          className="rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700"
+          className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
           role="alert"
           data-testid="knowledge-scope-validation-error"
         >
@@ -781,7 +781,7 @@ export function Knowledge(props: KnowledgeProps = {}) {
 
       {loadError && (
         <div
-          className="rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700"
+          className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
           role="alert"
           data-testid="knowledge-load-error"
         >
@@ -902,12 +902,12 @@ export function Knowledge(props: KnowledgeProps = {}) {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             {saveError && (
-              <p className="text-xs text-red-600" role="alert" data-testid="knowledge-save-error">
+              <p className="text-xs text-destructive" role="alert" data-testid="knowledge-save-error">
                 {saveError}
               </p>
             )}
             {savedMessage && (
-              <p className="text-xs text-emerald-700" data-testid="knowledge-save-success">
+              <p className="text-xs text-emerald-700 dark:text-emerald-400" data-testid="knowledge-save-success">
                 {savedMessage}
               </p>
             )}
@@ -932,8 +932,8 @@ export function Knowledge(props: KnowledgeProps = {}) {
             <span
               className={`rounded px-2 py-0.5 text-xs font-medium ${
                 index.ready
-                  ? 'bg-emerald-100 text-emerald-800'
-                  : 'bg-amber-100 text-amber-800'
+                  ? 'bg-emerald-600/15 dark:bg-emerald-400/15 text-emerald-700 dark:text-emerald-400'
+                  : 'bg-amber-600/15 dark:bg-amber-400/15 text-amber-700 dark:text-amber-400'
               }`}
               data-testid="knowledge-index-ready"
             >
@@ -1025,13 +1025,13 @@ export function Knowledge(props: KnowledgeProps = {}) {
         </div>
 
         {reindexMessage && (
-          <p className="text-xs text-emerald-700" data-testid="knowledge-reindex-success">
+          <p className="text-xs text-emerald-700 dark:text-emerald-400" data-testid="knowledge-reindex-success">
             {reindexMessage}
           </p>
         )}
         {reindexError && (
           <div
-            className="rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700"
+            className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
             role="alert"
             data-testid="knowledge-reindex-error"
           >
@@ -1041,7 +1041,7 @@ export function Knowledge(props: KnowledgeProps = {}) {
 
         {activeJob && (
           <div
-            className="rounded border border-amber-300 bg-amber-50/70 p-3 space-y-1 text-xs"
+            className="rounded border border-amber-600/30 bg-amber-600/10 dark:bg-amber-400/10 p-3 space-y-1 text-xs"
             data-testid="knowledge-active-job"
           >
             <div className="flex flex-wrap items-center justify-between gap-2 font-medium">
@@ -1056,12 +1056,12 @@ export function Knowledge(props: KnowledgeProps = {}) {
               </span>
             </div>
             {activeJob.lastError && (
-              <p className="text-red-700" data-testid="knowledge-active-job-error">
+              <p className="text-destructive" data-testid="knowledge-active-job-error">
                 {tc(KNOWLEDGE_JOB_LAST_ERROR, { error: activeJob.lastError })}
               </p>
             )}
             {activeJob.retryAfter && (
-              <p className="text-amber-800" data-testid="knowledge-active-job-retry">
+              <p className="text-amber-700 dark:text-amber-400" data-testid="knowledge-active-job-retry">
                 {tc(KNOWLEDGE_JOB_RETRY_AFTER, { time: activeJob.retryAfter })}
               </p>
             )}
@@ -1149,7 +1149,7 @@ export function Knowledge(props: KnowledgeProps = {}) {
 
         {queryError && (
           <div
-            className="rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700"
+            className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
             role="alert"
             data-testid="knowledge-query-error"
           >
@@ -1161,7 +1161,7 @@ export function Knowledge(props: KnowledgeProps = {}) {
           <div className="rounded border bg-muted/20 p-3 space-y-3" data-testid="knowledge-query-results">
             {queryResult.degraded && (
               <div
-                className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+                className="rounded border border-amber-600/30 bg-amber-600/15 dark:bg-amber-400/15 px-3 py-2 text-xs text-amber-700 dark:text-amber-400"
                 data-testid="knowledge-query-degraded"
               >
                 {tc(KNOWLEDGE_QUERY_DEGRADED_BANNER, {
@@ -1333,7 +1333,7 @@ export function Knowledge(props: KnowledgeProps = {}) {
           </p>
         ) : usageError ? (
           <div
-            className="rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700"
+            className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
             role="alert"
             data-testid="knowledge-usage-error"
           >

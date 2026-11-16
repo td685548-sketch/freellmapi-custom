@@ -130,7 +130,7 @@ export function GuardPolicyEditor({
           {tc(GUARD_REVISION_LABEL)}: {policy.revision}
         </span>
         {!canEdit && (
-          <span className="text-xs text-amber-600" data-testid="guard-edit-readonly-notice">
+          <span className="text-xs text-amber-700 dark:text-amber-400" data-testid="guard-edit-readonly-notice">
             {tc(GUARD_EDIT_REQUIRED)}
           </span>
         )}
@@ -140,22 +140,22 @@ export function GuardPolicyEditor({
       <div className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground space-y-1" data-testid="guard-latency-notice">
         <p>{tc(GUARD_LATENCY_NOTICE)}</p>
         {hasPatternRules && (
-          <p className="text-amber-600" data-testid="guard-buffering-patterns-warning">
+          <p className="text-amber-700 dark:text-amber-400" data-testid="guard-buffering-patterns-warning">
             {tc(GUARD_BUFFERING_FULL_PATTERNS)}
           </p>
         )}
         {hasExternalChecks && (
-          <p className="text-amber-600" data-testid="guard-buffering-external-warning">
+          <p className="text-amber-700 dark:text-amber-400" data-testid="guard-buffering-external-warning">
             {tc(GUARD_BUFFERING_FULL_EXTERNAL)}
           </p>
         )}
         {showJudgeIdentityWarning && (
-          <p className="text-amber-600" data-testid="guard-judge-identity-warning">
+          <p className="text-amber-700 dark:text-amber-400" data-testid="guard-judge-identity-warning">
             {tc(GUARD_JUDGE_IDENTITY_WARNING)}
           </p>
         )}
         {policy.bufferingReason && policy.bufferingReason !== 'none' && (
-          <p className="text-amber-600" data-testid="guard-server-buffering-reason">
+          <p className="text-amber-700 dark:text-amber-400" data-testid="guard-server-buffering-reason">
             {policy.bufferingReason}
           </p>
         )}
@@ -370,7 +370,7 @@ export function GuardPolicyEditor({
                 {canEdit && (
                   <button
                     type="button"
-                    className="rounded border px-2 py-1 text-xs text-red-600 hover:bg-muted"
+                    className="rounded border px-2 py-1 text-xs text-destructive hover:bg-muted"
                     onClick={() => removePatternRule(idx)}
                   >
                     {tc(GUARD_REMOVE_PATTERN)}
@@ -547,12 +547,12 @@ export function GuardPolicyEditor({
 
       {/* Feedback & Save */}
       {error && (
-        <div className="rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700" role="alert" data-testid="guard-policy-error">
+        <div className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive" role="alert" data-testid="guard-policy-error">
           {error}
         </div>
       )}
       {savedMessage && (
-        <div className="rounded border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-700" data-testid="guard-policy-saved">
+        <div className="rounded border border-emerald-600/30 bg-emerald-600/15 dark:bg-emerald-400/15 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400" data-testid="guard-policy-saved">
           {savedMessage}
         </div>
       )}

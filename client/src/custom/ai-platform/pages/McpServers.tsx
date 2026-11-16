@@ -293,7 +293,7 @@ export function McpServers() {
 
   if (!hasAnyMcpAccess) {
     return (
-      <div className="p-6" data-testid="mcp-no-permission">
+      <div data-testid="mcp-no-permission">
         <p className="text-sm text-muted-foreground">{tc(MCP_NO_PERMISSION)}</p>
       </div>
     );
@@ -516,10 +516,10 @@ export function McpServers() {
   ];
 
   return (
-    <div className="p-6 space-y-6" data-testid="mcp-page">
+    <div className="space-y-6" data-testid="mcp-page">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h2 className="text-xl font-semibold">{tc(MCP_PAGE_TITLE)}</h2>
+          <h2 className="text-lg font-semibold">{tc(MCP_PAGE_TITLE)}</h2>
           <p className="text-sm text-muted-foreground mt-0.5">{tc(MCP_PAGE_SUBTITLE)}</p>
         </div>
         {canEditServers && tab === 'servers' && (

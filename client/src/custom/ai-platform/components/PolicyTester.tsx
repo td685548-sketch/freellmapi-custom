@@ -167,7 +167,7 @@ export function PolicyTester({ scope, policy, sessionRevision, disabled }: Polic
             />
             <span>{tc(GUARD_TESTER_INCLUDE_EXTERNAL)}</span>
           </label>
-          <p className="text-xs text-amber-600" data-testid="guard-tester-external-warning">
+          <p className="text-xs text-amber-700 dark:text-amber-400" data-testid="guard-tester-external-warning">
             {tc(GUARD_TESTER_EXTERNAL_WARNING)}
           </p>
         </div>
@@ -186,7 +186,7 @@ export function PolicyTester({ scope, policy, sessionRevision, disabled }: Polic
       </div>
 
       {error && (
-        <div className="rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700" role="alert" data-testid="guard-tester-error">
+        <div className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive" role="alert" data-testid="guard-tester-error">
           {error}
         </div>
       )}
@@ -201,13 +201,13 @@ export function PolicyTester({ scope, policy, sessionRevision, disabled }: Polic
           </div>
 
           {result.buffering && result.bufferingReason !== 'none' && (
-            <p className="text-xs text-amber-600" data-testid="guard-tester-buffering-reason">
+            <p className="text-xs text-amber-700 dark:text-amber-400" data-testid="guard-tester-buffering-reason">
               {result.bufferingReason}
             </p>
           )}
 
           {result.warnings?.map((w, idx) => (
-            <p key={idx} className="text-xs text-amber-600">
+            <p key={idx} className="text-xs text-amber-700 dark:text-amber-400">
               {w}
             </p>
           ))}

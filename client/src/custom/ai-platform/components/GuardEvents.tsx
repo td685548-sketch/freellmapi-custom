@@ -208,7 +208,7 @@ export function GuardEvents({
           {tc(GUARD_EVENTS_METADATA_NOTICE)}
         </p>
         {!canViewExcerpts && (
-          <p className="text-xs text-amber-600" data-testid="guard-excerpt-permission-notice">
+          <p className="text-xs text-amber-700 dark:text-amber-400" data-testid="guard-excerpt-permission-notice">
             {tc(GUARD_EXCERPT_PERMISSION_REQUIRED)}
           </p>
         )}
@@ -241,7 +241,7 @@ export function GuardEvents({
             </button>
           </div>
           {lookupId.trim() && excerptErrorById[lookupId.trim()] && (
-            <p className="text-xs text-red-600" role="alert" data-testid="guard-excerpt-error">
+            <p className="text-xs text-destructive" role="alert" data-testid="guard-excerpt-error">
               {excerptErrorById[lookupId.trim()]}
             </p>
           )}
@@ -302,7 +302,7 @@ export function GuardEvents({
           )}
 
           {error && (
-            <div className="rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700" role="alert" data-testid="guard-events-error">
+            <div className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive" role="alert" data-testid="guard-events-error">
               {error}
             </div>
           )}
@@ -360,7 +360,7 @@ export function GuardEvents({
                             <span className="text-muted-foreground">-</span>
                           )}
                           {excerptErr && (
-                            <p className="text-red-600" role="alert" data-testid={`guard-excerpt-error-${idKey}`}>
+                            <p className="text-destructive" role="alert" data-testid={`guard-excerpt-error-${idKey}`}>
                               {excerptErr}
                             </p>
                           )}

@@ -229,16 +229,16 @@ export function OutputGuard() {
 
   if (!canView && !canEdit && !canViewExcerpts) {
     return (
-      <div className="p-6" data-testid="guard-no-permission">
+      <div data-testid="guard-no-permission">
         <p className="text-sm text-muted-foreground">{tc(GUARD_NO_PERMISSION)}</p>
       </div>
     );
   }
 
   return (
-    <div className="p-6 space-y-6 max-w-5xl" data-testid="output-guard-page">
+    <div className="space-y-6" data-testid="output-guard-page">
       <header className="space-y-1">
-        <h1 className="text-xl font-semibold">{tc(GUARD_PAGE_TITLE)}</h1>
+        <h2 className="text-lg font-semibold">{tc(GUARD_PAGE_TITLE)}</h2>
         <p className="text-sm text-muted-foreground">{tc(GUARD_PAGE_SUBTITLE)}</p>
       </header>
 
@@ -363,7 +363,7 @@ export function OutputGuard() {
       {activeTab === 'policy' && (canView || canEdit) && (
         <div className="space-y-6">
           {!canView && canEdit && (
-            <div className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="guard-editor-only-notice">
+            <div className="rounded border border-amber-600/30 bg-amber-600/15 dark:bg-amber-400/15 px-3 py-2 text-xs text-amber-700 dark:text-amber-400" data-testid="guard-editor-only-notice">
               {tc(GUARD_VIEW_REQUIRED_FOR_POLICY)}
             </div>
           )}
@@ -377,7 +377,7 @@ export function OutputGuard() {
               {tc(GUARD_LOADING_POLICY)}
             </p>
           ) : loadError ? (
-            <div className="rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700" role="alert" data-testid="guard-policy-load-error">
+            <div className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive" role="alert" data-testid="guard-policy-load-error">
               {loadError}
             </div>
           ) : (

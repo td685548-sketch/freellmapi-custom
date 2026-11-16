@@ -269,7 +269,7 @@ export function Flows() {
 
   if (!canView && !canEdit && !canPublish) {
     return (
-      <div className="p-6" data-testid="flows-no-permission">
+      <div data-testid="flows-no-permission">
         <p className="text-sm text-muted-foreground">{tc(FLOWS_NO_PERMISSION)}</p>
       </div>
     );
@@ -945,10 +945,10 @@ function FlowsContent({
   }, [agents, draftDef.agents]);
 
   return (
-    <div className="p-6 space-y-6 max-w-6xl" data-testid="flows-page">
+    <div className="space-y-6" data-testid="flows-page">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold">{tc(FLOWS_PAGE_TITLE)}</h1>
+          <h2 className="text-lg font-semibold">{tc(FLOWS_PAGE_TITLE)}</h2>
           <p className="text-sm text-muted-foreground mt-0.5">{tc(FLOWS_PAGE_SUBTITLE)}</p>
         </div>
         {canView && (
@@ -966,7 +966,7 @@ function FlowsContent({
       {!canView && (canEdit || canPublish) && (
         <div
           data-testid="flows-editor-only-notice"
-          className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300"
+          className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
         >
           {tc(FLOWS_EDITOR_ONLY_NOTICE)}
         </div>
@@ -975,7 +975,7 @@ function FlowsContent({
       {canView && !canEdit && !canPublish && (
         <div
           data-testid="flows-view-only-notice"
-          className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300"
+          className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
         >
           {tc(FLOWS_VIEW_ONLY_NOTICE)}
         </div>
@@ -1865,7 +1865,7 @@ function FlowsContent({
                 <div
                   data-testid="flow-limits-ceiling-errors"
                   role="alert"
-                  className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300 space-y-0.5"
+                  className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300 space-y-0.5"
                 >
                   {ceilingWarnings.map((w, i) => (
                     <div key={i}>{w}</div>
