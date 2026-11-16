@@ -168,12 +168,12 @@ export function Overview() {
   }
 
   if (overviewQuery.isPending) {
-    return <div className="p-6 text-sm text-muted-foreground">{tc(OVERVIEW_LOADING)}</div>;
+    return <div className="text-sm text-muted-foreground">{tc(OVERVIEW_LOADING)}</div>;
   }
 
   if (overviewQuery.isError) {
     return (
-      <div className="p-6">
+      <div>
         <div className="text-sm text-destructive mb-2">{tc(OVERVIEW_ERROR)}</div>
         <button
           className="text-sm underline"
@@ -189,7 +189,7 @@ export function Overview() {
   if (!flags) return null;
 
   return (
-    <div className="p-6 space-y-4 max-w-2xl">
+    <div className="space-y-4">
       <h2 className="text-lg font-semibold">{tc(OVERVIEW_HEADING)}</h2>
 
       {mutationError && (

@@ -193,7 +193,7 @@ export function Prompts() {
 
   if (!canView && !canEdit && !canPublish) {
     return (
-      <div className="p-6" data-testid="prompts-no-permission">
+      <div data-testid="prompts-no-permission">
         <p className="text-sm text-muted-foreground">{tc(PROMPTS_NO_PERMISSION)}</p>
       </div>
     );
@@ -783,9 +783,9 @@ function PromptsContent({
   const anyMutating = savingDraft || discardingDraft || publishing || restoringVersion !== null;
 
   return (
-    <div className="p-6 space-y-6 max-w-5xl" data-testid="prompts-page">
+    <div className="space-y-6" data-testid="prompts-page">
       <header className="space-y-1">
-        <h1 className="text-xl font-semibold">{tc(PROMPTS_PAGE_TITLE)}</h1>
+        <h2 className="text-lg font-semibold">{tc(PROMPTS_PAGE_TITLE)}</h2>
         <p className="text-sm text-muted-foreground">{tc(PROMPTS_PAGE_SUBTITLE)}</p>
       </header>
 
@@ -808,7 +808,7 @@ function PromptsContent({
       )}
       {!canView && (canEdit || canPublish) && (
         <div
-          className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+          className="rounded border border-amber-600/30 bg-amber-600/15 dark:bg-amber-400/15 px-3 py-2 text-xs text-amber-700 dark:text-amber-400"
           data-testid="prompts-editor-only-notice"
         >
           {tc(PROMPTS_EDITOR_ONLY_NOTICE)}
@@ -908,7 +908,7 @@ function PromptsContent({
         <div
           role="alert"
           data-testid="prompts-load-error"
-          className="flex items-center justify-between gap-2 rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700"
+          className="flex items-center justify-between gap-2 rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
         >
           <span>{loadError}</span>
           <button
@@ -923,12 +923,12 @@ function PromptsContent({
 
       {scopeState && (
         <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="prompts-head-summary">
-          <span className="rounded bg-emerald-100 text-emerald-800 px-2 py-0.5 font-medium">
+          <span className="rounded bg-emerald-600/15 dark:bg-emerald-400/15 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 font-medium">
             {scopeState.head.publishedVersion !== null
               ? tc(PROMPTS_HEAD_PUBLISHED, { version: scopeState.head.publishedVersion })
               : tc(PROMPTS_HEAD_NO_PUBLISHED)}
           </span>
-          <span className="rounded bg-amber-100 text-amber-800 px-2 py-0.5 font-medium">
+          <span className="rounded bg-amber-600/15 dark:bg-amber-400/15 text-amber-700 dark:text-amber-400 px-2 py-0.5 font-medium">
             {scopeState.head.draftVersion !== null
               ? tc(PROMPTS_HEAD_DRAFT, { version: scopeState.head.draftVersion })
               : tc(PROMPTS_HEAD_NO_DRAFT)}
@@ -942,7 +942,7 @@ function PromptsContent({
       {scopeState && scopeState.prunedCount > 0 && (
         <div
           data-testid="prompts-pruned-notice"
-          className="rounded border border-blue-300 bg-blue-50 px-3 py-2 text-xs text-blue-900"
+          className="rounded border border-blue-600/30 bg-blue-600/15 dark:bg-blue-400/15 px-3 py-2 text-xs text-blue-700 dark:text-blue-400"
         >
           {tc(PROMPTS_PRUNED_NOTICE, { count: scopeState.prunedCount })}
         </div>
@@ -953,7 +953,7 @@ function PromptsContent({
         <div
           role="alert"
           data-testid="prompts-conflict-banner"
-          className="flex flex-wrap items-center justify-between gap-2 rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800"
+          className="flex flex-wrap items-center justify-between gap-2 rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
         >
           <span>{tc(PROMPTS_CONFLICT_BANNER)}</span>
           {canView && (
@@ -961,7 +961,7 @@ function PromptsContent({
               type="button"
               data-testid="prompts-conflict-reload-btn"
               onClick={() => void loadScopeState()}
-              className="rounded border border-red-400 bg-white px-2.5 py-1 text-xs font-medium text-red-800 hover:bg-red-100"
+              className="rounded border border-destructive/40 bg-background px-2.5 py-1 text-xs font-medium text-destructive hover:bg-destructive/10"
             >
               {tc(PROMPTS_CONFLICT_RELOAD_BTN)}
             </button>
@@ -974,7 +974,7 @@ function PromptsContent({
         <div
           role="alert"
           data-testid="prompts-validation-error"
-          className="rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700 font-mono"
+          className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive font-mono"
         >
           {validationError}
         </div>
@@ -985,7 +985,7 @@ function PromptsContent({
         <div
           role="alert"
           data-testid="prompts-action-error"
-          className="rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700"
+          className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
         >
           {actionError}
         </div>
@@ -993,7 +993,7 @@ function PromptsContent({
       {actionSuccess && (
         <div
           data-testid="prompts-action-success"
-          className="rounded border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-800"
+          className="rounded border border-emerald-600/30 bg-emerald-600/15 dark:bg-emerald-400/15 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400"
         >
           {actionSuccess}
         </div>
@@ -1135,7 +1135,7 @@ function PromptsContent({
             <div
               role="alert"
               data-testid="prompts-preview-error"
-              className="rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700"
+              className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
             >
               {previewError}
             </div>
@@ -1146,7 +1146,7 @@ function PromptsContent({
               {previewResult.missing.length > 0 && (
                 <div
                   data-testid="prompts-preview-missing"
-                  className="rounded border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900"
+                  className="rounded border border-amber-600/30 bg-amber-600/15 dark:bg-amber-400/15 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400"
                 >
                   <span className="font-medium">{tc(PROMPTS_PREVIEW_MISSING_LABEL)}: </span>
                   <span className="font-mono">
@@ -1223,7 +1223,7 @@ function PromptsContent({
             <div
               role="alert"
               data-testid="prompts-try-error"
-              className="rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700"
+              className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
             >
               {tryError}
             </div>
@@ -1261,7 +1261,7 @@ function PromptsContent({
           {pendingRestoreVersion !== null && (
             <div
               data-testid="prompts-restore-confirm-panel"
-              className="flex flex-wrap items-center justify-between gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+              className="flex flex-wrap items-center justify-between gap-2 rounded border border-amber-600/30 bg-amber-600/15 dark:bg-amber-400/15 px-3 py-2 text-xs text-amber-700 dark:text-amber-400"
             >
               <span>{tc(PROMPTS_RESTORE_CONFIRM_TEXT, { version: pendingRestoreVersion })}</span>
               <div className="flex items-center gap-2">
@@ -1278,7 +1278,7 @@ function PromptsContent({
                   type="button"
                   data-testid="prompts-restore-cancel-btn"
                   onClick={() => setPendingRestoreVersion(null)}
-                  className="rounded border bg-white px-2.5 py-1 text-xs font-medium hover:bg-muted"
+                  className="rounded border bg-background px-2.5 py-1 text-xs font-medium hover:bg-muted"
                 >
                   {tc(PROMPTS_RESTORE_CANCEL_BTN)}
                 </button>
@@ -1295,9 +1295,9 @@ function PromptsContent({
               {scopeState.versions.map((v) => {
                 const badgeCls =
                   v.status === 'published'
-                    ? 'bg-emerald-100 text-emerald-800'
+                    ? 'bg-emerald-600/15 dark:bg-emerald-400/15 text-emerald-700 dark:text-emerald-400'
                     : v.status === 'draft'
-                      ? 'bg-amber-100 text-amber-800'
+                      ? 'bg-amber-600/15 dark:bg-amber-400/15 text-amber-700 dark:text-amber-400'
                       : 'bg-muted text-muted-foreground';
 
                 return (
@@ -1315,7 +1315,7 @@ function PromptsContent({
                         {v.restoredFrom !== null && (
                           <span
                             data-testid={`prompts-restored-from-${v.version}`}
-                            className="rounded bg-blue-100 text-blue-800 px-1.5 py-0.5 text-[11px]"
+                            className="rounded bg-blue-600/15 dark:bg-blue-400/15 text-blue-700 dark:text-blue-400 px-1.5 py-0.5 text-[11px]"
                           >
                             {tc(PROMPTS_RESTORED_FROM, { version: v.restoredFrom })}
                           </span>
@@ -1378,7 +1378,7 @@ function PromptsContent({
           {versionDetailError && (
             <div
               role="alert"
-              className="rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700"
+              className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
             >
               {versionDetailError}
             </div>

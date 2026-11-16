@@ -119,7 +119,7 @@ export function DiffView({
         <div
           role="alert"
           data-testid="prompt-diff-error"
-          className="rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700"
+          className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
         >
           {error || tc(PROMPTS_DIFF_ERROR)}
         </div>
@@ -183,9 +183,9 @@ export function DiffView({
                 {diff.hunks.map((line, idx) => {
                   const rowCls =
                     line.type === 'add'
-                      ? 'bg-emerald-50 text-emerald-900'
+                      ? 'bg-emerald-600/15 dark:bg-emerald-400/15 text-emerald-700 dark:text-emerald-400'
                       : line.type === 'remove'
-                        ? 'bg-red-50 text-red-900'
+                        ? 'bg-destructive/10 text-destructive'
                         : '';
                   const marker = line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' ';
                   return (

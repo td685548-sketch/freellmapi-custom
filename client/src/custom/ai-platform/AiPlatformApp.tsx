@@ -12,7 +12,8 @@
  * - Native React only — no @testing-library/react import anywhere in this module.
  */
 
-import { Routes, Route, NavLink } from 'react-router-dom';
+import { Routes, Route, NavLink, Navigate } from 'react-router-dom';
+import { PageHeader } from '@/components/page-header';
 import { useCustomT } from '../i18n/use-custom-t';
 import { useAdministrativeAccess } from '../use-administrative-access';
 import { useUserSession } from '../use-session';
@@ -27,9 +28,12 @@ import { Runs } from './pages/Runs';
 import { KNOWLEDGE_NAV_HEADING } from './knowledge-strings';
 import {
   NAV_AI_PLATFORM,
+  PAGE_TITLE,
+  PAGE_SUBTITLE,
   NO_ACCESS,
   PILLAR_PROMPTS,
   MCP_SERVERS_HEADING,
+  OVERVIEW_HEADING,
   OUTPUT_GUARD_HEADING,
   PROMPT_CACHE_HEADING,
   FLOWS_HEADING,
@@ -38,9 +42,16 @@ import {
 
 // ─── Sub-nav ──────────────────────────────────────────────────────────────────
 
-const NAV_ITEMS = [
-  { to: 'overview', labelKey: 'Platform overview' as const },
-] as const;
+// Absolute paths: React Router 7 resolves a relative link inside a splat route
+// against the whole current URL, so `to="prompts"` on /ai-platform/overview went
+// to /ai-platform/overview/prompts and kept growing with every click.
+const BASE = '/ai-platform';
+
+// Same pill-tab idiom as ModelsTabs / SegmentedControl on the main dashboard.
+const tabClass = ({ isActive }: { isActive: boolean }) =>
+  `inline-flex items-center px-3 py-1.5 text-xs rounded-lg transition-colors ${
+    isActive ? 'bg-foreground text-background font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+  }`;
 
 // ─── Main app ─────────────────────────────────────────────────────────────────
 
@@ -89,47 +100,24 @@ export function AiPlatformApp() {
     !canRuns
   ) {
     return (
-      <div className="p-6">
+      <div>
         <p className="text-sm text-muted-foreground">{tc(NO_ACCESS)}</p>
       </div>
     );
   }
 
   return (
-    <Routes>
-      <Route
-        path="/ai-platform/*"
-        element={
-          <AiPlatformShell
-            canOverview={canOverview}
-            canPrompts={canPrompts}
-            canMcp={canMcp}
-            canOutputGuard={canOutputGuard}
-            canViewKnowledge={canViewKnowledge}
-            canEditKnowledge={canEditKnowledge}
-            canPromptCache={canPromptCache}
-            canFlows={canFlows}
-            canRuns={canRuns}
-          />
-        }
-      />
-      <Route
-        path="*"
-        element={
-          <AiPlatformShell
-            canOverview={canOverview}
-            canPrompts={canPrompts}
-            canMcp={canMcp}
-            canOutputGuard={canOutputGuard}
-            canViewKnowledge={canViewKnowledge}
-            canEditKnowledge={canEditKnowledge}
-            canPromptCache={canPromptCache}
-            canFlows={canFlows}
-            canRuns={canRuns}
-          />
-        }
-      />
-    </Routes>
+    <AiPlatformShell
+      canOverview={canOverview}
+      canPrompts={canPrompts}
+      canMcp={canMcp}
+      canOutputGuard={canOutputGuard}
+      canViewKnowledge={canViewKnowledge}
+      canEditKnowledge={canEditKnowledge}
+      canPromptCache={canPromptCache}
+      canFlows={canFlows}
+      canRuns={canRuns}
+    />
   );
 }
 
@@ -156,6 +144,16 @@ function AiPlatformShell({
 }) {
   const tc = useCustomT();
   const canKnowledge = canViewKnowledge || canEditKnowledge;
+  // /ai-platform opens the first section the account may see, by its own URL,
+  // so the matching tab is highlighted like on every other tabbed page.
+  const defaultPath = canOverview ? 'overview'
+    : canPrompts ? 'prompts'
+    : canMcp ? 'mcp'
+    : canOutputGuard ? 'output-guard'
+    : canKnowledge ? 'knowledge'
+    : canPromptCache ? 'prompt-cache'
+    : canFlows ? 'flows'
+    : 'runs';
   const defaultElement = canOverview ? (
     <Overview />
   ) : canPrompts ? (
@@ -180,130 +178,63 @@ function AiPlatformShell({
   );
 
   return (
-    <div className="flex gap-6">
-      {/* Sub-navigation */}
-      <nav className="w-48 shrink-0 pt-6 pl-6" aria-label={tc(NAV_AI_PLATFORM)}>
-        <div className="space-y-1">
-          {canOverview && NAV_ITEMS.map(({ to, labelKey }) => (
-            <NavLink
-              key={to}
-              to={to}
-              className={({ isActive }) =>
-                `block px-3 py-2 rounded-md text-sm transition-colors ${
-                  isActive
-                    ? 'bg-primary/10 text-primary font-medium'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                }`
-              }
-            >
-              {tc(labelKey)}
-            </NavLink>
-          ))}
-          {canPrompts && (
-            <NavLink
-              to="prompts"
-              className={({ isActive }) =>
-                `block px-3 py-2 rounded-md text-sm transition-colors ${
-                  isActive
-                    ? 'bg-primary/10 text-primary font-medium'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                }`
-              }
-            >
-              {tc(PILLAR_PROMPTS)}
-            </NavLink>
-          )}
-          {canMcp && (
-            <NavLink
-              to="mcp"
-              className={({ isActive }) =>
-                `block px-3 py-2 rounded-md text-sm transition-colors ${
-                  isActive
-                    ? 'bg-primary/10 text-primary font-medium'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                }`
-              }
-            >
-              {tc(MCP_SERVERS_HEADING)}
-            </NavLink>
-          )}
-          {canOutputGuard && (
-            <NavLink
-              to="output-guard"
-              className={({ isActive }) =>
-                `block px-3 py-2 rounded-md text-sm transition-colors ${
-                  isActive
-                    ? 'bg-primary/10 text-primary font-medium'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                }`
-              }
-            >
-              {tc(OUTPUT_GUARD_HEADING)}
-            </NavLink>
-          )}
-          {canKnowledge && (
-            <NavLink
-              to="knowledge"
-              className={({ isActive }) =>
-                `block px-3 py-2 rounded-md text-sm transition-colors ${
-                  isActive
-                    ? 'bg-primary/10 text-primary font-medium'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                }`
-              }
-            >
-              {tc(KNOWLEDGE_NAV_HEADING)}
-            </NavLink>
-          )}
-          {canPromptCache && (
-            <NavLink
-              to="prompt-cache"
-              className={({ isActive }) =>
-                `block px-3 py-2 rounded-md text-sm transition-colors ${
-                  isActive
-                    ? 'bg-primary/10 text-primary font-medium'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                }`
-              }
-            >
-              {tc(PROMPT_CACHE_HEADING)}
-            </NavLink>
-          )}
-          {canFlows && (
-            <NavLink
-              to="flows"
-              className={({ isActive }) =>
-                `block px-3 py-2 rounded-md text-sm transition-colors ${
-                  isActive
-                    ? 'bg-primary/10 text-primary font-medium'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                }`
-              }
-            >
-              {tc(FLOWS_HEADING)}
-            </NavLink>
-          )}
-          {canRuns && (
-            <NavLink
-              to="runs"
-              className={({ isActive }) =>
-                `block px-3 py-2 rounded-md text-sm transition-colors ${
-                  isActive
-                    ? 'bg-primary/10 text-primary font-medium'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                }`
-              }
-            >
-              {tc(RUNS_HEADING)}
-            </NavLink>
-          )}
-        </div>
-      </nav>
+    <div>
+      <PageHeader
+        title={tc(PAGE_TITLE)}
+        description={tc(PAGE_SUBTITLE)}
+        actions={
+          <nav
+            aria-label={tc(NAV_AI_PLATFORM)}
+            className="inline-flex max-w-full gap-1 overflow-x-auto rounded-xl border p-1 [&>a]:shrink-0"
+          >
+            {canOverview && (
+              <NavLink to={`${BASE}/overview`} className={tabClass}>
+                {tc(OVERVIEW_HEADING)}
+              </NavLink>
+            )}
+            {canPrompts && (
+              <NavLink to={`${BASE}/prompts`} className={tabClass}>
+                {tc(PILLAR_PROMPTS)}
+              </NavLink>
+            )}
+            {canMcp && (
+              <NavLink to={`${BASE}/mcp`} className={tabClass}>
+                {tc(MCP_SERVERS_HEADING)}
+              </NavLink>
+            )}
+            {canOutputGuard && (
+              <NavLink to={`${BASE}/output-guard`} className={tabClass}>
+                {tc(OUTPUT_GUARD_HEADING)}
+              </NavLink>
+            )}
+            {canKnowledge && (
+              <NavLink to={`${BASE}/knowledge`} className={tabClass}>
+                {tc(KNOWLEDGE_NAV_HEADING)}
+              </NavLink>
+            )}
+            {canPromptCache && (
+              <NavLink to={`${BASE}/prompt-cache`} className={tabClass}>
+                {tc(PROMPT_CACHE_HEADING)}
+              </NavLink>
+            )}
+            {canFlows && (
+              <NavLink to={`${BASE}/flows`} className={tabClass}>
+                {tc(FLOWS_HEADING)}
+              </NavLink>
+            )}
+            {canRuns && (
+              <NavLink to={`${BASE}/runs`} className={tabClass}>
+                {tc(RUNS_HEADING)}
+              </NavLink>
+            )}
+          </nav>
+        }
+      />
 
       {/* Page content */}
-      <div className="flex-1">
+      <div>
         <Routes>
-          <Route index element={defaultElement} />
+          <Route index element={<Navigate to={`${BASE}/${defaultPath}`} replace />} />
           <Route path="overview" element={<Overview />} />
           <Route
             path="prompts"
@@ -311,7 +242,7 @@ function AiPlatformShell({
               canPrompts ? (
                 <Prompts />
               ) : (
-                <div className="p-6">
+                <div>
                   <p className="text-sm text-muted-foreground">{tc(NO_ACCESS)}</p>
                 </div>
               )
@@ -330,7 +261,7 @@ function AiPlatformShell({
                   canQuery={canViewKnowledge}
                 />
               ) : (
-                <div className="p-6">
+                <div>
                   <p className="text-sm text-muted-foreground">{tc(NO_ACCESS)}</p>
                 </div>
               )
@@ -343,7 +274,7 @@ function AiPlatformShell({
               canPromptCache ? (
                 <PromptCache />
               ) : (
-                <div className="p-6">
+                <div>
                   <p className="text-sm text-muted-foreground">{tc(NO_ACCESS)}</p>
                 </div>
               )
@@ -356,7 +287,7 @@ function AiPlatformShell({
               canFlows ? (
                 <Flows />
               ) : (
-                <div className="p-6">
+                <div>
                   <p className="text-sm text-muted-foreground">{tc(NO_ACCESS)}</p>
                 </div>
               )
@@ -368,7 +299,7 @@ function AiPlatformShell({
               canRuns ? (
                 <Runs />
               ) : (
-                <div className="p-6">
+                <div>
                   <p className="text-sm text-muted-foreground">{tc(NO_ACCESS)}</p>
                 </div>
               )

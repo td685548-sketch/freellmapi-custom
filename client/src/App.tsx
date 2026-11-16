@@ -503,7 +503,6 @@ function AppShell({ children }: { children: ReactNode }) {
   const legacyGateway = legacyGatewayTarget(location)
   if (legacyGateway) return <Navigate to={legacyGateway} replace />
   if (location.pathname === '/thruline' || location.pathname.startsWith('/thruline/')) return <Suspense fallback={<RouteFallback fullScreen />}><XGatewayApp /></Suspense>
-  if (location.pathname === '/ai-platform' || location.pathname.startsWith('/ai-platform/')) return <Suspense fallback={<RouteFallback fullScreen />}><AiPlatformApp /></Suspense>
   return (
     <div className={`flex flex-col ${fullBleed ? 'h-dvh overflow-hidden' : 'min-h-screen'} ${isMacDesktop ? 'desktop-backdrop' : 'bg-background'}`}>
       {children}
@@ -554,6 +553,7 @@ function App() {
                         <Route path="/profiles/:id/usage" element={<ProfileUsagePage />} />
                         <Route path="/usage" element={<UsageRankingPage />} />
                         <Route path="/audit" element={<AuditLogPage />} />
+                        <Route path="/ai-platform/*" element={<AiPlatformApp />} />
                         <Route path="/agents" element={<AgentsPage />} />
                         <Route path="/fallback" element={<Navigate to="/models/chat" replace />} />
                         <Route path="/analytics" element={<AnalyticsAccessPage />} />

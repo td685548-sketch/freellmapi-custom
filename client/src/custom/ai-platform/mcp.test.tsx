@@ -17,7 +17,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Permission } from '../../../../shared/user-access';
 import { VI } from '../i18n/vi';
@@ -559,7 +559,7 @@ describe('McpCallLog & InternalOriginsEditor & Guards', () => {
       root.render(
         <QueryClientProvider client={client}>
           <MemoryRouter initialEntries={['/ai-platform/mcp']}>
-            <AiPlatformApp />
+            <Routes><Route path="/ai-platform/*" element={<AiPlatformApp />} /></Routes>
           </MemoryRouter>
         </QueryClientProvider>,
       );
@@ -574,7 +574,7 @@ describe('McpCallLog & InternalOriginsEditor & Guards', () => {
       root.render(
         <QueryClientProvider client={client}>
           <MemoryRouter initialEntries={['/ai-platform/mcp']}>
-            <AiPlatformApp />
+            <Routes><Route path="/ai-platform/*" element={<AiPlatformApp />} /></Routes>
           </MemoryRouter>
         </QueryClientProvider>,
       );

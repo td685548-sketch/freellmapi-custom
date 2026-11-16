@@ -21,7 +21,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetchOverview, putFlags } from './api';
 import { AiPlatformApp } from './AiPlatformApp';
@@ -125,7 +125,7 @@ async function render() {
     root.render(
       <QueryClientProvider client={client}>
         <MemoryRouter initialEntries={['/ai-platform/overview']}>
-          <AiPlatformApp />
+          <Routes><Route path="/ai-platform/*" element={<AiPlatformApp />} /></Routes>
         </MemoryRouter>
       </QueryClientProvider>
     );
@@ -136,6 +136,26 @@ async function render() {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('AiPlatformApp', () => {
+  it('section tabs link to absolute /ai-platform/<section> paths, so the URL never accumulates', async () => {
+    actor.perms = new Set(['*']);
+    await render();
+    const nav = container.querySelector('nav[aria-label]');
+    expect(nav).not.toBeNull();
+    const hrefs = [...nav!.querySelectorAll('a')].map((a) => a.getAttribute('href'));
+    expect(hrefs).toEqual([
+      '/ai-platform/overview',
+      '/ai-platform/prompts',
+      '/ai-platform/mcp',
+      '/ai-platform/output-guard',
+      '/ai-platform/knowledge',
+      '/ai-platform/prompt-cache',
+      '/ai-platform/flows',
+      '/ai-platform/runs',
+    ]);
+    // One page title, as on every other dashboard page.
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
+  });
+
   it('shows "no access" when user has no ai-platform permissions', async () => {
     actor.perms = new Set(); // no permissions
     await render();
