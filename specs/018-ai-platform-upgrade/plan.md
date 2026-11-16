@@ -82,6 +82,7 @@ So từ commit đầu tiên của 018 (`5af82fd`) tới hết Phase Polish, ch�
 | `server/src/lib/fallback-loop.ts` | một lời gọi ở đường gửi tới nhà cung cấp (T089) | Đúng: 1 import và `withPromptCacheRoute(route)` (`9cdb51d`). |
 | `server/src/lib/system-prompt.ts` | một dòng gọi `renderPrompt()` | Đúng: 1 import và 1 lời gọi (`163563c`). |
 | `server/src/services/audit-log.ts` | thêm vùng `ai-platform` | Đúng: một dòng trong danh sách trường bị che (`5af82fd`); vùng được suy ra tự động từ đường dẫn. |
+| `server/src/db/turso.ts` | không có trong kế hoạch | Mỗi migration có trigger `AFTER DELETE ON client_profiles` thêm bảng của mình vào `TRIGGER_SIDE_EFFECTS` (khoảng 18 dòng qua `ba97ffa`, `a483943`, `3dc3b2f`, `70e8b61`, `dc58fc6` và T140), để cache SELECT của Turso biết trigger ghi vào đâu; `turso-read-cache.test.ts` buộc mọi trigger mới phải được khai báo. |
 | `server/src/routes/profile-knowledge.ts` | không có trong kế hoạch | Thêm 4 dòng gọi `onDocumentChanged` / `onDocumentDeleted` để chỉ mục ngữ nghĩa cập nhật khi tài liệu đổi (`a483943`, US4). |
 | `client/src/custom/PermissionsDialog.tsx` | không sửa nếu đọc `PERMISSION_GROUPS` | Đúng: không sửa. |
 

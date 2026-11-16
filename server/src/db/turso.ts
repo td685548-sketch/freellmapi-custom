@@ -97,6 +97,10 @@ const TRIGGER_SIDE_EFFECTS: Readonly<Record<string, readonly string[]>> = {
     'custom_ai_flow_grants',
     'custom_ai_run_steps',
     'custom_ai_runs',
+    'custom_ai_tool_bindings',
+    'custom_ai_tool_calls',
+    'custom_ai_approvals',
+    'settings',
   ],
 };
 // Results that depend on something other than table contents.
