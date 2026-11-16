@@ -21,11 +21,13 @@ import { McpServers } from './pages/McpServers';
 import { OutputGuard } from './pages/OutputGuard';
 import { Overview } from './pages/Overview';
 import { PromptCache } from './pages/PromptCache';
+import { Prompts } from './pages/Prompts';
 import { KNOWLEDGE_NAV_HEADING } from './knowledge-strings';
 import {
   NAV_AI_PLATFORM,
   NO_ACCESS,
   NOT_IMPLEMENTED_YET,
+  PILLAR_PROMPTS,
   MCP_SERVERS_HEADING,
   OUTPUT_GUARD_HEADING,
   PROMPT_CACHE_HEADING,
@@ -65,6 +67,11 @@ export function AiPlatformApp() {
   const { isPrimary } = useUserSession();
 
   const canOverview = isPrimary || can('view_ai_platform') || can('edit_ai_flags') || can('manage_ai_platform');
+  const canPrompts =
+    isPrimary ||
+    can('view_prompts') ||
+    can('edit_prompts') ||
+    can('publish_prompts');
   const canMcp =
     isPrimary ||
     can('view_mcp_servers') ||
@@ -82,7 +89,7 @@ export function AiPlatformApp() {
   const canPromptCache = isPrimary || can('view_prompt_cache') || can('edit_prompt_cache');
 
   // Guard: no sensitive query when user lacks access.
-  if (!canOverview && !canMcp && !canOutputGuard && !canKnowledge && !canPromptCache) {
+  if (!canOverview && !canPrompts && !canMcp && !canOutputGuard && !canKnowledge && !canPromptCache) {
     return (
       <div className="p-6">
         <p className="text-sm text-muted-foreground">{tc(NO_ACCESS)}</p>
@@ -97,6 +104,7 @@ export function AiPlatformApp() {
         element={
           <AiPlatformShell
             canOverview={canOverview}
+            canPrompts={canPrompts}
             canMcp={canMcp}
             canOutputGuard={canOutputGuard}
             canViewKnowledge={canViewKnowledge}
@@ -110,6 +118,7 @@ export function AiPlatformApp() {
         element={
           <AiPlatformShell
             canOverview={canOverview}
+            canPrompts={canPrompts}
             canMcp={canMcp}
             canOutputGuard={canOutputGuard}
             canViewKnowledge={canViewKnowledge}
@@ -124,6 +133,7 @@ export function AiPlatformApp() {
 
 function AiPlatformShell({
   canOverview,
+  canPrompts,
   canMcp,
   canOutputGuard,
   canViewKnowledge,
@@ -131,6 +141,7 @@ function AiPlatformShell({
   canPromptCache,
 }: {
   canOverview: boolean;
+  canPrompts: boolean;
   canMcp: boolean;
   canOutputGuard: boolean;
   canViewKnowledge: boolean;
@@ -141,6 +152,8 @@ function AiPlatformShell({
   const canKnowledge = canViewKnowledge || canEditKnowledge;
   const defaultElement = canOverview ? (
     <Overview />
+  ) : canPrompts ? (
+    <Prompts />
   ) : canMcp ? (
     <McpServers />
   ) : canOutputGuard ? (
@@ -176,6 +189,20 @@ function AiPlatformShell({
               {tc(labelKey)}
             </NavLink>
           ))}
+          {canPrompts && (
+            <NavLink
+              to="prompts"
+              className={({ isActive }) =>
+                `block px-3 py-2 rounded-md text-sm transition-colors ${
+                  isActive
+                    ? 'bg-primary/10 text-primary font-medium'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                }`
+              }
+            >
+              {tc(PILLAR_PROMPTS)}
+            </NavLink>
+          )}
           {canMcp && (
             <NavLink
               to="mcp"
@@ -256,6 +283,18 @@ function AiPlatformShell({
         <Routes>
           <Route index element={defaultElement} />
           <Route path="overview" element={<Overview />} />
+          <Route
+            path="prompts"
+            element={
+              canPrompts ? (
+                <Prompts />
+              ) : (
+                <div className="p-6">
+                  <p className="text-sm text-muted-foreground">{tc(NO_ACCESS)}</p>
+                </div>
+              )
+            }
+          />
           <Route path="mcp" element={<McpServers />} />
           <Route path="output-guard" element={<OutputGuard />} />
           <Route
