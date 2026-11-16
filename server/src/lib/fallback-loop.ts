@@ -58,6 +58,7 @@ import { sanitizeProviderErrorMessage, summarizeAttemptError } from './error-red
 import { benchForTools, clearToolRejections, noteToolRejection, toolCapabilityKey } from './tool-capability.js';
 import { parseProviderReportedSize } from './provider-size-parser.js';
 import { checkKeyHealth, markKeyHealthyFromRequest } from '../services/health.js';
+import { withPromptCacheRoute } from '../custom/ai-platform/prompt-cache/runtime.js';
 import { noteModelRetirementSignal } from '../services/model-retirement.js';
 import { getDb, getSetting } from '../db/index.js';
 import { newBreaker, recordBreakerFailure } from './guardrails.js';
@@ -1584,7 +1585,8 @@ async function runFallbackLoopAttempts(hooks: FallbackHooks, trace: RequestTrace
       // otherwise the global proxy / direct path applies as before. The URL
       // arrives already decrypted on the route (services/router.ts), so an
       // attempt costs nothing extra — no query, no decrypt.
-      outcome = await withKeyProxy(route.proxyUrl, () => hooks.dispatch(route, attempt, { disarmHedge }));
+      const effectiveRoute = withPromptCacheRoute(route);
+      outcome = await withKeyProxy(route.proxyUrl, () => hooks.dispatch(effectiveRoute, attempt, { disarmHedge }));
     } catch (err: any) {
       // Client-caused abort: the composed fetch signal fired because OUR
       // client hung up mid-attempt (see newClientAbortError). Not a

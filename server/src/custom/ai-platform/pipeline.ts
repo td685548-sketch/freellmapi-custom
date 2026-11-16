@@ -6,6 +6,13 @@ import { consumeMcpTakeoverPlan, refreshMcpTakeoverMessages } from './mcp-client
 import { sendMcpLoopResult } from './mcp-client/respond.js';
 import { runToolLoop } from './mcp-client/tool-loop.js';
 import { buildProfileGuardContext, type ProfileGuardContext } from './output-guard/context.js';
+import {
+  captureCallerCacheControl,
+  getActiveCacheTargetForRequest,
+  getCapturedCacheUsageForRequest,
+  markPromptCacheInterceptorInstalled,
+} from './prompt-cache/runtime.js';
+import { cacheUsageFilter } from './prompt-cache/stats.js';
 import { detectWire } from './wire/detect.js';
 import { installInterceptor, type OutputFilter } from './wire/interceptor.js';
 import { injectRetrievedKnowledgeForSlot6 } from '../knowledge-inject.js';
@@ -23,6 +30,32 @@ export function registerOutputFilterProvider(provider: OutputFilterProvider | nu
 }
 
 /**
+ * Idempotently installs the prompt-cache usage stats filter on `res` before
+ * `citationFilter` and `outputFilterFor` (filter order: stats -> citations -> outputGuard).
+ * Returns immediately without wrapping `res` when `promptCache` is disabled.
+ */
+export function installPromptCacheFilterIfNeeded(
+  req: Request,
+  res: Response,
+  profile: GateProfile,
+): void {
+  const flags = getFlags();
+  if (!flags.promptCache) return;
+  if (isInternalCall(req) !== null) return;
+
+  const detected = detectWire(req);
+  if (!detected) return;
+
+  markPromptCacheInterceptorInstalled(res);
+  const filter = cacheUsageFilter(profile.id, detected.wire, {
+    res,
+    getRoute: () => getActiveCacheTargetForRequest(res),
+    getUpstreamUsage: () => getCapturedCacheUsageForRequest(res),
+  });
+  installInterceptor(req, res, detected.wire, [filter]);
+}
+
+/**
  * Idempotently installs the output guard interceptor on `res` before any early-handled
  * response (`answerQuickly`, `sendMcpLoopResult`, exact cache hit, or normal provider).
  * Skips verified internal loopback subcalls and returns immediately when `outputGuard` is off.
@@ -33,6 +66,8 @@ export function installOutputGuardIfNeeded(
   profile: GateProfile,
   endUser: string | null,
 ): void {
+  installPromptCacheFilterIfNeeded(req, res, profile);
+
   const flags = getFlags();
   if (!flags.outputGuard) return;
   if (isInternalCall(req) !== null) return;
@@ -98,6 +133,9 @@ export async function runPreRequest(
   // 4. SLOT: orchestrator (flow:<slug> takeover)
   // 5. SLOT: prompts (variable substitution)
   // 6. SLOT: retrieval (semantic RAG injection)
+  if (flags.promptCache) {
+    installPromptCacheFilterIfNeeded(req, res, _profile);
+  }
   if (flags.retrieval) {
     await injectRetrievedKnowledgeForSlot6(req, res, {
       profileId: _profile.id,
@@ -159,6 +197,10 @@ export async function runPreRequest(
   }
 
   // 8. SLOT: promptCache (per-provider cache breakpoints)
+  if (flags.promptCache) {
+    captureCallerCacheControl(req);
+  }
+
   // 10. SLOT: outputGuard / response interceptor (idempotent; also installed before early handlers)
   installOutputGuardIfNeeded(req, res, _profile, _endUser);
 
