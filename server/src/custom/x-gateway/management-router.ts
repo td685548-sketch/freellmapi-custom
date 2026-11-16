@@ -16,6 +16,7 @@ import {
 import { createCombo, deleteCombo, getComboById, listCombos, updateCombo } from './config.js';
 import { getActiveCooldownsForKeys } from '../../services/ratelimit.js';
 import { calculateRequestCost } from './pricing.js';
+import { handleUsageStream, queryRecentRequests } from './usage-stream.js';
 
 /** Combos CRUD, request log, hourly usage and an in-console playground.
  *
@@ -306,6 +307,8 @@ const AGG_COLUMNS = `COUNT(*) AS requests,
             COALESCE(SUM(output_tokens), 0) AS completionTokens,
             COALESCE(SUM(latency_ms), 0) AS latencySum`;
 
+xGatewayManagementRouter.get('/usage/stream', handleUsageStream);
+
 xGatewayManagementRouter.get('/usage/breakdown', (req, res) => {
   const rawRange = String(req.query.range ?? '7d');
   if (!(BREAKDOWN_RANGES as readonly string[]).includes(rawRange)) {
@@ -344,6 +347,76 @@ xGatewayManagementRouter.get('/usage/breakdown', (req, res) => {
   ).all(...params) as Array<AggRow & { platform: string }>;
   const providerAgg = new Map(providerRows.map(r => [r.platform, r]));
 
+  // Recent error details per provider and per (provider, model) within range
+  const recentErrorRows = db.prepare(
+    `SELECT platform, model_id AS model, error, created_at AS timestamp, client_agent AS clientAgent
+       FROM requests
+      WHERE ${where} AND status != 'success'
+      ORDER BY id DESC
+      LIMIT 500`,
+  ).all(...params) as Array<{
+    platform: string;
+    model: string;
+    error: string | null;
+    timestamp: string;
+    clientAgent: string | null;
+  }>;
+
+  const lastErrorByProvider = new Map<string, {
+    model: string;
+    message: string;
+    timestamp: string;
+    fromPlayground?: boolean;
+  }>();
+  const lastErrorMsgByProviderModel = new Map<string, string>();
+  for (const r of recentErrorRows) {
+    if (!lastErrorByProvider.has(r.platform)) {
+      lastErrorByProvider.set(r.platform, {
+        model: r.model,
+        message: r.error ?? 'Unknown error',
+        timestamp: r.timestamp,
+        ...(r.clientAgent === 'playground' ? { fromPlayground: true } : {}),
+      });
+    }
+    const pmKey = `${r.platform}\0${r.model}`;
+    if (!lastErrorMsgByProviderModel.has(pmKey)) {
+      lastErrorMsgByProviderModel.set(pmKey, r.error ?? 'Unknown error');
+    }
+  }
+
+  const failedModelAggRows = db.prepare(
+    `SELECT platform, model_id AS model, COUNT(*) AS errorCount, MAX(created_at) AS lastErrorAt
+       FROM requests
+      WHERE ${where} AND status != 'success'
+      GROUP BY platform, model_id
+      ORDER BY errorCount DESC, lastErrorAt DESC`,
+  ).all(...params) as Array<{
+    platform: string;
+    model: string;
+    errorCount: number;
+    lastErrorAt: string;
+  }>;
+
+  const failedModelsByProvider = new Map<string, Array<{
+    model: string;
+    errorCount: number;
+    lastErrorMessage: string;
+    lastErrorAt: string;
+  }>>();
+  for (const r of failedModelAggRows) {
+    let list = failedModelsByProvider.get(r.platform);
+    if (!list) {
+      list = [];
+      failedModelsByProvider.set(r.platform, list);
+    }
+    list.push({
+      model: r.model,
+      errorCount: r.errorCount,
+      lastErrorMessage: lastErrorMsgByProviderModel.get(`${r.platform}\0${r.model}`) ?? 'Unknown error',
+      lastErrorAt: r.lastErrorAt,
+    });
+  }
+
   const providerIds = [...new Set(accounts.map(a => a.provider))];
   const topology = providerIds.map(id => {
     const list = accounts.filter(a => a.provider === id);
@@ -356,10 +429,11 @@ xGatewayManagementRouter.get('/usage/breakdown', (req, res) => {
     if (row) addAgg(agg, row);
     const view = aggView(agg);
 
-    let status: 'healthy' | 'degraded' | 'cooldown' | 'paused';
+    let status: 'healthy' | 'degraded' | 'error' | 'cooldown' | 'paused';
     if (enabled.length === 0) status = 'paused';
     else if (usable.length > 0 && cooling.length === usable.length) status = 'cooldown';
-    else if (usable.length === 0 || cooling.length > 0 || erroring.length > 0 || (view.requests >= 5 && view.successRate < 80)) {
+    else if (view.requests > 0 && view.successRate === 0) status = 'error';
+    else if (usable.length === 0 || cooling.length > 0 || erroring.length > 0 || (view.requests > 0 && view.successRate < 80)) {
       status = 'degraded';
     } else status = 'healthy';
 
@@ -373,6 +447,8 @@ xGatewayManagementRouter.get('/usage/breakdown', (req, res) => {
       monthlyRequests: list.reduce((s, a) => s + a.monthlyRequests, 0),
       monthlyTokens: list.reduce((s, a) => s + a.monthlyTokens, 0),
       ...view,
+      lastError: lastErrorByProvider.get(id) ?? null,
+      failedModels: failedModelsByProvider.get(id) ?? [],
     };
   });
 
@@ -466,7 +542,9 @@ xGatewayManagementRouter.get('/usage/breakdown', (req, res) => {
     ...aggView(endpointAgg.get(endpoint)!),
   }));
 
-  res.json({ range, since, month, topology, byModel, byAccount, byClientKey, byEndpoint });
+  const recentRequests = queryRecentRequests(20);
+
+  res.json({ range, since, month, topology, byModel, byAccount, byClientKey, byEndpoint, recentRequests });
 });
 
 /* ----------------------------------------------------------------------------

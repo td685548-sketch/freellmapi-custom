@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -14,28 +14,31 @@ import {
   Activity,
   BarChart3,
   Coins,
-  Cpu,
   Layers,
   Plus,
   RefreshCw,
   RotateCcw,
   Save,
   Search,
-  Server,
   Sliders,
   X,
 } from 'lucide-react'
-import { apiFetch } from '@/lib/api'
+import { apiFetch, getToken } from '@/lib/api'
 import { useAccounts } from '../api'
 import { useXStrings } from '../strings'
 import { useSessionRevision } from '../../session-state'
 import { useUserSession } from '../../use-session'
 import { mgmtApi } from '../management-api'
 import { quotaApi } from '../quota-api'
-import type { XAccountQuota } from '../../../../../shared/x-quota'
-import AccountQuotaSummary, { formatWindowValue } from '../components/AccountQuotaSummary'
 import { AccountLoadState } from './Providers'
-import ProviderTopology, { type TopologyNode } from '../components/ProviderTopology'
+import ProviderTopology, { type ActiveRequestInfo, type TopologyNode } from '../components/ProviderTopology'
+import RecentRequestsPanel, { type RecentRequestItem } from '../components/RecentRequestsPanel'
+import { ProviderBarChart, TopModelsChart } from '../components/UsageCharts'
+import UsageTable, {
+  type UsageGroup,
+  type UsageViewMode,
+  UsageViewModeToggle,
+} from '../components/UsageTable'
 
 type TimeRange = '24h' | '7d' | '30d' | 'all'
 
@@ -155,17 +158,106 @@ export default function AccountUsage() {
     session.hasPermission('edit_x_settings') || session.hasPermission('manage_x_gateway')
   const canViewQuota = session.hasPermission('view_x_usage')
   const query = useAccounts()
-  const [now, setNow] = useState(Date.now)
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 5_000)
-    return () => window.clearInterval(timer)
-  }, [])
 
   // Filters State
   const [timeRange, setTimeRange] = useState<TimeRange>('7d')
   const [providerSearch, setProviderSearch] = useState('')
   const [breakdownTab, setBreakdownTab] = useState<BreakdownTab>('provider')
   const [chartMetric, setChartMetric] = useState<'requests' | 'tokens'>('tokens')
+  const [tableViewMode, setTableViewMode] = useState<UsageViewMode>('costs')
+  const [detailFilterPreset, setDetailFilterPreset] = useState<Partial<DetailFilters> | null>(null)
+
+  // Live SSE State (/api/thruline/usage/stream) with graceful polling fallback
+  const [sseState, setSseState] = useState<{
+    activeRequests: ActiveRequestInfo[]
+    lastProvider: string
+    errorProvider: string
+    recentRequests: RecentRequestItem[] | null
+    connected: boolean
+  }>({
+    activeRequests: [],
+    lastProvider: '',
+    errorProvider: '',
+    recentRequests: null,
+    connected: false,
+  })
+
+  useEffect(() => {
+    let isMounted = true
+    let retry: ReturnType<typeof setTimeout> | undefined
+    const abort = new AbortController()
+    const streamUrl = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api/thruline/usage/stream`
+
+    const onMessage = (raw: string) => {
+      try {
+        const data = JSON.parse(raw) as {
+          activeRequests?: ActiveRequestInfo[]
+          lastProvider?: string
+          errorProvider?: string | { provider?: string } | null
+          recentRequests?: RecentRequestItem[]
+        }
+        const errProv =
+          typeof data.errorProvider === 'string'
+            ? data.errorProvider
+            : data.errorProvider?.provider ?? ''
+        if (!isMounted) return
+        setSseState(prev => ({
+          activeRequests: Array.isArray(data.activeRequests) ? data.activeRequests : prev.activeRequests,
+          lastProvider: typeof data.lastProvider === 'string' ? data.lastProvider : prev.lastProvider,
+          errorProvider: errProv,
+          recentRequests: Array.isArray(data.recentRequests) ? data.recentRequests : prev.recentRequests,
+          connected: true,
+        }))
+      } catch {
+        // ignore malformed SSE heartbeat/payload
+      }
+    }
+
+    // The stream needs the session token, which EventSource cannot send, so it is read with fetch.
+    const connect = async () => {
+      let refused = false
+      try {
+        const token = getToken()
+        const response = await fetch(streamUrl, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          signal: abort.signal,
+        })
+        refused = response.status === 401 || response.status === 403
+        if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)
+        if (isMounted) setSseState(prev => ({ ...prev, connected: true }))
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          let end = buffer.indexOf('\n\n')
+          while (end !== -1) {
+            const event = buffer.slice(0, end)
+            buffer = buffer.slice(end + 2)
+            for (const line of event.split('\n')) {
+              if (line.startsWith('data: ')) onMessage(line.slice(6))
+            }
+            end = buffer.indexOf('\n\n')
+          }
+        }
+      } catch {
+        // dropped connection; retried below unless refused or unmounted
+      }
+      if (!isMounted) return
+      setSseState(prev => ({ ...prev, connected: false }))
+      if (!refused) retry = setTimeout(connect, 3000)
+    }
+
+    void connect()
+
+    return () => {
+      isMounted = false
+      if (retry) clearTimeout(retry)
+      abort.abort()
+    }
+  }, [revision])
 
   // Pricing Modal / Drawer State
   const [showPricingModal, setShowPricingModal] = useState(false)
@@ -208,14 +300,6 @@ export default function AccountUsage() {
   })
   const breakdown = breakdownQuery.data
 
-  const quotaQuery = useQuery({
-    queryKey: ['x-quota', revision],
-    queryFn: ({ signal }) => quotaApi.list(signal),
-    enabled: canViewQuota,
-    refetchInterval: 30_000,
-    retry: false,
-  })
-
   const refreshAllQuotas = useMutation({
     meta: { silenceToast: true },
     mutationFn: () => quotaApi.refreshAll(true),
@@ -223,45 +307,6 @@ export default function AccountUsage() {
       queryClient.setQueryData(['x-quota', revision], data)
     },
   })
-
-  const refreshOneQuota = useMutation({
-    meta: { silenceToast: true },
-    mutationFn: (id: number) => quotaApi.refresh(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['x-quota', revision] }),
-  })
-
-  const quotaByAccount = useMemo(
-    () => new Map<number, XAccountQuota>((quotaQuery.data?.accounts ?? []).map(a => [a.accountId, a])),
-    [quotaQuery.data],
-  )
-
-  const quotaSummaryByProvider = useMemo(() => {
-    const map = new Map<string, string>()
-    const grouped = new Map<string, XAccountQuota[]>()
-    for (const a of quotaQuery.data?.accounts ?? []) {
-      if (!a.windows.length) continue
-      const list = grouped.get(a.provider) ?? []
-      list.push(a)
-      grouped.set(a.provider, list)
-    }
-    for (const [prov, list] of grouped) {
-      const firstWin = list[0]?.windows[0]
-      if (!firstWin) continue
-      if (list.length === 1) {
-        map.set(prov, formatWindowValue(firstWin))
-      } else if (firstWin.unit === '%') {
-        const minPct = Math.min(...list.flatMap(a => a.windows.map(w => w.remaining ?? 100)))
-        map.set(prov, `Min ${Math.round(minPct)}% (${list.length} accts)`)
-      } else {
-        const totalRem = list.reduce((sum, a) => sum + (a.windows[0]?.remaining ?? 0), 0)
-        const totalLim = list.reduce((sum, a) => sum + (a.windows[0]?.limit ?? 0), 0)
-        if (totalLim > 0) {
-          map.set(prov, `${totalRem.toLocaleString()} / ${totalLim.toLocaleString()} ${firstWin.unit}`)
-        }
-      }
-    }
-    return map
-  }, [quotaQuery.data])
 
   const pricingMap = pricingDraft ?? pricingQuery.data?.pricing
 
@@ -453,6 +498,124 @@ export default function AccountUsage() {
     return list.slice(0, 5)
   }, [accounts, pricingMap])
 
+  const effectiveRecentRequests = useMemo<RecentRequestItem[]>(() => {
+    return sseState.recentRequests ?? breakdown?.recentRequests ?? []
+  }, [sseState.recentRequests, breakdown?.recentRequests])
+
+  const providerChartEntries = useMemo(() => {
+    const topo = breakdown?.topology ?? []
+    if (topo.length > 0) {
+      return topo.map(t => ({
+        provider: t.provider,
+        name: t.name || t.provider,
+        tokens: t.totalTokens,
+        requests: t.requests,
+      }))
+    }
+    return topProviders.map(p => ({
+      provider: p.provider,
+      name: p.name,
+      tokens: p.tokens,
+      requests: p.requests,
+    }))
+  }, [breakdown?.topology, topProviders])
+
+  const modelChartEntries = useMemo(() => {
+    const byModel = breakdown?.byModel ?? []
+    if (byModel.length > 0) {
+      return byModel.map(m => ({
+        model: m.model,
+        tokens: m.totalTokens,
+        requests: m.requests,
+      }))
+    }
+    return topModels.map(m => ({
+      model: m.model,
+      tokens: m.tokens,
+      requests: m.requests,
+    }))
+  }, [breakdown?.byModel, topModels])
+
+  const providerTableGroups = useMemo(() => {
+    const grouped: Record<
+      string,
+      UsageGroup<{
+        id: number
+        provider: string
+        providerName: string
+        label: string
+        monthlyRequestCap: number | null
+        monthlyTokenCap: number | null
+        requests: number
+        promptTokens: number
+        completionTokens: number
+        totalTokens: number
+        inputCost: number
+        outputCost: number
+        totalCost: number
+      }>
+    > = {}
+
+    for (const acc of filteredAccounts) {
+      const key = acc.providerName || acc.provider
+      const promptTokens = Math.round(acc.monthlyUsage.tokens * 0.7)
+      const completionTokens = Math.max(0, acc.monthlyUsage.tokens - promptTokens)
+      const totalCost = calculateBlendedTokensCostDollars(acc.provider, undefined, acc.monthlyUsage.tokens, pricingMap)
+      const inputCost = totalCost * 0.45
+      const outputCost = Math.max(0, totalCost - inputCost)
+
+      if (!grouped[key]) {
+        grouped[key] = {
+          groupKey: key,
+          label: (
+            <Link
+              to={`/thruline/providers/${encodeURIComponent(acc.provider)}`}
+              onClick={e => e.stopPropagation()}
+            >
+              {key}
+            </Link>
+          ),
+          summary: {
+            requests: 0,
+            promptTokens: 0,
+            completionTokens: 0,
+            totalTokens: 0,
+            inputCost: 0,
+            outputCost: 0,
+            totalCost: 0,
+          },
+          items: [],
+        }
+      }
+
+      grouped[key].summary.requests += acc.monthlyUsage.requests
+      grouped[key].summary.promptTokens += promptTokens
+      grouped[key].summary.completionTokens += completionTokens
+      grouped[key].summary.totalTokens += acc.monthlyUsage.tokens
+      grouped[key].summary.inputCost += inputCost
+      grouped[key].summary.outputCost += outputCost
+      grouped[key].summary.totalCost += totalCost
+
+      grouped[key].items.push({
+        id: acc.id,
+        provider: acc.provider,
+        providerName: acc.providerName,
+        label: acc.label || acc.providerName,
+        monthlyRequestCap: acc.monthlyRequestCap,
+        monthlyTokenCap: acc.monthlyTokenCap,
+        requests: acc.monthlyUsage.requests,
+        promptTokens,
+        completionTokens,
+        totalTokens: acc.monthlyUsage.tokens,
+        inputCost,
+        outputCost,
+        totalCost,
+      })
+    }
+
+    return Object.values(grouped).sort((a, b) => b.summary.totalTokens - a.summary.totalTokens)
+  }, [filteredAccounts, pricingMap])
+
   // Flattened pricing rows for Pricing Settings UI
   const pricingRows = useMemo(() => {
     const map = pricingMap ?? {}
@@ -506,10 +669,35 @@ export default function AccountUsage() {
         </div>
       </div>
 
-      <ProviderTopology
-        nodes={(breakdown?.topology ?? []) as TopologyNode[]}
-        loading={breakdownQuery.isPending}
-      />
+      <div className="mb-6 grid min-w-0 grid-cols-1 items-stretch gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
+        <ProviderTopology
+          nodes={(breakdown?.topology ?? []) as TopologyNode[]}
+          loading={breakdownQuery.isPending}
+          activeRequests={sseState.activeRequests}
+          lastProvider={sseState.lastProvider || effectiveRecentRequests[0]?.provider || ''}
+          errorProvider={sseState.errorProvider}
+          onInspectRequests={(provider, onlyErrors) => {
+            setDetailFilterPreset({
+              provider,
+              status: onlyErrors ? 'error' : '',
+            })
+            setBreakdownTab('request-details')
+          }}
+        />
+        <RecentRequestsPanel
+          requests={effectiveRecentRequests}
+          loading={breakdownQuery.isPending}
+          liveConnected={sseState.connected}
+          onSelectRequest={req => {
+            setDetailFilterPreset({
+              provider: req.provider || '',
+              model: req.model || '',
+              status: req.status === 'error' ? 'error' : '',
+            })
+            setBreakdownTab('request-details')
+          }}
+        />
+      </div>
 
       {/* Pricing Settings Panel / Drawer */}
       {showPricingModal && (
@@ -886,93 +1074,13 @@ export default function AccountUsage() {
         </div>
       </section>
 
-      {/* Two Column Section: Top Models & Top Providers */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem', marginBottom: '1.5rem' }}>
-        {/* Top Models Card */}
-        <section className="x-panel" style={{ padding: '1.25rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
-            <Cpu size={18} color="#3b82f6" />
-            <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>Top Models by Consumption</h3>
-          </div>
-          {topModels.length === 0 ? (
-            <p className="x-caption" style={{ margin: 0 }}>Chưa có dữ liệu yêu cầu gần đây.</p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-              {topModels.map(m => (
-                <div
-                  key={m.model}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '0.5rem 0.75rem',
-                    background: 'var(--bg-subtle, rgba(0,0,0,0.03))',
-                    borderRadius: '6px',
-                    border: '1px solid var(--border)',
-                  }}
-                >
-                  <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '60%' }}>
-                    <code style={{ fontSize: '0.85rem' }}>{m.model}</code>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                      {m.requests.toLocaleString()} requests {m.errors > 0 && <span style={{ color: '#f87171' }}>({m.errors} errors)</span>}
-                    </div>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <strong style={{ fontSize: '0.9rem', color: '#10b981' }}>{fmtTokens(m.tokens)}</strong>
-                    <div style={{ fontSize: '0.75rem', color: '#f59e0b' }}>{fmtDollars(m.costDollars)}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* Top Providers Card */}
-        <section className="x-panel" style={{ padding: '1.25rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
-            <Server size={18} color="#10b981" />
-            <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>Top Providers by Volume</h3>
-          </div>
-          {topProviders.length === 0 ? (
-            <p className="x-caption" style={{ margin: 0 }}>Chưa có nhà cung cấp nào được kết nối.</p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-              {topProviders.map(p => (
-                <div
-                  key={p.provider}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '0.5rem 0.75rem',
-                    background: 'var(--bg-subtle, rgba(0,0,0,0.03))',
-                    borderRadius: '6px',
-                    border: '1px solid var(--border)',
-                  }}
-                >
-                  <div>
-                    <strong style={{ fontSize: '0.9rem' }}>{p.name}</strong>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                      {p.accountsCount} tài khoản kết nối • {p.requests.toLocaleString()} requests
-                    </div>
-                    {quotaSummaryByProvider.has(p.provider) && (
-                      <div style={{ fontSize: '0.72rem', color: '#3b82f6', marginTop: '0.15rem' }}>
-                        Hạn mức: {quotaSummaryByProvider.get(p.provider)}
-                      </div>
-                    )}
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <strong style={{ fontSize: '0.9rem', color: '#10b981' }}>{fmtTokens(p.tokens)}</strong>
-                    <div style={{ fontSize: '0.75rem', color: '#f59e0b' }}>{fmtDollars(p.costDollars)}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
+      {/* Two Column Section: Top Models & Top Providers (Tokens / Requests toggle) */}
+      <div className="mb-6 grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2">
+        <TopModelsChart models={modelChartEntries} />
+        <ProviderBarChart providers={providerChartEntries} />
       </div>
 
-      {/* Breakdown tabs */}
+      {/* Breakdown tabs + Costs/Tokens toggle + Range */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.75rem' }}>
         <div role="tablist" style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
           {BREAKDOWN_TABS.map(tab => (
@@ -997,33 +1105,47 @@ export default function AccountUsage() {
             </button>
           ))}
         </div>
-        <div style={{ display: 'flex', gap: '0.25rem', background: 'var(--bg-subtle, rgba(0,0,0,0.06))', padding: '0.2rem', borderRadius: '6px' }}>
-          {RANGE_OPTIONS.map(opt => (
-            <button
-              key={opt.id}
-              type="button"
-              onClick={() => setTimeRange(opt.id)}
-              style={{
-                padding: '0.25rem 0.65rem',
-                borderRadius: '4px',
-                fontSize: '0.75rem',
-                fontWeight: 500,
-                cursor: 'pointer',
-                border: 'none',
-                background: timeRange === opt.id ? 'var(--primary, #3b82f6)' : 'transparent',
-                color: timeRange === opt.id ? '#fff' : 'inherit',
-              }}
-            >
-              {opt.label}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2">
+          {breakdownTab !== 'request-details' && (
+            <UsageViewModeToggle value={tableViewMode} onChange={setTableViewMode} />
+          )}
+          <div style={{ display: 'flex', gap: '0.25rem', background: 'var(--bg-subtle, rgba(0,0,0,0.06))', padding: '0.2rem', borderRadius: '6px' }}>
+            {RANGE_OPTIONS.map(opt => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setTimeRange(opt.id)}
+                style={{
+                  padding: '0.25rem 0.65rem',
+                  borderRadius: '4px',
+                  fontSize: '0.75rem',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  border: 'none',
+                  background: timeRange === opt.id ? 'var(--primary, #3b82f6)' : 'transparent',
+                  color: timeRange === opt.id ? '#fff' : 'inherit',
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {breakdownTab === 'request-details' && <RequestDetailsPanel />}
+      {breakdownTab === 'request-details' && (
+        <RequestDetailsPanel presetFilters={detailFilterPreset} />
+      )}
 
       {breakdownTab !== 'provider' && breakdownTab !== 'request-details' && (
-        <BreakdownPanel tab={breakdownTab} data={breakdown} loading={breakdownQuery.isPending} error={breakdownQuery.isError} />
+        <BreakdownPanel
+          tab={breakdownTab}
+          data={breakdown}
+          loading={breakdownQuery.isPending}
+          error={breakdownQuery.isError}
+          viewMode={tableViewMode}
+          pricingMap={pricingMap}
+        />
       )}
 
       {/* Account Usage Breakdown Table & Provider Search */}
@@ -1077,82 +1199,46 @@ export default function AccountUsage() {
           </div>
         </div>
 
-        <div className="x-table-wrap">
-          <table className="x-table">
-            <thead>
-              <tr>
-                <th>{s.accounts}</th>
-                <th>{s.providers}</th>
-                <th>Hạn mức Provider (Quota)</th>
-                <th>Sử dụng tháng này</th>
-                <th>Ước tính chi phí</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredAccounts.map(account => {
-                const accountCost = calculateBlendedTokensCostDollars(
-                  account.provider,
-                  undefined,
-                  account.monthlyUsage.tokens,
-                  pricingMap,
-                )
-                return (
-                  <tr key={account.id}>
-                    <th>
-                      <Link to={`/thruline/providers/${encodeURIComponent(account.provider)}`}>
-                        {account.label || account.providerName}
-                      </Link>
-                    </th>
-                    <td>{account.providerName}</td>
-                    <td>
-                      <AccountQuotaSummary
-                        quota={quotaByAccount.get(account.id)}
-                        now={now}
-                        compact
-                        refreshing={
-                          refreshAllQuotas.isPending ||
-                          (refreshOneQuota.isPending && refreshOneQuota.variables === account.id)
-                        }
-                        onRefresh={canViewQuota ? () => refreshOneQuota.mutate(account.id) : undefined}
-                      />
-                    </td>
-                    <td>
-                      <div style={{ fontSize: '0.8125rem' }}>
-                        <div>
-                          {account.monthlyUsage.requests.toLocaleString()} reqs
-                          {account.monthlyRequestCap > 0 && (
-                            <small> / {account.monthlyRequestCap.toLocaleString()}</small>
-                          )}
-                        </div>
-                        <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
-                          {fmtTokens(account.monthlyUsage.tokens)} tokens
-                          {account.monthlyTokenCap > 0 && (
-                            <small> / {fmtTokens(account.monthlyTokenCap)}</small>
-                          )}
-                        </div>
-                      </div>
-                    </td>
-                    <td>
-                      <span style={{ color: '#f59e0b', fontWeight: 500 }}>
-                        {fmtDollars(accountCost)}
-                      </span>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-          {!filteredAccounts.length && (
-            <div className="x-empty">
-              <p>{providerSearch ? 'Không tìm thấy tài khoản phù hợp với từ khóa.' : s.noAccounts}</p>
-              {!accounts.length && (
-                <Link className="x-button" to="/thruline/providers">
-                  {s.addAccount}
-                </Link>
-              )}
-            </div>
+        <UsageTable
+          primaryHeader={s.providers}
+          extraHeaders={
+            <>
+              <th>{s.accounts}</th>
+              <th style={{ textAlign: 'right' }}>Cap (Req / Tok)</th>
+            </>
+          }
+          groups={providerTableGroups}
+          viewMode={tableViewMode}
+          storageKey="thruline-usage:expanded-provider"
+          renderSummaryExtraCells={() => (
+            <>
+              <td className="text-muted-foreground">—</td>
+              <td style={{ textAlign: 'right' }} className="text-muted-foreground">—</td>
+            </>
           )}
-        </div>
+          renderDetailExtraCells={item => (
+            <>
+              <td>
+                <Link to={`/thruline/providers/${encodeURIComponent(item.provider)}`}>
+                  {item.label}
+                </Link>
+              </td>
+              <td style={{ textAlign: 'right' }}>
+                <small>
+                  {item.monthlyRequestCap || '∞'} / {item.monthlyTokenCap ? fmtTokens(item.monthlyTokenCap) : '∞'}
+                </small>
+              </td>
+            </>
+          )}
+          emptyMessage={providerSearch ? 'Không tìm thấy tài khoản phù hợp với từ khóa.' : s.noAccounts}
+        />
+        {!filteredAccounts.length && !accounts.length && (
+          <div style={{ marginTop: '0.75rem', textAlign: 'center' }}>
+            <Link className="x-button" to="/thruline/providers">
+              {s.addAccount}
+            </Link>
+          </div>
+        )}
       </section>
       )}
     </>
@@ -1189,6 +1275,7 @@ interface BreakdownStats {
 interface UsageBreakdown {
   range: TimeRange
   topology: Array<TopologyNode & { cooldownAccounts: number }>
+  recentRequests?: RecentRequestItem[]
   byModel: Array<BreakdownStats & { provider: string; model: string; estimatedCostUsd: number }>
   byAccount: Array<{
     id: number; provider: string; providerName: string; label: string; monthlyRequests: number
@@ -1205,102 +1292,244 @@ function BreakdownPanel({
   data,
   loading,
   error,
+  viewMode,
+  pricingMap,
 }: {
   tab: Exclude<BreakdownTab, 'provider' | 'request-details'>
   data: UsageBreakdown | undefined
   loading: boolean
   error: boolean
+  viewMode: UsageViewMode
+  pricingMap: ProviderPricingMap | undefined
 }) {
-  const statCells = (r: BreakdownStats) => (
-    <>
-      <td>{r.requests.toLocaleString()}</td>
-      <td>{fmtTokens(r.promptTokens)}</td>
-      <td>{fmtTokens(r.completionTokens)}</td>
-      <td>{r.successRate}%</td>
-      <td>{r.avgLatencyMs} ms</td>
-    </>
-  )
-  const statHeads = (
-    <>
-      <th>Requests</th>
-      <th>Prompt</th>
-      <th>Completion</th>
-      <th>Success</th>
-      <th>Avg latency</th>
-    </>
-  )
-
-  let body: React.ReactNode = null
-  let empty = true
-  if (data) {
-    if (tab === 'model') {
-      empty = data.byModel.length === 0
-      body = (
-        <table className="x-table">
-          <thead><tr><th>Model</th><th>Provider</th>{statHeads}<th>Errors</th><th>Est. cost</th></tr></thead>
-          <tbody>
-            {data.byModel.map(r => (
-              <tr key={`${r.provider}/${r.model}`}>
-                <th>{r.model}</th>
-                <td>{r.provider}</td>
-                {statCells(r)}
-                <td>{r.errorCount}</td>
-                <td><span style={{ color: '#f59e0b', fontWeight: 500 }}>{fmtDollars(r.estimatedCostUsd)}</span></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )
-    } else if (tab === 'client') {
-      empty = data.byClientKey.length === 0
-      body = (
-        <table className="x-table">
-          <thead><tr><th>Client key</th><th>Prefix</th>{statHeads}<th>Errors</th></tr></thead>
-          <tbody>
-            {data.byClientKey.map(r => (
-              <tr key={r.id} style={r.revoked ? { opacity: 0.5 } : undefined}>
-                <th>
-                  {r.name}
-                  {r.revoked && <small> (revoked)</small>}
-                  {r.sharedOwner && <small title="Keys of the same owner share figures"> (shared owner)</small>}
-                </th>
-                <td><code>{r.keyPrefix}...</code></td>
-                {statCells(r)}
-                <td>{r.errorCount}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )
-    } else {
-      empty = false
-      body = (
-        <table className="x-table">
-          <thead><tr><th>Endpoint</th>{statHeads}<th>Errors</th></tr></thead>
-          <tbody>
-            {data.byEndpoint.map(r => (
-              <tr key={r.endpoint}>
-                <th><code>/thruline/v1/{r.endpoint}</code></th>
-                {statCells(r)}
-                <td>{r.errorCount}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )
-    }
+  if (loading || error || !data) {
+    return (
+      <section className="x-panel" style={{ padding: '1.25rem' }}>
+        <div className="x-empty">
+          <p>{loading ? 'Loading...' : error ? 'Could not load usage breakdown.' : 'No usage recorded for this range.'}</p>
+        </div>
+      </section>
+    )
   }
+
+  if (tab === 'model') {
+    type ModelRow = BreakdownStats & {
+      provider: string
+      model: string
+      inputCost: number
+      outputCost: number
+      totalCost: number
+    }
+    const grouped: Record<string, UsageGroup<ModelRow>> = {}
+    for (const r of data.byModel) {
+      const rate = resolveClientModelPricing(r.provider, r.model, pricingMap)
+      const inputCost = (r.promptTokens * rate.input) / 1_000_000
+      const outputCost = (r.completionTokens * rate.output) / 1_000_000
+      const totalCost = r.estimatedCostUsd ?? inputCost + outputCost
+      const row: ModelRow = { ...r, inputCost, outputCost, totalCost }
+      if (!grouped[r.model]) {
+        grouped[r.model] = {
+          groupKey: r.model,
+          label: <code>{r.model}</code>,
+          summary: {
+            requests: 0,
+            promptTokens: 0,
+            completionTokens: 0,
+            totalTokens: 0,
+            inputCost: 0,
+            outputCost: 0,
+            totalCost: 0,
+            errors: 0,
+          },
+          items: [],
+        }
+      }
+      const s = grouped[r.model].summary
+      s.requests += r.requests
+      s.promptTokens += r.promptTokens
+      s.completionTokens += r.completionTokens
+      s.totalTokens += r.totalTokens
+      s.inputCost += inputCost
+      s.outputCost += outputCost
+      s.totalCost += totalCost
+      s.errors = (s.errors ?? 0) + r.errorCount
+      grouped[r.model].items.push(row)
+    }
+
+    return (
+      <section className="x-panel" style={{ padding: '1.25rem' }}>
+        <UsageTable
+          primaryHeader="Model"
+          extraHeaders={
+            <>
+              <th>Provider</th>
+              <th style={{ textAlign: 'right' }}>Success</th>
+              <th style={{ textAlign: 'right' }}>Avg latency</th>
+              <th style={{ textAlign: 'right' }}>Errors</th>
+            </>
+          }
+          groups={Object.values(grouped)}
+          viewMode={viewMode}
+          storageKey="thruline-usage:expanded-model"
+          renderSummaryExtraCells={g => (
+            <>
+              <td className="text-muted-foreground">—</td>
+              <td style={{ textAlign: 'right' }} className="text-muted-foreground">—</td>
+              <td style={{ textAlign: 'right' }} className="text-muted-foreground">—</td>
+              <td style={{ textAlign: 'right' }}>
+                {(g.summary.errors ?? 0) > 0 ? (
+                  <span className="text-red-400 font-semibold">{g.summary.errors}</span>
+                ) : (
+                  0
+                )}
+              </td>
+            </>
+          )}
+          renderDetailExtraCells={r => (
+            <>
+              <td>{r.provider}</td>
+              <td style={{ textAlign: 'right' }}>{r.successRate}%</td>
+              <td style={{ textAlign: 'right' }}>{r.avgLatencyMs} ms</td>
+              <td style={{ textAlign: 'right' }}>
+                {r.errorCount > 0 ? <span className="text-red-400 font-semibold">{r.errorCount}</span> : 0}
+              </td>
+            </>
+          )}
+        />
+      </section>
+    )
+  }
+
+  if (tab === 'client') {
+    type ClientRow = BreakdownStats & {
+      id: number
+      name: string
+      keyPrefix: string
+      revoked: boolean
+      sharedOwner: boolean
+      inputCost: number
+      outputCost: number
+      totalCost: number
+    }
+    const groups: UsageGroup<ClientRow>[] = data.byClientKey.map(r => {
+      const inputCost = calculateTokenCostDollars(undefined, undefined, r.promptTokens, 0, pricingMap)
+      const outputCost = calculateTokenCostDollars(undefined, undefined, 0, r.completionTokens, pricingMap)
+      const row: ClientRow = { ...r, inputCost, outputCost, totalCost: inputCost + outputCost }
+      return {
+        groupKey: String(r.id),
+        label: (
+          <span style={r.revoked ? { opacity: 0.5 } : undefined}>
+            {r.name}
+            {r.revoked && <small> (revoked)</small>}
+            {r.sharedOwner && <small title="Keys of the same owner share figures"> (shared owner)</small>}
+          </span>
+        ),
+        summary: {
+          requests: r.requests,
+          promptTokens: r.promptTokens,
+          completionTokens: r.completionTokens,
+          totalTokens: r.totalTokens,
+          inputCost,
+          outputCost,
+          totalCost: inputCost + outputCost,
+          errors: r.errorCount,
+        },
+        items: [row],
+      }
+    })
+
+    return (
+      <section className="x-panel" style={{ padding: '1.25rem' }}>
+        <UsageTable
+          primaryHeader="Client key"
+          extraHeaders={
+            <>
+              <th>Prefix</th>
+              <th style={{ textAlign: 'right' }}>Success</th>
+              <th style={{ textAlign: 'right' }}>Avg latency</th>
+              <th style={{ textAlign: 'right' }}>Errors</th>
+            </>
+          }
+          groups={groups}
+          viewMode={viewMode}
+          storageKey="thruline-usage:expanded-client"
+          renderSummaryExtraCells={g => (
+            <>
+              <td><code>{g.items[0]?.keyPrefix}...</code></td>
+              <td style={{ textAlign: 'right' }}>{g.items[0]?.successRate ?? 0}%</td>
+              <td style={{ textAlign: 'right' }}>{g.items[0]?.avgLatencyMs ?? 0} ms</td>
+              <td style={{ textAlign: 'right' }}>{g.summary.errors ?? 0}</td>
+            </>
+          )}
+          renderDetailExtraCells={r => (
+            <>
+              <td><code>{r.keyPrefix}...</code></td>
+              <td style={{ textAlign: 'right' }}>{r.successRate}%</td>
+              <td style={{ textAlign: 'right' }}>{r.avgLatencyMs} ms</td>
+              <td style={{ textAlign: 'right' }}>{r.errorCount}</td>
+            </>
+          )}
+        />
+      </section>
+    )
+  }
+
+  type EndpointRow = BreakdownStats & {
+    endpoint: string
+    inputCost: number
+    outputCost: number
+    totalCost: number
+  }
+  const endpointGroups: UsageGroup<EndpointRow>[] = data.byEndpoint.map(r => {
+    const inputCost = calculateTokenCostDollars(undefined, undefined, r.promptTokens, 0, pricingMap)
+    const outputCost = calculateTokenCostDollars(undefined, undefined, 0, r.completionTokens, pricingMap)
+    const row: EndpointRow = { ...r, inputCost, outputCost, totalCost: inputCost + outputCost }
+    return {
+      groupKey: r.endpoint,
+      label: <code>/thruline/v1/{r.endpoint}</code>,
+      summary: {
+        requests: r.requests,
+        promptTokens: r.promptTokens,
+        completionTokens: r.completionTokens,
+        totalTokens: r.totalTokens,
+        inputCost,
+        outputCost,
+        totalCost: inputCost + outputCost,
+        errors: r.errorCount,
+      },
+      items: [row],
+    }
+  })
 
   return (
     <section className="x-panel" style={{ padding: '1.25rem' }}>
-      <div className="x-table-wrap">
-        {body}
-        {(loading || error || empty) && (
-          <div className="x-empty">
-            <p>{loading ? 'Loading...' : error ? 'Could not load usage breakdown.' : 'No usage recorded for this range.'}</p>
-          </div>
+      <UsageTable
+        primaryHeader="Endpoint"
+        extraHeaders={
+          <>
+            <th style={{ textAlign: 'right' }}>Success</th>
+            <th style={{ textAlign: 'right' }}>Avg latency</th>
+            <th style={{ textAlign: 'right' }}>Errors</th>
+          </>
+        }
+        groups={endpointGroups}
+        viewMode={viewMode}
+        storageKey="thruline-usage:expanded-endpoint"
+        renderSummaryExtraCells={g => (
+          <>
+            <td style={{ textAlign: 'right' }}>{g.items[0]?.successRate ?? 0}%</td>
+            <td style={{ textAlign: 'right' }}>{g.items[0]?.avgLatencyMs ?? 0} ms</td>
+            <td style={{ textAlign: 'right' }}>{g.summary.errors ?? 0}</td>
+          </>
         )}
-      </div>
+        renderDetailExtraCells={r => (
+          <>
+            <td style={{ textAlign: 'right' }}>{r.successRate}%</td>
+            <td style={{ textAlign: 'right' }}>{r.avgLatencyMs} ms</td>
+            <td style={{ textAlign: 'right' }}>{r.errorCount}</td>
+          </>
+        )}
+      />
     </section>
   )
 }
@@ -1376,11 +1605,20 @@ const fmtDetailTime = (value: string) => {
   return Number.isNaN(d.getTime()) ? value : d.toLocaleString()
 }
 
-function RequestDetailsPanel() {
+function RequestDetailsPanel({ presetFilters }: { presetFilters?: Partial<DetailFilters> | null }) {
   const revision = useSessionRevision()
   const [page, setPage] = useState(1)
-  const [filters, setFilters] = useState<DetailFilters>(EMPTY_DETAIL_FILTERS)
+  const [filters, setFilters] = useState<DetailFilters>(() => ({
+    ...EMPTY_DETAIL_FILTERS,
+    ...presetFilters,
+  }))
   const [selected, setSelected] = useState<RequestDetailRow | null>(null)
+
+  useEffect(() => {
+    if (!presetFilters) return
+    setFilters({ ...EMPTY_DETAIL_FILTERS, ...presetFilters })
+    setPage(1)
+  }, [presetFilters])
 
   const detailsQuery = useQuery({
     queryKey: ['x-request-details', page, filters, revision],

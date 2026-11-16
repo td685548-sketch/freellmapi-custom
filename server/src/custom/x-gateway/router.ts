@@ -11,7 +11,9 @@ import { assessProviderUrl } from '../../lib/url-guard.js';
 import { withQuotaTracking } from './quota/tracking.js';
 import { applyQuotaRouting } from './quota/store.js';
 import { logRequest } from '../../lib/request-log.js';
+import { getClientContext } from '../../lib/client-context.js';
 import { sanitizeProviderErrorMessage } from '../../lib/error-redaction.js';
+import { beginUsageRequest, cancelUsageRequest, endUsageRequest } from './usage-stream.js';
 import { applyOutputSavers } from '../output-savers/apply.js';
 import { buildSaverBlock } from '../output-savers/prompts.js';
 import {
@@ -624,6 +626,11 @@ export function applyGatewaySavers(req: Request, messages: ChatMessage[]): {
 // POST /thruline/v1/chat/completions — dispatch exclusively over x_gateway_keys
 export async function handleXGatewayChat(req: Request, res: Response): Promise<void> {
   const startMs = Date.now();
+  const fromPlayground = Boolean(res.locals?.fromPlayground || req.headers['x-thruline-playground'] === '1');
+  if (fromPlayground) {
+    const clientCtx = getClientContext();
+    clientCtx.agent = 'playground' as typeof clientCtx.agent;
+  }
   const body = (req.body && typeof req.body === 'object') ? req.body as Record<string, unknown> : {};
   const rawMessages = Array.isArray(body.messages) ? (body.messages as ChatMessage[]) : [];
   if (rawMessages.length === 0) {
@@ -787,18 +794,41 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
         const abortChildren = () => { for (const child of children) child.abort(); };
         const onAbort = () => abortChildren();
         controller.signal.addEventListener('abort', onAbort);
+        const fusionTokens = fusionCandidates.map(c => beginUsageRequest(c.account.provider, c.modelId, fromPlayground));
         try {
           const winner = await raceFirstSuccess(fusionCandidates.map((candidate, index) =>
             attemptNonStream(candidate, children[index].signal)));
-          if (controller.signal.aborted) return;
+          if (controller.signal.aborted) {
+            for (const token of fusionTokens) cancelUsageRequest(token);
+            return;
+          }
           recordRouteOutcome(healthKey(winner.candidate), { latencyMs: winner.latencyMs });
           succeedNonStream(winner);
+          for (let i = 0; i < fusionCandidates.length; i += 1) {
+            const c = fusionCandidates[i];
+            if (c === winner.candidate) {
+              endUsageRequest(fusionTokens[i], { status: 'success', provider: c.account.provider, model: c.modelId });
+            } else {
+              cancelUsageRequest(fusionTokens[i]);
+            }
+          }
           return;
         } catch (err) {
-          if (controller.signal.aborted) return;
+          if (controller.signal.aborted) {
+            for (const token of fusionTokens) cancelUsageRequest(token);
+            return;
+          }
           lastError = err;
-          for (const candidate of fusionCandidates) {
+          const errMsg = sanitizeProviderErrorMessage(err instanceof Error ? err.message : 'Fusion attempt failed');
+          for (let i = 0; i < fusionCandidates.length; i += 1) {
+            const candidate = fusionCandidates[i];
             recordRouteOutcome(healthKey(candidate), { error: true });
+            endUsageRequest(fusionTokens[i], {
+              status: 'error',
+              provider: candidate.account.provider,
+              model: candidate.modelId,
+              errorMessage: errMsg,
+            });
           }
           // Fall through to the sequential loop, which retries every step in order.
         } finally {
@@ -813,13 +843,26 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
       const { account, modelId } = candidate;
 
       if (!isStream) {
+        const activeToken = beginUsageRequest(account.provider, modelId, fromPlayground);
         try {
           const result = await attemptNonStream(candidate, controller.signal);
           recordRouteOutcome(healthKey(candidate), { latencyMs: result.latencyMs });
           succeedNonStream(result);
+          endUsageRequest(activeToken, { status: 'success', provider: account.provider, model: modelId });
           return;
         } catch (err) {
+          if (controller.signal.aborted) {
+            cancelUsageRequest(activeToken);
+            return;
+          }
           recordRouteOutcome(healthKey(candidate), { error: true });
+          const errMsg = sanitizeProviderErrorMessage(err instanceof Error ? err.message : 'Provider error');
+          endUsageRequest(activeToken, {
+            status: 'error',
+            provider: account.provider,
+            model: modelId,
+            errorMessage: errMsg,
+          });
           lastError = err;
           continue;
         }
@@ -843,6 +886,7 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
 
       const effectiveProxy = resolveXGatewayAccountProxy(account);
       const streamStartedAt = Date.now();
+      const activeToken = beginUsageRequest(account.provider, modelId, fromPlayground);
 
       try {
         await withQuotaTracking(account, modelId, effectiveProxy, async () => {
@@ -892,15 +936,50 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
             'x-gateway',
           );
         });
+        if (controller.signal.aborted) {
+          cancelUsageRequest(activeToken);
+        } else {
+          endUsageRequest(activeToken, { status: 'success', provider: account.provider, model: modelId });
+        }
         return;
       } catch (err) {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted) {
+          cancelUsageRequest(activeToken);
+          return;
+        }
         recordRouteOutcome(healthKey(candidate), { error: true });
+        const errMsg = sanitizeProviderErrorMessage(err instanceof Error ? err.message : 'Stream interrupted');
         if (res.headersSent) {
-          res.write(`data: ${JSON.stringify({ error: { message: sanitizeProviderErrorMessage(err instanceof Error ? err.message : 'Stream interrupted') } })}\n\n`);
+          logRequest(
+            account.provider,
+            modelId,
+            null,
+            'error',
+            0,
+            0,
+            Date.now() - startMs,
+            errMsg,
+            null,
+            requestedModel === 'auto' ? null : requestedModel,
+            null,
+            'x-gateway',
+          );
+          endUsageRequest(activeToken, {
+            status: 'error',
+            provider: account.provider,
+            model: modelId,
+            errorMessage: errMsg,
+          });
+          res.write(`data: ${JSON.stringify({ error: { message: errMsg } })}\n\n`);
           res.end();
           return;
         }
+        endUsageRequest(activeToken, {
+          status: 'error',
+          provider: account.provider,
+          model: modelId,
+          errorMessage: errMsg,
+        });
         lastError = err;
         continue;
       }
@@ -914,7 +993,7 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
         firstCandidate.modelId,
         null,
         'error',
-        estimatedPromptTokens,
+        0,
         0,
         Date.now() - startMs,
         message,
@@ -923,6 +1002,12 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
         null,
         'x-gateway',
       );
+      endUsageRequest(null, {
+        status: 'error',
+        provider: firstCandidate.account.provider,
+        model: firstCandidate.modelId,
+        errorMessage: message,
+      });
     }
     res.status(502).json({
       error: { message, type: 'upstream_error' },

@@ -67,5 +67,6 @@ xPlaygroundRouter.post('/playground/chat', async (req, res) => {
     return;
   }
   req.body = { ...parsed.data, stream: true, stream_options: { include_usage: true } };
+  res.locals.fromPlayground = true;
   await handleXGatewayChat(req, res);
 });

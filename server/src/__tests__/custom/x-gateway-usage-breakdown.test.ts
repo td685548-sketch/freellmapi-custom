@@ -24,14 +24,15 @@ function seedAccount(provider: string, opts: { enabled?: number; status?: string
 
 function seedRequest(r: {
   platform: string; model: string; status?: string; inTok?: number; outTok?: number; latency?: number;
-  type?: string; caller?: string; userId?: number | null; createdAt?: string;
+  type?: string; caller?: string; userId?: number | null; createdAt?: string; error?: string | null; clientAgent?: string | null;
 }): void {
   getDb().prepare(`INSERT INTO requests
-    (platform, model_id, status, input_tokens, output_tokens, latency_ms, caller, request_type, user_id, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    (platform, model_id, status, input_tokens, output_tokens, latency_ms, caller, request_type, user_id, created_at, error, client_agent)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(r.platform, r.model, r.status ?? 'success', r.inTok ?? 0, r.outTok ?? 0, r.latency ?? 0,
       r.caller ?? 'x-gateway', r.type ?? 'chat', r.userId ?? null,
-      r.createdAt ?? new Date().toISOString().slice(0, 19).replace('T', ' '));
+      r.createdAt ?? new Date().toISOString().slice(0, 19).replace('T', ' '),
+      r.error ?? null, r.clientAgent ?? null);
 }
 
 function breakdown(range?: string, token = session) {
@@ -100,7 +101,8 @@ describe('GET /api/thruline/usage/breakdown', () => {
     const byId = Object.fromEntries(body.topology.map((t: any) => [t.provider, t]));
     expect(Object.keys(byId).sort()).toEqual(['groq', 'mistral', 'xai']);
 
-    expect(byId.xai.status).toBe('healthy');
+    expect(byId.xai.status).toBe('degraded');
+    expect(byId.xai.errorCount).toBe(1);
     expect(byId.xai.totalAccounts).toBe(2);
     expect(byId.xai.activeAccounts).toBe(2);
     expect(byId.xai.requests).toBe(3);
@@ -194,5 +196,80 @@ describe('GET /api/thruline/usage/breakdown', () => {
     expect(ep.fetch.requests).toBe(0);
     expect(ep.messages.requests).toBe(0);
     expect(ep.responses.requests).toBe(0);
+  });
+
+  it('marks 0%-success provider as error and populates errorCount, lastError, failedModels, and recentRequests', async () => {
+    seedAccount('xai');
+    seedRequest({
+      platform: 'xai',
+      model: 'grok-4',
+      status: 'error',
+      latency: 120,
+      error: '401 Invalid API key',
+      clientAgent: 'playground',
+    });
+    const body = await (await breakdown('24h')).json() as any;
+    expect(body.topology[0]).toMatchObject({
+      provider: 'xai',
+      status: 'error',
+      errorCount: 1,
+      lastError: {
+        model: 'grok-4',
+        message: '401 Invalid API key',
+        fromPlayground: true,
+      },
+      failedModels: [
+        {
+          model: 'grok-4',
+          errorCount: 1,
+          lastErrorMessage: '401 Invalid API key',
+        },
+      ],
+    });
+    expect(body.recentRequests).toHaveLength(1);
+    expect(body.recentRequests[0]).toMatchObject({
+      provider: 'xai',
+      model: 'grok-4',
+      status: 'error',
+      promptTokens: 0,
+      completionTokens: 0,
+      latencyMs: 120,
+      errorMessage: '401 Invalid API key',
+      fromPlayground: true,
+    });
+  });
+
+  it('streams initial usage snapshot on GET /api/thruline/usage/stream', async () => {
+    seedRequest({
+      platform: 'groq',
+      model: 'llama-3.3-70b',
+      status: 'error',
+      error: 'Rate limited',
+      clientAgent: 'playground',
+    });
+    const ac = new AbortController();
+    const res = await fetch(`${base}/api/thruline/usage/stream`, {
+      headers: { Authorization: `Bearer ${session}` },
+      signal: ac.signal,
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/event-stream');
+    const reader = res.body!.getReader();
+    const { value } = await reader.read();
+    const text = new TextDecoder().decode(value);
+    ac.abort();
+    const dataLine = text.split('\n').find(l => l.startsWith('data: '));
+    expect(dataLine).toBeTruthy();
+    const payload = JSON.parse(dataLine!.slice(6));
+    expect(payload.activeRequests).toEqual([]);
+    expect(payload.lastProvider).toBe('groq');
+    expect(payload.recentRequests).toHaveLength(1);
+    expect(payload.recentRequests[0]).toMatchObject({
+      provider: 'groq',
+      model: 'llama-3.3-70b',
+      status: 'error',
+      errorMessage: 'Rate limited',
+      fromPlayground: true,
+    });
   });
 });
