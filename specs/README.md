@@ -31,10 +31,7 @@ Cách xác định trạng thái: đếm checkbox trong `tasks.md`, rồi đối
 | 019-ai-support-service-desk | Service Desk | 32/32 | PR #32 | |
 | 020-ai-support-output-controls | Kiểm soát đầu ra cho support | 19/19 | PR #73, #78 | Trùng số 020 với spec dưới |
 | 020-azure-document-storage | Lưu archive tài liệu tenant lên Azure Blob | 5/5 | PR #41 | Code xong; chưa bật trên production (mục 2) |
-
-### 018-ai-platform-upgrade: phần chính xong, còn Polish
-
-US1–US7 đã merge: nền tảng (PR #48), MCP client (PR #52), Output Guard (PR #69), Semantic Retrieval (PR #74), Prompt Cache, Versioned Prompts và Orchestrator (PR #77). Trong `tasks.md` đã tick T001–T131. Các task còn mở xem ở mục 3A.
+| 018-ai-platform-upgrade | 6 trụ cột AI: prompts, retrieval, prompt cache, MCP, output guard, orchestrator | 140/140 | PR #48, #52, #69, #74, #77; Phase Polish trên nhánh `chore/ai-platform-polish` | Tài liệu vận hành: [`docs/ai-platform.md`](../docs/ai-platform.md); nghiệm thu: [`acceptance.md`](018-ai-platform-upgrade/acceptance.md) |
 
 ## 2. Việc vận hành (không cần spec)
 
@@ -47,19 +44,16 @@ US1–US7 đã merge: nền tảng (PR #48), MCP client (PR #52), Output Guard (
 
 ## 3. Việc chưa làm
 
-### 3A. Đã có spec, chỉ cần làm tiếp (dùng `/speckit-implement` trên 018)
+### 3A. Đã có spec, chỉ cần làm tiếp
 
-Đây là các task còn mở trong `specs/018-ai-platform-upgrade/tasks.md`:
+Không còn task nào mở trong các spec hiện có (ngoài việc vận hành ở mục 2). Phase Polish của 018 (T132–T140) đã xong. Trong lúc làm đã phát hiện và sửa 5 lỗi:
 
-- **T132**: chưa có `all-pillars.test.ts`. Chưa có test nào bật cả 6 trụ cột trên cùng một client key.
-- **T133**: `backup-restore.test.ts` mới phủ migration nền, chưa phủ các bảng `custom_ai_*` của US2–US7.
-- **T134**: `secret-leak.test.ts` chủ yếu phủ MCP, chưa phủ các trụ cột còn lại.
-- **T135**: chưa đo overhead khi tắt mọi công tắc (ngưỡng 5%).
-- **T136**: chưa có `docs/ai-platform.md`.
-- **T137**: chạy lại kiểm tra đủ khóa i18n cho toàn bộ trụ cột.
-- **T138**: chưa có `acceptance.md` (chạy quickstart thật, gồm Docker single-user).
-- **T139**: chưa cập nhật CHANGELOG và bảng "Điểm móc".
-- **T140** (mới thêm khi rà soát): migration MCP không có trigger `AFTER DELETE ON client_profiles`. Vì vậy khi xóa profile, `custom_ai_tool_bindings` có `scope_kind = 'profile'` và khóa `ai_platform_scope_profile_<id>_mcp_binding` không bị xóa. Các trụ cột khác đã có trigger. Mức độ thấp vì `client_profiles.id` dùng `AUTOINCREMENT` nên ID không bị dùng lại, nhưng vẫn để lại dữ liệu mồ côi.
+- Xóa client profile để lại dữ liệu MCP (T140), và trigger mới chưa được khai báo cho cache đọc của Turso.
+- Chỉ mục ngữ nghĩa không tự dựng lại sau khi khôi phục bản sao lưu không có embeddings (T133).
+- Lỗi từ provider embeddings có thể lưu và trả về API key (T134).
+- Biến `x-freellm-vars` của caller bị mất trong vòng lặp tool MCP (T132).
+
+Chi tiết và kết quả nghiệm thu: `specs/018-ai-platform-upgrade/acceptance.md`.
 
 ### 3B. Cần spec mới (chưa bắt đầu)
 
