@@ -3,6 +3,7 @@ import type { ChatMessage } from '@freellmapi/shared/types.js';
 import { getDb, getUnifiedApiKey } from '../db/index.js';
 import { validateUserApiKey, USER_KEY_PREFIX } from '../services/user-keys.js';
 import { profileIdForPreviousKey } from '../services/profile-previous-keys.js';
+import { renderPrompt } from '../custom/ai-platform/prompts/render.js';
 
 // Per-client API keys with server-enforced system prompts (#411). A client
 // profile is a second kind of inference credential: it authenticates ONLY the
@@ -89,6 +90,7 @@ export function resolveAuth(token: string | undefined): ResolvedAuth | null {
  * An empty/null prompt is a neutral passthrough: nothing is injected.
  */
 export function prependSystemPrompt(messages: ChatMessage[], prompt: string | null | undefined): ChatMessage[] {
-  if (prompt == null || prompt.trim().length === 0) return messages;
-  return [{ role: 'system', content: prompt }, ...messages];
+  const effective = renderPrompt(prompt);
+  if (effective == null || effective.trim().length === 0) return messages;
+  return [{ role: 'system', content: effective }, ...messages];
 }

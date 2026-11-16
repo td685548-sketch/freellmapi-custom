@@ -15,6 +15,7 @@ import { getFlags, setFlags } from './flags.js';
 import { mcpAdminRouter } from './mcp-client/router.js';
 import { outputGuardAdminRouter } from './output-guard/router.js';
 import { promptCacheAdminRouter } from './prompt-cache/router.js';
+import { promptsAdminRouter } from './prompts/router.js';
 import { retrievalAdminRouter } from './retrieval/router.js';
 
 const RETENTION_KEY = 'ai_platform_retention_v1';
@@ -85,12 +86,17 @@ aiPlatformRouter.get('/overview', requirePerm('view_ai_platform'), (_req, res) =
   const pillars = Object.fromEntries(
     PILLARS.map((pillar) => {
       const ready =
+        pillar === 'prompts' ||
         pillar === 'mcpClient' ||
         pillar === 'outputGuard' ||
         pillar === 'retrieval' ||
         pillar === 'promptCache';
       const summary =
-        pillar === 'mcpClient'
+        pillar === 'prompts'
+          ? flags[pillar]
+            ? 'System prompts runtime active.'
+            : 'System prompts ready (disabled by default).'
+          : pillar === 'mcpClient'
           ? flags[pillar]
             ? 'MCP client runtime active.'
             : 'MCP client ready (disabled by default).'
@@ -183,3 +189,4 @@ aiPlatformRouter.use(mcpAdminRouter);
 aiPlatformRouter.use(outputGuardAdminRouter);
 aiPlatformRouter.use(retrievalAdminRouter);
 aiPlatformRouter.use(promptCacheAdminRouter);
+aiPlatformRouter.use(promptsAdminRouter);

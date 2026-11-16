@@ -49,6 +49,7 @@ import {
   getWidgetScript,
 } from './support-runtime-router.js';
 import { getSupportConversationForUser } from './support-workflows.js';
+import { renderTenantSystemPrompt } from '../ai-platform/prompts/render.js';
 
 // ---------------------------------------------------------------------------
 // Shared Types
@@ -446,7 +447,7 @@ export async function executeSupportChatPipeline(options: {
     : '';
 
   const rawSystemPrompt = [
-    tenant.systemPrompt?.trim() || 'You are an AI Support Assistant for this organization.',
+    renderTenantSystemPrompt(tenant, userContext).trim() || 'You are an AI Support Assistant for this organization.',
     '',
     '--- CUSTOMER IDENTITY & RBAC CONTEXT ---',
     `User ID: ${userContext.userId}`,

@@ -16,6 +16,7 @@ import { cacheUsageFilter } from './prompt-cache/stats.js';
 import { detectWire } from './wire/detect.js';
 import { installInterceptor, type OutputFilter } from './wire/interceptor.js';
 import { injectRetrievedKnowledgeForSlot6 } from '../knowledge-inject.js';
+import { capturePromptRequestContext } from './prompts/render.js';
 
 export type OutputFilterProvider = (ctx: ProfileGuardContext) => OutputFilter | null;
 
@@ -132,6 +133,9 @@ export async function runPreRequest(
   // Fixed FR-008 order:
   // 4. SLOT: orchestrator (flow:<slug> takeover)
   // 5. SLOT: prompts (variable substitution)
+  if (flags.prompts) {
+    capturePromptRequestContext(req, _profile, _endUser);
+  }
   // 6. SLOT: retrieval (semantic RAG injection)
   if (flags.promptCache) {
     installPromptCacheFilterIfNeeded(req, res, _profile);
