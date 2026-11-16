@@ -1,4 +1,4 @@
-import React, { memo, useEffect, useState } from 'react';
+import React, { Component, memo, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -89,11 +89,60 @@ interface HastNode {
   children?: HastNode[];
 }
 
-const VOID_TAGS = new Set(['br', 'hr', 'img', 'input', 'meta', 'link']);
+const VOID_TAGS = new Set([
+  'area',
+  'base',
+  'br',
+  'col',
+  'embed',
+  'hr',
+  'img',
+  'input',
+  'link',
+  'meta',
+  'param',
+  'source',
+  'track',
+  'wbr',
+]);
+
+const BLOCKED_HTML_TAGS = new Set([
+  'script',
+  'style',
+  'iframe',
+  'object',
+  'embed',
+  'applet',
+  'base',
+  'meta',
+  'link',
+  'frame',
+  'frameset',
+  'portal',
+  'noscript',
+  'template',
+]);
+
+const BLOCKED_HTML_ATTRS = new Set([
+  'ref',
+  'key',
+  'dangerouslysetinnerhtml',
+  '__proto__',
+  'constructor',
+  'prototype',
+]);
+
+function isSafeHtmlAttr(key: string, val: unknown): boolean {
+  const lower = key.toLowerCase();
+  if (BLOCKED_HTML_ATTRS.has(lower)) return false;
+  if (/^on[a-z]/i.test(key)) return false;
+  if (lower === 'style' && typeof val !== 'string') return false;
+  return true;
+}
 
 // Parse an HTML fragment into a HAST-compatible node tree
 function parseHtmlFragment(rawHtml: string): HastNode[] {
-  const tagRegex = /<\/?([a-zA-Z0-9_-]+)((?:\s+[a-zA-Z0-9_-]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|\{[^}]*\}|[^\s>]+))?)*)\s*(\/?)>/g;
+  const tagRegex = /<\/?([a-zA-Z][a-zA-Z0-9_-]*)((?:\s+[a-zA-Z0-9_-]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|\{[^}]*\}|[^\s>]+))?)*)\s*(\/?)>/g;
   const root: HastNode = { type: 'root', children: [] };
   const stack: HastNode[] = [root];
   let lastIndex = 0;
@@ -118,6 +167,14 @@ function parseHtmlFragment(rawHtml: string): HastNode[] {
     const isSelfClosing = match[3] === '/' || VOID_TAGS.has(tagName);
     const isClosing = fullTag.startsWith('</');
 
+    if (BLOCKED_HTML_TAGS.has(tagName)) {
+      const current = stack[stack.length - 1];
+      if (current && current.children) {
+        current.children.push({ type: 'text', value: fullTag });
+      }
+      continue;
+    }
+
     if (isClosing) {
       for (let i = stack.length - 1; i > 0; i--) {
         if (stack[i].tagName === tagName) {
@@ -141,6 +198,7 @@ function parseHtmlFragment(rawHtml: string): HastNode[] {
             : attrMatch[5] !== undefined
             ? attrMatch[5]
             : true;
+        if (!isSafeHtmlAttr(key, val)) continue;
         properties[key] = val;
       }
 
@@ -200,6 +258,15 @@ function rehypeRawHtml() {
   };
 }
 
+function stripUnsafeDomProps<T extends object>(raw: T): Omit<T, 'node' | 'ref' | 'key' | 'dangerouslySetInnerHTML'> {
+  const rest = { ...raw } as Record<string, unknown>;
+  delete rest.node;
+  delete rest.ref;
+  delete rest.key;
+  delete rest.dangerouslySetInnerHTML;
+  return rest as Omit<T, 'node' | 'ref' | 'key' | 'dangerouslySetInnerHTML'>;
+}
+
 // Interactive button component supporting click-to-copy
 interface CustomButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   children?: React.ReactNode;
@@ -207,8 +274,9 @@ interface CustomButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement
   size?: string;
 }
 
-function CustomButton({ children, className, title, onClick, ...props }: CustomButtonProps) {
+function CustomButton({ children, className, title, onClick, ...rawProps }: CustomButtonProps) {
   const [copied, setCopied] = useState(false);
+  const props = stripUnsafeDomProps(rawProps);
 
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (onClick) {
@@ -440,10 +508,11 @@ const baseComponents: Components = {
     </th>
   ),
   td: ({ children }) => <td className="border border-border px-2.5 py-1.5 align-top">{children}</td>,
-  code: ({ className, children, ...props }) => {
+  code: ({ className, children, ...rawProps }) => {
     const match = /language-(\w+)/.exec(className || '');
     const isInline = !match && !String(children).includes('\n');
     if (isInline) {
+      const props = stripUnsafeDomProps(rawProps);
       return (
         <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground" {...props}>
           {children}
@@ -590,6 +659,35 @@ interface PlaygroundMessageContentProps {
   className?: string;
 }
 
+/** Isolates unexpected markdown/HTML rendering errors to a single message bubble. */
+class MessageRenderBoundary extends Component<
+  { content: string; children: React.ReactNode },
+  { hasError: boolean; failedContent: string }
+> {
+  state = { hasError: false, failedContent: '' };
+
+  static getDerivedStateFromError(): Partial<{ hasError: boolean }> {
+    return { hasError: true };
+  }
+
+  static getDerivedStateFromProps(
+    props: { content: string },
+    state: { hasError: boolean; failedContent: string },
+  ) {
+    if (state.hasError && props.content !== state.failedContent) {
+      return { hasError: false, failedContent: props.content };
+    }
+    return state.hasError ? null : { failedContent: props.content };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return <div className="whitespace-pre-wrap wrap-break-word">{this.props.content}</div>;
+    }
+    return this.props.children;
+  }
+}
+
 function PlaygroundMessageContentInner({
   content,
   isGenerating = false,
@@ -611,15 +709,17 @@ function PlaygroundMessageContentInner({
 
   return (
     <div className={cn('x-playground-content text-sm leading-relaxed text-foreground', className)}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeRawHtml]}
-        remarkRehypeOptions={{ allowDangerousHtml: true }}
-        urlTransform={playgroundUrlTransform}
-        components={customComponents}
-      >
-        {content}
-      </ReactMarkdown>
+      <MessageRenderBoundary content={content}>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          rehypePlugins={[rehypeRawHtml]}
+          remarkRehypeOptions={{ allowDangerousHtml: true }}
+          urlTransform={playgroundUrlTransform}
+          components={customComponents}
+        >
+          {content}
+        </ReactMarkdown>
+      </MessageRenderBoundary>
     </div>
   );
 }

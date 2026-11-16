@@ -333,4 +333,65 @@ describe('Playground component', () => {
     expect(img?.getAttribute('src')).toBe(dataUrl);
     expect(img?.getAttribute('alt')).toBe('watermarked_img_1.png');
   });
+
+  it('ignores non-function ref and unsafe HTML attributes in assistant messages without crashing React', () => {
+    const reply = [
+      '<div ref="card">\n  Card content\n  <button ref={btnRef} onClick="alert(1)">Copy me</button>\n  <a href="https://example.com" ref="noopener">External link</a>\n</div>',
+      'Inline <span ref="inline-ref">span</span> with <wbr>wordbreak',
+      'Latency is <100ms> on average.',
+      '<script>window.__xss = true;</script>',
+    ].join('\n\n');
+
+    act(() => {
+      root.render(<PlaygroundMessageContent content={reply} />);
+    });
+
+    expect(container.textContent).toContain('Card content');
+    expect(container.querySelector('button')?.textContent).toContain('Copy me');
+    const link = container.querySelector('a[href="https://example.com"]');
+    expect(link).not.toBeNull();
+    expect(link?.textContent).toBe('External link');
+    expect(container.querySelector('wbr')).not.toBeNull();
+    expect(container.textContent).toContain('wordbreak');
+    expect(container.textContent).toContain('<100ms>');
+    expect(container.querySelector('script')).toBeNull();
+    expect((window as unknown as { __xss?: boolean }).__xss).toBeUndefined();
+  });
+
+  it('loads saved Playground history containing ref attributes in HTML without crashing', async () => {
+    window.localStorage.setItem(
+      'x-playground.history.1',
+      JSON.stringify([
+        {
+          id: 'chat-ref-1',
+          title: 'Saved React chat',
+          model: 'auto',
+          updatedAt: Date.now(),
+          messages: [
+            { id: 'u1', role: 'user', content: 'Show a button' },
+            { id: 'a1', role: 'assistant', content: '<div ref="wrapper"><button ref={myRef}>Click</button></div>' },
+          ],
+        },
+      ]),
+    );
+
+    try {
+      act(() => {
+        root.render(
+          <QueryClientProvider client={client}>
+            <MemoryRouter>
+              <Playground />
+            </MemoryRouter>
+          </QueryClientProvider>
+        );
+      });
+
+      await vi.waitFor(() => {
+        expect(container.textContent).toContain('Saved React chat');
+        expect(container.textContent).toContain('Click');
+      });
+    } finally {
+      window.localStorage.removeItem('x-playground.history.1');
+    }
+  });
 });
