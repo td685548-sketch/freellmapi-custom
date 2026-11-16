@@ -1,3 +1,4 @@
+import { getDb } from '../../db/index.js';
 import { sanitizeProviderErrorMessage } from '../../lib/error-redaction.js';
 import {
   clearAccountCooldown,
@@ -38,6 +39,19 @@ const NOT_ALLOWED_RE = /\brequest not allowed\b/i;
 const STATUS_IN_MSG_RE = /\b(400|401|402|403|404|408|409|413|422|429|500|502|503|504|520|524|529)\b/;
 
 const backoffLevels = new Map<string, number>();
+let backoffDb: unknown = null;
+
+function syncBackoffDb(): void {
+  try {
+    const db = getDb();
+    if (backoffDb !== null && backoffDb !== db) {
+      backoffLevels.clear();
+    }
+    backoffDb = db;
+  } catch {
+    // Allow pure unit tests without an initialized DB.
+  }
+}
 
 function backoffKey(accountId: number, modelId: string): string {
   return `${accountId}:${modelId}`;
@@ -95,6 +109,7 @@ export function classifyRouteError(err: unknown): RouteErrorClassification {
 }
 
 function nextBackoffMs(accountId: number, modelId: string): number {
+  syncBackoffDb();
   const key = backoffKey(accountId, modelId);
   const level = Math.min(BACKOFF_MAX_LEVEL, (backoffLevels.get(key) ?? 0) + 1);
   backoffLevels.set(key, level);
@@ -131,6 +146,7 @@ export function recordCandidateFailure(
 
 /** Clear any active cooldown and reset exponential backoff on a successful response. */
 export function recordCandidateSuccess(accountId: number, modelId: string): void {
+  syncBackoffDb();
   clearAccountCooldown(accountId, modelId);
   backoffLevels.delete(backoffKey(accountId, modelId));
 }
