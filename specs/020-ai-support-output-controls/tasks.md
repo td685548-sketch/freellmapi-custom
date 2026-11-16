@@ -31,9 +31,9 @@ Implementation integrated; reviewer has explicit user authorization to fix revie
 ## Reviewer acceptance
 - [x] T017 Reviewer integrate exact accepted commits; review all paths/no raw data/no missing peer implementations.
 - [x] T018 Reviewer run full test/build/lint/migration gates from quickstart.md; account for every failure/skip without relabeling.
-- [ ] T019 Reviewer document evidence/scope/limitations and open one PR targeting main after green checks; report CI, no automatic merge.
+- [x] T019 Reviewer document evidence/scope/limitations and open one PR targeting main after green checks; report CI, no automatic merge.
 
 Dependencies: T001/T002 before peer implementation; T003/T004 store before T009/T014; T005..T007 engine before T009/preview composed proof; T009..T013 require accepted017/018 and019 for Copilot; T017..T019 wait for four handoffs. Preparation/tests may run independently; integration claims require actual peer code.
 
 
-Final local evidence: review.md and verification-inventory.json. T019 publication/CI is tracked in GitHub; no merge authorized.
+Final evidence: review.md and verification-inventory.json. PR #73 (`T001`–`T019`) merged into `main`; follow-up completion pass (Stage 4 `retrievalCitations` enforcement & canonical history original `userRole` masking/revalidation) documented in review.md.

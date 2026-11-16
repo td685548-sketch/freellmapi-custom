@@ -1,5 +1,6 @@
 import { retainSupportOutputCitationText } from './support-output-citations.js';
 import type { Db } from '../../db/index.js';
+import type { CitationEntry } from '@freellmapi/shared/ai-platform-retrieval.js';
 import type { SupportAnswerEvidence, SupportEvidenceCitation } from '@freellmapi/shared/support-evidence.js';
 import {
   SUPPORT_OUTPUT_BLOCK_NOTICE,
@@ -44,6 +45,7 @@ export interface SupportOutputTurnInput<
   choices?: Array<{ index: number; message: { role: 'assistant'; content: string }; finish_reason: string }>;
   toolTrace: TTrace[];
   evidence?: SupportAnswerEvidence;
+  retrievalCitations?: CitationEntry[];
   replySource: SupportRuntimeMetadata['replySource'];
   db?: Db;
   /**
@@ -65,6 +67,7 @@ export interface SupportOutputTurnResult<
   choices: Array<{ index: number; message: { role: 'assistant'; content: string }; finish_reason: string }>;
   toolTrace: TTrace[];
   evidence?: SupportAnswerEvidence;
+  retrievalCitations?: CitationEntry[];
   replySource: SupportRuntimeMetadata['replySource'];
   output: SupportOutputMetadata;
   redactionCount: number;
@@ -172,6 +175,7 @@ function buildTurnLeaves<TTrace extends SupportOutputToolTraceLike>(input: {
   choices?: Array<{ index: number; message: { role: 'assistant'; content: string }; finish_reason: string }>;
   toolTrace: TTrace[];
   evidence?: SupportAnswerEvidence;
+  retrievalCitations?: CitationEntry[];
 }): SupportOutputLeaf[] {
   const leaves: SupportOutputLeaf[] = [{ path: 'reply', text: input.reply }];
 
@@ -215,6 +219,14 @@ function buildTurnLeaves<TTrace extends SupportOutputToolTraceLike>(input: {
     }
   }
 
+  if (Array.isArray(input.retrievalCitations)) {
+    for (let i = 0; i < input.retrievalCitations.length; i += 1) {
+      const c = input.retrievalCitations[i];
+      leaves.push({ path: `retrievalCitations.${i}.title`, text: c.title });
+      leaves.push({ path: `retrievalCitations.${i}.snippet`, text: c.snippet });
+    }
+  }
+
   return leaves;
 }
 
@@ -224,6 +236,7 @@ function reconstructTurnFromLeaves<TTrace extends SupportOutputToolTraceLike>(
     choices?: Array<{ index: number; message: { role: 'assistant'; content: string }; finish_reason: string }>;
     toolTrace: TTrace[];
     evidence?: SupportAnswerEvidence;
+    retrievalCitations?: CitationEntry[];
   },
   leafMap: ReadonlyMap<string, string>,
 ): {
@@ -231,6 +244,7 @@ function reconstructTurnFromLeaves<TTrace extends SupportOutputToolTraceLike>(
   choices: Array<{ index: number; message: { role: 'assistant'; content: string }; finish_reason: string }>;
   toolTrace: TTrace[];
   evidence?: SupportAnswerEvidence;
+  retrievalCitations?: CitationEntry[];
 } {
   const nextReply = leafMap.get('reply') ?? input.reply;
   const nextChoices = Array.isArray(input.choices)
@@ -275,11 +289,20 @@ function reconstructTurnFromLeaves<TTrace extends SupportOutputToolTraceLike>(
       }
     : undefined;
 
+  const nextRetrievalCitations = Array.isArray(input.retrievalCitations)
+    ? input.retrievalCitations.map((c, i) => ({
+        ...c,
+        title: leafMap.get(`retrievalCitations.${i}.title`) ?? c.title,
+        snippet: leafMap.get(`retrievalCitations.${i}.snippet`) ?? c.snippet,
+      }))
+    : undefined;
+
   return {
     reply: nextReply,
     choices: nextChoices,
     toolTrace: nextToolTrace,
     evidence: nextEvidence,
+    retrievalCitations: nextRetrievalCitations,
   };
 }
 
@@ -307,6 +330,7 @@ function buildBlockedTurnResult<TTrace extends SupportOutputToolTraceLike>(
     ],
     toolTrace: [],
     ...(safeEvidence ? { evidence: safeEvidence } : {}),
+    retrievalCitations: undefined,
     replySource: 'output_policy_notice',
     output: {
       policyVersion,
@@ -436,6 +460,7 @@ export function evaluateAndApplySupportOutputToTurn<
       choices: finalChoices,
       toolTrace: reconstructed.toolTrace,
       ...(finalEvidence ? { evidence: finalEvidence } : {}),
+      retrievalCitations: reconstructed.retrievalCitations,
       replySource: finalReplySource,
       output: {
         policyVersion: policy.version,
@@ -466,6 +491,7 @@ export function evaluateAndApplySupportOutputToTurn<
     choices: defaultChoices,
     toolTrace: input.toolTrace,
     ...(input.evidence ? { evidence: input.evidence } : {}),
+    retrievalCitations: input.retrievalCitations,
     replySource: input.replySource,
     output: {
       policyVersion: policy.version,
@@ -507,11 +533,16 @@ export function sanitizeSupportReplayResult<
   }
 
   // Legacy pre-020 cache: evaluate under current policy read-only
+  const topCitations = (options.cachedResponse as { citations?: CitationEntry[] }).citations;
+  const runtimeCitations = (options.cachedResponse.runtime as { citations?: CitationEntry[] }).citations;
+  const legacyRetrievalCitations = topCitations ?? runtimeCitations;
+
   const leaves = buildTurnLeaves({
     reply: options.cachedResponse.reply,
     choices: options.cachedResponse.choices,
     toolTrace: options.cachedResponse.toolTrace,
     evidence: options.cachedResponse.runtime.evidence,
+    retrievalCitations: legacyRetrievalCitations,
   });
   const decision = runEvaluator(policy, leaves);
 
@@ -521,7 +552,7 @@ export function sanitizeSupportReplayResult<
       decision,
       options.cachedResponse.runtime.evidence,
     );
-    return {
+    const blockedResult: T = {
       ...options.cachedResponse,
       reply: blocked.reply,
       choices: blocked.choices,
@@ -533,6 +564,9 @@ export function sanitizeSupportReplayResult<
         output: blocked.output,
       },
     };
+    delete (blockedResult as { citations?: CitationEntry[] }).citations;
+    delete (blockedResult.runtime as { citations?: CitationEntry[] }).citations;
+    return blockedResult;
   }
 
   if (decision.action === 'redact') {
@@ -543,11 +577,17 @@ export function sanitizeSupportReplayResult<
         choices: options.cachedResponse.choices,
         toolTrace: options.cachedResponse.toolTrace,
         evidence: options.cachedResponse.runtime.evidence,
+        retrievalCitations: legacyRetrievalCitations,
       },
       leafMap,
     );
+    const hasTopCitations = Array.isArray(topCitations);
+    const hasRuntimeCitations = Array.isArray(runtimeCitations);
     return {
       ...options.cachedResponse,
+      ...(hasTopCitations && reconstructed.retrievalCitations !== undefined
+        ? { citations: reconstructed.retrievalCitations }
+        : {}),
       reply: reconstructed.reply,
       choices: reconstructed.choices,
       toolTrace: reconstructed.toolTrace,
@@ -555,6 +595,9 @@ export function sanitizeSupportReplayResult<
         ...options.cachedResponse.runtime,
         redactionCount: options.cachedResponse.runtime.redactionCount + decision.redactionCount,
         ...(reconstructed.evidence ? { evidence: reconstructed.evidence } : {}),
+        ...(hasRuntimeCitations && reconstructed.retrievalCitations !== undefined
+          ? { citations: reconstructed.retrievalCitations }
+          : {}),
         output: {
           policyVersion: policy.version,
           action: 'redact',

@@ -512,6 +512,25 @@ export async function executeSupportTurn(options: {
           citations: [],
         };
 
+        const safeNotice = guardedAbstentionText;
+        const outputCheck = evaluateAndApplySupportOutputToTurn({
+          tenantId: tenant.id,
+          operationId: turnId,
+          reply: safeNotice,
+          choices: [
+            {
+              index: 0,
+              message: { role: 'assistant', content: safeNotice },
+              finish_reason: abstentionFinishReason,
+            },
+          ],
+          toolTrace: [],
+          evidence,
+          replySource: 'knowledge_abstention',
+          db: getDb(),
+        });
+        totalRedactions += outputCheck.redactionCount;
+
         const internalIntake = getInternalIntakeForGate(intakeGate);
         if (isSigned) {
           const maskedUserRes = maskSupportSensitiveText(String(tenant.id), lastUserText, userContext.role);
@@ -545,7 +564,7 @@ export async function executeSupportTurn(options: {
             conversationId,
             customerMessageId,
             assistantMessageId: null,
-            evidence,
+            evidence: outputCheck.evidence ?? evidence,
           });
         }
 
@@ -559,23 +578,7 @@ export async function executeSupportTurn(options: {
           userRole: userContext.role,
         });
 
-        const safeNotice = guardedAbstentionText;
-        const outputCheck = evaluateAndApplySupportOutputToTurn({
-          tenantId: tenant.id,
-          operationId: turnId,
-          reply: safeNotice,
-          choices: [
-            {
-              index: 0,
-              message: { role: 'assistant', content: safeNotice },
-              finish_reason: abstentionFinishReason,
-            },
-          ],
-          toolTrace: [],
-          evidence,
-          replySource: 'knowledge_abstention',
-          db: getDb(),
-        });
+        const maskedUserContext = maskSupportSensitiveData(String(tenant.id), userContext, userContext.role).masked;
 
         const runtimeMetadata: SupportRuntimeMetadata = {
           requestId,
@@ -583,7 +586,7 @@ export async function executeSupportTurn(options: {
           replayed: false,
           replySource: outputCheck.replySource,
           knowledgeDocIds: [],
-          redactionCount: totalRedactions + outputCheck.redactionCount,
+          redactionCount: totalRedactions,
           quota: {
             requestsUsed: currentQuota.requestsUsed,
             tokensUsed: currentQuota.tokensUsed,
@@ -598,7 +601,7 @@ export async function executeSupportTurn(options: {
 
         const finalResult: SupportChatCompletionResult & { runtime: SupportRuntimeMetadata } = {
           reply: outputCheck.reply,
-          userContext,
+          userContext: maskedUserContext,
           allowedTools: [],
           toolTrace: outputCheck.toolTrace,
           modelUsed: null,
@@ -1012,6 +1015,20 @@ export async function executeSupportTurn(options: {
       ? undefined
       : maskSupportSensitiveData(String(tenant.id), genResult, userContext.role).masked;
 
+    const maskedRetrievalCitations: CitationEntry[] | undefined =
+      retrievalCitations && retrievalCitations.length > 0 && !isRejectedRequired && !guardBlocked
+        ? retrievalCitations.map((c) => {
+            const maskedTitle = maskSupportSensitiveText(String(tenant.id), c.title, userContext.role);
+            const maskedSnippet = maskSupportSensitiveText(String(tenant.id), c.snippet, userContext.role);
+            totalRedactions += maskedTitle.redactionCount + maskedSnippet.redactionCount;
+            return {
+              ...c,
+              title: maskedTitle.masked,
+              snippet: maskedSnippet.masked,
+            };
+          })
+        : undefined;
+
     const outputCheck = evaluateAndApplySupportOutputToTurn({
       tenantId: tenant.id,
       operationId: turnId,
@@ -1021,6 +1038,7 @@ export async function executeSupportTurn(options: {
         : maskedGen?.choices,
       toolTrace: maskedToolTrace,
       evidence: evidenceObj,
+      retrievalCitations: maskedRetrievalCitations,
       replySource: isRejectedRequired ? 'knowledge_abstention' : 'model',
       db: getDb(),
       revalidateEvidence:
@@ -1173,8 +1191,12 @@ export async function executeSupportTurn(options: {
 
     // 18. Build Runtime Metadata
     const activeCitations =
-      retrievalCitations && !isRejectedRequired && !isOutputBlocked && !guardBlocked
-        ? retrievalCitations
+      outputCheck.retrievalCitations &&
+      outputCheck.retrievalCitations.length > 0 &&
+      !isRejectedRequired &&
+      !isOutputBlocked &&
+      !guardBlocked
+        ? outputCheck.retrievalCitations
         : undefined;
     if (retrievalHeaderValue && options.res) {
       applyCitationsHeader(options.res, activeCitations ?? [], retrievalHeaderValue, {
