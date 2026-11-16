@@ -172,6 +172,7 @@ describe('Turso SELECT result cache', () => {
       '20261113_130000_custom_ai_retrieval.ts',
       '20261113_140000_custom_ai_prompt_cache.ts',
       '20261113_150000_custom_ai_prompt_versions.ts',
+      '20261113_160000_custom_ai_orchestrator.ts',
     ]);
   });
 });

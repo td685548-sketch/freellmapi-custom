@@ -94,6 +94,9 @@ const TRIGGER_SIDE_EFFECTS: Readonly<Record<string, readonly string[]>> = {
     'custom_ai_cache_usage_daily',
     'custom_ai_prompt_versions',
     'custom_ai_prompt_heads',
+    'custom_ai_flow_grants',
+    'custom_ai_run_steps',
+    'custom_ai_runs',
   ],
 };
 // Results that depend on something other than table contents.

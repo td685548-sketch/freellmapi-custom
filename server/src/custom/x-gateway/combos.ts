@@ -1,5 +1,5 @@
 export const COMBO_NAME_RE = /^[a-z0-9\-_.]{1,48}$/;
-export const RESERVED_PREFIXES = ['auto:', 'combo:'];
+export const RESERVED_PREFIXES = ['auto:', 'combo:', 'flow:'];
 export const RESERVED_NAMES = new Set(['auto']);
 export const MAX_COMBOS = 50;
 export const MAX_ENTRIES = 20;
