@@ -1711,4 +1711,48 @@ describe('AI Support Runtime Widget (support-runtime-widget.ts)', () => {
     expect(window.FreeLLMAPISupport._instance).toBe(live);
     live.destroy();
   });
+
+  it('renders extended appearance customizations in preview without network transport', () => {
+    loadWidgetScript();
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const preview = window.FreeLLMAPISupport.preview(container, {
+      enabled: true,
+      version: 2,
+      appearance: {
+        primaryColor: '#7c3aed',
+        secondaryColor: '#5b21b6',
+        theme: 'dark',
+        headerStyle: 'gradient',
+        title: 'VIP Support',
+        subtitle: 'Online 24/7',
+        avatarPreset: 'sparkles',
+        showStatusDot: false,
+        welcomeMessage: 'Hello VIP!',
+        position: 'bottom-left',
+        launcherStyle: 'pill',
+        launcherLabel: 'Ask VIP',
+        borderRadius: 'pill',
+        widgetSize: 'large',
+        fontFamily: 'mono',
+        inputPlaceholder: 'Write here...',
+        sendButtonLabel: 'Go',
+        showPoweredBy: false,
+        quickPrompts: ['Check status'],
+      },
+      intake: { required: false, fields: [] },
+    });
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    const box = container.querySelector('[data-testid="widget-preview-box"]') as HTMLElement;
+    expect(box.style.borderRadius).toBe('24px');
+    expect(box.style.maxWidth).toBe('420px');
+    expect(box.style.background).toContain('rgb(17, 24, 39)');
+    expect((container.querySelector('[data-testid="widget-preview-subtitle"]') as HTMLElement).textContent).toBe('Online 24/7');
+    expect((container.querySelector('[data-testid="widget-preview-status-dot"]') as HTMLElement).style.display).toBe('none');
+    expect((container.querySelector('[data-testid="widget-preview-powered-by"]') as HTMLElement).style.display).toBe('none');
+    expect((container.querySelector('[data-testid="widget-preview-launcher"]') as HTMLElement).textContent).toContain('Ask VIP');
+    expect((box.querySelector('input[type="text"]') as HTMLInputElement).placeholder).toBe('Write here...');
+    preview.destroy();
+  });
 });

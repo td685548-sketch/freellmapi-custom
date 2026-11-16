@@ -311,4 +311,125 @@ describe('support-widget-profile', () => {
       ),
     ).toThrow(SupportDeskError);
   });
+
+  it('validates extended appearance customization fields and fills defaults when omitted', () => {
+    const withDefaults = validateWidgetConfigPatch(
+      DEFAULT_SUPPORT_DESK_WIDGET_CONFIG,
+      {
+        enabled: true,
+        appearance: {
+          primaryColor: '#2563eb',
+          title: 'Help Desk',
+          welcomeMessage: 'Hi there!',
+          position: 'bottom-right',
+          quickPrompts: [],
+        },
+      },
+      '2026-11-16T00:00:00.000Z',
+    );
+    expect(withDefaults.appearance.theme).toBe('light');
+    expect(withDefaults.appearance.headerStyle).toBe('solid');
+    expect(withDefaults.appearance.edgeOffsetPx).toBe(24);
+    expect(withDefaults.appearance.showPoweredBy).toBe(true);
+
+    const customized = validateWidgetConfigPatch(
+      withDefaults,
+      {
+        enabled: true,
+        appearance: {
+          primaryColor: '#7c3aed',
+          secondaryColor: '#5b21b6',
+          theme: 'dark',
+          headerStyle: 'gradient',
+          title: 'VIP Desk',
+          subtitle: 'Typically replies in 2 mins',
+          avatarPreset: 'sparkles',
+          showStatusDot: false,
+          welcomeMessage: 'Welcome!',
+          position: 'bottom-left',
+          edgeOffsetPx: 32,
+          launcherStyle: 'pill',
+          launcherLabel: 'Need help?',
+          borderRadius: 'pill',
+          widgetSize: 'large',
+          fontFamily: 'inter',
+          inputPlaceholder: 'Ask anything...',
+          sendButtonLabel: 'Go',
+          showPoweredBy: false,
+          autoOpenDelaySeconds: 10,
+          quickPrompts: ['Order status'],
+        },
+      },
+      '2026-11-16T00:01:00.000Z',
+    );
+    expect(customized.appearance).toMatchObject({
+      secondaryColor: '#5b21b6',
+      theme: 'dark',
+      headerStyle: 'gradient',
+      subtitle: 'Typically replies in 2 mins',
+      avatarPreset: 'sparkles',
+      showStatusDot: false,
+      edgeOffsetPx: 32,
+      launcherStyle: 'pill',
+      launcherLabel: 'Need help?',
+      borderRadius: 'pill',
+      widgetSize: 'large',
+      fontFamily: 'inter',
+      inputPlaceholder: 'Ask anything...',
+      sendButtonLabel: 'Go',
+      showPoweredBy: false,
+      autoOpenDelaySeconds: 10,
+    });
+
+    expect(() =>
+      validateWidgetConfigPatch(
+        withDefaults,
+        {
+          appearance: {
+            primaryColor: '#2563eb',
+            secondaryColor: 'red',
+            title: 'Help',
+            welcomeMessage: '',
+            position: 'bottom-right',
+            quickPrompts: [],
+          },
+        },
+        '2026-11-16T00:02:00.000Z',
+      ),
+    ).toThrow(SupportDeskError);
+
+    expect(() =>
+      validateWidgetConfigPatch(
+        withDefaults,
+        {
+          appearance: {
+            primaryColor: '#2563eb',
+            theme: 'neon',
+            title: 'Help',
+            welcomeMessage: '',
+            position: 'bottom-right',
+            quickPrompts: [],
+          },
+        },
+        '2026-11-16T00:02:00.000Z',
+      ),
+    ).toThrow(SupportDeskError);
+
+    expect(() =>
+      validateWidgetConfigPatch(
+        withDefaults,
+        {
+          appearance: {
+            primaryColor: '#2563eb',
+            edgeOffsetPx: 120,
+            title: 'Help',
+            welcomeMessage: '',
+            position: 'bottom-right',
+            quickPrompts: [],
+          },
+        },
+        '2026-11-16T00:02:00.000Z',
+      ),
+    ).toThrow(SupportDeskError);
+  });
 });

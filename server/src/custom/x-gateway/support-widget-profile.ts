@@ -1,15 +1,30 @@
 import crypto from 'node:crypto';
 import {
+  DEFAULT_SUPPORT_DESK_WIDGET_CONFIG,
   RESERVED_INTAKE_FIELD_KEYS,
+  SUPPORT_DESK_AVATAR_PRESETS,
+  SUPPORT_DESK_BORDER_RADII,
+  SUPPORT_DESK_FONT_FAMILIES,
+  SUPPORT_DESK_HEADER_STYLES,
   SUPPORT_DESK_INTAKE_FIELD_TYPES,
+  SUPPORT_DESK_LAUNCHER_STYLES,
   SUPPORT_DESK_LIMITS,
   SUPPORT_DESK_WIDGET_POSITIONS,
+  SUPPORT_DESK_WIDGET_SIZES,
+  SUPPORT_DESK_WIDGET_THEMES,
+  type SupportDeskAvatarPreset,
+  type SupportDeskBorderRadius,
+  type SupportDeskFontFamily,
+  type SupportDeskHeaderStyle,
   type SupportDeskIntakeField,
   type SupportDeskIntakeFieldType,
+  type SupportDeskLauncherStyle,
   type SupportDeskPublicWidgetConfig,
   type SupportDeskWidgetAppearance,
   type SupportDeskWidgetConfig,
   type SupportDeskWidgetPosition,
+  type SupportDeskWidgetSize,
+  type SupportDeskWidgetTheme,
 } from '@freellmapi/shared/support-service-desk.js';
 
 export class SupportDeskError extends Error {
@@ -88,21 +103,127 @@ function assertSafeText(
   return normalized;
 }
 
+function validateEnumField<T extends string>(
+  raw: unknown,
+  allowed: readonly T[],
+  fallback: T,
+  label: string,
+): T {
+  if (raw === undefined) return fallback;
+  if (typeof raw !== 'string' || !(allowed as readonly string[]).includes(raw)) {
+    throw new SupportDeskError(
+      400,
+      'invalid_input',
+      `${label} must be one of: ${allowed.join(', ')}.`,
+    );
+  }
+  return raw as T;
+}
+
+function validateIntRangeField(
+  raw: unknown,
+  min: number,
+  max: number,
+  fallback: number,
+  label: string,
+): number {
+  if (raw === undefined) return fallback;
+  if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < min || raw > max) {
+    throw new SupportDeskError(
+      400,
+      'invalid_input',
+      `${label} must be an integer between ${min} and ${max}.`,
+    );
+  }
+  return raw;
+}
+
+function validateBoolField(raw: unknown, fallback: boolean, label: string): boolean {
+  if (raw === undefined) return fallback;
+  if (typeof raw !== 'boolean') {
+    throw new SupportDeskError(400, 'invalid_input', `${label} must be a boolean.`);
+  }
+  return raw;
+}
+
+export function normalizeWidgetAppearance(
+  raw?: Partial<SupportDeskWidgetAppearance> | null,
+): SupportDeskWidgetAppearance {
+  const defaults = DEFAULT_SUPPORT_DESK_WIDGET_CONFIG.appearance;
+  const src = raw ?? {};
+  return {
+    primaryColor: src.primaryColor ?? defaults.primaryColor,
+    title: src.title ?? defaults.title,
+    welcomeMessage: src.welcomeMessage ?? defaults.welcomeMessage,
+    position: src.position ?? defaults.position,
+    quickPrompts: Array.isArray(src.quickPrompts) ? [...src.quickPrompts] : [...defaults.quickPrompts],
+    secondaryColor: src.secondaryColor ?? defaults.secondaryColor,
+    theme: src.theme ?? defaults.theme,
+    headerStyle: src.headerStyle ?? defaults.headerStyle,
+    subtitle: src.subtitle ?? defaults.subtitle,
+    avatarPreset: src.avatarPreset ?? defaults.avatarPreset,
+    showStatusDot: src.showStatusDot ?? defaults.showStatusDot,
+    launcherStyle: src.launcherStyle ?? defaults.launcherStyle,
+    launcherLabel: src.launcherLabel ?? defaults.launcherLabel,
+    borderRadius: src.borderRadius ?? defaults.borderRadius,
+    widgetSize: src.widgetSize ?? defaults.widgetSize,
+    fontFamily: src.fontFamily ?? defaults.fontFamily,
+    edgeOffsetPx: src.edgeOffsetPx ?? defaults.edgeOffsetPx,
+    inputPlaceholder: src.inputPlaceholder ?? defaults.inputPlaceholder,
+    sendButtonLabel: src.sendButtonLabel ?? defaults.sendButtonLabel,
+    showPoweredBy: src.showPoweredBy ?? defaults.showPoweredBy,
+    autoOpenDelaySeconds: src.autoOpenDelaySeconds ?? defaults.autoOpenDelaySeconds,
+  };
+}
+
 function validateAppearance(raw: unknown): SupportDeskWidgetAppearance {
   if (!isPlainObject(raw)) {
     throw new SupportDeskError(400, 'invalid_input', 'appearance must be a plain object.');
   }
   const requiredKeys = ['primaryColor', 'title', 'welcomeMessage', 'position', 'quickPrompts'] as const;
-  assertAllowedKeys(raw, requiredKeys, 'appearance');
+  const optionalKeys = [
+    'secondaryColor',
+    'theme',
+    'headerStyle',
+    'subtitle',
+    'avatarPreset',
+    'showStatusDot',
+    'launcherStyle',
+    'launcherLabel',
+    'borderRadius',
+    'widgetSize',
+    'fontFamily',
+    'edgeOffsetPx',
+    'inputPlaceholder',
+    'sendButtonLabel',
+    'showPoweredBy',
+    'autoOpenDelaySeconds',
+  ] as const;
+  assertAllowedKeys(raw, [...requiredKeys, ...optionalKeys], 'appearance');
   for (const key of requiredKeys) {
     if (!(key in raw)) {
       throw new SupportDeskError(400, 'invalid_input', `appearance.${key} is required.`);
     }
   }
 
+  const defaults = DEFAULT_SUPPORT_DESK_WIDGET_CONFIG.appearance;
+
   if (typeof raw.primaryColor !== 'string' || !HEX_COLOR_RE.test(raw.primaryColor)) {
     throw new SupportDeskError(400, 'invalid_input', 'appearance.primaryColor must be a #RRGGBB hex color.');
   }
+  const secondaryColor =
+    raw.secondaryColor === undefined
+      ? defaults.secondaryColor!
+      : typeof raw.secondaryColor === 'string' && HEX_COLOR_RE.test(raw.secondaryColor)
+        ? raw.secondaryColor
+        : (() => {
+            throw new SupportDeskError(
+              400,
+              'invalid_input',
+              'appearance.secondaryColor must be a #RRGGBB hex color.',
+            );
+          })();
+
   const title = assertSafeText(raw.title, 'appearance.title', 1, SUPPORT_DESK_LIMITS.maxLabelChars);
   const welcomeMessage = assertSafeText(
     raw.welcomeMessage,
@@ -110,12 +231,112 @@ function validateAppearance(raw: unknown): SupportDeskWidgetAppearance {
     0,
     SUPPORT_DESK_LIMITS.maxTextChars,
   );
-  if (
-    typeof raw.position !== 'string' ||
-    !(SUPPORT_DESK_WIDGET_POSITIONS as readonly string[]).includes(raw.position)
-  ) {
-    throw new SupportDeskError(400, 'invalid_input', 'appearance.position must be bottom-right or bottom-left.');
-  }
+  const subtitle =
+    raw.subtitle === undefined
+      ? defaults.subtitle!
+      : assertSafeText(raw.subtitle, 'appearance.subtitle', 0, SUPPORT_DESK_LIMITS.maxSubtitleChars);
+  const launcherLabel =
+    raw.launcherLabel === undefined
+      ? defaults.launcherLabel!
+      : assertSafeText(
+          raw.launcherLabel,
+          'appearance.launcherLabel',
+          0,
+          SUPPORT_DESK_LIMITS.maxLauncherLabelChars,
+        );
+  const inputPlaceholder =
+    raw.inputPlaceholder === undefined
+      ? defaults.inputPlaceholder!
+      : assertSafeText(
+          raw.inputPlaceholder,
+          'appearance.inputPlaceholder',
+          0,
+          SUPPORT_DESK_LIMITS.maxLabelChars,
+        );
+  const sendButtonLabel =
+    raw.sendButtonLabel === undefined
+      ? defaults.sendButtonLabel!
+      : assertSafeText(
+          raw.sendButtonLabel,
+          'appearance.sendButtonLabel',
+          0,
+          SUPPORT_DESK_LIMITS.maxSendLabelChars,
+        );
+
+  const position = validateEnumField<SupportDeskWidgetPosition>(
+    raw.position,
+    SUPPORT_DESK_WIDGET_POSITIONS,
+    defaults.position,
+    'appearance.position',
+  );
+  const theme = validateEnumField<SupportDeskWidgetTheme>(
+    raw.theme,
+    SUPPORT_DESK_WIDGET_THEMES,
+    defaults.theme!,
+    'appearance.theme',
+  );
+  const headerStyle = validateEnumField<SupportDeskHeaderStyle>(
+    raw.headerStyle,
+    SUPPORT_DESK_HEADER_STYLES,
+    defaults.headerStyle!,
+    'appearance.headerStyle',
+  );
+  const avatarPreset = validateEnumField<SupportDeskAvatarPreset>(
+    raw.avatarPreset,
+    SUPPORT_DESK_AVATAR_PRESETS,
+    defaults.avatarPreset!,
+    'appearance.avatarPreset',
+  );
+  const launcherStyle = validateEnumField<SupportDeskLauncherStyle>(
+    raw.launcherStyle,
+    SUPPORT_DESK_LAUNCHER_STYLES,
+    defaults.launcherStyle!,
+    'appearance.launcherStyle',
+  );
+  const borderRadius = validateEnumField<SupportDeskBorderRadius>(
+    raw.borderRadius,
+    SUPPORT_DESK_BORDER_RADII,
+    defaults.borderRadius!,
+    'appearance.borderRadius',
+  );
+  const widgetSize = validateEnumField<SupportDeskWidgetSize>(
+    raw.widgetSize,
+    SUPPORT_DESK_WIDGET_SIZES,
+    defaults.widgetSize!,
+    'appearance.widgetSize',
+  );
+  const fontFamily = validateEnumField<SupportDeskFontFamily>(
+    raw.fontFamily,
+    SUPPORT_DESK_FONT_FAMILIES,
+    defaults.fontFamily!,
+    'appearance.fontFamily',
+  );
+
+  const showStatusDot = validateBoolField(
+    raw.showStatusDot,
+    defaults.showStatusDot!,
+    'appearance.showStatusDot',
+  );
+  const showPoweredBy = validateBoolField(
+    raw.showPoweredBy,
+    defaults.showPoweredBy!,
+    'appearance.showPoweredBy',
+  );
+  const edgeOffsetPx = validateIntRangeField(
+    raw.edgeOffsetPx,
+    SUPPORT_DESK_LIMITS.minEdgeOffsetPx,
+    SUPPORT_DESK_LIMITS.maxEdgeOffsetPx,
+    defaults.edgeOffsetPx!,
+    'appearance.edgeOffsetPx',
+  );
+  const autoOpenDelaySeconds = validateIntRangeField(
+    raw.autoOpenDelaySeconds,
+    0,
+    SUPPORT_DESK_LIMITS.maxAutoOpenDelaySeconds,
+    defaults.autoOpenDelaySeconds!,
+    'appearance.autoOpenDelaySeconds',
+  );
+
   if (!Array.isArray(raw.quickPrompts) || raw.quickPrompts.length > SUPPORT_DESK_LIMITS.maxQuickPrompts) {
     throw new SupportDeskError(
       400,
@@ -144,8 +365,24 @@ function validateAppearance(raw: unknown): SupportDeskWidgetAppearance {
     primaryColor: raw.primaryColor,
     title,
     welcomeMessage,
-    position: raw.position as SupportDeskWidgetPosition,
+    position,
     quickPrompts,
+    secondaryColor,
+    theme,
+    headerStyle,
+    subtitle,
+    avatarPreset,
+    showStatusDot,
+    launcherStyle,
+    launcherLabel,
+    borderRadius,
+    widgetSize,
+    fontFamily,
+    edgeOffsetPx,
+    inputPlaceholder,
+    sendButtonLabel,
+    showPoweredBy,
+    autoOpenDelaySeconds,
   };
 }
 
@@ -339,13 +576,7 @@ export function projectSupportDeskWidgetConfig(
   return {
     version: config.version,
     enabled: config.enabled,
-    appearance: {
-      primaryColor: config.appearance.primaryColor,
-      title: config.appearance.title,
-      welcomeMessage: config.appearance.welcomeMessage,
-      position: config.appearance.position,
-      quickPrompts: [...config.appearance.quickPrompts],
-    },
+    appearance: normalizeWidgetAppearance(config.appearance),
     intake: {
       required: config.intake.required,
       fields: config.intake.fields.map((f) => ({

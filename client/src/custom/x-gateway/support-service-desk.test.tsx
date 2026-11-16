@@ -931,4 +931,48 @@ describe('Support Service Desk & Widget Studio (SupportServiceDesk.tsx)', () => 
     script!.remove();
     vi.unstubAllEnvs();
   });
+
+  it('Tab 1 (Widget): applies color presets, extended appearance controls, reset defaults, and saves payload', async () => {
+    await mount()
+    await waitFor(() => expect(byId('widget-color-preset-violet')).not.toBeNull())
+
+    await click(byId('widget-color-preset-violet'))
+    expect(byId<HTMLInputElement>('widget-primary-color-input').value).toBe('#7c3aed')
+    expect(byId<HTMLInputElement>('widget-secondary-color-input').value).toBe('#5b21b6')
+
+    await change('widget-theme-select', 'dark')
+    await change('widget-header-style-select', 'gradient')
+    await change('widget-subtitle-input', 'Online 24/7')
+    await change('widget-launcher-style-select', 'pill')
+    await change('widget-launcher-label-input', 'Ask Support')
+    await change('widget-border-radius-select', 'pill')
+    await change('widget-size-select', 'large')
+    await change('widget-font-family-select', 'inter')
+
+    await click(byId('widget-save-btn'))
+
+    await waitFor(() => {
+      const putCalls = vi.mocked(apiFetch).mock.calls.filter(([path, opt]) =>
+        path.includes('/service-desk/widget-config') && opt?.method === 'PUT'
+      )
+      expect(putCalls.length).toBe(1)
+      const sentBody = JSON.parse(String(putCalls[0][1]?.body))
+      expect(sentBody.appearance).toMatchObject({
+        primaryColor: '#7c3aed',
+        secondaryColor: '#5b21b6',
+        theme: 'dark',
+        headerStyle: 'gradient',
+        subtitle: 'Online 24/7',
+        launcherStyle: 'pill',
+        launcherLabel: 'Ask Support',
+        borderRadius: 'pill',
+        widgetSize: 'large',
+        fontFamily: 'inter',
+      })
+    })
+
+    await click(byId('widget-reset-appearance-btn'))
+    expect(byId<HTMLInputElement>('widget-primary-color-input').value).toBe('#2563eb')
+    expect(byId<HTMLSelectElement>('widget-theme-select').value).toBe('light')
+  })
 })

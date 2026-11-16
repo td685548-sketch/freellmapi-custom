@@ -23,7 +23,11 @@ import {
   type SupportTicketPriority,
 } from '@freellmapi/shared/support-service-desk.js';
 import { SUPPORT_EVIDENCE_ROLES, type SupportEvidenceRole } from '@freellmapi/shared/support-evidence.js';
-import { SupportDeskError, validateWidgetConfigPatch } from './support-widget-profile.js';
+import {
+  SupportDeskError,
+  normalizeWidgetAppearance,
+  validateWidgetConfigPatch,
+} from './support-widget-profile.js';
 
 export { SupportDeskError };
 
@@ -185,6 +189,7 @@ export function getSupportDeskWidgetConfig(tenantId: number): SupportDeskWidgetC
 
     return {
       ...parsed,
+      appearance: normalizeWidgetAppearance(parsed.appearance),
       version: row.version,
       updatedAt: row.updated_at,
     };
