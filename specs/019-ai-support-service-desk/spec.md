@@ -3,7 +3,7 @@
 **Branch**: codex/support-service-desk
 **Directory**: specs/019-ai-support-service-desk
 **Created**: 2026-11-13
-**Status**: Implemented; reviewer corrections and local acceptance gates passed.
+**Status**: Hoàn thành — xem [specs/README.md](../README.md)
 **Input**: Dọn prompt cũ, viết spec và bốn prompt tiếp theo; reviewer chỉ review sau bàn giao, không tự dispatch/implement.
 
 ## User Scenarios & Testing

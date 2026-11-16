@@ -3,7 +3,7 @@
 **Feature Branch**: `feat/9router-integration`  
 **Feature Directory**: `specs/013-ai-support-gateway`  
 **Created**: 2026-11-12  
-**Status**: Approved for Implementation  
+**Status**: Hoàn thành — xem [specs/README.md](../README.md)
 **Input**: Biến hệ thống thành cổng AI Support cho phép website của đối tác gọi tới để hỗ trợ khách hàng của họ; AI nhận diện được khách hàng là ai, có quyền (role) gì, và truy cập được vào API Webhook (Cách A) lẫn Database Read-Only của đối tác (Cách B) tùy theo role của người hỏi.
 
 ---

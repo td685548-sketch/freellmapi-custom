@@ -1,7 +1,7 @@
 # Feature Specification: Provider Quota and Three-Tier Fallback
 **Branch**: feat/9router-integration
 **Created**: 2026-11-07
-**Status**: Ready
+**Status**: Hoàn thành — xem [specs/README.md](../README.md)
 **Input**: Add real provider quota tracking, reset countdown and Subscription → Cheap → Free fallback based on 9Router.
 
 ## User Scenarios & Testing

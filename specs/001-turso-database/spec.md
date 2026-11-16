@@ -1,7 +1,7 @@
 # Feature Specification: Optional Turso database
 
 **Created**: 2026-10-31
-**Status**: Accepted for implementation
+**Status**: Hoàn thành — xem [specs/README.md](../README.md)
 **Input**: Try Turso using the existing CLI/account, without affecting another project.
 
 ## User Scenarios & Testing

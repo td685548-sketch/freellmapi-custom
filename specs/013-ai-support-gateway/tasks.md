@@ -4,6 +4,8 @@ description: "Task list for 013-ai-support-gateway divided across 4 concurrent a
 
 # Tasks: Multi-Tenant AI Support Gateway (`013-ai-support-gateway`)
 
+> **Trạng thái (2026-11-16)**: Đã triển khai trên `main`. Các checkbox bên dưới không được tick từng dòng nên chỉ còn giá trị lịch sử. Xem [specs/README.md](../README.md).
+
 **Input**: Design documents from `/specs/013-ai-support-gateway/` (`spec.md`, `plan.md`, `data-model.md`, `contracts.md`, `ownership.md`)
 
 ---

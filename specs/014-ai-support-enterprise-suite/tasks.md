@@ -1,5 +1,7 @@
 # Tasks: AI Support Enterprise Suite (`014-ai-support-enterprise-suite`)
 
+> **Trạng thái (2026-11-16)**: Đã triển khai trên `main`. Các checkbox bên dưới không được tick từng dòng nên chỉ còn giá trị lịch sử. Xem [specs/README.md](../README.md).
+
 ## Phase 1: Parallel Backend Core Modules (Agent 1 & Agent 2)
 
 - [ ] **T001 [P] [Agent 1]** Implement `server/src/custom/x-gateway/support-knowledge.ts` with Knowledge Base CRUD, 1-click seeding (`seedDefaultSupportKnowledgeDocs`), role-filtered BM25/keyword chunk search (`searchSupportKnowledge`), prompt builder (`buildSupportKnowledgeContextPrompt`), and recursive PII Masking Engine (`getSupportMaskingPolicy`, `updateSupportMaskingPolicy`, `maskSupportSensitiveText`, `maskSupportSensitiveData`).

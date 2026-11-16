@@ -5,6 +5,8 @@ description: "Task list for the admin-only X gateway (separate API flow and cons
 
 # Tasks: Admin-only X Gateway (separate API flow and console)
 
+> **Trạng thái (2026-11-16)**: Đã triển khai trên `main`. Các checkbox bên dưới không được tick từng dòng nên chỉ còn giá trị lịch sử. Xem [specs/README.md](../README.md).
+
 **Input**: Design documents from `/specs/007-admin-x-gateway/`
 
 **Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/, quickstart.md

@@ -1,5 +1,7 @@
 # Tasks: X Gateway Basic Chat
 
+> **Trạng thái (2026-11-16)**: Đã triển khai trên `main`. Các checkbox bên dưới không được tick từng dòng nên chỉ còn giá trị lịch sử. Xem [specs/README.md](../README.md).
+
 ## Phase 1: Setup
 - [x] T001 Record specification and 9Router reference in specs/008-basic-chat/.
 ## Phase 2: Foundation

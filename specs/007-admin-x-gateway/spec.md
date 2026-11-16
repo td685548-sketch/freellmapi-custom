@@ -2,7 +2,7 @@
 
 **Feature Branch**: `007-admin-x-gateway`
 **Created**: 2026-11-06
-**Status**: Draft
+**Status**: Hoàn thành — xem [specs/README.md](../README.md)
 **Input**: Admin-only "X gateway" (phase 1 of porting 9router-style features): a new OpenAI-compatible chat flow at its own address, reachable only by the administrator, with named model combos, output-token savers (caveman, ponytail), an input-token saver for tool outputs, and per-admin usage. Clarified by the owner: it must be **separate from the main logic**, "its own API endpoint flow with its own interface".
 
 ## User Scenarios & Testing *(mandatory)*
