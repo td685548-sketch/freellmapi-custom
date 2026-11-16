@@ -298,7 +298,7 @@ description: "Task list for AI Platform Upgrade"
 - [ ] T137 [P] Chạy `client/src/custom/i18n/translations.test.ts`; bổ sung mọi khóa tiếng Việt còn thiếu trong `client/src/custom/i18n/vi.ts`
 - [ ] T138 Chạy toàn bộ quickstart.md trên bản chạy thật, gồm single-user trong Docker; ghi kết quả vào `specs/018-ai-platform-upgrade/acceptance.md`
 - [ ] T139 Cập nhật `docs/CHANGELOG.md` và rà lại bảng "Điểm móc" trong plan.md so với `git diff --stat` thực tế
-- [ ] T140 Thêm dọn dữ liệu MCP khi xóa client profile: migration mới (không sửa `M/20261113_110000_custom_ai_mcp_client.ts`) tạo trigger `AFTER DELETE ON client_profiles` xóa `custom_ai_tool_bindings` có `scope_kind = 'profile'` và khóa `ai_platform_scope_profile_<id>_mcp_binding` trong `settings`, theo mẫu trigger của migration retrieval; test roundtrip và ca xóa profile trong `server/src/__tests__/db/migrate/ai-platform-mcp.test.ts` (phát hiện khi rà soát 2026-11-16)
+- [x] T140 Thêm dọn dữ liệu MCP khi xóa client profile: `M/20261116_100000_custom_ai_mcp_profile_cleanup.ts` (không sửa migration MCP cũ) tạo trigger `trg_client_profiles_delete_mcp` xóa `custom_ai_tool_bindings`, `custom_ai_tool_calls`, `custom_ai_approvals` có `scope_kind = 'profile'` và khóa `ai_platform_scope_profile_<id>_mcp_binding` trong `settings`, theo mẫu trigger của các trụ cột khác; test trong `server/src/__tests__/db/migrate/ai-platform-mcp-profile-cleanup.test.ts` (phát hiện khi rà soát 2026-11-16)
 
 ---
 
