@@ -8,6 +8,7 @@ import {
   type ScopeKind,
 } from '@freellmapi/shared/ai-platform-retrieval.js';
 import { getDb } from '../../../db/index.js';
+import { sanitizeProviderErrorMessage } from '../../../lib/error-redaction.js';
 import {
   EmbeddingsError,
   embeddingsRetryAfterSec,
@@ -644,7 +645,9 @@ async function executeClaimedJob(job: IndexJobRow): Promise<'succeeded' | 'reque
           await yieldToEventLoop();
         }
       } catch (err) {
-        const errMsg = (err instanceof Error ? err.message : String(err)).slice(0, 1000);
+        // Provider errors can echo the credential or the request URL; this text is
+        // stored on the job and chunks, returned by the admin API and backed up.
+        const errMsg = sanitizeProviderErrorMessage(err instanceof Error ? err.message : String(err));
         const retryDelayMs = computeRetryDelayMs(err);
 
         if (retryDelayMs !== undefined) {
