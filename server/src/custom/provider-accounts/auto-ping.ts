@@ -35,7 +35,20 @@ export const PING_SCHEDULE_DEFAULTS: AutoPingSchedule = {
 // model segment means the whole account is cooling down.
 interface CooldownEntry { accountId: number; modelId: string | null; until: number; lastError: string | null }
 const cooldownMap = new Map<string, CooldownEntry>();
+let cooldownDb: unknown = null;
 const cooldownKey = (accountId: number, modelId?: string | null): string => `${accountId}|${modelId ?? ''}`;
+
+function syncCooldownDb(): void {
+  try {
+    const db = getDb();
+    if (cooldownDb !== null && cooldownDb !== db) {
+      cooldownMap.clear();
+    }
+    cooldownDb = db;
+  } catch {
+    // Allow pure unit tests without an initialized DB.
+  }
+}
 
 // In-memory schedules cache (synced to DB settings)
 const scheduleCache = new Map<number, AutoPingSchedule>();
@@ -52,6 +65,7 @@ export function setAccountCooldown(
   modelId?: string,
   lastError?: string,
 ): void {
+  syncCooldownDb();
   const untilMs = typeof durationMsOrUntil === 'string'
     ? new Date(durationMsOrUntil).getTime()
     : Date.now() + durationMsOrUntil;
@@ -73,6 +87,7 @@ export function listCooldownEntries(): Array<{
   remainingMs: number;
   lastError: string | null;
 }> {
+  syncCooldownDb();
   const now = Date.now();
   const res = [];
   for (const [key, entry] of cooldownMap.entries()) {
@@ -118,6 +133,7 @@ export function getAccountCooldown(accountId: number, modelId?: string): {
 
 /** Clears one model's cooldown when `modelId` is given, otherwise all of the account's. */
 export function clearAccountCooldown(accountId: number, modelId?: string): void {
+  syncCooldownDb();
   if (modelId !== undefined) {
     cooldownMap.delete(cooldownKey(accountId, modelId));
     return;
