@@ -1,6 +1,6 @@
 # 020 — AI Support Output Controls (chặng 3)
 
-Ngày: 2026-11-15. Trạng thái: đã tích hợp code bốn agent và sửa findings F1–F5; đã qua kiểm tra cục bộ, sẵn sàng PR vào main. Xem review.md cho bằng chứng đầy đủ.
+Ngày: 2026-11-16. Trạng thái: đã hoàn tất và merge PR #73 (`T001`–`T019`, F1–F5) vào `main`, đồng thời hoàn thành đợt bổ sung sau merge (kiểm soát `retrievalCitations` của Stage 4 và masking/revalidation lịch sử theo `userRole` gốc). Xem review.md cho bằng chứng đầy đủ.
 
 Đây là chặng 3 trong bảng 8 chặng của người dùng: kiểm soát nội dung đầu ra. Không phải chặng 3/4 của lộ trình Support cũ trong spec015/016. Không đánh dấu MCP Client hoàn tất, không triển khai embeddings, prompt caching hoặc đa agent trong đợt này.
 

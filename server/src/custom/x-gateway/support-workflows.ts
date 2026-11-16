@@ -6,6 +6,7 @@ import type {
   SupportDeskInternalConversationIntake,
 } from '@freellmapi/shared/support-service-desk.js';
 import { sanitizeSupportEvidenceConversation } from './support-evidence-runtime.js';
+import { maskSupportSensitiveText } from './support-knowledge.js';
 import { sanitizeSupportConversationOutput } from './support-output-runtime.js';
 import { hydrateSupportConversationIntake } from './support-service-desk-runtime.js';
 import {
@@ -168,6 +169,88 @@ function writeStore<T>(key: string, store: Record<string, T>): void {
 // Conversation Operations
 // ---------------------------------------------------------------------------
 
+/**
+ * Applies current 017 sensitive-text masking read-only to AI assistant messages
+ * using the conversation's original userRole, leaving human/customer messages untouched.
+ */
+function maskConversationAiMessagesForOriginalRole(
+  tenantId: string,
+  conv: SupportConversation,
+): SupportConversation {
+  const hasAiMessages = conv.messages.some((m) => m.senderType === 'ai_assistant');
+  if (!hasAiMessages) {
+    return conv;
+  }
+
+  const originalRole = conv.userRole || 'customer';
+  const maskedMessages = conv.messages.map((msg): SupportConversationMessage => {
+    if (msg.senderType !== 'ai_assistant') {
+      return msg;
+    }
+
+    const maskedContent = maskSupportSensitiveText(tenantId, msg.content, originalRole).masked;
+    const maskedToolTrace = msg.toolTrace
+      ? msg.toolTrace.map((trace) => ({
+          ...trace,
+          toolName: maskSupportSensitiveText(tenantId, trace.toolName, originalRole).masked,
+        }))
+      : undefined;
+    const maskedEvidence = msg.evidence
+      ? {
+          ...msg.evidence,
+          citations: msg.evidence.citations.map((c) => ({
+            ...c,
+            title: maskSupportSensitiveText(tenantId, c.title, originalRole).masked,
+            excerpt: maskSupportSensitiveText(tenantId, c.excerpt, originalRole).masked,
+          })),
+        }
+      : undefined;
+
+    return {
+      ...msg,
+      content: maskedContent,
+      ...(maskedToolTrace ? { toolTrace: maskedToolTrace } : {}),
+      ...(maskedEvidence ? { evidence: maskedEvidence } : {}),
+    };
+  });
+
+  return {
+    ...conv,
+    messages: maskedMessages,
+  };
+}
+
+/**
+ * Composes canonical read-only sanitization: 018 evidence -> 019 intake hydration
+ * -> 017 AI masking under original conversation role -> 020 output policy.
+ */
+function sanitizeConversationRead(
+  tenantId: string,
+  conv: SupportConversation,
+  intakeViewerRole: string,
+): SupportConversation {
+  const numericTenantId = Number(tenantId);
+  if (!Number.isInteger(numericTenantId) || numericTenantId <= 0) {
+    return conv;
+  }
+
+  const evidenceSanitized = sanitizeSupportEvidenceConversation({
+    tenantId: numericTenantId,
+    conversation: conv,
+    viewerRole: conv.userRole || intakeViewerRole,
+  });
+  const intakeHydrated = hydrateSupportConversationIntake({
+    tenantId: numericTenantId,
+    conversation: evidenceSanitized,
+    viewerRole: intakeViewerRole,
+  });
+  const maskedAiHistory = maskConversationAiMessagesForOriginalRole(tenantId, intakeHydrated);
+  return sanitizeSupportConversationOutput({
+    tenantId: numericTenantId,
+    conversation: maskedAiHistory,
+  });
+}
+
 export function listSupportConversations(
   tenantId: string,
   filter?: { userId?: string; status?: SupportConversationStatus },
@@ -175,7 +258,6 @@ export function listSupportConversations(
   const tid = String(tenantId);
   const store = readStore<SupportConversation[]>(CONVERSATIONS_KEY);
   const list = Array.isArray(store[tid]) ? store[tid] : [];
-  const numericTenantId = Number(tid);
 
   return list
     .filter((conv) => {
@@ -183,22 +265,7 @@ export function listSupportConversations(
       if (filter?.status && conv.status !== filter.status) return false;
       return true;
     })
-    .map((conv) =>
-      Number.isInteger(numericTenantId) && numericTenantId > 0
-        ? sanitizeSupportConversationOutput({
-            tenantId: numericTenantId,
-            conversation: hydrateSupportConversationIntake({
-              tenantId: numericTenantId,
-              conversation: sanitizeSupportEvidenceConversation({
-                tenantId: numericTenantId,
-                conversation: conv,
-                viewerRole: conv.userRole,
-              }),
-              viewerRole: conv.userRole,
-            }),
-          })
-        : conv,
-    );
+    .map((conv) => sanitizeConversationRead(tid, conv, conv.userRole));
 }
 
 export function getSupportConversationForUser(
@@ -225,23 +292,7 @@ export function getSupportConversationForUser(
     );
   }
 
-  const numericTenantId = Number(tid);
-  if (Number.isInteger(numericTenantId) && numericTenantId > 0) {
-    return sanitizeSupportConversationOutput({
-      tenantId: numericTenantId,
-      conversation: hydrateSupportConversationIntake({
-        tenantId: numericTenantId,
-        conversation: sanitizeSupportEvidenceConversation({
-          tenantId: numericTenantId,
-          conversation: found,
-          viewerRole: requester.role,
-        }),
-        viewerRole: requester.role,
-      }),
-    });
-  }
-
-  return found;
+  return sanitizeConversationRead(tid, found, requester.role);
 }
 
 export function createOrAppendSupportConversation(

@@ -2,7 +2,7 @@
 
 **Purpose**: Validate specification completeness, constitution alignment, and contract freeze readiness before peer implementation.
 **Created**: 2026-11-15
-**Feature**: [spec.md](file:///home/dotha/wt-support-output-controls/specs/020-ai-support-output-controls/spec.md)
+**Feature**: [spec.md](../spec.md)
 
 ## Content Quality
 

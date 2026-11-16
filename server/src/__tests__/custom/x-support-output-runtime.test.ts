@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Response } from 'express';
 import { getDb, initDb } from '../../db/index.js';
 import { setEnabled } from '../../custom/x-gateway/config.js';
+import { resetFlagsCacheForTests, setFlags } from '../../custom/ai-platform/flags.js';
+import { upsertSupportKnowledgeDoc } from '../../custom/x-gateway/support-knowledge.js';
 import {
   createSupportTenant,
   type SupportTenant,
@@ -26,6 +29,7 @@ import {
   listSupportOutputEvents,
   saveSupportOutputPolicy,
 } from '../../custom/x-gateway/support-output-store.js';
+import { CITATIONS_HEADER_NAME, type CitationEntry } from '@freellmapi/shared/ai-platform-retrieval.js';
 import { SUPPORT_OUTPUT_BLOCK_NOTICE } from '@freellmapi/shared/support-output.js';
 
 describe('Support Output Runtime Integration (Spec 020)', () => {
@@ -58,9 +62,26 @@ describe('Support Output Runtime Integration (Spec 020)', () => {
   });
 
   afterEach(() => {
+    resetFlagsCacheForTests();
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
   });
+
+  function createMockRes() {
+    const headers: Record<string, string> = {};
+    const res = {
+      headersSent: false,
+      req: { headers: {} },
+      setHeader(name: string, val: string | string[]) {
+        headers[name.toLowerCase()] = Array.isArray(val) ? val.join(', ') : String(val);
+        return res;
+      },
+      getHeader(name: string) {
+        return headers[name.toLowerCase()];
+      },
+    } as unknown as Response;
+    return { res, headers };
+  }
 
   function collectCapturedLogs(): string {
     return [
@@ -641,5 +662,341 @@ describe('Support Output Runtime Integration (Spec 020)', () => {
     saveSupportOutputPolicy({tenantId:tenant.id,expectedVersion:0,policy:{mode:'enforce',blockedTerms:[{id:'blocked',text:sentinel}],maxOutputChars:16000,redactCredentials:false}});
     const view=getSupportConversationForUser(String(tenant.id),conv.id,{userId:customerCtx.userId,role:'customer'});
     expect(JSON.stringify(view.messages)).not.toContain(sentinel);
+  });
+
+  it('redacts credentials in Stage 4 retrievalCitations across result.citations, runtime.citations, X-FreeLLM-Citations header, and cached replay', async () => {
+    const secretToken = 'sup_ctx_retrieval_secret_12345';
+    const bearerSecret = 'Bearer secret_retrieval_bearer_999';
+    upsertSupportKnowledgeDoc(String(tenant.id), {
+      title: `Auth Guide ${secretToken}`,
+      category: 'guide',
+      allowedRoles: ['customer'],
+      tags: ['auth', 'token'],
+      content: `Authenticate retrieval requests using ${bearerSecret} and ${secretToken}.`,
+    });
+
+    resetFlagsCacheForTests();
+    setFlags({ retrieval: true });
+
+    saveSupportOutputPolicy({
+      tenantId: tenant.id,
+      expectedVersion: 0,
+      policy: {
+        mode: 'enforce',
+        blockedTerms: [],
+        maxOutputChars: 16000,
+        redactCredentials: true,
+      },
+    });
+
+    const { res: mockRes, headers } = createMockRes();
+    const generate = vi.fn(async () => ({
+      reply: 'Please follow the authentication guide.',
+      userContext: customerCtx,
+      allowedTools: [],
+      toolTrace: [],
+      modelUsed: 'test-model',
+      usage: { prompt_tokens: 15, completion_tokens: 10, total_tokens: 25 },
+    }));
+
+    const turnRes = await executeSupportTurn({
+      tenant,
+      userContext: customerCtx,
+      res: mockRes,
+      input: {
+        tenantKey: tenant.publicKey,
+        requestId: 'req-retrieval-redact-1',
+        messages: [{ role: 'user', content: 'Authenticate retrieval auth guide token' }],
+      },
+      generate,
+    });
+
+    expect(Array.isArray(turnRes.citations)).toBe(true);
+    expect(turnRes.citations!.length).toBeGreaterThan(0);
+    expect(turnRes.runtime.citations).toEqual(turnRes.citations);
+    expect(JSON.stringify(turnRes)).not.toContain(secretToken);
+    expect(JSON.stringify(turnRes)).not.toContain('secret_retrieval_bearer_999');
+    expect(turnRes.citations![0].title).toContain('[REDACTED_TOKEN]');
+    expect(turnRes.citations![0].snippet).toContain('[REDACTED_TOKEN]');
+
+    const citHeader = headers[CITATIONS_HEADER_NAME.toLowerCase()];
+    expect(citHeader).toBeTruthy();
+    const decodedHeader = JSON.parse(Buffer.from(citHeader, 'base64url').toString('utf8')) as CitationEntry[];
+    expect(decodedHeader.length).toBeGreaterThan(0);
+    expect(JSON.stringify(decodedHeader)).not.toContain(secretToken);
+    expect(JSON.stringify(decodedHeader)).not.toContain('secret_retrieval_bearer_999');
+    expect(decodedHeader[0].title).toContain('[REDACTED_TOKEN]');
+
+    // Cached replay preserves sanitized citations
+    const replay = await executeSupportTurn({
+      tenant,
+      userContext: customerCtx,
+      input: {
+        tenantKey: tenant.publicKey,
+        requestId: 'req-retrieval-redact-1',
+        messages: [{ role: 'user', content: 'Authenticate retrieval auth guide token' }],
+      },
+      generate,
+    });
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(replay.runtime.replayed).toBe(true);
+    expect(replay.citations).toEqual(turnRes.citations);
+    expect(replay.runtime.citations).toEqual(turnRes.runtime.citations);
+    expect(JSON.stringify(replay)).not.toContain(secretToken);
+    expect(JSON.stringify(replay)).not.toContain('secret_retrieval_bearer_999');
+  });
+
+  it('blocks Stage 4 retrievalCitations containing blocked terms across result.citations, runtime.citations, X-FreeLLM-Citations header, and replay', async () => {
+    const blockedTerm = 'FORBIDDEN_CITATION_SNIPPET_777';
+    upsertSupportKnowledgeDoc(String(tenant.id), {
+      title: 'Shipping Policy',
+      category: 'guide',
+      allowedRoles: ['customer'],
+      tags: ['shipping'],
+      content: `Standard shipping takes 3 days. Internal marker: ${blockedTerm}.`,
+    });
+
+    resetFlagsCacheForTests();
+    setFlags({ retrieval: true });
+
+    saveSupportOutputPolicy({
+      tenantId: tenant.id,
+      expectedVersion: 0,
+      policy: {
+        mode: 'enforce',
+        blockedTerms: [{ id: 'ret-block-term', text: blockedTerm }],
+        maxOutputChars: 16000,
+        redactCredentials: false,
+      },
+    });
+
+    const { res: mockRes, headers } = createMockRes();
+    const generate = vi.fn(async () => ({
+      reply: 'Standard shipping takes 3 days.',
+      userContext: customerCtx,
+      allowedTools: [],
+      toolTrace: [],
+      modelUsed: 'test-model',
+      usage: { prompt_tokens: 12, completion_tokens: 8, total_tokens: 20 },
+    }));
+
+    const turnRes = await executeSupportTurn({
+      tenant,
+      userContext: customerCtx,
+      res: mockRes,
+      input: {
+        tenantKey: tenant.publicKey,
+        requestId: 'req-retrieval-block-1',
+        messages: [{ role: 'user', content: 'Standard shipping policy days' }],
+      },
+      generate,
+    });
+
+    expect(turnRes.reply).toBe(SUPPORT_OUTPUT_BLOCK_NOTICE);
+    expect(turnRes.runtime.replySource).toBe('output_policy_notice');
+    expect(turnRes.runtime.output?.action).toBe('block');
+    expect(turnRes.citations).toBeUndefined();
+    expect(turnRes.runtime.citations).toBeUndefined();
+    expect(headers[CITATIONS_HEADER_NAME.toLowerCase()]).toBeUndefined();
+    expect(JSON.stringify(turnRes)).not.toContain(blockedTerm);
+
+    const replay = await executeSupportTurn({
+      tenant,
+      userContext: customerCtx,
+      input: {
+        tenantKey: tenant.publicKey,
+        requestId: 'req-retrieval-block-1',
+        messages: [{ role: 'user', content: 'Standard shipping policy days' }],
+      },
+      generate,
+    });
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(replay.runtime.replayed).toBe(true);
+    expect(replay.reply).toBe(SUPPORT_OUTPUT_BLOCK_NOTICE);
+    expect(replay.citations).toBeUndefined();
+    expect(replay.runtime.citations).toBeUndefined();
+    expect(JSON.stringify(replay)).not.toContain(blockedTerm);
+  });
+
+  it('blocks or redacts legacy pre-020 cached replay citations and runtime.citations under updated 020 policy', async () => {
+    const legacyBlocked = 'LEGACY_CITATION_BLOCK_901';
+    const legacySecret = 'sup_ctx_legacy_cite_token_999';
+    upsertSupportKnowledgeDoc(String(tenant.id), {
+      title: 'Legacy Retrieval Guide',
+      category: 'guide',
+      allowedRoles: ['customer'],
+      tags: ['legacy', 'retrieval'],
+      content: 'Legacy retrieval guide details for customer support.',
+    });
+
+    resetFlagsCacheForTests();
+    setFlags({ retrieval: true });
+
+    const blockSeed = await executeSupportTurn({
+      tenant,
+      userContext: customerCtx,
+      input: {
+        tenantKey: tenant.publicKey,
+        requestId: 'req-legacy-cite-block',
+        messages: [{ role: 'user', content: 'Legacy retrieval guide details' }],
+      },
+      generate: async () => ({
+        reply: 'Clean reply text.',
+        userContext: customerCtx,
+        allowedTools: [],
+        toolTrace: [],
+        modelUsed: 'test-model',
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      }),
+    });
+
+    const redactSeed = await executeSupportTurn({
+      tenant,
+      userContext: customerCtx,
+      input: {
+        tenantKey: tenant.publicKey,
+        requestId: 'req-legacy-cite-redact',
+        messages: [{ role: 'user', content: 'Legacy retrieval guide details' }],
+      },
+      generate: async () => ({
+        reply: 'Clean reply text.',
+        userContext: customerCtx,
+        allowedTools: [],
+        toolTrace: [],
+        modelUsed: 'test-model',
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      }),
+    });
+
+    // Inject pre-020 payloads (no runtime.output) with tainted citations & runtime.citations
+    const { encrypt } = await import('../../lib/crypto.js');
+    const blockCitations: CitationEntry[] = [
+      {
+        docId: 'doc-legacy-1',
+        chunkId: 1,
+        title: `Title ${legacyBlocked}`,
+        score: 0.9,
+        snippet: 'Normal snippet',
+      },
+    ];
+    const blockPayload = {
+      ...blockSeed,
+      citations: blockCitations,
+      runtime: { ...blockSeed.runtime, citations: blockCitations },
+    };
+    delete (blockPayload.runtime as { output?: unknown }).output;
+    const encBlock = encrypt(JSON.stringify(blockPayload));
+    getDb()
+      .prepare(
+        'UPDATE x_support_runtime_turns SET masked_response_encrypted = ?, iv = ?, auth_tag = ? WHERE tenant_id = ? AND request_id = ?',
+      )
+      .run(encBlock.encrypted, encBlock.iv, encBlock.authTag, tenant.id, 'req-legacy-cite-block');
+
+    const redactCitations: CitationEntry[] = [
+      {
+        docId: 'doc-legacy-2',
+        chunkId: 1,
+        title: `Title ${legacySecret}`,
+        score: 0.9,
+        snippet: `Use ${legacySecret} here`,
+      },
+    ];
+    const redactPayload = {
+      ...redactSeed,
+      citations: redactCitations,
+      runtime: { ...redactSeed.runtime, citations: redactCitations },
+    };
+    delete (redactPayload.runtime as { output?: unknown }).output;
+    const encRedact = encrypt(JSON.stringify(redactPayload));
+    getDb()
+      .prepare(
+        'UPDATE x_support_runtime_turns SET masked_response_encrypted = ?, iv = ?, auth_tag = ? WHERE tenant_id = ? AND request_id = ?',
+      )
+      .run(encRedact.encrypted, encRedact.iv, encRedact.authTag, tenant.id, 'req-legacy-cite-redact');
+
+    saveSupportOutputPolicy({
+      tenantId: tenant.id,
+      expectedVersion: 0,
+      policy: {
+        mode: 'enforce',
+        blockedTerms: [{ id: 'legacy-cite-rule', text: legacyBlocked }],
+        maxOutputChars: 16000,
+        redactCredentials: true,
+      },
+    });
+
+    const replayedBlocked = await executeSupportTurn({
+      tenant,
+      userContext: customerCtx,
+      input: {
+        tenantKey: tenant.publicKey,
+        requestId: 'req-legacy-cite-block',
+        messages: [{ role: 'user', content: 'Legacy retrieval guide details' }],
+      },
+      generate: async () => {
+        throw new Error('Should not invoke provider on replay');
+      },
+    });
+    expect(replayedBlocked.runtime.replayed).toBe(true);
+    expect(replayedBlocked.reply).toBe(SUPPORT_OUTPUT_BLOCK_NOTICE);
+    expect(replayedBlocked.runtime.replySource).toBe('output_policy_notice');
+    expect(replayedBlocked.citations).toBeUndefined();
+    expect(replayedBlocked.runtime.citations).toBeUndefined();
+    expect('citations' in replayedBlocked).toBe(false);
+    expect('citations' in replayedBlocked.runtime).toBe(false);
+    expect(JSON.stringify(replayedBlocked)).not.toContain(legacyBlocked);
+
+    const replayedRedacted = await executeSupportTurn({
+      tenant,
+      userContext: customerCtx,
+      input: {
+        tenantKey: tenant.publicKey,
+        requestId: 'req-legacy-cite-redact',
+        messages: [{ role: 'user', content: 'Legacy retrieval guide details' }],
+      },
+      generate: async () => {
+        throw new Error('Should not invoke provider on replay');
+      },
+    });
+    expect(replayedRedacted.runtime.replayed).toBe(true);
+    expect(replayedRedacted.runtime.output?.action).toBe('redact');
+    expect(replayedRedacted.citations).toHaveLength(1);
+    expect(replayedRedacted.citations![0].title).toContain('[REDACTED_TOKEN]');
+    expect(replayedRedacted.citations![0].snippet).toContain('[REDACTED_TOKEN]');
+    expect(replayedRedacted.runtime.citations).toEqual(replayedRedacted.citations);
+    expect(JSON.stringify(replayedRedacted)).not.toContain(legacySecret);
+  });
+
+  it('masks userContext and runs 020 output evaluation before persistence on zero-model abstention', async () => {
+    updateSupportEvidencePolicy(tenant.id, {
+      mode: 'required',
+      includeLegacyDocs: false,
+      topK: 3,
+      minCoverage: 0.25,
+    }, 1);
+
+    const emailCtx: SupportUserContext = {
+      ...customerCtx,
+      email: 'alice.private@example.com',
+    };
+
+    const res = await executeSupportTurn({
+      tenant,
+      userContext: emailCtx,
+      input: {
+        tenantKey: tenant.publicKey,
+        requestId: 'req-abstention-mask-1',
+        messages: [{ role: 'user', content: 'Unknown question xyz987 my email is bob@example.com' }],
+      },
+      generate: async () => {
+        throw new Error('Should not call provider on zero-model abstention');
+      },
+    });
+
+    expect(res.runtime.replySource).toBe('knowledge_abstention');
+    expect(res.runtime.evidence?.reason).toBe('no_matches');
+    expect(res.userContext.email).not.toBe('alice.private@example.com');
+    expect(res.runtime.redactionCount).toBe(1);
+    expect(res.runtime.output?.action).toBe('allow');
   });
 });
