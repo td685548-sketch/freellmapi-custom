@@ -3,7 +3,7 @@
 **Feature Branch**: feat/9router-integration
 **Feature Directory**: specs/018-ai-support-knowledge-evidence
 **Created**: 2026-11-13
-**Status**: Implemented and locally validated on synchronized main. Current PR/CI/publication state: review.md.
+**Status**: Hoàn thành — xem [specs/README.md](../README.md)
 **Input**: Đề xuất bước tiếp theo để website đối tác dùng server làm AI hỗ trợ hoàn thiện hơn; viết spec và prompt cho bốn agent, reviewer chỉ review sau bàn giao.
 
 **Integration update (review round3)**: main đã đổi URL sang Thruline sau khi spec được soạn. Áp dụng [integration-main.md](integration-main.md) cho prefix lịch sử trong bộ tài liệu; giữ nguyên functional/security requirements và ownership. Tình trạng acceptance hiện hành ở [review.md](review.md).

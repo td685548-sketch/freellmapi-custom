@@ -56,7 +56,7 @@
 
 - [x] T028 Reviewer inspect all actual code paths, owner handoffs and prospective scope against specs/018-ai-support-knowledge-evidence/ownership.md and specs/018-ai-support-knowledge-evidence/review.md; return findings to owner, do not silently implement for them.
 - [x] T029 Reviewer execute all required gates in specs/018-ai-support-knowledge-evidence/quickstart.md, including migration registry, full workspace checks, actual HTTP proof and supported memory Db tests; rerun after corrections and account for every file if sharding.
-- [ ] T030 Reviewer record command evidence and scoped commit inventory in specs/018-ai-support-knowledge-evidence/review.md; safely sync main, preserve016, reuse/open integration PR only if accepted, report link/CI and do not merge.
+- [x] T030 Reviewer record command evidence and scoped commit inventory in specs/018-ai-support-knowledge-evidence/review.md; safely sync main, preserve016, reuse/open integration PR only if accepted, report link/CI and do not merge.
 
 ## Dependencies / parallel work
 

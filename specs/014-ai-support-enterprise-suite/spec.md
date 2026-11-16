@@ -3,7 +3,7 @@
 **Feature Branch**: `feat/9router-integration`  
 **Feature Directory**: `specs/014-ai-support-enterprise-suite`  
 **Created**: 2026-11-12  
-**Status**: Approved for Implementation  
+**Status**: Hoàn thành — xem [specs/README.md](../README.md)
 **Input**: Mở rộng cổng AI Support (`013-ai-support-gateway`) thành bộ giải pháp Enterprise hoàn chỉnh cho website đối tác:
 1. **Role-Scoped Knowledge Base (RAG)** & **PII/Data Masking Engine**: Tài liệu tri thức (FAQ, Chính sách nội bộ, SOP) được phân quyền theo `role` của người hỏi, kết hợp bộ lọc che giấu dữ liệu nhạy cảm (số thẻ, SĐT, email, regex tùy chỉnh) theo từng `role`.
 2. **Persistent Conversations, Human Hand-Off (Escalation Tickets) & Approval-Gated Actions**: Lưu lịch sử hội thoại theo từng khách hàng, chuyển tiếp cho nhân viên hỗ trợ thật (Human Agent) khi AI không giải quyết được, và cơ chế **Human-in-the-Loop Approval** đối với các hành động nhạy cảm (như hoàn tiền, hủy đơn, đổi địa chỉ).

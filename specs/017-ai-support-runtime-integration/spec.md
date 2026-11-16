@@ -3,7 +3,7 @@
 **Feature Branch**: `feat/9router-integration`
 **Feature Directory**: `specs/017-ai-support-runtime-integration`
 **Created**: 2026-11-12
-**Status**: Ready for implementation; reviewer acceptance pending
+**Status**: Hoàn thành — xem [specs/README.md](../README.md)
 **Input**: Hoàn thiện các tính năng còn thiếu để website đối tác dùng server này làm AI hỗ trợ thực tế. Viết spec và prompt cho bốn agent; reviewer chỉ review sau khi các agent hoàn tất và tạo PR khi đạt.
 
 ## User Scenarios & Testing *(mandatory)*

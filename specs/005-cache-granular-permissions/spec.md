@@ -1,7 +1,7 @@
 # Feature Specification: Cache settings and granular permissions
 **Branch**: codex/cache-settings-granular-permissions
 **Created**: 2026-11-02
-**Status**: Ready
+**Status**: Hoàn thành — xem [specs/README.md](../README.md)
 ## User scenarios
 ### US1 - Configure response cache (P1)
 An authorized operator opens Settings, views cache status, explicitly enables/disables it, chooses memory-only versus persistence, and clears entries with a separate permission. Existing cache default stays off until a user changes it. Explain system-wide scope, exact matching and plaintext persisted responses.

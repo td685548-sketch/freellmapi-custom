@@ -2,7 +2,7 @@
 
 **Feature Branch**: `feat/9router-integration`
 **Created**: 2026-11-07
-**Status**: Ready
+**Status**: Hoàn thành — xem [specs/README.md](../README.md)
 **Input**: Port 9Router Proxy Pools (multiple outbound proxies, sticky per account). Today X Gateway has a single gateway-wide outbound proxy plus a per-account proxy URL override.
 
 ## User Scenarios & Testing

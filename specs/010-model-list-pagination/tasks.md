@@ -25,7 +25,7 @@
 
 ## Phase 5: Validation
 - [X] T012 Run focused regressions, full tests, build and lint; record results and the Windows full-suite limitation in specs/010-model-list-pagination/quickstart.md. Require full green Linux CI before merge.
-- [ ] T013 Push codex/model-list-pagination, create a focused PR and merge only after green CI.
+- [x] T013 Push codex/model-list-pagination, create a focused PR and merge only after green CI.
 
 ## Dependencies and strategy
 T001 -> T002/T003 -> T004/T005/T006 -> T007/T008 -> T009/T010/T011 -> T012/T013. Build the batch endpoint first, then integrate the existing table and safe editing. No parallel writes are planned. The research phase was independently delegated; implementation remains sequential.

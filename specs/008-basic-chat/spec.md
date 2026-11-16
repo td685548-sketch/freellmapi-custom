@@ -2,7 +2,7 @@
 
 **Feature Branch**: `feat/9router-integration`
 **Created**: 2026-11-07
-**Status**: Ready
+**Status**: Hoàn thành — xem [specs/README.md](../README.md)
 **Input**: Bring 9Router Basic Chat / Playground into this web application.
 
 ## User Scenarios & Testing

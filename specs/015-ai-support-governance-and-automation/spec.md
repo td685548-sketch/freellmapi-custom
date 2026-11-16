@@ -3,7 +3,7 @@
 **Feature Branch**: `feat/9router-integration`  
 **Feature Directory**: `specs/015-ai-support-governance-and-automation`  
 **Created**: 2026-11-12  
-**Status**: Approved for Implementation  
+**Status**: Hoàn thành — xem [specs/README.md](../README.md)
 **Input**: Mở rộng cổng AI Support (`013` & `014`) sang Chặng 3 — **Quản trị an toàn (Prompt Firewall & Role Quotas), Hồ sơ trí nhớ khách hàng dài hạn (Customer CRM Memory & CSAT), và Hệ thống Webhook sự kiện chủ động bắn ngược về Website đối tác (Outbound Partner Event Webhooks)** kèm giao diện điều khiển `/thruline/support-guardrails`.
 
 ---

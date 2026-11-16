@@ -1,7 +1,7 @@
 # Feature Specification: Add keys from provider tiers
 **Branch**: codex/provider-tier-add-key
 **Created**: 2026-11-02
-**Status**: Ready
+**Status**: Hoàn thành — xem [specs/README.md](../README.md)
 ## User Scenarios & Testing
 ### US1 - Add a provider key (P1)
 An operator presses Add key beside a tier row and sees the existing key popup preselected to that provider. Successful additions update the displayed count and preserve the existing optional model-scope follow-up.

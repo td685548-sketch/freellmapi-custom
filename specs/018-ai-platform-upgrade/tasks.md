@@ -31,11 +31,11 @@ description: "Task list for AI Platform Upgrade"
 
 **Purpose**: Khung thư mục, kiểu dùng chung, công cụ test giả lập, và mốc hồi quy chụp trước khi có bất kỳ điểm móc nào.
 
-- [ ] T001 Tạo `shared/ai-platform.ts` với các kiểu `Pillar`, `Scope`, `ScopeKind`, `Wire`, hằng `AI_PLATFORM_LIMITS` (mọi giới hạn số trong data-model.md) và 21 tên quyền; tạo khung thư mục `S/`, `T/`, `C/` kèm `S/router.ts` rỗng
-- [ ] T002 [P] Tạo nhà cung cấp chat giả lập ghi lại thân yêu cầu và phát được luồng theo kịch bản cho cả 4 giao thức trong `server/src/__tests__/helpers/ai-platform-fake-provider.ts`
-- [ ] T003 [P] Tạo máy chủ MCP giả lập trong tiến trình (công cụ `lookup_order` đọc, `refund_order` ghi; có chế độ treo, trả 1 MB, chuyển hướng, đổi mô tả) trong `server/src/__tests__/helpers/fake-mcp-server.ts`
-- [ ] T004 [P] Tạo embedding giả lập xác định và bộ đánh giá `server/src/__tests__/fixtures/retrieval-eval.json` (tối thiểu 30 đoạn, 40 câu hỏi diễn đạt lại kèm đoạn đúng) trong `server/src/__tests__/helpers/fake-embeddings.ts`
-- [ ] T005 Chụp mốc hồi quy TRƯỚC mọi điểm móc: với bộ yêu cầu mẫu trên 4 giao thức (luồng và một lần, có và không có chỉ dẫn hệ thống/tri thức/`cache_control`), lưu thân gửi nhà cung cấp và thân/headers trả lời vào `server/src/__tests__/fixtures/ai-platform-baseline/` và viết `T/regression.test.ts` so sánh với mốc
+- [x] T001 Tạo `shared/ai-platform.ts` với các kiểu `Pillar`, `Scope`, `ScopeKind`, `Wire`, hằng `AI_PLATFORM_LIMITS` (mọi giới hạn số trong data-model.md) và 21 tên quyền; tạo khung thư mục `S/`, `T/`, `C/` kèm `S/router.ts` rỗng
+- [x] T002 [P] Tạo nhà cung cấp chat giả lập ghi lại thân yêu cầu và phát được luồng theo kịch bản cho cả 4 giao thức trong `server/src/__tests__/helpers/ai-platform-fake-provider.ts`
+- [x] T003 [P] Tạo máy chủ MCP giả lập trong tiến trình (công cụ `lookup_order` đọc, `refund_order` ghi; có chế độ treo, trả 1 MB, chuyển hướng, đổi mô tả) trong `server/src/__tests__/helpers/fake-mcp-server.ts`
+- [x] T004 [P] Tạo embedding giả lập xác định và bộ đánh giá `server/src/__tests__/fixtures/retrieval-eval.json` (tối thiểu 30 đoạn, 40 câu hỏi diễn đạt lại kèm đoạn đúng) trong `server/src/__tests__/helpers/fake-embeddings.ts`
+- [x] T005 Chụp mốc hồi quy TRƯỚC mọi điểm móc: với bộ yêu cầu mẫu trên 4 giao thức (luồng và một lần, có và không có chỉ dẫn hệ thống/tri thức/`cache_control`), lưu thân gửi nhà cung cấp và thân/headers trả lời vào `server/src/__tests__/fixtures/ai-platform-baseline/` và viết `T/regression.test.ts` so sánh với mốc
 
 ---
 
@@ -45,17 +45,17 @@ description: "Task list for AI Platform Upgrade"
 
 **⚠️ CRITICAL**: Chưa xong giai đoạn này thì chưa bắt đầu story nào.
 
-- [ ] T006 [P] Viết test cho nhận diện giao thức và các hàm `lastUserText`, `requestedModel`, `setRequestedModel`, `addSystemBlock`, `addTools` trên 4 giao thức trong `T/wire-extract.test.ts`
-- [ ] T007 Cài `S/wire/detect.ts` và `S/wire/extract.ts` theo internal-interfaces.md, dùng lại bảng đường dẫn của `server/src/custom/knowledge-inject.ts`
-- [ ] T008 [P] Viết test vàng cho `sendText` (một lần và SSE, `finish` = `stop` và `content_filter`) trên 4 giao thức trong `T/wire-respond.test.ts`, đối chiếu lược đồ với câu trả lời thật trong mốc T005
-- [ ] T009 Cài `S/wire/respond.ts`
-- [ ] T010 [P] Viết test cho bộ chặn: không filter thì không bọc `res`; filter `onDelta` thấy văn bản liền mạch dù SSE bị cắt giữa sự kiện; `stop` phát thay thế và sự kiện kết thúc hợp lệ; `buffering` giữ toàn bộ; lỗi phân tích thì cho qua nguyên vẹn; `onUsage` nhận usage của từng giao thức; trong `T/wire-interceptor.test.ts`
-- [ ] T011 Cài `S/wire/interceptor.ts` (bọc `res.write`/`res.end`/`res.json`, bộ tách SSE theo giao thức, chuỗi `OutputFilter`)
-- [ ] T012 [P] Viết test cho loopback: mang khóa người gọi; HMAC sai hoặc nguồn không phải loopback bị bỏ qua; độ sâu > 1 bị từ chối; tín hiệu hủy dừng lời gọi; usage được trả về; trong `T/loopback.test.ts`
-- [ ] T013 Cài `S/loopback.ts` theo mẫu `loopbackChatCompletionsUrl` của `server/src/routes/mcp.ts` với header `x-ai-platform-internal` ký bằng khóa sinh lúc khởi động
-- [ ] T014 Xác minh `server/src/custom/preparse-guard.ts` thấy được header trước cổng; thêm bước loại `x-ai-platform-internal` khỏi yêu cầu không đến từ loopback (trong tệp custom đó) và test trong `server/src/__tests__/custom/preparse-guard.test.ts`
-- [ ] T015 [P] Cài `S/masking.ts` (`maskText`, `maskData`) ủy quyền cho `maskSupportSensitiveText`/`maskSupportSensitiveData` của `server/src/custom/x-gateway/support-knowledge.ts`; với phạm vi `profile` dùng chính sách che mặc định dựng sẵn; test trong `T/masking.test.ts`
-- [ ] T016 Xác minh và ghi vào research.md mục R1: yêu cầu dưới `/thruline/v1` có đi qua `server/src/middleware/profile-gate.ts` hay không; nếu không, ghi rõ phạm vi áp dụng trong `contracts/inference-surface.md`
+- [x] T006 [P] Viết test cho nhận diện giao thức và các hàm `lastUserText`, `requestedModel`, `setRequestedModel`, `addSystemBlock`, `addTools` trên 4 giao thức trong `T/wire-extract.test.ts`
+- [x] T007 Cài `S/wire/detect.ts` và `S/wire/extract.ts` theo internal-interfaces.md, dùng lại bảng đường dẫn của `server/src/custom/knowledge-inject.ts`
+- [x] T008 [P] Viết test vàng cho `sendText` (một lần và SSE, `finish` = `stop` và `content_filter`) trên 4 giao thức trong `T/wire-respond.test.ts`, đối chiếu lược đồ với câu trả lời thật trong mốc T005
+- [x] T009 Cài `S/wire/respond.ts`
+- [x] T010 [P] Viết test cho bộ chặn: không filter thì không bọc `res`; filter `onDelta` thấy văn bản liền mạch dù SSE bị cắt giữa sự kiện; `stop` phát thay thế và sự kiện kết thúc hợp lệ; `buffering` giữ toàn bộ; lỗi phân tích thì cho qua nguyên vẹn; `onUsage` nhận usage của từng giao thức; trong `T/wire-interceptor.test.ts`
+- [x] T011 Cài `S/wire/interceptor.ts` (bọc `res.write`/`res.end`/`res.json`, bộ tách SSE theo giao thức, chuỗi `OutputFilter`)
+- [x] T012 [P] Viết test cho loopback: mang khóa người gọi; HMAC sai hoặc nguồn không phải loopback bị bỏ qua; độ sâu > 1 bị từ chối; tín hiệu hủy dừng lời gọi; usage được trả về; trong `T/loopback.test.ts`
+- [x] T013 Cài `S/loopback.ts` theo mẫu `loopbackChatCompletionsUrl` của `server/src/routes/mcp.ts` với header `x-ai-platform-internal` ký bằng khóa sinh lúc khởi động
+- [x] T014 Xác minh `server/src/custom/preparse-guard.ts` thấy được header trước cổng; thêm bước loại `x-ai-platform-internal` khỏi yêu cầu không đến từ loopback (trong tệp custom đó) và test trong `server/src/__tests__/custom/preparse-guard.test.ts`
+- [x] T015 [P] Cài `S/masking.ts` (`maskText`, `maskData`) ủy quyền cho `maskSupportSensitiveText`/`maskSupportSensitiveData` của `server/src/custom/x-gateway/support-knowledge.ts`; với phạm vi `profile` dùng chính sách che mặc định dựng sẵn; test trong `T/masking.test.ts`
+- [x] T016 Xác minh và ghi vào research.md mục R1: yêu cầu dưới `/thruline/v1` có đi qua `server/src/middleware/profile-gate.ts` hay không; nếu không, ghi rõ phạm vi áp dụng trong `contracts/inference-surface.md`
 
 **Checkpoint**: Lớp giao thức sẵn sàng; `T/regression.test.ts` vẫn đạt (chưa có điểm móc).
 
@@ -69,26 +69,26 @@ description: "Task list for AI Platform Upgrade"
 
 ### Tests for User Story 1 ⚠️
 
-- [ ] T017 [P] [US1] Viết test roundtrip `up`/`down`/`up` cho migration nền trong `server/src/__tests__/db/migrate/ai-platform-base.test.ts`
-- [ ] T018 [P] [US1] Viết test công tắc: thiếu khóa hoặc JSON lỗi là tất cả `false`; `setFlags` chỉ đổi khóa được gửi; lỗi DB trả `false`; trong `T/flags.test.ts`
-- [ ] T019 [P] [US1] Viết test ma trận quyền: mỗi dòng của `contracts/admin-api.md` ánh xạ đúng quyền; đường dẫn lạ và chữ hoa/thường trả `manage_ai_platform`; thành viên chỉ có quyền xem bị 403 khi ghi; triển khai single-user có đủ quyền; trong `T/permissions.test.ts`
-- [ ] T020 [P] [US1] Viết test audit: bật/tắt công tắc tạo mục vùng `ai-platform`; các trường `secret`, `authorization`, `headers`, `args` không có trong tóm tắt; trong `T/audit.test.ts`
-- [ ] T021 [P] [US1] Viết test `runPreRequest`: mọi công tắc tắt thì trả `continue` và `req.body`, `res` không đổi tham chiếu lẫn nội dung; lời gọi nội bộ hợp lệ bỏ qua các bước; trong `T/pipeline.test.ts`
+- [x] T017 [P] [US1] Viết test roundtrip `up`/`down`/`up` cho migration nền trong `server/src/__tests__/db/migrate/ai-platform-base.test.ts`
+- [x] T018 [P] [US1] Viết test công tắc: thiếu khóa hoặc JSON lỗi là tất cả `false`; `setFlags` chỉ đổi khóa được gửi; lỗi DB trả `false`; trong `T/flags.test.ts`
+- [x] T019 [P] [US1] Viết test ma trận quyền: mỗi dòng của `contracts/admin-api.md` ánh xạ đúng quyền; đường dẫn lạ và chữ hoa/thường trả `manage_ai_platform`; thành viên chỉ có quyền xem bị 403 khi ghi; triển khai single-user có đủ quyền; trong `T/permissions.test.ts`
+- [x] T020 [P] [US1] Viết test audit: bật/tắt công tắc tạo mục vùng `ai-platform`; các trường `secret`, `authorization`, `headers`, `args` không có trong tóm tắt; trong `T/audit.test.ts`
+- [x] T021 [P] [US1] Viết test `runPreRequest`: mọi công tắc tắt thì trả `continue` và `req.body`, `res` không đổi tham chiếu lẫn nội dung; lời gọi nội bộ hợp lệ bỏ qua các bước; trong `T/pipeline.test.ts`
 
 ### Implementation for User Story 1
 
-- [ ] T022 [US1] Tạo `M/20261113_100000_custom_ai_platform_base.ts` (không tạo hàng công tắc; `down` xóa các khóa `ai_platform_*` trong `settings`)
-- [ ] T023 [US1] Cài `S/flags.ts` (khóa `ai_platform_flags_v1`, cache 5 giây, `isPillarEnabled`, `getFlags`, `setFlags`)
-- [ ] T024 [US1] Thêm nhóm `manage_ai_platform` cùng 21 quyền con (tên và mô tả theo data-model.md mục 1) vào `shared/permissions.ts`; xác minh `client/src/custom/PermissionsDialog.tsx` tự hiển thị nhóm mới, chỉ sửa nếu không
-- [ ] T025 [US1] Cài `S/permissions.ts` (`aiPlatformPermission`) theo bảng trong `contracts/admin-api.md` và thêm một nhánh ủy quyền trong `server/src/custom/permission-actions.ts`
-- [ ] T026 [US1] Cài `S/router.ts` với `GET /overview`, `PUT /flags`, `GET/PUT /retention` (khóa `ai_platform_retention_v1`: vết chạy 30 ngày, lời gọi công cụ 30 ngày, trích đoạn 7 ngày)
-- [ ] T027 [US1] Đăng ký trong `server/src/custom/register.ts`: một mục `PERMISSION_GATES` (`/api/ai-platform` → `manage_ai_platform`), `app.use('/api/ai-platform', …)`; cập nhật bản sao đóng băng trong `server/src/__tests__/custom/surface.test.ts`
-- [ ] T028 [US1] Thêm vùng `ai-platform` vào `describeRoute` và bổ sung danh sách trường bị che của `summarize` trong `server/src/services/audit-log.ts`
-- [ ] T029 [US1] Cài `S/pipeline.ts` (`runPreRequest`, thứ tự cố định theo `contracts/inference-surface.md`, các bước là điểm cắm rỗng) và thêm một lời gọi trong `server/src/middleware/profile-gate.ts` sau bước chèn tri thức
-- [ ] T030 [US1] Cài `purgeScope(kind, id)` trong `S/scope.ts`; xác minh có thể gọi nó bằng trigger SQL `AFTER DELETE ON client_profiles` trong migration nền thay vì sửa `server/src/routes/client-profiles.ts`; ghi quyết định vào research.md mục R11
-- [ ] T031 [P] [US1] Viết test giao diện: tab chỉ hiện theo quyền; công tắc bị khóa khi thiếu `edit_ai_flags`; trong `C/ai-platform.test.tsx`
-- [ ] T032 [US1] Cài `C/AiPlatformApp.tsx`, `C/api.ts`, `C/strings.ts`, `C/pages/Overview.tsx`; thêm một mục điều hướng và route `/ai-platform/*` trong `client/src/App.tsx`; thêm khóa tiếng Việt vào `client/src/custom/i18n/vi.ts`
-- [ ] T033 [US1] Chạy `T/regression.test.ts` với các điểm móc đã cài; thêm ca "khôi phục bản sao lưu trước nâng cấp" vào `T/backup-restore.test.ts`
+- [x] T022 [US1] Tạo `M/20261113_100000_custom_ai_platform_base.ts` (không tạo hàng công tắc; `down` xóa các khóa `ai_platform_*` trong `settings`)
+- [x] T023 [US1] Cài `S/flags.ts` (khóa `ai_platform_flags_v1`, cache 5 giây, `isPillarEnabled`, `getFlags`, `setFlags`)
+- [x] T024 [US1] Thêm nhóm `manage_ai_platform` cùng 21 quyền con (tên và mô tả theo data-model.md mục 1) vào `shared/permissions.ts`; xác minh `client/src/custom/PermissionsDialog.tsx` tự hiển thị nhóm mới, chỉ sửa nếu không
+- [x] T025 [US1] Cài `S/permissions.ts` (`aiPlatformPermission`) theo bảng trong `contracts/admin-api.md` và thêm một nhánh ủy quyền trong `server/src/custom/permission-actions.ts`
+- [x] T026 [US1] Cài `S/router.ts` với `GET /overview`, `PUT /flags`, `GET/PUT /retention` (khóa `ai_platform_retention_v1`: vết chạy 30 ngày, lời gọi công cụ 30 ngày, trích đoạn 7 ngày)
+- [x] T027 [US1] Đăng ký trong `server/src/custom/register.ts`: một mục `PERMISSION_GATES` (`/api/ai-platform` → `manage_ai_platform`), `app.use('/api/ai-platform', …)`; cập nhật bản sao đóng băng trong `server/src/__tests__/custom/surface.test.ts`
+- [x] T028 [US1] Thêm vùng `ai-platform` vào `describeRoute` và bổ sung danh sách trường bị che của `summarize` trong `server/src/services/audit-log.ts`
+- [x] T029 [US1] Cài `S/pipeline.ts` (`runPreRequest`, thứ tự cố định theo `contracts/inference-surface.md`, các bước là điểm cắm rỗng) và thêm một lời gọi trong `server/src/middleware/profile-gate.ts` sau bước chèn tri thức
+- [x] T030 [US1] Cài `purgeScope(kind, id)` trong `S/scope.ts`; xác minh có thể gọi nó bằng trigger SQL `AFTER DELETE ON client_profiles` trong migration nền thay vì sửa `server/src/routes/client-profiles.ts`; ghi quyết định vào research.md mục R11
+- [x] T031 [P] [US1] Viết test giao diện: tab chỉ hiện theo quyền; công tắc bị khóa khi thiếu `edit_ai_flags`; trong `C/ai-platform.test.tsx`
+- [x] T032 [US1] Cài `C/AiPlatformApp.tsx`, `C/api.ts`, `C/strings.ts`, `C/pages/Overview.tsx`; thêm một mục điều hướng và route `/ai-platform/*` trong `client/src/App.tsx`; thêm khóa tiếng Việt vào `client/src/custom/i18n/vi.ts`
+- [x] T033 [US1] Chạy `T/regression.test.ts` với các điểm móc đã cài; thêm ca "khôi phục bản sao lưu trước nâng cấp" vào `T/backup-restore.test.ts`
 
 **Checkpoint**: US1 đạt; có thể phát hành mà không đổi hành vi.
 
@@ -102,29 +102,29 @@ description: "Task list for AI Platform Upgrade"
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T034 [US2] Đối chiếu bắt tay, header (`Mcp-Session-Id`, `MCP-Protocol-Version`), phân trang `tools/list` và dạng trả lời SSE với bản đặc tả MCP hiện hành (đọc tài liệu chính thức, không dựa trí nhớ); cập nhật research.md mục R6 nếu khác
-- [ ] T035 [P] [US2] Viết test roundtrip migration trong `server/src/__tests__/db/migrate/ai-platform-mcp.test.ts`
-- [ ] T036 [P] [US2] Viết test transport: bắt tay; thân JSON và SSE; phân trang; khởi tạo lại một lần khi 404 phiên; hạn 20 giây; kết quả > 262144 byte bị cắt có đánh dấu; chặn IP riêng, loopback, siêu dữ liệu, chuyển hướng tới nội bộ, tối đa 3 bước nhảy; trong `T/mcp-transport.test.ts`
-- [ ] T037 [P] [US2] Viết test registry: bí mật mã hóa và không bao giờ có trong trả lời; `schema_hash` đổi thì về `pending`; công cụ mới là `pending` và `effect = write`; `exposed_name` duy nhất và ≤ 64 ký tự; ngắt mạch sau 5 lỗi; xóa máy chủ đang dùng trả 409 `in_use`; trong `T/mcp-registry.test.ts`
-- [ ] T038 [P] [US2] Viết test `executeTool`: tham số và kết quả được che; bọc `<tool_result trust="untrusted">`; công cụ ghi tạo yêu cầu duyệt và không gọi máy chủ; mỗi lời gọi ghi một dòng `custom_ai_tool_calls`; trong `T/mcp-tools.test.ts`
-- [ ] T039 [P] [US2] Viết test duyệt: hai lần duyệt đồng thời chỉ một lần thực thi; từ chối không thực thi; hết hạn 24 giờ; trạng thái `unknown` không tự chạy lại; trong `T/approvals.test.ts`
-- [ ] T040 [P] [US2] Viết test vòng lặp: dừng khi không còn lời gọi công cụ; tối đa 8 vòng; công cụ của người gọi được trả về và vòng lặp dừng; usage là tổng; model không hỗ trợ công cụ thì bỏ công cụ kèm header; `x-freellm-tools: off`; trong `T/mcp-tool-loop.test.ts`
-- [ ] T041 [P] [US2] Viết test HTTP đầu-cuối trên 4 giao thức (luồng và một lần) với T002 và T003 trong `T/mcp-e2e.test.ts`
+- [x] T034 [US2] Đối chiếu bắt tay, header (`Mcp-Session-Id`, `MCP-Protocol-Version`), phân trang `tools/list` và dạng trả lời SSE với bản đặc tả MCP hiện hành (đọc tài liệu chính thức, không dựa trí nhớ); cập nhật research.md mục R6 nếu khác
+- [x] T035 [P] [US2] Viết test roundtrip migration trong `server/src/__tests__/db/migrate/ai-platform-mcp.test.ts`
+- [x] T036 [P] [US2] Viết test transport: bắt tay; thân JSON và SSE; phân trang; khởi tạo lại một lần khi 404 phiên; hạn 20 giây; kết quả > 262144 byte bị cắt có đánh dấu; chặn IP riêng, loopback, siêu dữ liệu, chuyển hướng tới nội bộ, tối đa 3 bước nhảy; trong `T/mcp-transport.test.ts`
+- [x] T037 [P] [US2] Viết test registry: bí mật mã hóa và không bao giờ có trong trả lời; `schema_hash` đổi thì về `pending`; công cụ mới là `pending` và `effect = write`; `exposed_name` duy nhất và ≤ 64 ký tự; ngắt mạch sau 5 lỗi; xóa máy chủ đang dùng trả 409 `in_use`; trong `T/mcp-registry.test.ts`
+- [x] T038 [P] [US2] Viết test `executeTool`: tham số và kết quả được che; bọc `<tool_result trust="untrusted">`; công cụ ghi tạo yêu cầu duyệt và không gọi máy chủ; mỗi lời gọi ghi một dòng `custom_ai_tool_calls`; trong `T/mcp-tools.test.ts`
+- [x] T039 [P] [US2] Viết test duyệt: hai lần duyệt đồng thời chỉ một lần thực thi; từ chối không thực thi; hết hạn 24 giờ; trạng thái `unknown` không tự chạy lại; trong `T/approvals.test.ts`
+- [x] T040 [P] [US2] Viết test vòng lặp: dừng khi không còn lời gọi công cụ; tối đa 8 vòng; công cụ của người gọi được trả về và vòng lặp dừng; usage là tổng; model không hỗ trợ công cụ thì bỏ công cụ kèm header; `x-freellm-tools: off`; trong `T/mcp-tool-loop.test.ts`
+- [x] T041 [P] [US2] Viết test HTTP đầu-cuối trên 4 giao thức (luồng và một lần) với T002 và T003 trong `T/mcp-e2e.test.ts`
 
 ### Implementation for User Story 2
 
-- [ ] T042 [US2] Tạo `M/20261113_110000_custom_ai_mcp_client.ts` với các bảng `custom_ai_mcp_servers`, `custom_ai_mcp_tools`, `custom_ai_tool_bindings`, `custom_ai_tool_calls`, `custom_ai_approvals` và cột `client_profiles.ai_tools_enabled INTEGER NOT NULL DEFAULT 0`, `ai_tool_max_rounds INTEGER` đúng data-model.md mục 2
-- [ ] T043 [US2] Cài `S/mcp-client/transport.ts` trên `safeFetch`/`validateSafeHttpUrl` của `server/src/custom/x-gateway/support-safe-http.ts`, phiên bản giao thức `2025-06-18`
-- [ ] T044 [US2] Cài `S/mcp-client/registry.ts` (CRUD máy chủ, mã hóa bằng `server/src/lib/crypto.ts`, `slug` khớp `^[a-z0-9-]{1,32}$`, `auth_kind` thuộc `none|bearer|header`, kiểm tra, đồng bộ, ngắt mạch 60 giây nhân đôi tới 15 phút, danh sách host nội bộ ngoại lệ)
-- [ ] T045 [US2] Cài `S/mcp-client/bindings.ts` và `S/mcp-client/tools.ts` (`toolsForScope` chỉ trả công cụ `allowed` của máy chủ `enabled` chưa `paused`; `executeTool`)
-- [ ] T046 [US2] Cài `S/mcp-client/calls.ts` (ghi và liệt kê lời gọi, cắt 8 KB, dọn theo thời hạn lưu)
-- [ ] T047 [US2] Cài `S/orchestrator/approvals.ts` (bảng `custom_ai_approvals`, `execution_key` duy nhất, chuyển trạng thái trong giao dịch theo mẫu `server/src/custom/x-gateway/support-action-executor.ts`, tác vụ hết hạn)
-- [ ] T048 [US2] Cài `S/mcp-client/tool-loop.ts` (`runToolLoop`) dùng `callGateway` và `executeTool`
-- [ ] T049 [US2] Nối bước 7 trong `S/pipeline.ts`: client key có `ai_tools_enabled` và có công cụ thì tiếp quản yêu cầu, chạy `runToolLoop`, trả lời bằng `sendText`, đặt header theo `contracts/inference-surface.md`
-- [ ] T050 [US2] Cài `S/mcp-client/router.ts` (mọi tuyến `/mcp/*` và `/approvals*` trong admin-api.md) và gắn vào `S/router.ts`
-- [ ] T051 [P] [US2] Viết test giao diện cho bảng duyệt công cụ, hộp thoại đăng ký (bí mật không hiển thị lại), hàng chờ duyệt trong `C/mcp.test.tsx`
-- [ ] T052 [US2] Cài `C/pages/McpServers.tsx`, `C/components/ToolReviewTable.tsx`, `C/components/ApprovalQueue.tsx`, chuỗi tiếng Việt trong `client/src/custom/i18n/vi.ts`
-- [ ] T053 [US2] Thêm ca rò rỉ bí mật (log, nhật ký lời gọi, audit, bản sao lưu dạng rõ) vào `T/secret-leak.test.ts`; chạy `T/regression.test.ts`
+- [x] T042 [US2] Tạo `M/20261113_110000_custom_ai_mcp_client.ts` với các bảng `custom_ai_mcp_servers`, `custom_ai_mcp_tools`, `custom_ai_tool_bindings`, `custom_ai_tool_calls`, `custom_ai_approvals` và cột `client_profiles.ai_tools_enabled INTEGER NOT NULL DEFAULT 0`, `ai_tool_max_rounds INTEGER` đúng data-model.md mục 2
+- [x] T043 [US2] Cài `S/mcp-client/transport.ts` trên `safeFetch`/`validateSafeHttpUrl` của `server/src/custom/x-gateway/support-safe-http.ts`, phiên bản giao thức `2025-06-18`
+- [x] T044 [US2] Cài `S/mcp-client/registry.ts` (CRUD máy chủ, mã hóa bằng `server/src/lib/crypto.ts`, `slug` khớp `^[a-z0-9-]{1,32}$`, `auth_kind` thuộc `none|bearer|header`, kiểm tra, đồng bộ, ngắt mạch 60 giây nhân đôi tới 15 phút, danh sách host nội bộ ngoại lệ)
+- [x] T045 [US2] Cài `S/mcp-client/bindings.ts` và `S/mcp-client/tools.ts` (`toolsForScope` chỉ trả công cụ `allowed` của máy chủ `enabled` chưa `paused`; `executeTool`)
+- [x] T046 [US2] Cài `S/mcp-client/calls.ts` (ghi và liệt kê lời gọi, cắt 8 KB, dọn theo thời hạn lưu)
+- [x] T047 [US2] Cài `S/orchestrator/approvals.ts` (bảng `custom_ai_approvals`, `execution_key` duy nhất, chuyển trạng thái trong giao dịch theo mẫu `server/src/custom/x-gateway/support-action-executor.ts`, tác vụ hết hạn)
+- [x] T048 [US2] Cài `S/mcp-client/tool-loop.ts` (`runToolLoop`) dùng `callGateway` và `executeTool`
+- [x] T049 [US2] Nối bước 7 trong `S/pipeline.ts`: client key có `ai_tools_enabled` và có công cụ thì tiếp quản yêu cầu, chạy `runToolLoop`, trả lời bằng `sendText`, đặt header theo `contracts/inference-surface.md`
+- [x] T050 [US2] Cài `S/mcp-client/router.ts` (mọi tuyến `/mcp/*` và `/approvals*` trong admin-api.md) và gắn vào `S/router.ts`
+- [x] T051 [P] [US2] Viết test giao diện cho bảng duyệt công cụ, hộp thoại đăng ký (bí mật không hiển thị lại), hàng chờ duyệt trong `C/mcp.test.tsx`
+- [x] T052 [US2] Cài `C/pages/McpServers.tsx`, `C/components/ToolReviewTable.tsx`, `C/components/ApprovalQueue.tsx`, chuỗi tiếng Việt trong `client/src/custom/i18n/vi.ts`
+- [x] T053 [US2] Thêm ca rò rỉ bí mật (log, nhật ký lời gọi, audit, bản sao lưu dạng rõ) vào `T/secret-leak.test.ts`; chạy `T/regression.test.ts`
 
 **Checkpoint**: US2 đạt và tự kiểm chứng được.
 
@@ -298,6 +298,7 @@ description: "Task list for AI Platform Upgrade"
 - [ ] T137 [P] Chạy `client/src/custom/i18n/translations.test.ts`; bổ sung mọi khóa tiếng Việt còn thiếu trong `client/src/custom/i18n/vi.ts`
 - [ ] T138 Chạy toàn bộ quickstart.md trên bản chạy thật, gồm single-user trong Docker; ghi kết quả vào `specs/018-ai-platform-upgrade/acceptance.md`
 - [ ] T139 Cập nhật `docs/CHANGELOG.md` và rà lại bảng "Điểm móc" trong plan.md so với `git diff --stat` thực tế
+- [ ] T140 Thêm dọn dữ liệu MCP khi xóa client profile: migration mới (không sửa `M/20261113_110000_custom_ai_mcp_client.ts`) tạo trigger `AFTER DELETE ON client_profiles` xóa `custom_ai_tool_bindings` có `scope_kind = 'profile'` và khóa `ai_platform_scope_profile_<id>_mcp_binding` trong `settings`, theo mẫu trigger của migration retrieval; test roundtrip và ca xóa profile trong `server/src/__tests__/db/migrate/ai-platform-mcp.test.ts` (phát hiện khi rà soát 2026-11-16)
 
 ---
 
@@ -363,11 +364,11 @@ US1 → US2 → US3 → US4 (hết nhóm P1) → US5 → US6 (P2) → US7 (P3) �
 | 7 | US5 | 15 (T089–T103) |
 | 8 | US6 | 11 (T104–T114) |
 | 9 | US7 | 17 (T115–T131) |
-| 10 Polish | — | 8 (T132–T139) |
-| **Tổng** | | **139** |
+| 10 Polish | — | 9 (T132–T140) |
+| **Tổng** | | **140** |
 
 ## Notes
 
 - Các task T016, T030, T034, T089, T090 là task xác minh: kết quả của chúng được ghi lại vào research.md trước khi viết mã phụ thuộc.
 - Commit sau mỗi task hoặc nhóm task liền mạch; không commit tệp nhị phân; tài liệu công khai dùng ngôn ngữ trung tính (AGENTS.md mục 6).
-- Mọi checkbox ở trạng thái chưa làm: tài liệu này là kế hoạch, chưa có dòng mã nào của tính năng được viết.
+- Trạng thái 2026-11-16: T001–T131 đã triển khai và merge vào `main` (PR #48, #52, #69, #74, #77). Còn T132–T140 của Phase Polish. Xem `specs/README.md`.

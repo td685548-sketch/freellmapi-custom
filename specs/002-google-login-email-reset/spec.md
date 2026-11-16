@@ -2,7 +2,7 @@
 
 **Feature Branch**: `codex/feat-google-auth-recovery`
 **Created**: 2026-11-01
-**Status**: Implemented; live integration activation awaits operator credentials
+**Status**: Hoàn thành phần code; chờ người vận hành cấp credential để bật thật — xem [specs/README.md](../README.md)
 **Input**: Add Google login and forgotten-password emails delivered through Gmail.
 
 ## User Scenarios & Testing

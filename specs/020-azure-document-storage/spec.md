@@ -2,7 +2,7 @@
 
 **Feature Branch**: `codex/azure-document-storage`
 **Created**: 2026-11-14
-**Status**: Implementation
+**Status**: Hoàn thành phần code; chưa bật trên production — xem [specs/README.md](../README.md)
 **Input**: Create a new Azure resource using Azure CLI and use it to store project documents.
 
 ## User Scenarios & Testing

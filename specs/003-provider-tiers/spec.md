@@ -2,7 +2,7 @@
 
 **Feature Branch**: `codex/provider-tier-key-count`
 **Created**: 2026-11-02
-**Status**: Ready
+**Status**: Hoàn thành — xem [specs/README.md](../README.md)
 **Input**: Create a provider tier table with linked key counts beside each provider.
 
 ## User Scenarios & Testing

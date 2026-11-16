@@ -2,7 +2,7 @@
 
 **Feature Branch**: `feat/9router-integration`
 **Created**: 2026-11-10
-**Status**: Accepted
+**Status**: Hoàn thành; còn ghi biên bản smoke test Linux (T007) — xem [specs/README.md](../README.md)
 **Input**: Complete CLI setup, real connection probes, diagnostics and Render deployment guidance.
 
 ## User Scenarios & Testing

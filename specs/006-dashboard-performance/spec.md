@@ -2,7 +2,7 @@
 
 **Feature Branch**: `codex/p01-dashboard-performance`
 **Created**: 2026-11-05
-**Status**: Implemented; local evidence ready, staging acceptance pending review
+**Status**: Hoàn thành phần code; chưa ghi nghiệm thu staging — xem [specs/README.md](../README.md)
 **Input**: Improve Render startup and dashboard database loading; begin with the P01 baseline required by docs/performance.
 
 ## User Scenarios & Testing

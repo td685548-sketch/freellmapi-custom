@@ -2,7 +2,7 @@
 
 **Feature Branch**: `codex/model-list-pagination`
 **Created**: 2026-11-08
-**Status**: Implemented; validation in progress
+**Status**: Hoàn thành — xem [specs/README.md](../README.md)
 **Input**: Show 20 models initially and load the next 20 only when the user selects Load more, reducing database load.
 
 ## User Scenarios & Testing *(mandatory)*
