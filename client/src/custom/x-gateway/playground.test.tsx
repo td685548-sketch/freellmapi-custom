@@ -394,4 +394,88 @@ describe('Playground component', () => {
       window.localStorage.removeItem('x-playground.history.1');
     }
   });
+
+  it('keeps dark theme intact and does not throw removeChild when assistant returns an unfenced HTML document', () => {
+    document.documentElement.classList.add('dark');
+    document.body.style.background = '';
+
+    const rawHtmlDoc = [
+      '<!DOCTYPE html>',
+      '<html lang="vi" class="light">',
+      '<head>',
+      '  <meta charset="UTF-8">',
+      '  <title>Bánh Mì Nhà</title>',
+      '  <style>body { background: #ffffff; }</style>',
+      '</head>',
+      '<body style="background: #ffffff">',
+      '  <!-- ABOUT -->',
+      '  <h2>❤️ Câu Chuyện Bánh Mì Nhà</h2>',
+      '',
+      '    <p>Nội dung bánh mì.</p>',
+      '</body>',
+      '</html>',
+    ].join('\n');
+
+    try {
+      act(() => {
+        root.render(<PlaygroundMessageContent content={rawHtmlDoc} />);
+      });
+
+      expect(document.documentElement.classList.contains('dark')).toBe(true);
+      expect(document.body.style.background).toBe('');
+      expect(container.querySelector('button[aria-label="Preview"]')).not.toBeNull();
+
+      // Navigating away unmounts PlaygroundMessageContent — must not throw NotFoundError (removeChild).
+      act(() => {
+        root.render(<div>Next page</div>);
+      });
+      expect(container.textContent).toBe('Next page');
+    } finally {
+      document.documentElement.classList.remove('dark');
+      document.body.style.background = '';
+    }
+  });
+
+  it('never renders document/executable tags or fixed overlays from raw HTML fragments', () => {
+    document.documentElement.classList.add('dark');
+
+    const fragment = [
+      '<body style="background: white">',
+      '<style>body { background: white !important; }</style>',
+      '<div style="position: fixed; inset: 0; background: white; z-index: 9999" class="fixed inset-0 x-sidebar">Safe text</div>',
+      '<svg onload="window.__svgXss = true"><script>window.__svgScript = true</script></svg>',
+      '<form action="https://evil.example"><input value="secret" /></form>',
+      '</body>',
+    ].join('\n');
+
+    try {
+      act(() => {
+        root.render(<PlaygroundMessageContent content={fragment} />);
+      });
+
+      expect(document.documentElement.classList.contains('dark')).toBe(true);
+      expect(document.body.style.background).toBe('');
+      expect(container.textContent).toContain('Safe text');
+      expect(container.querySelector('svg')).toBeNull();
+      expect(container.querySelector('style')).toBeNull();
+      expect(container.querySelector('form')).toBeNull();
+      expect(container.querySelector('input')).toBeNull();
+      const div = Array.from(container.querySelectorAll('.x-playground-content div')).find((el) =>
+        el.textContent?.includes('Safe text'),
+      );
+      expect(div).toBeDefined();
+      expect(div?.getAttribute('style')).toBeNull();
+      expect(div?.className ?? '').not.toContain('fixed');
+      expect(div?.className ?? '').not.toContain('x-sidebar');
+      expect((window as unknown as { __svgXss?: boolean }).__svgXss).toBeUndefined();
+      expect((window as unknown as { __svgScript?: boolean }).__svgScript).toBeUndefined();
+
+      act(() => {
+        root.render(<div>Unmounted cleanly</div>);
+      });
+      expect(container.textContent).toBe('Unmounted cleanly');
+    } finally {
+      document.documentElement.classList.remove('dark');
+    }
+  });
 });
