@@ -89,55 +89,158 @@ interface HastNode {
   children?: HastNode[];
 }
 
-const VOID_TAGS = new Set([
-  'area',
-  'base',
-  'br',
-  'col',
-  'embed',
-  'hr',
-  'img',
-  'input',
-  'link',
-  'meta',
-  'param',
-  'source',
-  'track',
-  'wbr',
-]);
+const VOID_TAGS = new Set(['br', 'hr', 'img', 'wbr']);
 
-const BLOCKED_HTML_TAGS = new Set([
-  'script',
-  'style',
-  'iframe',
-  'object',
-  'embed',
-  'applet',
-  'base',
-  'meta',
-  'link',
-  'frame',
-  'frameset',
-  'portal',
-  'noscript',
-  'template',
+const ALLOWED_HTML_TAGS = new Set([
+  // Custom Playground UI tags
+  'row',
+  'box',
+  'badge',
+  'title',
+  'button',
+  // Safe formatting / content / table / disclosure tags (never document/script/style/form tags)
+  'a',
+  'abbr',
+  'b',
+  'blockquote',
+  'br',
+  'code',
+  'dd',
+  'del',
+  'details',
+  'div',
+  'dl',
+  'dt',
+  'em',
+  'figcaption',
+  'figure',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'hr',
+  'i',
+  'img',
+  'kbd',
+  'li',
+  'mark',
+  'ol',
+  'p',
+  'pre',
+  'q',
+  's',
+  'small',
+  'span',
+  'strong',
+  'sub',
+  'summary',
+  'sup',
+  'table',
+  'tbody',
+  'td',
+  'th',
+  'thead',
+  'tfoot',
+  'tr',
+  'u',
+  'ul',
+  'wbr',
 ]);
 
 const BLOCKED_HTML_ATTRS = new Set([
   'ref',
   'key',
+  'children',
   'dangerouslysetinnerhtml',
+  'style',
+  'id',
+  'formaction',
+  'action',
+  'srcdoc',
+  'data',
+  'xmlns',
+  'contenteditable',
+  'autofocus',
+  'accesskey',
   '__proto__',
   'constructor',
   'prototype',
 ]);
 
-function isSafeHtmlAttr(key: string, val: unknown): boolean {
+const UNSAFE_CLASS_TOKEN = /^(?:fixed|sticky|inset-|top-|right-|bottom-|left-|z-|w-screen|h-screen|min-h-screen|min-h-dvh|x-)/i;
+
+function sanitizeHtmlClassName(raw: string): string {
+  return raw
+    .split(/\s+/)
+    .filter((token) => token && !UNSAFE_CLASS_TOKEN.test(token))
+    .join(' ');
+}
+
+function isSafeHtmlAttr(key: string): boolean {
   const lower = key.toLowerCase();
   if (BLOCKED_HTML_ATTRS.has(lower)) return false;
   if (/^on[a-z]/i.test(key)) return false;
-  if (lower === 'style' && typeof val !== 'string') return false;
   return true;
+}
+
+// Wrap standalone unfenced HTML documents (e.g. `<!DOCTYPE html>...</html>`) in a
+// `html` code fence so they render cleanly with syntax highlighting and sandboxed Preview
+// instead of breaking into indented code fragments or leaking raw HTML into the chat DOM.
+function fenceRawHtmlDocuments(markdown: string): string {
+  const lines = markdown.split('\n');
+  const out: string[] = [];
+  let activeFence: { char: string; len: number } | null = null;
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i]!;
+    const trimmed = line.trimStart();
+
+    const fenceMatch = /^(`{3,}|~{3,})(.*)$/.exec(trimmed);
+    if (fenceMatch) {
+      const marker = fenceMatch[1]!;
+      const rest = fenceMatch[2]!;
+      if (!activeFence) {
+        if (!(marker[0] === '`' && rest.includes('`'))) {
+          activeFence = { char: marker[0]!, len: marker.length };
+        }
+      } else if (marker[0] === activeFence.char && marker.length >= activeFence.len && rest.trim() === '') {
+        activeFence = null;
+      }
+      out.push(line);
+      i += 1;
+      continue;
+    }
+
+    if (!activeFence && /^(?:<!doctype\s+html\b|<html(?:\s|>|$))/i.test(trimmed)) {
+      const htmlLines: string[] = [line];
+      let closed = /<\/html\s*>/i.test(line);
+      i += 1;
+      while (!closed && i < lines.length) {
+        const nextLine = lines[i]!;
+        htmlLines.push(nextLine);
+        if (/<\/html\s*>/i.test(nextLine)) {
+          closed = true;
+        }
+        i += 1;
+      }
+      const maxBackticks = htmlLines.reduce((max, l) => {
+        const matches = l.match(/`+/g);
+        if (!matches) return max;
+        return Math.max(max, ...matches.map((m) => m.length));
+      }, 2);
+      const fence = '`'.repeat(Math.max(3, maxBackticks + 1));
+      out.push(`${fence}html`, ...htmlLines, fence);
+      continue;
+    }
+
+    out.push(line);
+    i += 1;
+  }
+
+  return out.join('\n');
 }
 
 // Parse an HTML fragment into a HAST-compatible node tree
@@ -167,7 +270,7 @@ function parseHtmlFragment(rawHtml: string): HastNode[] {
     const isSelfClosing = match[3] === '/' || VOID_TAGS.has(tagName);
     const isClosing = fullTag.startsWith('</');
 
-    if (BLOCKED_HTML_TAGS.has(tagName)) {
+    if (!ALLOWED_HTML_TAGS.has(tagName)) {
       const current = stack[stack.length - 1];
       if (current && current.children) {
         current.children.push({ type: 'text', value: fullTag });
@@ -198,7 +301,14 @@ function parseHtmlFragment(rawHtml: string): HastNode[] {
             : attrMatch[5] !== undefined
             ? attrMatch[5]
             : true;
-        if (!isSafeHtmlAttr(key, val)) continue;
+        if (!isSafeHtmlAttr(key)) continue;
+        if (key === 'class' || key === 'className') {
+          if (typeof val !== 'string') continue;
+          const sanitized = sanitizeHtmlClassName(val);
+          if (!sanitized) continue;
+          properties[key] = sanitized;
+          continue;
+        }
         properties[key] = val;
       }
 
@@ -258,13 +368,17 @@ function rehypeRawHtml() {
   };
 }
 
-function stripUnsafeDomProps<T extends object>(raw: T): Omit<T, 'node' | 'ref' | 'key' | 'dangerouslySetInnerHTML'> {
+function stripUnsafeDomProps<T extends object>(
+  raw: T,
+): Omit<T, 'node' | 'ref' | 'key' | 'dangerouslySetInnerHTML' | 'formAction'> {
   const rest = { ...raw } as Record<string, unknown>;
   delete rest.node;
   delete rest.ref;
   delete rest.key;
   delete rest.dangerouslySetInnerHTML;
-  return rest as Omit<T, 'node' | 'ref' | 'key' | 'dangerouslySetInnerHTML'>;
+  delete rest.formAction;
+  delete rest.formaction;
+  return rest as Omit<T, 'node' | 'ref' | 'key' | 'dangerouslySetInnerHTML' | 'formAction'>;
 }
 
 // Interactive button component supporting click-to-copy
@@ -293,6 +407,7 @@ function CustomButton({ children, className, title, onClick, ...rawProps }: Cust
 
   return (
     <button
+      {...props}
       type="button"
       onClick={handleClick}
       title={title || 'Copy'}
@@ -300,7 +415,6 @@ function CustomButton({ children, className, title, onClick, ...rawProps }: Cust
         'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border border-border bg-muted/60 hover:bg-muted text-foreground transition cursor-pointer',
         className,
       )}
-      {...props}
     >
       {copied ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
       <span>{copied ? 'Copied' : children}</span>
@@ -707,9 +821,11 @@ function PlaygroundMessageContentInner({
     return null;
   }
 
+  const normalizedContent = fenceRawHtmlDocuments(content);
+
   return (
     <div className={cn('x-playground-content text-sm leading-relaxed text-foreground', className)}>
-      <MessageRenderBoundary content={content}>
+      <MessageRenderBoundary content={normalizedContent}>
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           rehypePlugins={[rehypeRawHtml]}
@@ -717,7 +833,7 @@ function PlaygroundMessageContentInner({
           urlTransform={playgroundUrlTransform}
           components={customComponents}
         >
-          {content}
+          {normalizedContent}
         </ReactMarkdown>
       </MessageRenderBoundary>
     </div>
