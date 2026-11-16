@@ -128,59 +128,249 @@ export function getSupportRuntimeWidgetScript(): string {
     return fallback || '#2563eb';
   }
 
-  function applyPosition(rootEl, boxEl, pos) {
+  function applyPosition(rootEl, boxEl, pos, offsetPx) {
+    var offset = (typeof offsetPx === 'number' && offsetPx >= 8 && offsetPx <= 64) ? offsetPx : 24;
+    rootEl.style.bottom = offset + 'px';
     if (pos === 'bottom-left') {
-      rootEl.style.left = '24px';
+      rootEl.style.left = offset + 'px';
       rootEl.style.right = 'auto';
       boxEl.style.left = '0';
       boxEl.style.right = 'auto';
     } else {
-      rootEl.style.right = '24px';
+      rootEl.style.right = offset + 'px';
       rootEl.style.left = 'auto';
       boxEl.style.right = '0';
       boxEl.style.left = 'auto';
     }
   }
 
+  var AVATAR_SVGS = {
+    bot: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>',
+    headset: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>',
+    sparkles: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>',
+    message: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+    shield: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>'
+  };
+
+  var FONT_STACKS = {
+    system: '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif',
+    inter: '"Inter",system-ui,-apple-system,sans-serif',
+    serif: 'Georgia,"Times New Roman",serif',
+    mono: 'ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace'
+  };
+
+  function renderLauncherButton(toggleEl, app, bgCss) {
+    if (!toggleEl) return;
+    var styleMode = app.launcherStyle === 'pill' ? 'pill' : 'icon';
+    var preset = (app.avatarPreset && AVATAR_SVGS[app.avatarPreset]) ? app.avatarPreset : 'message';
+    var labelText = (typeof app.launcherLabel === 'string' && app.launcherLabel.trim()) ? app.launcherLabel.trim() : 'Chat with us';
+    toggleEl.innerHTML = '';
+    var iconWrap = document.createElement('span');
+    iconWrap.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;';
+    iconWrap.innerHTML = AVATAR_SVGS[preset] || AVATAR_SVGS.message;
+    toggleEl.appendChild(iconWrap);
+    if (styleMode === 'pill') {
+      toggleEl.style.width = 'auto';
+      toggleEl.style.height = '46px';
+      toggleEl.style.padding = '0 18px';
+      toggleEl.style.borderRadius = '9999px';
+      toggleEl.style.gap = '8px';
+      var lblSpan = document.createElement('span');
+      lblSpan.setAttribute('data-testid', 'widget-launcher-label');
+      lblSpan.style.cssText = 'font-size:13px;font-weight:600;white-space:nowrap;';
+      lblSpan.textContent = labelText;
+      toggleEl.appendChild(lblSpan);
+    } else {
+      toggleEl.style.width = '56px';
+      toggleEl.style.height = '56px';
+      toggleEl.style.padding = '0';
+      toggleEl.style.borderRadius = '28px';
+      toggleEl.style.gap = '0';
+    }
+    toggleEl.style.background = bgCss;
+  }
+
   // Shared safe appearance renderer for both the live widget and transport-free Studio preview.
-  function renderWidgetAppearance(view, appearance, onPrompt) {
+  function renderWidgetAppearance(view, appearance, onPrompt, strings) {
     var app = appearance || {};
     var prefix = view.preview ? 'widget-preview-' : 'widget-';
     var color = sanitizeHexColor(app.primaryColor, '#2563eb');
-    view.header.style.background = color;
-    view.send.style.background = color;
-    if (view.toggle) view.toggle.style.background = color;
+    var secondaryColor = sanitizeHexColor(app.secondaryColor, '#1d4ed8');
+    var headerBg = app.headerStyle === 'gradient'
+      ? 'linear-gradient(135deg,' + color + ',' + secondaryColor + ')'
+      : color;
+    var isDark = app.theme === 'dark';
+    var radiusMap = { sharp: '6px', rounded: '16px', pill: '24px' };
+    var boxRadius = radiusMap[app.borderRadius] || '16px';
+    var chipRadius = app.borderRadius === 'sharp' ? '4px' : (app.borderRadius === 'pill' ? '9999px' : '12px');
+    var fontStack = FONT_STACKS[app.fontFamily] || FONT_STACKS.system;
+
+    view.box.style.borderRadius = boxRadius;
+    view.box.style.fontFamily = fontStack;
+    if (view.root) view.root.style.fontFamily = fontStack;
+
+    // Widget size
+    var sizeMap = view.preview
+      ? { compact: ['340px', '440px'], standard: ['380px', '500px'], large: ['420px', '540px'] }
+      : { compact: ['340px', '460px'], standard: ['380px', '540px'], large: ['420px', '600px'] };
+    var dims = sizeMap[app.widgetSize] || sizeMap.standard;
+    if (view.preview) {
+      view.box.style.maxWidth = dims[0];
+      view.box.style.height = dims[1];
+    } else {
+      view.box.style.width = dims[0];
+      view.box.style.height = dims[1];
+    }
+
+    // Theme surface colors
+    view.box.style.background = isDark ? '#111827' : '#ffffff';
+    view.box.style.borderColor = isDark ? '#1f2937' : '#e5e7eb';
+    view.body.style.background = isDark ? '#0f172a' : '#f9fafb';
+    if (view.footer) {
+      view.footer.style.background = isDark ? '#111827' : '#ffffff';
+      view.footer.style.borderTopColor = isDark ? '#1f2937' : '#e5e7eb';
+    }
+    if (view.input) {
+      view.input.style.background = isDark ? '#1e293b' : (view.preview ? '#f9fafb' : '#ffffff');
+      view.input.style.borderColor = isDark ? '#334155' : '#d1d5db';
+      view.input.style.color = isDark ? '#f8fafc' : '#111827';
+      view.input.placeholder = (typeof app.inputPlaceholder === 'string' && app.inputPlaceholder.trim())
+        ? app.inputPlaceholder.trim()
+        : ((strings && strings.placeholder) || 'Type your message...');
+    }
+
+    view.header.style.background = headerBg;
+    view.send.style.background = headerBg;
+    view.send.textContent = (typeof app.sendButtonLabel === 'string' && app.sendButtonLabel.trim())
+      ? app.sendButtonLabel.trim()
+      : ((strings && strings.send) || 'Send');
+    renderLauncherButton(view.toggle, app, headerBg);
+
     if (typeof app.title === 'string') view.title.textContent = app.title;
-    if (view.root && app.position) applyPosition(view.root, view.box, app.position);
+
+    // Header avatar + status dot + subtitle
+    if (view.avatarEl) {
+      var preset = app.avatarPreset || 'bot';
+      if (preset !== 'none' && AVATAR_SVGS[preset]) {
+        view.avatarEl.style.display = 'inline-flex';
+        if (view.avatarIcon) {
+          view.avatarIcon.innerHTML = AVATAR_SVGS[preset];
+        }
+      } else {
+        view.avatarEl.style.display = 'none';
+        if (view.avatarIcon) {
+          view.avatarIcon.innerHTML = '';
+        }
+      }
+    }
+    if (view.statusDot) {
+      view.statusDot.style.display = app.showStatusDot === false ? 'none' : 'inline-block';
+    }
+    if (view.subtitleEl) {
+      var subText = typeof app.subtitle === 'string' ? app.subtitle.trim() : '';
+      if (subText) {
+        view.subtitleEl.textContent = subText;
+        view.subtitleEl.style.display = 'block';
+      } else {
+        view.subtitleEl.textContent = '';
+        view.subtitleEl.style.display = 'none';
+      }
+    }
+
+    if (view.root && app.position) applyPosition(view.root, view.box, app.position, app.edgeOffsetPx);
+
     var oldWelcome = view.body.querySelector('[data-appearance-welcome]');
     if (oldWelcome) oldWelcome.remove();
     if (app.welcomeMessage && (view.preview || view.body.children.length === 0)) {
       var welcome = document.createElement('div');
       welcome.setAttribute('data-appearance-welcome', 'true');
       welcome.setAttribute('data-testid', view.preview ? prefix + 'welcome' : 'widget-welcome-message');
-      welcome.style.cssText = 'align-self:flex-start;max-width:85%;padding:10px 14px;background:#e5e7eb;color:#1f2937;border-radius:16px 16px 16px 2px;word-break:break-word;font-size:13px;';
+      welcome.style.cssText = 'align-self:flex-start;max-width:85%;padding:10px 14px;background:' +
+        (isDark ? '#1e293b' : '#e5e7eb') + ';color:' + (isDark ? '#f1f5f9' : '#1f2937') +
+        ';border-radius:16px 16px 16px 2px;word-break:break-word;font-size:13px;';
       welcome.textContent = app.welcomeMessage;
       view.body.prepend(welcome);
     }
+
     var oldPrompts = view.box.querySelector('[data-appearance-prompts]');
     if (oldPrompts) oldPrompts.remove();
     if (Array.isArray(app.quickPrompts) && app.quickPrompts.length > 0) {
       var prompts = document.createElement('div');
       prompts.setAttribute('data-appearance-prompts', 'true');
       prompts.setAttribute('data-testid', prefix + 'quick-prompts');
-      prompts.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;padding:6px 12px;background:#fff;border-top:1px solid #f3f4f6;';
+      prompts.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;padding:6px 12px;background:' +
+        (isDark ? '#111827' : '#ffffff') + ';border-top:1px solid ' + (isDark ? '#1f2937' : '#f3f4f6') + ';';
       app.quickPrompts.forEach(function(text, index) {
         var button = document.createElement('button');
         button.type = 'button';
         button.setAttribute('data-testid', view.preview ? prefix + 'quick-prompt-' + index : 'widget-quick-prompt');
         button.textContent = text;
-        button.style.cssText = 'padding:4px 10px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:12px;font-size:11px;color:#374151;cursor:pointer;';
+        button.style.cssText = 'padding:4px 10px;background:' + (isDark ? '#1e293b' : '#f3f4f6') +
+          ';border:1px solid ' + (isDark ? '#334155' : '#d1d5db') + ';border-radius:' + chipRadius +
+          ';font-size:11px;color:' + (isDark ? '#e2e8f0' : '#374151') + ';cursor:pointer;';
         button.disabled = !onPrompt;
         if (onPrompt) button.addEventListener('click', function() { onPrompt(text); });
         prompts.appendChild(button);
       });
       view.box.insertBefore(prompts, view.footer);
     }
+
+    if (view.poweredByEl) {
+      view.poweredByEl.style.display = app.showPoweredBy === false ? 'none' : 'block';
+      view.poweredByEl.style.background = isDark ? '#111827' : '#ffffff';
+      view.poweredByEl.style.color = isDark ? '#64748b' : '#9ca3af';
+    }
+  }
+
+  function createHeaderIdentity(isPreview, titleText) {
+    var left = document.createElement('div');
+    left.style.cssText = 'display:flex;align-items:center;gap:10px;min-width:0;flex:1;';
+
+    var avatarWrap = document.createElement('div');
+    avatarWrap.style.cssText = 'position:relative;display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,0.18);flex-shrink:0;';
+
+    var avatarIcon = document.createElement('span');
+    avatarIcon.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;';
+    avatarWrap.appendChild(avatarIcon);
+
+    var statusDot = document.createElement('span');
+    statusDot.setAttribute('data-testid', isPreview ? 'widget-preview-status-dot' : 'widget-status-dot');
+    statusDot.style.cssText = 'position:absolute;bottom:0;right:0;width:9px;height:9px;border-radius:50%;background:#22c55e;border:2px solid rgba(0,0,0,0.2);';
+    avatarWrap.appendChild(statusDot);
+
+    var textCol = document.createElement('div');
+    textCol.style.cssText = 'display:flex;flex-direction:column;min-width:0;';
+
+    var titleEl = document.createElement('span');
+    titleEl.setAttribute('data-testid', isPreview ? 'widget-preview-title' : 'widget-title');
+    titleEl.style.cssText = 'font-weight:600;font-size:15px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+    titleEl.textContent = titleText;
+
+    var subtitleEl = document.createElement('span');
+    subtitleEl.setAttribute('data-testid', isPreview ? 'widget-preview-subtitle' : 'widget-subtitle');
+    subtitleEl.style.cssText = 'display:none;font-size:11px;font-weight:400;opacity:0.88;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;';
+
+    textCol.appendChild(titleEl);
+    textCol.appendChild(subtitleEl);
+    left.appendChild(avatarWrap);
+    left.appendChild(textCol);
+
+    return {
+      container: left,
+      avatarEl: avatarWrap,
+      avatarIcon: avatarIcon,
+      statusDot: statusDot,
+      titleEl: titleEl,
+      subtitleEl: subtitleEl,
+    };
+  }
+
+  function createPoweredByFooter(isPreview) {
+    var el = document.createElement('div');
+    el.setAttribute('data-testid', isPreview ? 'widget-preview-powered-by' : 'widget-powered-by');
+    el.style.cssText = 'text-align:center;font-size:10px;padding:4px 12px 6px;color:#9ca3af;background:#ffffff;';
+    el.textContent = 'Powered by FreeLLMAPI';
+    return el;
   }
 
   window.FreeLLMAPISupport = {
@@ -202,17 +392,15 @@ export function getSupportRuntimeWidgetScript(): string {
 
       // Header
       var header = document.createElement('div');
-      header.style.cssText = 'background:' + primaryColor + ';color:#fff;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;font-weight:600;font-size:15px;';
-      var titleEl = document.createElement('span');
-      titleEl.setAttribute('data-testid', 'widget-preview-title');
-      titleEl.textContent = titleText; // SAFE TEXT
-      header.appendChild(titleEl);
+      header.style.cssText = 'background:' + primaryColor + ';color:#fff;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;font-weight:600;font-size:15px;gap:8px;';
+      var identity = createHeaderIdentity(true, titleText);
+      header.appendChild(identity.container);
 
       var closeBtn = document.createElement('button');
       closeBtn.type = 'button';
       closeBtn.setAttribute('data-testid', 'widget-preview-close-btn');
       closeBtn.textContent = '×';
-      closeBtn.style.cssText = 'background:none;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1;';
+      closeBtn.style.cssText = 'background:none;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1;flex-shrink:0;';
       header.appendChild(closeBtn);
       previewRoot.appendChild(header);
 
@@ -299,14 +487,45 @@ export function getSupportRuntimeWidgetScript(): string {
       footer.appendChild(mockSend);
       previewRoot.appendChild(footer);
 
-      renderWidgetAppearance({ header: header, title: titleEl, send: mockSend,
-        body: bodyArea, box: previewRoot, footer: footer, preview: true }, appearance, null);
-      container.appendChild(previewRoot);
+      var previewPoweredBy = createPoweredByFooter(true);
+      previewRoot.appendChild(previewPoweredBy);
+
+      var previewWrapper = document.createElement('div');
+      previewWrapper.style.cssText = 'display:flex;flex-direction:column;gap:12px;width:100%;';
+      previewWrapper.appendChild(previewRoot);
+
+      var launcherRow = document.createElement('div');
+      launcherRow.style.cssText = 'display:flex;width:100%;max-width:380px;justify-content:' +
+        (appearance.position === 'bottom-left' ? 'flex-start' : 'flex-end') + ';';
+      var previewToggle = document.createElement('button');
+      previewToggle.type = 'button';
+      previewToggle.setAttribute('data-testid', 'widget-preview-launcher');
+      previewToggle.style.cssText = 'color:#fff;border:none;box-shadow:0 4px 14px rgba(0,0,0,0.22);cursor:default;display:inline-flex;align-items:center;justify-content:center;';
+      launcherRow.appendChild(previewToggle);
+      previewWrapper.appendChild(launcherRow);
+
+      renderWidgetAppearance({
+        header: header,
+        title: identity.titleEl,
+        subtitleEl: identity.subtitleEl,
+        avatarEl: identity.avatarEl,
+        avatarIcon: identity.avatarIcon,
+        statusDot: identity.statusDot,
+        send: mockSend,
+        input: mockInput,
+        body: bodyArea,
+        box: previewRoot,
+        footer: footer,
+        poweredByEl: previewPoweredBy,
+        toggle: previewToggle,
+        preview: true
+      }, appearance, null, strings);
+      container.appendChild(previewWrapper);
 
       return {
         destroy: function() {
-          if (previewRoot && previewRoot.parentNode) {
-            previewRoot.parentNode.removeChild(previewRoot);
+          if (previewWrapper && previewWrapper.parentNode) {
+            previewWrapper.parentNode.removeChild(previewWrapper);
           }
         }
       };
@@ -372,6 +591,8 @@ export function getSupportRuntimeWidgetScript(): string {
       var profileLoadFailed = false;
       var conversationId = null;
       var isOpen = false;
+      var autoOpenScheduled = false;
+      var autoOpenTimer = null;
       var isEscalated = false;
       var renderedMessageIds = {};
       var renderedRequestIds = {};
@@ -461,14 +682,13 @@ export function getSupportRuntimeWidgetScript(): string {
 
       // Header
       var header = document.createElement('div');
-      header.style.cssText = 'background:' + primaryColor + ';color:#fff;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;font-weight:600;font-size:15px;';
+      header.style.cssText = 'background:' + primaryColor + ';color:#fff;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;font-weight:600;font-size:15px;gap:8px;';
 
-      var headerTitle = document.createElement('span');
-      headerTitle.setAttribute('data-testid', 'widget-title');
-      headerTitle.textContent = titleText; // SAFE TEXT
+      var liveIdentity = createHeaderIdentity(false, titleText);
+      var headerTitle = liveIdentity.titleEl;
 
       var headerActions = document.createElement('div');
-      headerActions.style.cssText = 'display:flex;align-items:center;gap:8px;';
+      headerActions.style.cssText = 'display:flex;align-items:center;gap:8px;flex-shrink:0;';
 
       var escalateBtn = document.createElement('button');
       escalateBtn.setAttribute('data-testid', 'widget-escalate-btn');
@@ -484,7 +704,7 @@ export function getSupportRuntimeWidgetScript(): string {
 
       headerActions.appendChild(escalateBtn);
       headerActions.appendChild(closeBtn);
-      header.appendChild(headerTitle);
+      header.appendChild(liveIdentity.container);
       header.appendChild(headerActions);
 
       // Status Banner
@@ -523,11 +743,14 @@ export function getSupportRuntimeWidgetScript(): string {
       intakeContainer.setAttribute('data-testid', 'widget-intake-form');
       intakeContainer.style.cssText = 'display:none;flex:1;overflow-y:auto;padding:16px;background:#f9fafb;flex-direction:column;gap:12px;';
 
+      var livePoweredBy = createPoweredByFooter(false);
+
       box.appendChild(header);
       box.appendChild(bannerBox);
       box.appendChild(intakeContainer);
       box.appendChild(msgList);
       box.appendChild(form);
+      box.appendChild(livePoweredBy);
       root.appendChild(box);
       root.appendChild(toggleBtn);
       document.body.appendChild(root);
@@ -836,12 +1059,41 @@ export function getSupportRuntimeWidgetScript(): string {
         }
         if (pubConfig.appearance) {
           primaryColor = sanitizeHexColor(pubConfig.appearance.primaryColor, primaryColor);
-          renderWidgetAppearance({ root: root, box: box, header: header, title: headerTitle,
-            send: sendBtn, toggle: toggleBtn, body: msgList, footer: form, preview: false },
-            pubConfig.appearance, function(text) {
-              input.value = text;
-              form.dispatchEvent(new Event('submit'));
-            });
+          renderWidgetAppearance({
+            root: root,
+            box: box,
+            header: header,
+            title: headerTitle,
+            subtitleEl: liveIdentity.subtitleEl,
+            avatarEl: liveIdentity.avatarEl,
+            avatarIcon: liveIdentity.avatarIcon,
+            statusDot: liveIdentity.statusDot,
+            send: sendBtn,
+            input: input,
+            toggle: toggleBtn,
+            body: msgList,
+            footer: form,
+            poweredByEl: livePoweredBy,
+            preview: false
+          },
+          pubConfig.appearance, function(text) {
+            input.value = text;
+            form.dispatchEvent(new Event('submit'));
+          }, strings);
+          if (
+            typeof pubConfig.appearance.autoOpenDelaySeconds === 'number' &&
+            pubConfig.appearance.autoOpenDelaySeconds > 0 &&
+            !isOpen &&
+            !autoOpenScheduled
+          ) {
+            autoOpenScheduled = true;
+            autoOpenTimer = window.setTimeout(function() {
+              if (!destroyed && !isOpen) {
+                isOpen = true;
+                box.style.display = 'flex';
+              }
+            }, pubConfig.appearance.autoOpenDelaySeconds * 1000);
+          }
         }
 
         if (pubConfig.intake && Array.isArray(pubConfig.intake.fields) && pubConfig.intake.fields.length > 0) {
@@ -1662,6 +1914,10 @@ export function getSupportRuntimeWidgetScript(): string {
           // Cancel active requests
           abortAllRequests();
           stopPolling();
+          if (autoOpenTimer) {
+            window.clearTimeout(autoOpenTimer);
+            autoOpenTimer = null;
+          }
 
           // Clear prior messages and UI state
           msgList.innerHTML = '';
@@ -1723,6 +1979,10 @@ export function getSupportRuntimeWidgetScript(): string {
           renderedNotices = {};
           abortAllRequests();
           stopPolling();
+          if (autoOpenTimer) {
+            window.clearTimeout(autoOpenTimer);
+            autoOpenTimer = null;
+          }
           if (root && root.parentNode) {
             root.parentNode.removeChild(root);
           }

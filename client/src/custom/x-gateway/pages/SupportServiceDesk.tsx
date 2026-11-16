@@ -1,25 +1,41 @@
 import type {
+  SupportDeskAvatarPreset,
+  SupportDeskBorderRadius,
   SupportDeskCopilotDraft,
   SupportDeskCopilotResult,
   SupportDeskDepartment,
+  SupportDeskFontFamily,
+  SupportDeskHeaderStyle,
   SupportDeskIntakeField,
   SupportDeskIntakeFieldType,
+  SupportDeskLauncherStyle,
   SupportDeskPublicWidgetConfig,
   SupportDeskRoutingRule,
   SupportDeskSlaClock,
   SupportDeskSlaPolicy,
   SupportDeskTicketState,
+  SupportDeskWidgetAppearance,
   SupportDeskWidgetConfig,
   SupportDeskWidgetPosition,
+  SupportDeskWidgetSize,
+  SupportDeskWidgetTheme,
   SupportTicketPriority,
 } from '@freellmapi/shared/support-service-desk.js'
 import {
   DEFAULT_SUPPORT_DESK_SLA_POLICY,
+  DEFAULT_SUPPORT_DESK_WIDGET_CONFIG,
   RESERVED_INTAKE_FIELD_KEYS,
+  SUPPORT_DESK_AVATAR_PRESETS,
+  SUPPORT_DESK_BORDER_RADII,
   SUPPORT_DESK_DEPARTMENTS,
+  SUPPORT_DESK_FONT_FAMILIES,
+  SUPPORT_DESK_HEADER_STYLES,
   SUPPORT_DESK_INTAKE_FIELD_TYPES,
+  SUPPORT_DESK_LAUNCHER_STYLES,
   SUPPORT_DESK_LIMITS,
   SUPPORT_DESK_WIDGET_POSITIONS,
+  SUPPORT_DESK_WIDGET_SIZES,
+  SUPPORT_DESK_WIDGET_THEMES,
 } from '@freellmapi/shared/support-service-desk.js'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -32,6 +48,7 @@ import {
   Copy,
   Headphones,
   Plus,
+  RotateCcw,
   Send,
   ShieldAlert,
   ShieldCheck,
@@ -202,33 +219,109 @@ function WidgetTabPanel({
   const [draft, setDraft] = useState<{
     enabled?: boolean
     primaryColor?: string
+    secondaryColor?: string
+    theme?: SupportDeskWidgetTheme
+    headerStyle?: SupportDeskHeaderStyle
     title?: string
+    subtitle?: string
+    avatarPreset?: SupportDeskAvatarPreset
+    showStatusDot?: boolean
     welcomeMessage?: string
     position?: SupportDeskWidgetPosition
+    edgeOffsetPx?: number
+    launcherStyle?: SupportDeskLauncherStyle
+    launcherLabel?: string
+    borderRadius?: SupportDeskBorderRadius
+    widgetSize?: SupportDeskWidgetSize
+    fontFamily?: SupportDeskFontFamily
+    inputPlaceholder?: string
+    sendButtonLabel?: string
+    showPoweredBy?: boolean
+    autoOpenDelaySeconds?: number
     quickPrompts?: string[]
     intakeRequired?: boolean
     fields?: SupportDeskIntakeField[]
   }>({})
   const [newPrompt, setNewPrompt] = useState('')
 
+  const defaults = DEFAULT_SUPPORT_DESK_WIDGET_CONFIG.appearance
   const serverCfg = configQuery.data?.config
   const enabled = draft.enabled ?? serverCfg?.enabled ?? false
-  const primaryColor = draft.primaryColor ?? serverCfg?.appearance?.primaryColor ?? '#2563eb'
-  const title = draft.title ?? serverCfg?.appearance?.title ?? 'Support Assistant'
-  const welcomeMessage = draft.welcomeMessage ?? serverCfg?.appearance?.welcomeMessage ?? ''
-  const position = draft.position ?? serverCfg?.appearance?.position ?? 'bottom-right'
-  const quickPrompts = draft.quickPrompts ?? serverCfg?.appearance?.quickPrompts ?? []
+  const primaryColor = draft.primaryColor ?? serverCfg?.appearance?.primaryColor ?? defaults.primaryColor
+  const secondaryColor = draft.secondaryColor ?? serverCfg?.appearance?.secondaryColor ?? defaults.secondaryColor!
+  const theme = draft.theme ?? serverCfg?.appearance?.theme ?? defaults.theme!
+  const headerStyle = draft.headerStyle ?? serverCfg?.appearance?.headerStyle ?? defaults.headerStyle!
+  const title = draft.title ?? serverCfg?.appearance?.title ?? defaults.title
+  const subtitle = draft.subtitle ?? serverCfg?.appearance?.subtitle ?? defaults.subtitle!
+  const avatarPreset = draft.avatarPreset ?? serverCfg?.appearance?.avatarPreset ?? defaults.avatarPreset!
+  const showStatusDot = draft.showStatusDot ?? serverCfg?.appearance?.showStatusDot ?? defaults.showStatusDot!
+  const welcomeMessage = draft.welcomeMessage ?? serverCfg?.appearance?.welcomeMessage ?? defaults.welcomeMessage
+  const position = draft.position ?? serverCfg?.appearance?.position ?? defaults.position
+  const edgeOffsetPx = draft.edgeOffsetPx ?? serverCfg?.appearance?.edgeOffsetPx ?? defaults.edgeOffsetPx!
+  const launcherStyle = draft.launcherStyle ?? serverCfg?.appearance?.launcherStyle ?? defaults.launcherStyle!
+  const launcherLabel = draft.launcherLabel ?? serverCfg?.appearance?.launcherLabel ?? defaults.launcherLabel!
+  const borderRadius = draft.borderRadius ?? serverCfg?.appearance?.borderRadius ?? defaults.borderRadius!
+  const widgetSize = draft.widgetSize ?? serverCfg?.appearance?.widgetSize ?? defaults.widgetSize!
+  const fontFamily = draft.fontFamily ?? serverCfg?.appearance?.fontFamily ?? defaults.fontFamily!
+  const inputPlaceholder = draft.inputPlaceholder ?? serverCfg?.appearance?.inputPlaceholder ?? defaults.inputPlaceholder!
+  const sendButtonLabel = draft.sendButtonLabel ?? serverCfg?.appearance?.sendButtonLabel ?? defaults.sendButtonLabel!
+  const showPoweredBy = draft.showPoweredBy ?? serverCfg?.appearance?.showPoweredBy ?? defaults.showPoweredBy!
+  const autoOpenDelaySeconds = draft.autoOpenDelaySeconds ?? serverCfg?.appearance?.autoOpenDelaySeconds ?? defaults.autoOpenDelaySeconds!
+  const quickPrompts = draft.quickPrompts ?? serverCfg?.appearance?.quickPrompts ?? defaults.quickPrompts
   const intakeRequired = draft.intakeRequired ?? serverCfg?.intake?.required ?? false
   const fields = draft.fields ?? serverCfg?.intake?.fields ?? []
 
   const setEnabled = (v: boolean) => setDraft(d => ({ ...d, enabled: v }))
   const setPrimaryColor = (v: string) => setDraft(d => ({ ...d, primaryColor: v }))
+  const setSecondaryColor = (v: string) => setDraft(d => ({ ...d, secondaryColor: v }))
+  const setTheme = (v: SupportDeskWidgetTheme) => setDraft(d => ({ ...d, theme: v }))
+  const setHeaderStyle = (v: SupportDeskHeaderStyle) => setDraft(d => ({ ...d, headerStyle: v }))
   const setTitle = (v: string) => setDraft(d => ({ ...d, title: v }))
+  const setSubtitle = (v: string) => setDraft(d => ({ ...d, subtitle: v }))
+  const setAvatarPreset = (v: SupportDeskAvatarPreset) => setDraft(d => ({ ...d, avatarPreset: v }))
+  const setShowStatusDot = (v: boolean) => setDraft(d => ({ ...d, showStatusDot: v }))
   const setWelcomeMessage = (v: string) => setDraft(d => ({ ...d, welcomeMessage: v }))
   const setPosition = (v: SupportDeskWidgetPosition) => setDraft(d => ({ ...d, position: v }))
+  const setEdgeOffsetPx = (v: number) => setDraft(d => ({ ...d, edgeOffsetPx: v }))
+  const setLauncherStyle = (v: SupportDeskLauncherStyle) => setDraft(d => ({ ...d, launcherStyle: v }))
+  const setLauncherLabel = (v: string) => setDraft(d => ({ ...d, launcherLabel: v }))
+  const setBorderRadius = (v: SupportDeskBorderRadius) => setDraft(d => ({ ...d, borderRadius: v }))
+  const setWidgetSize = (v: SupportDeskWidgetSize) => setDraft(d => ({ ...d, widgetSize: v }))
+  const setFontFamily = (v: SupportDeskFontFamily) => setDraft(d => ({ ...d, fontFamily: v }))
+  const setInputPlaceholder = (v: string) => setDraft(d => ({ ...d, inputPlaceholder: v }))
+  const setSendButtonLabel = (v: string) => setDraft(d => ({ ...d, sendButtonLabel: v }))
+  const setShowPoweredBy = (v: boolean) => setDraft(d => ({ ...d, showPoweredBy: v }))
+  const setAutoOpenDelaySeconds = (v: number) => setDraft(d => ({ ...d, autoOpenDelaySeconds: v }))
   const setQuickPrompts = (v: string[]) => setDraft(d => ({ ...d, quickPrompts: v }))
   const setIntakeRequired = (v: boolean) => setDraft(d => ({ ...d, intakeRequired: v }))
   const setFields = (v: SupportDeskIntakeField[]) => setDraft(d => ({ ...d, fields: v }))
+
+  function resetAppearanceDefaults() {
+    setDraft(d => ({
+      ...d,
+      primaryColor: defaults.primaryColor,
+      secondaryColor: defaults.secondaryColor,
+      theme: defaults.theme,
+      headerStyle: defaults.headerStyle,
+      title: defaults.title,
+      subtitle: defaults.subtitle,
+      avatarPreset: defaults.avatarPreset,
+      showStatusDot: defaults.showStatusDot,
+      welcomeMessage: defaults.welcomeMessage,
+      position: defaults.position,
+      edgeOffsetPx: defaults.edgeOffsetPx,
+      launcherStyle: defaults.launcherStyle,
+      launcherLabel: defaults.launcherLabel,
+      borderRadius: defaults.borderRadius,
+      widgetSize: defaults.widgetSize,
+      fontFamily: defaults.fontFamily,
+      inputPlaceholder: defaults.inputPlaceholder,
+      sendButtonLabel: defaults.sendButtonLabel,
+      showPoweredBy: defaults.showPoweredBy,
+      autoOpenDelaySeconds: defaults.autoOpenDelaySeconds,
+      quickPrompts: [...defaults.quickPrompts],
+    }))
+  }
 
   const [clientError, setClientError] = useState<string | null>(null)
   const [versionConflict, setVersionConflict] = useState(false)
@@ -238,13 +331,7 @@ function WidgetTabPanel({
     mutationFn: (body: {
       expectedVersion: number
       enabled: boolean
-      appearance: {
-        primaryColor: string
-        title: string
-        welcomeMessage: string
-        position: SupportDeskWidgetPosition
-        quickPrompts: string[]
-      }
+      appearance: SupportDeskWidgetAppearance
       intake: {
         required: boolean
         fields: SupportDeskIntakeField[]
@@ -283,7 +370,7 @@ function WidgetTabPanel({
     setVersionConflict(false)
 
     // Validations
-    if (!/^#[0-9a-fA-F]{6}$/.test(primaryColor)) {
+    if (!/^#[0-9a-fA-F]{6}$/.test(primaryColor) || !/^#[0-9a-fA-F]{6}$/.test(secondaryColor)) {
       setClientError(s.widget.errors.invalidColor)
       return
     }
@@ -340,9 +427,25 @@ function WidgetTabPanel({
       enabled,
       appearance: {
         primaryColor,
+        secondaryColor,
+        theme,
+        headerStyle,
         title,
+        subtitle,
+        avatarPreset,
+        showStatusDot,
         welcomeMessage,
         position,
+        edgeOffsetPx,
+        launcherStyle,
+        launcherLabel,
+        borderRadius,
+        widgetSize,
+        fontFamily,
+        inputPlaceholder,
+        sendButtonLabel,
+        showPoweredBy,
+        autoOpenDelaySeconds,
         quickPrompts,
       },
       intake: {
@@ -402,9 +505,25 @@ function WidgetTabPanel({
     enabled,
     appearance: {
       primaryColor,
+      secondaryColor,
+      theme,
+      headerStyle,
       title,
+      subtitle,
+      avatarPreset,
+      showStatusDot,
       welcomeMessage,
       position,
+      edgeOffsetPx,
+      launcherStyle,
+      launcherLabel,
+      borderRadius,
+      widgetSize,
+      fontFamily,
+      inputPlaceholder,
+      sendButtonLabel,
+      showPoweredBy,
+      autoOpenDelaySeconds,
       quickPrompts,
     },
     intake: {
@@ -444,140 +563,513 @@ function WidgetTabPanel({
           </div>
 
           {/* Appearance */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>{s.widget.appearanceHeading}</h3>
-
-            <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-                {s.widget.primaryColor}
-              </label>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <input
-                  type="color"
-                  value={/^#[0-9a-fA-F]{6}$/.test(primaryColor) ? primaryColor : '#2563eb'}
-                  onChange={e => setPrimaryColor(e.target.value)}
-                  style={{ width: 40, height: 36, padding: 0, border: '1px solid #d1d5db', borderRadius: 6, cursor: 'pointer' }}
-                />
-                <input
-                  type="text"
-                  data-testid="widget-primary-color-input"
-                  className="x-input"
-                  value={primaryColor}
-                  onChange={e => setPrimaryColor(e.target.value)}
-                  style={{ width: 140 }}
-                />
-              </div>
-              <p className="x-hint" style={{ fontSize: 11, marginTop: 2 }}>{s.widget.primaryColorHint}</p>
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-                {s.widget.title}
-              </label>
-              <input
-                type="text"
-                data-testid="widget-title-input"
-                className="x-input"
-                value={title}
-                onChange={e => setTitle(e.target.value)}
-                placeholder={s.widget.titlePlaceholder}
-                maxLength={SUPPORT_DESK_LIMITS.maxLabelChars}
-              />
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-                {s.widget.welcomeMessage}
-              </label>
-              <textarea
-                data-testid="widget-welcome-input"
-                className="x-textarea"
-                rows={3}
-                value={welcomeMessage}
-                onChange={e => setWelcomeMessage(e.target.value)}
-                placeholder={s.widget.welcomeMessagePlaceholder}
-                maxLength={SUPPORT_DESK_LIMITS.maxValueChars}
-              />
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-                {s.widget.position}
-              </label>
-              <select
-                data-testid="widget-position-select"
-                className="x-select"
-                value={position}
-                onChange={e => setPosition(e.target.value as SupportDeskWidgetPosition)}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>{s.widget.appearanceHeading}</h3>
+              <button
+                type="button"
+                data-testid="widget-reset-appearance-btn"
+                className="x-button x-button-sm"
+                onClick={resetAppearanceDefaults}
               >
-                {SUPPORT_DESK_WIDGET_POSITIONS.map(pos => (
-                  <option key={pos} value={pos}>
-                    {s.widget.positions[pos]}
-                  </option>
-                ))}
-              </select>
+                <RotateCcw size={13} />
+                <span>{s.widget.resetDefaults}</span>
+              </button>
             </div>
 
-            {/* Quick Prompts */}
-            <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-                {s.widget.quickPrompts}
-              </label>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                <input
-                  type="text"
-                  data-testid="widget-prompt-input"
-                  className="x-input"
-                  value={newPrompt}
-                  onChange={e => setNewPrompt(e.target.value)}
-                  placeholder={s.widget.promptPlaceholder}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      addQuickPrompt()
-                    }
-                  }}
-                />
-                <button
-                  type="button"
-                  data-testid="widget-add-prompt-btn"
-                  className="x-button"
-                  onClick={addQuickPrompt}
-                >
-                  <Plus size={14} />
-                  <span>{s.widget.addPrompt}</span>
-                </button>
-              </div>
-              {quickPrompts.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {quickPrompts.map((p, idx) => (
-                    <div
-                      key={idx}
+            {/* Section 1: Colors & Theme */}
+            <div style={{ padding: 14, background: 'var(--x-alt)', borderRadius: 8, border: '1px solid var(--x-border)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{s.widget.sectionColors}</div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 500, marginBottom: 6 }}>
+                  {s.widget.colorPresets}
+                </label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {[
+                    { name: 'Ocean', p: '#2563eb', s: '#1d4ed8' },
+                    { name: 'Emerald', p: '#059669', s: '#047857' },
+                    { name: 'Violet', p: '#7c3aed', s: '#5b21b6' },
+                    { name: 'Coral', p: '#e11d48', s: '#be123c' },
+                    { name: 'Amber', p: '#d97706', s: '#b45309' },
+                    { name: 'Slate', p: '#334155', s: '#1e293b' },
+                  ].map(preset => (
+                    <button
+                      key={preset.name}
+                      type="button"
+                      data-testid={`widget-color-preset-${preset.name.toLowerCase()}`}
+                      onClick={() => {
+                        setPrimaryColor(preset.p)
+                        setSecondaryColor(preset.s)
+                      }}
                       style={{
-                        display: 'flex',
+                        display: 'inline-flex',
                         alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '6px 10px',
-                        background: 'var(--x-alt)',
-                        border: '1px solid var(--x-border)',
-                        borderRadius: 6,
-                        fontSize: 13,
+                        gap: 6,
+                        padding: '4px 10px',
+                        borderRadius: 999,
+                        border: primaryColor.toLowerCase() === preset.p ? '2px solid var(--x-accent, #2563eb)' : '1px solid var(--x-border)',
+                        background: 'var(--x-bg, transparent)',
+                        color: 'inherit',
+                        fontSize: 12,
+                        cursor: 'pointer',
                       }}
                     >
-                      <span>{p}</span>
-                      <button
-                        type="button"
-                        data-testid={`widget-remove-prompt-${idx}`}
-                        className="x-button x-button-sm"
-                        onClick={() => removeQuickPrompt(idx)}
-                        style={{ padding: '2px 6px' }}
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
+                      <span
+                        style={{
+                          width: 12,
+                          height: 12,
+                          borderRadius: '50%',
+                          background: `linear-gradient(135deg, ${preset.p}, ${preset.s})`,
+                          display: 'inline-block',
+                        }}
+                      />
+                      <span>{preset.name}</span>
+                    </button>
                   ))}
                 </div>
-              )}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+                    {s.widget.primaryColor}
+                  </label>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <input
+                      type="color"
+                      value={/^#[0-9a-fA-F]{6}$/.test(primaryColor) ? primaryColor : '#2563eb'}
+                      onChange={e => setPrimaryColor(e.target.value)}
+                      style={{ width: 38, height: 34, padding: 0, border: '1px solid var(--x-border)', borderRadius: 6, cursor: 'pointer' }}
+                    />
+                    <input
+                      type="text"
+                      data-testid="widget-primary-color-input"
+                      className="x-input"
+                      value={primaryColor}
+                      onChange={e => setPrimaryColor(e.target.value)}
+                      style={{ flex: 1, minWidth: 0 }}
+                    />
+                  </div>
+                  <p className="x-hint" style={{ fontSize: 11, marginTop: 2 }}>{s.widget.primaryColorHint}</p>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+                    {s.widget.secondaryColor}
+                  </label>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <input
+                      type="color"
+                      value={/^#[0-9a-fA-F]{6}$/.test(secondaryColor) ? secondaryColor : '#1d4ed8'}
+                      onChange={e => setSecondaryColor(e.target.value)}
+                      style={{ width: 38, height: 34, padding: 0, border: '1px solid var(--x-border)', borderRadius: 6, cursor: 'pointer' }}
+                    />
+                    <input
+                      type="text"
+                      data-testid="widget-secondary-color-input"
+                      className="x-input"
+                      value={secondaryColor}
+                      onChange={e => setSecondaryColor(e.target.value)}
+                      style={{ flex: 1, minWidth: 0 }}
+                    />
+                  </div>
+                  <p className="x-hint" style={{ fontSize: 11, marginTop: 2 }}>{s.widget.secondaryColorHint}</p>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+                    {s.widget.theme}
+                  </label>
+                  <select
+                    data-testid="widget-theme-select"
+                    className="x-select"
+                    value={theme}
+                    onChange={e => setTheme(e.target.value as SupportDeskWidgetTheme)}
+                  >
+                    {SUPPORT_DESK_WIDGET_THEMES.map(t => (
+                      <option key={t} value={t}>
+                        {s.widget.themes[t]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+                    {s.widget.headerStyle}
+                  </label>
+                  <select
+                    data-testid="widget-header-style-select"
+                    className="x-select"
+                    value={headerStyle}
+                    onChange={e => setHeaderStyle(e.target.value as SupportDeskHeaderStyle)}
+                  >
+                    {SUPPORT_DESK_HEADER_STYLES.map(hs => (
+                      <option key={hs} value={hs}>
+                        {s.widget.headerStyles[hs]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 2: Header & Identity */}
+            <div style={{ padding: 14, background: 'var(--x-alt)', borderRadius: 8, border: '1px solid var(--x-border)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{s.widget.sectionIdentity}</div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+                    {s.widget.title}
+                  </label>
+                  <input
+                    type="text"
+                    data-testid="widget-title-input"
+                    className="x-input"
+                    value={title}
+                    onChange={e => setTitle(e.target.value)}
+                    placeholder={s.widget.titlePlaceholder}
+                    maxLength={SUPPORT_DESK_LIMITS.maxLabelChars}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+                    {s.widget.subtitle}
+                  </label>
+                  <input
+                    type="text"
+                    data-testid="widget-subtitle-input"
+                    className="x-input"
+                    value={subtitle}
+                    onChange={e => setSubtitle(e.target.value)}
+                    placeholder={s.widget.subtitlePlaceholder}
+                    maxLength={SUPPORT_DESK_LIMITS.maxSubtitleChars}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'end' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+                    {s.widget.avatarPreset}
+                  </label>
+                  <select
+                    data-testid="widget-avatar-select"
+                    className="x-select"
+                    value={avatarPreset}
+                    onChange={e => setAvatarPreset(e.target.value as SupportDeskAvatarPreset)}
+                  >
+                    {SUPPORT_DESK_AVATAR_PRESETS.map(ap => (
+                      <option key={ap} value={ap}>
+                        {s.widget.avatarPresets[ap]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', paddingBottom: 8, fontSize: 13, fontWeight: 500 }}>
+                  <input
+                    type="checkbox"
+                    data-testid="widget-status-dot-toggle"
+                    checked={showStatusDot}
+                    onChange={e => setShowStatusDot(e.target.checked)}
+                  />
+                  <span>{s.widget.showStatusDot}</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Section 3: Launcher & Position */}
+            <div style={{ padding: 14, background: 'var(--x-alt)', borderRadius: 8, border: '1px solid var(--x-border)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{s.widget.sectionLauncher}</div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+                    {s.widget.position}
+                  </label>
+                  <select
+                    data-testid="widget-position-select"
+                    className="x-select"
+                    value={position}
+                    onChange={e => setPosition(e.target.value as SupportDeskWidgetPosition)}
+                  >
+                    {SUPPORT_DESK_WIDGET_POSITIONS.map(pos => (
+                      <option key={pos} value={pos}>
+                        {s.widget.positions[pos]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+                    {s.widget.edgeOffsetPx}
+                  </label>
+                  <input
+                    type="number"
+                    data-testid="widget-edge-offset-input"
+                    className="x-input"
+                    min={SUPPORT_DESK_LIMITS.minEdgeOffsetPx}
+                    max={SUPPORT_DESK_LIMITS.maxEdgeOffsetPx}
+                    value={edgeOffsetPx}
+                    onChange={e => {
+                      const val = Number(e.target.value)
+                      if (!Number.isNaN(val)) {
+                        setEdgeOffsetPx(Math.min(SUPPORT_DESK_LIMITS.maxEdgeOffsetPx, Math.max(SUPPORT_DESK_LIMITS.minEdgeOffsetPx, Math.round(val))))
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+                    {s.widget.launcherStyle}
+                  </label>
+                  <select
+                    data-testid="widget-launcher-style-select"
+                    className="x-select"
+                    value={launcherStyle}
+                    onChange={e => setLauncherStyle(e.target.value as SupportDeskLauncherStyle)}
+                  >
+                    {SUPPORT_DESK_LAUNCHER_STYLES.map(ls => (
+                      <option key={ls} value={ls}>
+                        {s.widget.launcherStyles[ls]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+                    {s.widget.launcherLabel}
+                  </label>
+                  <input
+                    type="text"
+                    data-testid="widget-launcher-label-input"
+                    className="x-input"
+                    value={launcherLabel}
+                    onChange={e => setLauncherLabel(e.target.value)}
+                    placeholder={s.widget.launcherLabelPlaceholder}
+                    maxLength={SUPPORT_DESK_LIMITS.maxLauncherLabelChars}
+                    disabled={launcherStyle !== 'pill'}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Section 4: Layout & Typography */}
+            <div style={{ padding: 14, background: 'var(--x-alt)', borderRadius: 8, border: '1px solid var(--x-border)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{s.widget.sectionLayout}</div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 500, marginBottom: 4 }}>
+                    {s.widget.borderRadius}
+                  </label>
+                  <select
+                    data-testid="widget-border-radius-select"
+                    className="x-select"
+                    value={borderRadius}
+                    onChange={e => setBorderRadius(e.target.value as SupportDeskBorderRadius)}
+                  >
+                    {SUPPORT_DESK_BORDER_RADII.map(br => (
+                      <option key={br} value={br}>
+                        {s.widget.borderRadii[br]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 500, marginBottom: 4 }}>
+                    {s.widget.widgetSize}
+                  </label>
+                  <select
+                    data-testid="widget-size-select"
+                    className="x-select"
+                    value={widgetSize}
+                    onChange={e => setWidgetSize(e.target.value as SupportDeskWidgetSize)}
+                  >
+                    {SUPPORT_DESK_WIDGET_SIZES.map(ws => (
+                      <option key={ws} value={ws}>
+                        {s.widget.widgetSizes[ws]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 500, marginBottom: 4 }}>
+                    {s.widget.fontFamily}
+                  </label>
+                  <select
+                    data-testid="widget-font-family-select"
+                    className="x-select"
+                    value={fontFamily}
+                    onChange={e => setFontFamily(e.target.value as SupportDeskFontFamily)}
+                  >
+                    {SUPPORT_DESK_FONT_FAMILIES.map(ff => (
+                      <option key={ff} value={ff}>
+                        {s.widget.fontFamilies[ff]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 5: Messaging & Behavior */}
+            <div style={{ padding: 14, background: 'var(--x-alt)', borderRadius: 8, border: '1px solid var(--x-border)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{s.widget.sectionBehavior}</div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+                  {s.widget.welcomeMessage}
+                </label>
+                <textarea
+                  data-testid="widget-welcome-input"
+                  className="x-textarea"
+                  rows={3}
+                  value={welcomeMessage}
+                  onChange={e => setWelcomeMessage(e.target.value)}
+                  placeholder={s.widget.welcomeMessagePlaceholder}
+                  maxLength={SUPPORT_DESK_LIMITS.maxValueChars}
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+                    {s.widget.inputPlaceholder}
+                  </label>
+                  <input
+                    type="text"
+                    data-testid="widget-input-placeholder-input"
+                    className="x-input"
+                    value={inputPlaceholder}
+                    onChange={e => setInputPlaceholder(e.target.value)}
+                    maxLength={SUPPORT_DESK_LIMITS.maxLabelChars}
+                  />
+                  <p className="x-hint" style={{ fontSize: 11, marginTop: 2 }}>{s.widget.inputPlaceholderHint}</p>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+                    {s.widget.sendButtonLabel}
+                  </label>
+                  <input
+                    type="text"
+                    data-testid="widget-send-label-input"
+                    className="x-input"
+                    value={sendButtonLabel}
+                    onChange={e => setSendButtonLabel(e.target.value)}
+                    maxLength={SUPPORT_DESK_LIMITS.maxSendLabelChars}
+                  />
+                  <p className="x-hint" style={{ fontSize: 11, marginTop: 2 }}>{s.widget.sendButtonLabelHint}</p>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'center' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, fontWeight: 500 }}>
+                  <input
+                    type="checkbox"
+                    data-testid="widget-powered-by-toggle"
+                    checked={showPoweredBy}
+                    onChange={e => setShowPoweredBy(e.target.checked)}
+                  />
+                  <span>{s.widget.showPoweredBy}</span>
+                </label>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 500, marginBottom: 4 }}>
+                    {s.widget.autoOpenDelaySeconds}
+                  </label>
+                  <input
+                    type="number"
+                    data-testid="widget-auto-open-input"
+                    className="x-input"
+                    min={0}
+                    max={SUPPORT_DESK_LIMITS.maxAutoOpenDelaySeconds}
+                    value={autoOpenDelaySeconds}
+                    onChange={e => {
+                      const val = Number(e.target.value)
+                      if (!Number.isNaN(val)) {
+                        setAutoOpenDelaySeconds(Math.min(SUPPORT_DESK_LIMITS.maxAutoOpenDelaySeconds, Math.max(0, Math.round(val))))
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Quick Prompts */}
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+                  {s.widget.quickPrompts}
+                </label>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                  <input
+                    type="text"
+                    data-testid="widget-prompt-input"
+                    className="x-input"
+                    value={newPrompt}
+                    onChange={e => setNewPrompt(e.target.value)}
+                    placeholder={s.widget.promptPlaceholder}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        addQuickPrompt()
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    data-testid="widget-add-prompt-btn"
+                    className="x-button"
+                    onClick={addQuickPrompt}
+                  >
+                    <Plus size={14} />
+                    <span>{s.widget.addPrompt}</span>
+                  </button>
+                </div>
+                {quickPrompts.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {quickPrompts.map((p, idx) => (
+                      <div
+                        key={idx}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '6px 10px',
+                          background: 'var(--x-bg, transparent)',
+                          border: '1px solid var(--x-border)',
+                          borderRadius: 6,
+                          fontSize: 13,
+                        }}
+                      >
+                        <span>{p}</span>
+                        <button
+                          type="button"
+                          data-testid={`widget-remove-prompt-${idx}`}
+                          className="x-button x-button-sm"
+                          onClick={() => removeQuickPrompt(idx)}
+                          style={{ padding: '2px 6px' }}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 

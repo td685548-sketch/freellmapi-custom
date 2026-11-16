@@ -14,6 +14,27 @@ export type SupportDeskDepartment = (typeof SUPPORT_DESK_DEPARTMENTS)[number];
 export const SUPPORT_DESK_WIDGET_POSITIONS = ['bottom-right', 'bottom-left'] as const;
 export type SupportDeskWidgetPosition = (typeof SUPPORT_DESK_WIDGET_POSITIONS)[number];
 
+export const SUPPORT_DESK_WIDGET_THEMES = ['light', 'dark'] as const;
+export type SupportDeskWidgetTheme = (typeof SUPPORT_DESK_WIDGET_THEMES)[number];
+
+export const SUPPORT_DESK_HEADER_STYLES = ['solid', 'gradient'] as const;
+export type SupportDeskHeaderStyle = (typeof SUPPORT_DESK_HEADER_STYLES)[number];
+
+export const SUPPORT_DESK_AVATAR_PRESETS = ['none', 'bot', 'headset', 'sparkles', 'message', 'shield'] as const;
+export type SupportDeskAvatarPreset = (typeof SUPPORT_DESK_AVATAR_PRESETS)[number];
+
+export const SUPPORT_DESK_LAUNCHER_STYLES = ['icon', 'pill'] as const;
+export type SupportDeskLauncherStyle = (typeof SUPPORT_DESK_LAUNCHER_STYLES)[number];
+
+export const SUPPORT_DESK_BORDER_RADII = ['sharp', 'rounded', 'pill'] as const;
+export type SupportDeskBorderRadius = (typeof SUPPORT_DESK_BORDER_RADII)[number];
+
+export const SUPPORT_DESK_WIDGET_SIZES = ['compact', 'standard', 'large'] as const;
+export type SupportDeskWidgetSize = (typeof SUPPORT_DESK_WIDGET_SIZES)[number];
+
+export const SUPPORT_DESK_FONT_FAMILIES = ['system', 'inter', 'serif', 'mono'] as const;
+export type SupportDeskFontFamily = (typeof SUPPORT_DESK_FONT_FAMILIES)[number];
+
 export const SUPPORT_DESK_INTAKE_FIELD_TYPES = ['text', 'email', 'number', 'select'] as const;
 export type SupportDeskIntakeFieldType = (typeof SUPPORT_DESK_INTAKE_FIELD_TYPES)[number];
 
@@ -24,6 +45,12 @@ export const SUPPORT_DESK_LIMITS = {
   maxQuickPrompts: 6,
   maxLabelChars: 80,
   maxTextChars: 500,
+  maxSubtitleChars: 80,
+  maxLauncherLabelChars: 30,
+  maxSendLabelChars: 24,
+  minEdgeOffsetPx: 8,
+  maxEdgeOffsetPx: 64,
+  maxAutoOpenDelaySeconds: 60,
   maxIntakeBytes: 8192,
   intakeTtlSeconds: 1800,
   maxQueuePageSize: 100,
@@ -76,6 +103,22 @@ export interface SupportDeskWidgetAppearance {
   welcomeMessage: string;
   position: SupportDeskWidgetPosition;
   quickPrompts: string[];
+  secondaryColor?: string;
+  theme?: SupportDeskWidgetTheme;
+  headerStyle?: SupportDeskHeaderStyle;
+  subtitle?: string;
+  avatarPreset?: SupportDeskAvatarPreset;
+  showStatusDot?: boolean;
+  launcherStyle?: SupportDeskLauncherStyle;
+  launcherLabel?: string;
+  borderRadius?: SupportDeskBorderRadius;
+  widgetSize?: SupportDeskWidgetSize;
+  fontFamily?: SupportDeskFontFamily;
+  edgeOffsetPx?: number;
+  inputPlaceholder?: string;
+  sendButtonLabel?: string;
+  showPoweredBy?: boolean;
+  autoOpenDelaySeconds?: number;
 }
 
 export interface SupportDeskWidgetConfig {
@@ -110,6 +153,22 @@ export const DEFAULT_SUPPORT_DESK_WIDGET_CONFIG: SupportDeskWidgetConfig = {
     welcomeMessage: '',
     position: 'bottom-right',
     quickPrompts: [],
+    secondaryColor: '#1d4ed8',
+    theme: 'light',
+    headerStyle: 'solid',
+    subtitle: '',
+    avatarPreset: 'bot',
+    showStatusDot: true,
+    launcherStyle: 'icon',
+    launcherLabel: 'Chat with us',
+    borderRadius: 'rounded',
+    widgetSize: 'standard',
+    fontFamily: 'system',
+    edgeOffsetPx: 24,
+    inputPlaceholder: '',
+    sendButtonLabel: '',
+    showPoweredBy: true,
+    autoOpenDelaySeconds: 0,
   },
   intake: {
     required: false,
