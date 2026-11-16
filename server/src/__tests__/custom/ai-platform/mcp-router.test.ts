@@ -59,8 +59,8 @@ describe('MCP Admin Router & Readiness (T050)', () => {
     expect(res.status).toBe(200);
     const pillars = res.json.pillars as Record<string, { enabled: boolean; ready: boolean }>;
     expect(pillars.mcpClient.ready).toBe(true);
-    expect(pillars.prompts.ready).toBe(false);
-    expect(pillars.orchestrator.ready).toBe(false);
+    expect(pillars.prompts.ready).toBe(true);
+    expect(pillars.orchestrator.ready).toBe(true);
   });
 
   it('enforces exact child permissions and primary-only allowed-internal-hosts', async () => {
@@ -152,8 +152,8 @@ describe('MCP Admin Router & Readiness (T050)', () => {
     expect((bindRes.json.binding as { aiToolsEnabled: boolean }).aiToolsEnabled).toBe(true);
 
     const agentRes = await api('GET', '/api/ai-platform/mcp/bindings/agent/triage', token);
-    expect(agentRes.status).toBe(409);
-    expect((agentRes.json.error as { code?: string }).code).toBe('scope_unavailable');
+    expect(agentRes.status).toBe(404);
+    expect((agentRes.json.error as { code?: string }).code).toBe('scope_not_found');
 
     // F02: unexpected internal errors return generic 500 message without leaking stack/DB text
     const badRes = await api('GET', '/api/ai-platform/mcp/servers/not-a-valid-id/tools', token);

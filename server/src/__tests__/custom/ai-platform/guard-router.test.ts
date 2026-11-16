@@ -220,13 +220,13 @@ describe('Output Guard Admin Router (T068)', () => {
     expect(localTest.status).toBe(200);
     expect(localTest.json.action).toBe('pass');
 
-    // Overview reports implemented pillars ready=true and keeps unimplemented pillars ready=false
+    // Overview reports implemented pillars ready=true
     const overview = await api('GET', '/api/ai-platform/overview', token);
     expect(overview.status).toBe(200);
     const pillars = overview.json.pillars as Record<string, { ready: boolean }>;
     expect(pillars.outputGuard.ready).toBe(true);
     expect(pillars.mcpClient.ready).toBe(true);
     expect(pillars.retrieval.ready).toBe(true);
-    expect(pillars.prompts.ready).toBe(false);
+    expect(pillars.prompts.ready).toBe(true);
   });
 });
