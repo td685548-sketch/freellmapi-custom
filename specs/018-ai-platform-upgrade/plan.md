@@ -72,6 +72,23 @@ Chỉ cache prompt cần một điểm móc trong đường gửi tới nhà cun
 
 Không sửa: mọi migration cũ, `routes/proxy.ts`, `routes/anthropic.ts`, `routes/gemini.ts`, `routes/responses.ts`, `routes/mcp.ts`, `services/router.ts`, `services/fusion.ts`, `custom/x-gateway/combos.ts`.
 
+#### Đối chiếu với thay đổi thực tế (T139, 2026-11-16)
+
+So từ commit đầu tiên của 018 (`5af82fd`) tới hết Phase Polish, chỉ tính commit của AI Platform. Danh sách "Không sửa" ở trên được giữ đúng, trừ một dòng trong `custom/x-gateway/combos.ts`: `dc58fc6` thêm `'flow:'` vào `RESERVED_PREFIXES` (T116) để tên combo không thể trùng `flow:<slug>`. Không migration cũ nào bị sửa; chỉ có migration mới.
+
+| Tệp upstream | Kế hoạch | Thực tế |
+|---|---|---|
+| `server/src/middleware/profile-gate.ts` | một lời gọi `runPreRequest()` | Lớn hơn kế hoạch: khoảng 195 dòng qua 5 commit (`5af82fd`, `b19b652`, `3e79811`, `be11bcf`, `2bd0f49`). Ngoài `runPreRequest()` còn có ghi nhận lời gọi loopback, nhận diện `flow:<slug>` và chuẩn bị MCP takeover trước kiểm tra hạn mức, cài output guard trước mọi nhánh trả lời sớm, và thêm flow vào `GET /v1/models`. Các bước này phải chạy trước bước kiểm tra hạn mức hiện có nên không đặt được sau một lời gọi duy nhất. |
+| `server/src/lib/fallback-loop.ts` | một lời gọi ở đường gửi tới nhà cung cấp (T089) | Đúng: 1 import và `withPromptCacheRoute(route)` (`9cdb51d`). |
+| `server/src/lib/system-prompt.ts` | một dòng gọi `renderPrompt()` | Đúng: 1 import và 1 lời gọi (`163563c`). |
+| `server/src/services/audit-log.ts` | thêm vùng `ai-platform` | Đúng: một dòng trong danh sách trường bị che (`5af82fd`); vùng được suy ra tự động từ đường dẫn. |
+| `server/src/routes/profile-knowledge.ts` | không có trong kế hoạch | Thêm 4 dòng gọi `onDocumentChanged` / `onDocumentDeleted` để chỉ mục ngữ nghĩa cập nhật khi tài liệu đổi (`a483943`, US4). |
+| `client/src/custom/PermissionsDialog.tsx` | không sửa nếu đọc `PERMISSION_GROUPS` | Đúng: không sửa. |
+
+Tệp custom có chạm thêm ngoài bảng: `server/src/custom/preparse-guard.ts` (gỡ header nội bộ, T014), `server/src/custom/x-gateway/support-knowledge.ts` (cập nhật chỉ mục), `support-router.ts` (`renderTenantSystemPrompt`), `support-output-runtime.ts` (kiểu trích dẫn). Phase Polish thêm migration `20261116_100000_custom_ai_mcp_profile_cleanup.ts` và đăng ký trong `server/src/db/migrate/defaults.ts`.
+
+CHANGELOG: `docs/CHANGELOG.md` là changelog tài liệu của upstream và fork chưa từng sửa nó; ghi vào đó sẽ gây xung đột khi đồng bộ upstream (AGENTS.md mục 2). Thay đổi của 018 được ghi trong `specs/README.md` và `docs/ai-platform.md`.
+
 ## Project Structure
 
 ### Documentation (this feature)
