@@ -325,13 +325,14 @@ export default function ProviderTopology({
   }
 
   const handlePointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
-    if (!dragging || !dragStartRef.current) return
-    const dx = e.clientX - dragStartRef.current.px
-    const dy = e.clientY - dragStartRef.current.py
+    const start = dragStartRef.current
+    if (!dragging || !start) return
+    const nextX = start.tx + (e.clientX - start.px)
+    const nextY = start.ty + (e.clientY - start.py)
     setTransform(prev => ({
       ...prev,
-      x: dragStartRef.current!.tx + dx,
-      y: dragStartRef.current!.ty + dy,
+      x: nextX,
+      y: nextY,
     }))
   }
 
