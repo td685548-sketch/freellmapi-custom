@@ -236,20 +236,20 @@ description: "Task list for AI Platform Upgrade"
 
 ### Tests for User Story 6 ⚠️
 
-- [ ] T104 [P] [US6] Viết test migration: mỗi `client_profiles.system_prompt` khác rỗng và mỗi tenant có `systemPrompt` thành phiên bản 1 `published`; `down` giữ nguyên cột hiện có; trong `server/src/__tests__/db/migrate/ai-platform-prompts.test.ts`
-- [ ] T105 [P] [US6] Viết test mẫu: `{{tên}}` và `{{tên|mặc định}}`; tên khớp `^[a-z][a-z0-9_]{0,31}$`; lỗi kèm dòng và cột; thay một lượt, giá trị chứa `{{date}}` không bị thay tiếp; giá trị người gọi cắt 200 ký tự và loại ký tự điều khiển; chuỗi không có `{{` trả đúng tham chiếu; trong `T/prompt-template.test.ts`
-- [ ] T106 [P] [US6] Viết test kho: phiên bản bất biến; nhiều nhất một `published` và một `draft`; phát hành ghi `body` vào cột hiện có trong cùng giao dịch; khôi phục tạo phiên bản mới có `restored_from`; 409 khi `revision` sai; giữ 50 phiên bản, không dọn bản `published`; trong `T/prompt-store.test.ts`
-- [ ] T107 [P] [US6] Viết test HTTP đầu-cuối: nháp không ảnh hưởng chat; phát hành có hiệu lực ở yêu cầu kế tiếp; `x-freellm-vars` sai định dạng bị bỏ qua không lỗi; `try` không ghi vào sử dụng của client key; trong `T/prompt-e2e.test.ts`
+- [x] T104 [P] [US6] Viết test migration: mỗi `client_profiles.system_prompt` khác rỗng và mỗi tenant có `systemPrompt` thành phiên bản 1 `published`; `down` giữ nguyên cột hiện có; trong `server/src/__tests__/db/migrate/ai-platform-prompts.test.ts`
+- [x] T105 [P] [US6] Viết test mẫu: `{{tên}}` và `{{tên|mặc định}}`; tên khớp `^[a-z][a-z0-9_]{0,31}$`; lỗi kèm dòng và cột; thay một lượt, giá trị chứa `{{date}}` không bị thay tiếp; giá trị người gọi cắt 200 ký tự và loại ký tự điều khiển; chuỗi không có `{{` trả đúng tham chiếu; trong `T/prompt-template.test.ts`
+- [x] T106 [P] [US6] Viết test kho: phiên bản bất biến; nhiều nhất một `published` và một `draft`; phát hành ghi `body` vào cột hiện có trong cùng giao dịch; khôi phục tạo phiên bản mới có `restored_from`; 409 khi `revision` sai; giữ 50 phiên bản, không dọn bản `published`; trong `T/prompt-store.test.ts`
+- [x] T107 [P] [US6] Viết test HTTP đầu-cuối: nháp không ảnh hưởng chat; phát hành có hiệu lực ở yêu cầu kế tiếp; `x-freellm-vars` sai định dạng bị bỏ qua không lỗi; `try` không ghi vào sử dụng của client key; trong `T/prompt-e2e.test.ts`
 
 ### Implementation for User Story 6
 
-- [ ] T108 [US6] Tạo `M/20261113_150000_custom_ai_prompt_versions.ts` với `custom_ai_prompt_versions` (`status` thuộc `draft|published|archived`, `note` tối đa 500) và `custom_ai_prompt_heads`, kèm di trú phiên bản 1
-- [ ] T109 [US6] Cài `S/prompts/template.ts` (`validateTemplate`, `renderWith`) và `S/prompts/store.ts` (`saveDraft`, `publish`, `restore`, `getPublishedPrompt`, diff theo dòng)
-- [ ] T110 [US6] Cài `S/prompts/render.ts` (`renderPrompt` lấy ngữ cảnh từ `server/src/lib/client-context.ts` và `x-freellm-vars`) và thêm một dòng gọi nó trong `prependSystemPrompt` của `server/src/lib/system-prompt.ts`
-- [ ] T111 [US6] Áp dụng `renderWith` cho `systemPrompt` của tenant tại nơi dựng chỉ dẫn trong `server/src/custom/x-gateway/support-router.ts`
-- [ ] T112 [US6] Cài `S/prompts/router.ts` (mọi tuyến `/prompts/*`) và gắn vào `S/router.ts`
-- [ ] T113 [P] [US6] Viết test giao diện cho lịch sử, so sánh, trình sửa biến, xem trước, cảnh báo biến làm mất ổn định cache trong `C/prompts.test.tsx`
-- [ ] T114 [US6] Cài `C/pages/Prompts.tsx`, `C/components/DiffView.tsx`, `C/components/VariableEditor.tsx`, chuỗi tiếng Việt; chạy `T/regression.test.ts`
+- [x] T108 [US6] Tạo `M/20261113_150000_custom_ai_prompt_versions.ts` với `custom_ai_prompt_versions` (`status` thuộc `draft|published|archived`, `note` tối đa 500) và `custom_ai_prompt_heads`, kèm di trú phiên bản 1
+- [x] T109 [US6] Cài `S/prompts/template.ts` (`validateTemplate`, `renderWith`) và `S/prompts/store.ts` (`saveDraft`, `publish`, `restore`, `getPublishedPrompt`, diff theo dòng)
+- [x] T110 [US6] Cài `S/prompts/render.ts` (`renderPrompt` lấy ngữ cảnh từ `server/src/lib/client-context.ts` và `x-freellm-vars`) và thêm một dòng gọi nó trong `prependSystemPrompt` của `server/src/lib/system-prompt.ts`
+- [x] T111 [US6] Áp dụng `renderWith` cho `systemPrompt` của tenant tại nơi dựng chỉ dẫn trong `server/src/custom/x-gateway/support-router.ts`
+- [x] T112 [US6] Cài `S/prompts/router.ts` (mọi tuyến `/prompts/*`) và gắn vào `S/router.ts`
+- [x] T113 [P] [US6] Viết test giao diện cho lịch sử, so sánh, trình sửa biến, xem trước, cảnh báo biến làm mất ổn định cache trong `C/prompts.test.tsx`
+- [x] T114 [US6] Cài `C/pages/Prompts.tsx`, `C/components/DiffView.tsx`, `C/components/VariableEditor.tsx`, chuỗi tiếng Việt; chạy `T/regression.test.ts`
 
 **Checkpoint**: US6 đạt và tự kiểm chứng được.
 
