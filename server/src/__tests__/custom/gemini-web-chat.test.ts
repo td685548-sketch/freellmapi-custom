@@ -5,6 +5,7 @@ import {
   extractGeminiSessionTokens,
   extractGeminiStreamText,
   normalizeGeminiWebCookie,
+  streamGeminiWebChat,
   stripGeminiPlaceholders,
 } from '../../custom/provider-accounts/gemini-web-chat.js';
 import { rotateGeminiWebAccountsOnce } from '../../custom/provider-accounts/gemini-web-keepalive.js';
@@ -667,5 +668,212 @@ describe('gemini-web executor', () => {
       valid: false,
       error: expect.stringContaining('SNlM0e'),
     });
+  });
+
+  it('coalesces concurrent /app fetches and skips /app on warm turns', async () => {
+    let appCalls = 0;
+    let streamCalls = 0;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url === 'https://gemini.google.com/app') {
+        appCalls += 1;
+        await new Promise(resolve => setTimeout(resolve, 25));
+        return new Response(
+          '<script>{"SNlM0e":"snl_coalesced","cfb2h":"boq_bl_1","FdrFJe":"112233"}</script>',
+          { status: 200, headers: { 'Content-Type': 'text/html' } },
+        );
+      }
+      if (url.includes('StreamGenerate')) {
+        streamCalls += 1;
+        const inner = JSON.stringify([null, null, null, null, [['rc_1', [`Reply ${streamCalls}`]]]]);
+        return new Response(
+          streamFromLines([")]}'", '80', JSON.stringify([['wrb.fr', null, inner]])]),
+          { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } },
+        );
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const provider = new WebCookieProvider({
+      providerId: 'gemini-web',
+      name: 'Gemini Web',
+      baseUrl: 'https://gemini.google.com/app',
+    });
+
+    const [res1, res2] = await Promise.all([
+      provider.chatCompletion('__Secure-1PSID=coalesce_psid', [{ role: 'user', content: 'Hi 1' }], 'gemini-3.1-pro'),
+      provider.chatCompletion('__Secure-1PSID=coalesce_psid', [{ role: 'user', content: 'Hi 2' }], 'gemini-3.1-pro'),
+    ]);
+    expect(appCalls).toBe(1);
+    expect(streamCalls).toBe(2);
+    expect(res1.choices[0]?.message?.content).toMatch(/^Reply /);
+    expect(res2.choices[0]?.message?.content).toMatch(/^Reply /);
+
+    const res3 = await provider.chatCompletion(
+      '__Secure-1PSID=coalesce_psid',
+      [{ role: 'user', content: 'Hi 3' }],
+      'gemini-3.1-pro',
+    );
+    expect(appCalls).toBe(1);
+    expect(streamCalls).toBe(3);
+    expect(res3.choices[0]?.message?.content).toBe('Reply 3');
+  });
+
+  it('invalidates cached /app tokens and retries once on auth/bootstrap error', async () => {
+    let appCalls = 0;
+    const seenAtTokens: string[] = [];
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url === 'https://gemini.google.com/app') {
+        appCalls += 1;
+        const tok = appCalls === 1 ? 'snl_stale' : 'snl_fresh';
+        return new Response(
+          `<script>{"SNlM0e":"${tok}","cfb2h":"boq_bl_${appCalls}","FdrFJe":"9988"}</script>`,
+          { status: 200, headers: { 'Content-Type': 'text/html' } },
+        );
+      }
+      if (url.includes('StreamGenerate')) {
+        const at = new URLSearchParams(String(init?.body ?? '')).get('at') ?? '';
+        seenAtTokens.push(at);
+        if (at === 'snl_stale' && seenAtTokens.length === 2) {
+          return new Response('Bad Request', { status: 400 });
+        }
+        const inner = JSON.stringify([null, null, null, null, [['rc_1', [`ok:${at}`]]]]);
+        return new Response(
+          streamFromLines([")]}'", '80', JSON.stringify([['wrb.fr', null, inner]])]),
+          { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } },
+        );
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const provider = new WebCookieProvider({
+      providerId: 'gemini-web',
+      name: 'Gemini Web',
+      baseUrl: 'https://gemini.google.com/app',
+    });
+
+    // Warm the cache on turn 1
+    const first = await provider.chatCompletion(
+      '__Secure-1PSID=retry_psid',
+      [{ role: 'user', content: 'Turn 1' }],
+      'gemini-3.1-pro',
+    );
+    expect(first.choices[0]?.message?.content).toBe('ok:snl_stale');
+    expect(appCalls).toBe(1);
+
+    // Turn 2 hits 400 with stale cached token, refreshes /app once, and retries with snl_fresh
+    const second = await provider.chatCompletion(
+      '__Secure-1PSID=retry_psid',
+      [{ role: 'user', content: 'Turn 2' }],
+      'gemini-3.1-pro',
+    );
+    expect(second.choices[0]?.message?.content).toBe('ok:snl_fresh');
+    expect(appCalls).toBe(2);
+    expect(seenAtTokens).toEqual(['snl_stale', 'snl_stale', 'snl_fresh']);
+  });
+
+  it('fails fast on StreamGenerate stall and respects caller abort signal', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url === 'https://gemini.google.com/app') {
+        return new Response('<script>{"SNlM0e":"snl_stall"}</script>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html' },
+        });
+      }
+      if (url.includes('StreamGenerate')) {
+        const encoder = new TextEncoder();
+        const inner1 = JSON.stringify([null, null, null, null, [['rc_1', ['Partial']]]]);
+        const hangingStream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encoder.encode(`${JSON.stringify([['wrb.fr', null, inner1]])}\n`));
+            // Never closes -> stalls on second read
+          },
+        });
+        return new Response(hangingStream, {
+          status: 200,
+          headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const deltas: string[] = [];
+    await expect(async () => {
+      for await (const delta of streamGeminiWebChat({
+        credential: '__Secure-1PSID=stall_psid',
+        messages: [{ role: 'user', content: 'Hang mid-stream' }],
+        modelId: 'gemini-3.1-pro',
+        options: { timeoutMs: 250 },
+      })) {
+        if (delta.content) deltas.push(delta.content);
+      }
+    }).rejects.toMatchObject({ status: 504 });
+    expect(deltas).toEqual(['Partial']);
+
+    const abortController = new AbortController();
+    setTimeout(() => abortController.abort(new Error('client cancelled')), 30);
+    await expect(async () => {
+      for await (const _delta of streamGeminiWebChat({
+        credential: '__Secure-1PSID=stall_psid',
+        messages: [{ role: 'user', content: 'Abort mid-stream' }],
+        modelId: 'gemini-3.1-pro',
+        options: { signal: abortController.signal, timeoutMs: 5_000 },
+      })) {
+        // drain
+      }
+    }).rejects.toThrow(/client cancelled|abort/i);
+  });
+
+  it('bounds slow image fetches on text models and falls back to markdown link', async () => {
+    const entry = [
+      [null, null, null, [null, null, 'Chart', 'https://lh3.googleusercontent.com/slow-img']],
+      ['image-id-slow'],
+    ];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url === 'https://gemini.google.com/app') {
+        return new Response('<script>{"SNlM0e":"snl_img_fast"}</script>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html' },
+        });
+      }
+      if (url.includes('StreamGenerate')) {
+        const candidate = [
+          'rc_1',
+          ['Here is your answer:\nhttp://googleusercontent.com/image_generation_content/0_1\n'],
+          null, null, null, null, null, null, null, null, null, null,
+          [null, null, null, null, null, null, null, [[entry]]],
+        ];
+        const inner = JSON.stringify([null, null, null, null, [candidate]]);
+        return new Response(streamFromLines([")]}'", '90', JSON.stringify([['wrb.fr', null, inner]])]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        });
+      }
+      if (url === 'https://lh3.googleusercontent.com/slow-img') {
+        // Hang until signal aborts
+        return await new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+        });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const deltas: string[] = [];
+    for await (const delta of streamGeminiWebChat({
+      credential: '__Secure-1PSID=slow_img_psid',
+      messages: [{ role: 'user', content: 'Explain charts' }],
+      modelId: 'gemini-3.1-flash-lite',
+      options: { timeoutMs: 120 },
+    })) {
+      if (delta.content) deltas.push(delta.content);
+    }
+
+    expect(deltas[0]).toBe('Here is your answer:');
+    expect(deltas[1]).toContain('[Chart](https://lh3.googleusercontent.com/slow-img)');
   });
 });

@@ -10,6 +10,7 @@ import type {
 } from '@freellmapi/shared/types.js';
 import { contentToString, estimateInputTokens } from '../../lib/content.js';
 import { BaseProvider, providerHttpError, type CompletionOptions, type KeyValidationResult } from '../../providers/base.js';
+import { streamStallTimeoutMs } from '../../lib/provider-timeout.js';
 import type { QuotaObservationContext } from '../../services/provider-quota.js';
 import { runChatGptWebChat } from './chatgpt-web-chat.js';
 import { probeGeminiWebSession, runGeminiWebChat, streamGeminiWebChat } from './gemini-web-chat.js';
@@ -264,6 +265,112 @@ function resolveTargetUrl(baseUrl: string, pathSuffix: string): string {
   return `${cleanBase}${pathSuffix}`;
 }
 
+const CHATGPT_WEB_STREAM_TIMEOUT_MS = 35_000;
+const WEB_COOKIE_CONNECT_TIMEOUT_MS = 20_000;
+const WEB_COOKIE_TTFT_TIMEOUT_MS = 25_000;
+const WEB_COOKIE_STALL_TIMEOUT_MS = 20_000;
+
+function abortReasonError(signal?: AbortSignal): Error {
+  if (signal?.reason instanceof Error) return signal.reason;
+  return new DOMException('The operation was aborted.', 'AbortError') as unknown as Error;
+}
+
+/** Run an async operation bounded by both an optional timeout and an external AbortSignal. */
+async function runWithTimeoutAndSignal<T>(
+  fn: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+  externalSignal?: AbortSignal,
+  timeoutMessage = 'Web stream timed out',
+): Promise<T> {
+  if (externalSignal?.aborted) {
+    throw abortReasonError(externalSignal);
+  }
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+
+  const taskPromise = fn(controller.signal);
+  taskPromise.catch(() => {});
+
+  const racePromise = new Promise<never>((_, reject) => {
+    if (timeoutMs > 0 && Number.isFinite(timeoutMs)) {
+      timer = setTimeout(() => {
+        const timeoutErr = Object.assign(new Error(timeoutMessage), { status: 504 });
+        controller.abort(timeoutErr);
+        reject(timeoutErr);
+      }, timeoutMs);
+      timer.unref?.();
+    }
+    if (externalSignal) {
+      onAbort = () => {
+        const abortErr = abortReasonError(externalSignal);
+        controller.abort(abortErr);
+        reject(abortErr);
+      };
+      externalSignal.addEventListener('abort', onAbort, { once: true });
+    }
+  });
+
+  try {
+    return await Promise.race([taskPromise, racePromise]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (externalSignal && onAbort) externalSignal.removeEventListener('abort', onAbort);
+  }
+}
+
+/** Read one stream chunk while enforcing per-read inactivity timeout, overall deadline, and abort signal. */
+async function readWebStreamChunk(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  inactivityTimeoutMs: number,
+  deadlineAt: number,
+  signal: AbortSignal | undefined,
+  providerName: string,
+  awaitingFirstContent: boolean,
+): ReturnType<ReadableStreamDefaultReader<Uint8Array>['read']> {
+  if (signal?.aborted) {
+    void reader.cancel().catch(() => {});
+    throw abortReasonError(signal);
+  }
+  const remainingMs = deadlineAt - Date.now();
+  if (remainingMs <= 0) {
+    void reader.cancel().catch(() => {});
+    throw Object.assign(new Error(`${providerName} stream timed out`), { status: 504 });
+  }
+  const waitMs = inactivityTimeoutMs > 0
+    ? Math.max(1, Math.min(inactivityTimeoutMs, remainingMs))
+    : Math.max(1, remainingMs);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<never>((_resolve, reject) => {
+        if (Number.isFinite(waitMs)) {
+          timer = setTimeout(() => {
+            const label = awaitingFirstContent
+              ? `${providerName} stream: no content within ${waitMs}ms (TTFT timeout)`
+              : `${providerName} stream stalled: no data for ${waitMs}ms (timeout)`;
+            reject(Object.assign(new Error(label), { status: 504 }));
+            void reader.cancel().catch(() => {});
+          }, waitMs);
+          timer.unref?.();
+        }
+        if (signal) {
+          onAbort = () => {
+            reject(abortReasonError(signal));
+            void reader.cancel().catch(() => {});
+          };
+          signal.addEventListener('abort', onAbort, { once: true });
+        }
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+  }
+}
+
 /**
  * Adapter for 9Router `webCookie` providers (`grok-web`, `chatgpt-web`, `perplexity-web`,
  * `gemini-web`, `deepseek-web`, `muse-web`, `uc-web`).
@@ -411,25 +518,44 @@ export class WebCookieProvider extends BaseProvider {
     options?: CompletionOptions,
     _quotaContext?: QuotaObservationContext,
   ): AsyncGenerator<ChatCompletionChunk> {
+    if (options?.signal?.aborted) {
+      throw abortReasonError(options.signal);
+    }
+
     if (this.providerId === 'chatgpt-web') {
-      const text = await runChatGptWebChat({
-        credential: apiKey,
-        messages,
-        baseUrl: this.baseUrl,
-        platform: this.platform,
-        signal: options?.signal,
-      });
+      const requestedTimeoutMs = options?.timeoutMs;
+      const effectiveTimeoutMs = requestedTimeoutMs === 0
+        ? 0
+        : (requestedTimeoutMs && requestedTimeoutMs > 0
+          ? requestedTimeoutMs
+          : Math.min(this.timeoutMs, CHATGPT_WEB_STREAM_TIMEOUT_MS));
+      const text = await runWithTimeoutAndSignal(
+        (signal) => runChatGptWebChat({
+          credential: apiKey,
+          messages,
+          baseUrl: this.baseUrl,
+          platform: this.platform,
+          signal,
+        }),
+        effectiveTimeoutMs,
+        options?.signal,
+        `${this.name} stream timed out after ${effectiveTimeoutMs}ms`,
+      );
+      if (options?.signal?.aborted) {
+        throw abortReasonError(options.signal);
+      }
+      if (!text.trim()) {
+        throw Object.assign(new Error(`${this.name} returned an empty stream response`), { status: 502 });
+      }
       const chatGptId = this.makeId();
       const chatGptCreated = Math.floor(Date.now() / 1000);
-      if (text) {
-        yield {
-          id: chatGptId,
-          object: 'chat.completion.chunk',
-          created: chatGptCreated,
-          model: modelId,
-          choices: [{ index: 0, delta: { content: text }, finish_reason: null }],
-        };
-      }
+      yield {
+        id: chatGptId,
+        object: 'chat.completion.chunk',
+        created: chatGptCreated,
+        model: modelId,
+        choices: [{ index: 0, delta: { content: text }, finish_reason: null }],
+      };
       yield {
         id: chatGptId,
         object: 'chat.completion.chunk',
@@ -451,6 +577,9 @@ export class WebCookieProvider extends BaseProvider {
         platform: this.platform,
         options,
       })) {
+        if (options?.signal?.aborted) {
+          throw abortReasonError(options.signal);
+        }
         yield {
           id: geminiId,
           object: 'chat.completion.chunk',
@@ -458,6 +587,9 @@ export class WebCookieProvider extends BaseProvider {
           model: modelId,
           choices: [{ index: 0, delta, finish_reason: null }],
         };
+      }
+      if (options?.signal?.aborted) {
+        throw abortReasonError(options.signal);
       }
       yield {
         id: geminiId,
@@ -473,6 +605,9 @@ export class WebCookieProvider extends BaseProvider {
       const ucId = this.makeId();
       const ucCreated = Math.floor(Date.now() / 1000);
       const content = await this.ucWebImageMarkdown(apiKey, messages, modelId, options);
+      if (options?.signal?.aborted) {
+        throw abortReasonError(options.signal);
+      }
       yield {
         id: ucId,
         object: 'chat.completion.chunk',
@@ -501,6 +636,9 @@ export class WebCookieProvider extends BaseProvider {
         platform: this.platform,
         options,
       })) {
+        if (options?.signal?.aborted) {
+          throw abortReasonError(options.signal);
+        }
         yield {
           id: deepSeekId,
           object: 'chat.completion.chunk',
@@ -508,6 +646,9 @@ export class WebCookieProvider extends BaseProvider {
           model: modelId,
           choices: [{ index: 0, delta, finish_reason: null }],
         };
+      }
+      if (options?.signal?.aborted) {
+        throw abortReasonError(options.signal);
       }
       yield {
         id: deepSeekId,
@@ -523,6 +664,22 @@ export class WebCookieProvider extends BaseProvider {
     const url = resolveTargetUrl(this.baseUrl, pathSuffix);
     const headers = buildWebSessionHeaders(this.providerId, apiKey);
 
+    const requestedTimeoutMs = options?.timeoutMs;
+    const effectiveTimeoutMs = requestedTimeoutMs === 0
+      ? 0
+      : (requestedTimeoutMs && requestedTimeoutMs > 0 ? requestedTimeoutMs : this.timeoutMs);
+    const connectTimeoutMs = effectiveTimeoutMs === 0
+      ? 0
+      : Math.min(effectiveTimeoutMs, WEB_COOKIE_CONNECT_TIMEOUT_MS);
+    const ttftTimeoutMs = effectiveTimeoutMs === 0
+      ? 0
+      : Math.min(effectiveTimeoutMs, WEB_COOKIE_TTFT_TIMEOUT_MS);
+    const stallTimeoutMs = effectiveTimeoutMs === 0
+      ? 0
+      : Math.min(effectiveTimeoutMs, WEB_COOKIE_STALL_TIMEOUT_MS);
+    const deadlineAt = effectiveTimeoutMs === 0 ? Infinity : Date.now() + effectiveTimeoutMs;
+    const ttftDeadlineAt = ttftTimeoutMs === 0 ? Infinity : Date.now() + ttftTimeoutMs;
+
     const res = await this.fetchWithTimeout(
       url,
       {
@@ -530,7 +687,7 @@ export class WebCookieProvider extends BaseProvider {
         headers,
         body: JSON.stringify(body),
       },
-      options?.timeoutMs ?? this.timeoutMs,
+      connectTimeoutMs,
       { signal: options?.signal },
     );
 
@@ -544,6 +701,7 @@ export class WebCookieProvider extends BaseProvider {
     }
 
     if ((res.headers.get('content-type') ?? '').includes('text/html')) {
+      await res.body?.cancel().catch(() => {});
       throw this.htmlChallengeError('stream');
     }
 
@@ -558,7 +716,17 @@ export class WebCookieProvider extends BaseProvider {
 
     try {
       while (true) {
-        const { done, value } = await reader.read();
+        const awaitingFirstContent = !emittedAny;
+        const readInactivityMs = awaitingFirstContent ? ttftTimeoutMs : stallTimeoutMs;
+        const readDeadline = awaitingFirstContent ? Math.min(deadlineAt, ttftDeadlineAt) : deadlineAt;
+        const { done, value } = await readWebStreamChunk(
+          reader,
+          readInactivityMs,
+          readDeadline,
+          options?.signal,
+          this.name,
+          awaitingFirstContent,
+        );
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
@@ -567,6 +735,9 @@ export class WebCookieProvider extends BaseProvider {
         for (const rawLine of lines) {
           const trimmed = rawLine.trim();
           if (!trimmed || trimmed.startsWith('event:')) continue;
+          if (!emittedAny && looksLikeHtmlDocument(trimmed)) {
+            throw this.htmlChallengeError('stream');
+          }
           const payloadStr = trimmed.startsWith('data:') ? trimmed.slice(5).trim() : trimmed;
           if (!payloadStr || payloadStr === '[DONE]') continue;
 
@@ -612,6 +783,9 @@ export class WebCookieProvider extends BaseProvider {
             }
           } catch {
             if (!emittedAny) {
+              if (looksLikeHtmlDocument(clean)) {
+                throw this.htmlChallengeError('stream');
+              }
               emittedAny = true;
               yield {
                 id,
@@ -623,6 +797,13 @@ export class WebCookieProvider extends BaseProvider {
             }
           }
         }
+      }
+
+      if (options?.signal?.aborted) {
+        throw abortReasonError(options.signal);
+      }
+      if (!emittedAny) {
+        throw Object.assign(new Error(`${this.name} web stream returned no content`), { status: 502 });
       }
 
       yield {
@@ -644,13 +825,22 @@ export class WebCookieProvider extends BaseProvider {
     modelId: string,
     options?: CompletionOptions,
   ): Promise<ChatCompletionResponse> {
-    const text = await runChatGptWebChat({
-      credential: apiKey,
-      messages,
-      baseUrl: this.baseUrl,
-      platform: this.platform,
-      signal: options?.signal,
-    });
+    const requestedTimeoutMs = options?.timeoutMs;
+    const effectiveTimeoutMs = requestedTimeoutMs === 0
+      ? 0
+      : (requestedTimeoutMs && requestedTimeoutMs > 0 ? requestedTimeoutMs : this.timeoutMs);
+    const text = await runWithTimeoutAndSignal(
+      (signal) => runChatGptWebChat({
+        credential: apiKey,
+        messages,
+        baseUrl: this.baseUrl,
+        platform: this.platform,
+        signal,
+      }),
+      effectiveTimeoutMs,
+      options?.signal,
+      `${this.name} completion timed out after ${effectiveTimeoutMs}ms`,
+    );
     const promptTokens = estimateInputTokens(messages);
     const completionTokens = Math.max(1, Math.ceil(text.length / 4));
     return {
@@ -1118,11 +1308,21 @@ export class AnthropicWireProvider extends BaseProvider {
     const decoder = new TextDecoder();
     const id = this.makeId();
     const created = Math.floor(Date.now() / 1000);
+    const stallTimeoutMs = streamStallTimeoutMs(this.platform);
+    const chatTimeoutMs = options?.timeoutMs ?? this.timeoutMs;
+    const firstByteMs = this.firstByteBudgetMs(chatTimeoutMs, stallTimeoutMs);
+    let awaitingFirstByte = true;
     let buffer = '';
 
     try {
       while (true) {
-        const { done, value } = await reader.read();
+        if (options?.signal?.aborted) {
+          throw abortReasonError(options.signal);
+        }
+        const { done, value } = awaitingFirstByte
+          ? await this.readWithStallTimeout(() => reader.read(), firstByteMs, this.firstByteTimeoutMessage(firstByteMs))
+          : await this.readWithStallTimeout(() => reader.read(), stallTimeoutMs);
+        awaitingFirstByte = false;
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');

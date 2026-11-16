@@ -23,6 +23,7 @@ const schema = z.object({
   temperature: z.number().min(0).max(2).optional(),
   max_tokens: z.number().int().min(1).max(32_768).optional(),
   reasoning_effort: z.enum(['low', 'medium', 'high']).optional(),
+  sessionId: z.string().trim().min(1).max(128).optional(),
 }).strict();
 
 // Mounted behind the console's session and use_x_gateway gate. The catalog
@@ -66,7 +67,20 @@ xPlaygroundRouter.post('/playground/chat', async (req, res) => {
     res.status(400).json({ error: { type: 'invalid_request_error', message: 'Invalid chat messages, images or settings.' } });
     return;
   }
-  req.body = { ...parsed.data, stream: true, stream_options: { include_usage: true } };
+  const rawHeaderSession = req.headers['x-session-id'];
+  const headerSessionId = typeof rawHeaderSession === 'string'
+    ? rawHeaderSession.trim().slice(0, 128)
+    : Array.isArray(rawHeaderSession) && typeof rawHeaderSession[0] === 'string'
+      ? rawHeaderSession[0].trim().slice(0, 128)
+      : '';
+  const sessionId = parsed.data.sessionId || headerSessionId || undefined;
+  req.body = {
+    ...parsed.data,
+    ...(sessionId ? { sessionId } : {}),
+    stream: true,
+    stream_options: { include_usage: true },
+  };
   res.locals.fromPlayground = true;
+  if (sessionId) res.locals.sessionId = sessionId;
   await handleXGatewayChat(req, res);
 });
