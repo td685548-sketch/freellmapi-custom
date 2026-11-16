@@ -263,26 +263,26 @@ description: "Task list for AI Platform Upgrade"
 
 ### Tests for User Story 7 ⚠️
 
-- [ ] T115 [P] [US7] Viết test roundtrip migration trong `server/src/__tests__/db/migrate/ai-platform-orchestrator.test.ts`
-- [ ] T116 [P] [US7] Viết test định nghĩa: kiểm tra `entryAgent`, `handoffs`, agent `enabled`; trần cứng 50 bước, 100 lời gọi công cụ, 10 chuyển giao, 500.000 token, 600 giây; phát hành chụp phiên bản chỉ dẫn của từng agent; `slug` khớp `^[a-z0-9-]{1,48}$`; trong `T/flow-definitions.test.ts`
-- [ ] T117 [P] [US7] Viết test giới hạn và phát hiện lặp: mỗi `stop_reason`; vượt token tối đa một bước; cùng (công cụ, tham số) lần thứ 3 bị cắt; A→B→A→B bị cắt; trong `T/flow-limits.test.ts`
-- [ ] T118 [P] [US7] Viết test engine: `single` và `handoff`; công cụ ảo `transfer_to_<agent>` chỉ cho đích được phép; agent sau chuyển giao không thấy công cụ và tri thức của agent trước; mọi chuyển trạng thái trong data-model.md mục 7; trong `T/flow-engine.test.ts`
-- [ ] T119 [P] [US7] Viết test duyệt và gián đoạn: tạm dừng, duyệt thì tiếp tục đúng bước, từ chối thì kết thúc có giải thích, hết hạn thì `stopped`; khởi động lại chuyển `running` thành `interrupted` và không lặp lời gọi công cụ; trong `T/flow-approvals.test.ts`
-- [ ] T120 [P] [US7] Viết test HTTP đầu-cuối: `flow:<slug>` trên 4 giao thức; 403 `flow_not_granted`; 400 `flow_requires_client_key`; 404 khi trụ cột tắt; tiến độ là dòng chú thích SSE; ngắt kết nối và hủy; tổng token khớp phân tích của client key; hết hạn mức giữa chừng dừng `quota_exhausted`; câu trả lời cuối qua kiểm soát đầu ra; `GET /v1/ai/runs/{id}` chỉ cho key khởi tạo; trong `T/flow-e2e.test.ts`
+- [x] T115 [P] [US7] Viết test roundtrip migration trong `server/src/__tests__/db/migrate/ai-platform-orchestrator.test.ts`
+- [x] T116 [P] [US7] Viết test định nghĩa: kiểm tra `entryAgent`, `handoffs`, agent `enabled`; trần cứng 50 bước, 100 lời gọi công cụ, 10 chuyển giao, 500.000 token, 600 giây; phát hành chụp phiên bản chỉ dẫn của từng agent; `slug` khớp `^[a-z0-9-]{1,48}$`; trong `T/flow-definitions.test.ts`
+- [x] T117 [P] [US7] Viết test giới hạn và phát hiện lặp: mỗi `stop_reason`; vượt token tối đa một bước; cùng (công cụ, tham số) lần thứ 3 bị cắt; A→B→A→B bị cắt; trong `T/flow-limits.test.ts`
+- [x] T118 [P] [US7] Viết test engine: `single` và `handoff`; công cụ ảo `transfer_to_<agent>` chỉ cho đích được phép; agent sau chuyển giao không thấy công cụ và tri thức của agent trước; mọi chuyển trạng thái trong data-model.md mục 7; trong `T/flow-engine.test.ts`
+- [x] T119 [P] [US7] Viết test duyệt và gián đoạn: tạm dừng, duyệt thì tiếp tục đúng bước, từ chối thì kết thúc có giải thích, hết hạn thì `stopped`; khởi động lại chuyển `running` thành `interrupted` và không lặp lời gọi công cụ; trong `T/flow-approvals.test.ts`
+- [x] T120 [P] [US7] Viết test HTTP đầu-cuối: `flow:<slug>` trên 4 giao thức; 403 `flow_not_granted`; 400 `flow_requires_client_key`; 404 khi trụ cột tắt; tiến độ là dòng chú thích SSE; ngắt kết nối và hủy; tổng token khớp phân tích của client key; hết hạn mức giữa chừng dừng `quota_exhausted`; câu trả lời cuối qua kiểm soát đầu ra; `GET /v1/ai/runs/{id}` chỉ cho key khởi tạo; trong `T/flow-e2e.test.ts`
 
 ### Implementation for User Story 7
 
-- [ ] T121 [US7] Tạo `M/20261113_160000_custom_ai_orchestrator.ts` với `custom_ai_agents`, `custom_ai_flows`, `custom_ai_flow_grants`, `custom_ai_runs`, `custom_ai_run_steps` đúng data-model.md mục 7
-- [ ] T122 [US7] Thêm `flow:` vào `RESERVED_PREFIXES` trong `server/src/custom/x-gateway/combos.ts` và ca test tương ứng
-- [ ] T123 [US7] Cài `S/orchestrator/definitions.ts` (CRUD agent và quy trình, kiểm tra, phát hành, cấp cho client key)
-- [ ] T124 [US7] Cài `S/orchestrator/limits.ts` (bộ đếm, mặc định 12 bước / 20 lời gọi công cụ / 4 chuyển giao / 60.000 token / 120 giây, phát hiện lặp)
-- [ ] T125 [US7] Cài `S/orchestrator/trace.ts` (ghi bước ngay khi xong, che và cắt 8 KB, dọn theo thời hạn lưu)
-- [ ] T126 [US7] Cài `S/orchestrator/engine.ts` (`isFlowModel`, `startRun`, `resumeRun`, `cancelRun`, `markInterruptedRuns`) dùng `runToolLoop`, `retrieve`, `getPublishedPrompt`, `evaluateOutput`
-- [ ] T127 [US7] Nối bước 4 trong `S/pipeline.ts` (nhận diện `flow:<slug>` trước các bước khác); gọi `markInterruptedRuns` lúc khởi động từ `server/src/custom/register.ts`; nối `resumeRun` vào quyết định duyệt trong `S/orchestrator/approvals.ts`
-- [ ] T128 [US7] Cài `S/orchestrator/runs-public.ts` (`GET /v1/ai/runs/:id`) và gắn `app.use('/v1/ai', …)` trong `server/src/custom/register.ts`
-- [ ] T129 [US7] Cài `S/orchestrator/router.ts` (mọi tuyến `/agents*`, `/flows*`, `/runs*`) và gắn vào `S/router.ts`
-- [ ] T130 [P] [US7] Viết test giao diện cho trình sửa quy trình, chạy thử, vết chạy trực tiếp, hủy trong `C/flows.test.tsx`
-- [ ] T131 [US7] Cài `C/pages/Flows.tsx`, `C/pages/Runs.tsx`, `C/components/RunTrace.tsx`, chuỗi tiếng Việt; chạy `T/regression.test.ts`
+- [x] T121 [US7] Tạo `M/20261113_160000_custom_ai_orchestrator.ts` với `custom_ai_agents`, `custom_ai_flows`, `custom_ai_flow_grants`, `custom_ai_runs`, `custom_ai_run_steps` đúng data-model.md mục 7
+- [x] T122 [US7] Thêm `flow:` vào `RESERVED_PREFIXES` trong `server/src/custom/x-gateway/combos.ts` và ca test tương ứng
+- [x] T123 [US7] Cài `S/orchestrator/definitions.ts` (CRUD agent và quy trình, kiểm tra, phát hành, cấp cho client key)
+- [x] T124 [US7] Cài `S/orchestrator/limits.ts` (bộ đếm, mặc định 12 bước / 20 lời gọi công cụ / 4 chuyển giao / 60.000 token / 120 giây, phát hiện lặp)
+- [x] T125 [US7] Cài `S/orchestrator/trace.ts` (ghi bước ngay khi xong, che và cắt 8 KB, dọn theo thời hạn lưu)
+- [x] T126 [US7] Cài `S/orchestrator/engine.ts` (`isFlowModel`, `startRun`, `resumeRun`, `cancelRun`, `markInterruptedRuns`) dùng `runToolLoop`, `retrieve`, `getPublishedPrompt`, `evaluateOutput`
+- [x] T127 [US7] Nối bước 4 trong `S/pipeline.ts` (nhận diện `flow:<slug>` trước các bước khác); gọi `markInterruptedRuns` lúc khởi động từ `server/src/custom/register.ts`; nối `resumeRun` vào quyết định duyệt trong `S/orchestrator/approvals.ts`
+- [x] T128 [US7] Cài `S/orchestrator/runs-public.ts` (`GET /v1/ai/runs/:id`) và gắn `app.use('/v1/ai', …)` trong `server/src/custom/register.ts`
+- [x] T129 [US7] Cài `S/orchestrator/router.ts` (mọi tuyến `/agents*`, `/flows*`, `/runs*`) và gắn vào `S/router.ts`
+- [x] T130 [P] [US7] Viết test giao diện cho trình sửa quy trình, chạy thử, vết chạy trực tiếp, hủy trong `C/flows.test.tsx`
+- [x] T131 [US7] Cài `C/pages/Flows.tsx`, `C/pages/Runs.tsx`, `C/components/RunTrace.tsx`, chuỗi tiếng Việt; chạy `T/regression.test.ts`
 
 **Checkpoint**: Cả bảy story hoạt động.
 
