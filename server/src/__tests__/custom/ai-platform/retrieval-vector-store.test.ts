@@ -113,7 +113,7 @@ describe('retrieval settings, vector-store, and profile ranked search', () => {
       expect.objectContaining({ status: 404, code: 'scope_not_found' }),
     );
     expect(() => assertScopeExists({ kind: 'agent', id: 'triage' })).toThrowError(
-      expect.objectContaining({ status: 409, code: 'scope_unavailable' }),
+      expect.objectContaining({ status: 404, code: 'scope_not_found' }),
     );
     expect(() => assertScopeExists({ kind: 'profile', id: 'abc' })).toThrowError(
       expect.objectContaining({ status: 400, code: 'invalid_scope' }),

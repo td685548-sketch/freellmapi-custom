@@ -6,9 +6,19 @@ import { consumeMcpTakeoverPlan, refreshMcpTakeoverMessages } from './mcp-client
 import { sendMcpLoopResult } from './mcp-client/respond.js';
 import { runToolLoop } from './mcp-client/tool-loop.js';
 import { buildProfileGuardContext, type ProfileGuardContext } from './output-guard/context.js';
+import {
+  captureCallerCacheControl,
+  getActiveCacheTargetForRequest,
+  getCapturedCacheUsageForRequest,
+  markPromptCacheInterceptorInstalled,
+} from './prompt-cache/runtime.js';
+import { cacheUsageFilter } from './prompt-cache/stats.js';
 import { detectWire } from './wire/detect.js';
 import { installInterceptor, type OutputFilter } from './wire/interceptor.js';
 import { injectRetrievedKnowledgeForSlot6 } from '../knowledge-inject.js';
+import { capturePromptRequestContext } from './prompts/render.js';
+import { getFlowBySlug, isFlowGrantedToProfile } from './orchestrator/definitions.js';
+import { executeFlowHttpRequest, extractRequestedModel, isFlowModel } from './orchestrator/engine.js';
 
 export type OutputFilterProvider = (ctx: ProfileGuardContext) => OutputFilter | null;
 
@@ -23,6 +33,32 @@ export function registerOutputFilterProvider(provider: OutputFilterProvider | nu
 }
 
 /**
+ * Idempotently installs the prompt-cache usage stats filter on `res` before
+ * `citationFilter` and `outputFilterFor` (filter order: stats -> citations -> outputGuard).
+ * Returns immediately without wrapping `res` when `promptCache` is disabled.
+ */
+export function installPromptCacheFilterIfNeeded(
+  req: Request,
+  res: Response,
+  profile: GateProfile,
+): void {
+  const flags = getFlags();
+  if (!flags.promptCache) return;
+  if (isInternalCall(req) !== null) return;
+
+  const detected = detectWire(req);
+  if (!detected) return;
+
+  markPromptCacheInterceptorInstalled(res);
+  const filter = cacheUsageFilter(profile.id, detected.wire, {
+    res,
+    getRoute: () => getActiveCacheTargetForRequest(res),
+    getUpstreamUsage: () => getCapturedCacheUsageForRequest(res),
+  });
+  installInterceptor(req, res, detected.wire, [filter]);
+}
+
+/**
  * Idempotently installs the output guard interceptor on `res` before any early-handled
  * response (`answerQuickly`, `sendMcpLoopResult`, exact cache hit, or normal provider).
  * Skips verified internal loopback subcalls and returns immediately when `outputGuard` is off.
@@ -33,6 +69,8 @@ export function installOutputGuardIfNeeded(
   profile: GateProfile,
   endUser: string | null,
 ): void {
+  installPromptCacheFilterIfNeeded(req, res, profile);
+
   const flags = getFlags();
   if (!flags.outputGuard) return;
   if (isInternalCall(req) !== null) return;
@@ -96,8 +134,58 @@ export async function runPreRequest(
 
   // Fixed FR-008 order:
   // 4. SLOT: orchestrator (flow:<slug> takeover)
+  if (flags.orchestrator) {
+    const detected = detectWire(req);
+    if (detected) {
+      const reqModel = extractRequestedModel(detected.wire, req).trim();
+      if (reqModel.startsWith('flow:')) {
+        const flowSlug = isFlowModel(reqModel);
+        const flow = flowSlug ? getFlowBySlug(flowSlug) : null;
+        if (!flow || !flow.enabled || !flow.published || flow.publishedVersion <= 0) {
+          if (!res.headersSent) {
+            res.status(404).json({
+              error: {
+                message: 'Flow not found.',
+                type: 'not_found_error',
+                code: 'flow_not_found',
+              },
+            });
+          }
+          return 'handled';
+        }
+        if (!isFlowGrantedToProfile(flow.id, _profile.id)) {
+          if (!res.headersSent) {
+            res.status(403).json({
+              error: {
+                message: 'Client key is not granted access to this flow.',
+                type: 'permission_error',
+                code: 'flow_not_granted',
+              },
+            });
+          }
+          return 'handled';
+        }
+        await executeFlowHttpRequest(
+          req,
+          res,
+          _profile.id,
+          _endUser,
+          detected.wire,
+          detected.stream,
+          flowSlug!,
+        );
+        return 'handled';
+      }
+    }
+  }
   // 5. SLOT: prompts (variable substitution)
+  if (flags.prompts) {
+    capturePromptRequestContext(req, _profile, _endUser);
+  }
   // 6. SLOT: retrieval (semantic RAG injection)
+  if (flags.promptCache) {
+    installPromptCacheFilterIfNeeded(req, res, _profile);
+  }
   if (flags.retrieval) {
     await injectRetrievedKnowledgeForSlot6(req, res, {
       profileId: _profile.id,
@@ -159,6 +247,10 @@ export async function runPreRequest(
   }
 
   // 8. SLOT: promptCache (per-provider cache breakpoints)
+  if (flags.promptCache) {
+    captureCallerCacheControl(req);
+  }
+
   // 10. SLOT: outputGuard / response interceptor (idempotent; also installed before early handlers)
   installOutputGuardIfNeeded(req, res, _profile, _endUser);
 

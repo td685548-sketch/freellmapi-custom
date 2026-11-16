@@ -12,6 +12,7 @@ import {
 import { retrieve } from './ai-platform/retrieval/hybrid.js';
 import { getRetrievalSettingsInternal } from './ai-platform/retrieval/settings.js';
 import type { Wire } from './ai-platform/wire/detect.js';
+import { markVolatileSystemText } from './ai-platform/wire/extract.js';
 import { installInterceptor } from './ai-platform/wire/interceptor.js';
 
 // Adds a client key's best-matching knowledge passages to a chat request before it is routed. Works on
@@ -136,6 +137,7 @@ export function injectKnowledge(req: Request, profileId: number, maxChars: numbe
     const hits = searchKnowledge(profileId, plan.question, maxChars);
     const block = knowledgeBlock(hits);
     if (!block) return 0;
+    markVolatileSystemText(block);
     plan.apply(block);
     return hits.length;
   } catch {
@@ -197,6 +199,7 @@ export async function injectRetrievedKnowledgeForSlot6(
       })),
     );
     if (block) {
+      markVolatileSystemText(block);
       plan.apply(block);
     }
 

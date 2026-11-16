@@ -13,7 +13,10 @@ import { hasPermission } from '../../middleware/requirePermission.js';
 import type { SessionUser } from '../../services/auth.js';
 import { getFlags, setFlags } from './flags.js';
 import { mcpAdminRouter } from './mcp-client/router.js';
+import { orchestratorAdminRouter } from './orchestrator/router.js';
 import { outputGuardAdminRouter } from './output-guard/router.js';
+import { promptCacheAdminRouter } from './prompt-cache/router.js';
+import { promptsAdminRouter } from './prompts/router.js';
 import { retrievalAdminRouter } from './retrieval/router.js';
 
 const RETENTION_KEY = 'ai_platform_retention_v1';
@@ -84,9 +87,18 @@ aiPlatformRouter.get('/overview', requirePerm('view_ai_platform'), (_req, res) =
   const pillars = Object.fromEntries(
     PILLARS.map((pillar) => {
       const ready =
-        pillar === 'mcpClient' || pillar === 'outputGuard' || pillar === 'retrieval';
+        pillar === 'prompts' ||
+        pillar === 'mcpClient' ||
+        pillar === 'outputGuard' ||
+        pillar === 'retrieval' ||
+        pillar === 'promptCache' ||
+        pillar === 'orchestrator';
       const summary =
-        pillar === 'mcpClient'
+        pillar === 'prompts'
+          ? flags[pillar]
+            ? 'System prompts runtime active.'
+            : 'System prompts ready (disabled by default).'
+          : pillar === 'mcpClient'
           ? flags[pillar]
             ? 'MCP client runtime active.'
             : 'MCP client ready (disabled by default).'
@@ -98,9 +110,17 @@ aiPlatformRouter.get('/overview', requirePerm('view_ai_platform'), (_req, res) =
               ? flags[pillar]
                 ? 'Retrieval runtime active.'
                 : 'Retrieval ready (disabled by default).'
-              : flags[pillar]
-                ? 'Enabled in foundation mode (pillar engine not yet installed).'
-                : 'Disabled by default.';
+              : pillar === 'promptCache'
+                ? flags[pillar]
+                  ? 'Prompt cache runtime active.'
+                  : 'Prompt cache ready (disabled by default).'
+                : pillar === 'orchestrator'
+                  ? flags[pillar]
+                    ? 'Orchestrator runtime active.'
+                    : 'Orchestrator ready (disabled by default).'
+                  : flags[pillar]
+                    ? 'Enabled in foundation mode (pillar engine not yet installed).'
+                    : 'Disabled by default.';
       return [pillar, { enabled: flags[pillar], ready, summary }];
     }),
   ) as AiPlatformOverviewResponse['pillars'];
@@ -174,3 +194,6 @@ aiPlatformRouter.put('/retention', requirePerm('edit_ai_flags'), (req, res) => {
 aiPlatformRouter.use(mcpAdminRouter);
 aiPlatformRouter.use(outputGuardAdminRouter);
 aiPlatformRouter.use(retrievalAdminRouter);
+aiPlatformRouter.use(promptCacheAdminRouter);
+aiPlatformRouter.use(promptsAdminRouter);
+aiPlatformRouter.use(orchestratorAdminRouter);

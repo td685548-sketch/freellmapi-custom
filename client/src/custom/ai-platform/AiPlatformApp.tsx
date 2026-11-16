@@ -16,15 +16,19 @@ import { Routes, Route, NavLink } from 'react-router-dom';
 import { useCustomT } from '../i18n/use-custom-t';
 import { useAdministrativeAccess } from '../use-administrative-access';
 import { useUserSession } from '../use-session';
+import { Flows } from './pages/Flows';
 import { Knowledge } from './pages/Knowledge';
 import { McpServers } from './pages/McpServers';
 import { OutputGuard } from './pages/OutputGuard';
 import { Overview } from './pages/Overview';
+import { PromptCache } from './pages/PromptCache';
+import { Prompts } from './pages/Prompts';
+import { Runs } from './pages/Runs';
 import { KNOWLEDGE_NAV_HEADING } from './knowledge-strings';
 import {
   NAV_AI_PLATFORM,
   NO_ACCESS,
-  NOT_IMPLEMENTED_YET,
+  PILLAR_PROMPTS,
   MCP_SERVERS_HEADING,
   OUTPUT_GUARD_HEADING,
   PROMPT_CACHE_HEADING,
@@ -32,29 +36,10 @@ import {
   RUNS_HEADING,
 } from './strings';
 
-// ─── Placeholder for unimplemented screens ────────────────────────────────────
-
-function NotImplemented({ title }: { title: string }) {
-  const tc = useCustomT();
-  return (
-    <div className="p-6 space-y-2">
-      <h2 className="text-lg font-semibold">{title}</h2>
-      <p className="text-sm text-muted-foreground">{tc(NOT_IMPLEMENTED_YET)}</p>
-    </div>
-  );
-}
-
 // ─── Sub-nav ──────────────────────────────────────────────────────────────────
 
 const NAV_ITEMS = [
   { to: 'overview', labelKey: 'Platform overview' as const },
-] as const;
-
-// Future screens — links shown but pages are placeholders until US5–US7 ship.
-const FUTURE_NAV_ITEMS = [
-  { to: 'prompt-cache', labelKey: PROMPT_CACHE_HEADING },
-  { to: 'flows', labelKey: FLOWS_HEADING },
-  { to: 'runs', labelKey: RUNS_HEADING },
 ] as const;
 
 // ─── Main app ─────────────────────────────────────────────────────────────────
@@ -65,6 +50,11 @@ export function AiPlatformApp() {
   const { isPrimary } = useUserSession();
 
   const canOverview = isPrimary || can('view_ai_platform') || can('edit_ai_flags') || can('manage_ai_platform');
+  const canPrompts =
+    isPrimary ||
+    can('view_prompts') ||
+    can('edit_prompts') ||
+    can('publish_prompts');
   const canMcp =
     isPrimary ||
     can('view_mcp_servers') ||
@@ -79,9 +69,25 @@ export function AiPlatformApp() {
   const canViewKnowledge = isPrimary || can('view_retrieval');
   const canEditKnowledge = isPrimary || can('edit_retrieval');
   const canKnowledge = canViewKnowledge || canEditKnowledge;
+  const canPromptCache = isPrimary || can('view_prompt_cache') || can('edit_prompt_cache');
+  const canFlows = isPrimary || can('view_flows') || can('edit_flows') || can('publish_flows');
+  const canRuns =
+    isPrimary ||
+    can('view_flow_runs') ||
+    can('cancel_flow_runs') ||
+    can('approve_ai_actions');
 
   // Guard: no sensitive query when user lacks access.
-  if (!canOverview && !canMcp && !canOutputGuard && !canKnowledge) {
+  if (
+    !canOverview &&
+    !canPrompts &&
+    !canMcp &&
+    !canOutputGuard &&
+    !canKnowledge &&
+    !canPromptCache &&
+    !canFlows &&
+    !canRuns
+  ) {
     return (
       <div className="p-6">
         <p className="text-sm text-muted-foreground">{tc(NO_ACCESS)}</p>
@@ -96,10 +102,14 @@ export function AiPlatformApp() {
         element={
           <AiPlatformShell
             canOverview={canOverview}
+            canPrompts={canPrompts}
             canMcp={canMcp}
             canOutputGuard={canOutputGuard}
             canViewKnowledge={canViewKnowledge}
             canEditKnowledge={canEditKnowledge}
+            canPromptCache={canPromptCache}
+            canFlows={canFlows}
+            canRuns={canRuns}
           />
         }
       />
@@ -108,10 +118,14 @@ export function AiPlatformApp() {
         element={
           <AiPlatformShell
             canOverview={canOverview}
+            canPrompts={canPrompts}
             canMcp={canMcp}
             canOutputGuard={canOutputGuard}
             canViewKnowledge={canViewKnowledge}
             canEditKnowledge={canEditKnowledge}
+            canPromptCache={canPromptCache}
+            canFlows={canFlows}
+            canRuns={canRuns}
           />
         }
       />
@@ -121,32 +135,48 @@ export function AiPlatformApp() {
 
 function AiPlatformShell({
   canOverview,
+  canPrompts,
   canMcp,
   canOutputGuard,
   canViewKnowledge,
   canEditKnowledge,
+  canPromptCache,
+  canFlows,
+  canRuns,
 }: {
   canOverview: boolean;
+  canPrompts: boolean;
   canMcp: boolean;
   canOutputGuard: boolean;
   canViewKnowledge: boolean;
   canEditKnowledge: boolean;
+  canPromptCache: boolean;
+  canFlows: boolean;
+  canRuns: boolean;
 }) {
   const tc = useCustomT();
   const canKnowledge = canViewKnowledge || canEditKnowledge;
   const defaultElement = canOverview ? (
     <Overview />
+  ) : canPrompts ? (
+    <Prompts />
   ) : canMcp ? (
     <McpServers />
   ) : canOutputGuard ? (
     <OutputGuard />
-  ) : (
+  ) : canKnowledge ? (
     <Knowledge
       canView={canViewKnowledge}
       canEdit={canEditKnowledge}
       canReindex={canEditKnowledge}
       canQuery={canViewKnowledge}
     />
+  ) : canPromptCache ? (
+    <PromptCache />
+  ) : canFlows ? (
+    <Flows />
+  ) : (
+    <Runs />
   );
 
   return (
@@ -169,6 +199,20 @@ function AiPlatformShell({
               {tc(labelKey)}
             </NavLink>
           ))}
+          {canPrompts && (
+            <NavLink
+              to="prompts"
+              className={({ isActive }) =>
+                `block px-3 py-2 rounded-md text-sm transition-colors ${
+                  isActive
+                    ? 'bg-primary/10 text-primary font-medium'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                }`
+              }
+            >
+              {tc(PILLAR_PROMPTS)}
+            </NavLink>
+          )}
           {canMcp && (
             <NavLink
               to="mcp"
@@ -211,11 +255,9 @@ function AiPlatformShell({
               {tc(KNOWLEDGE_NAV_HEADING)}
             </NavLink>
           )}
-          {/* Future screens — rendered as nav links but go to placeholder pages */}
-          {FUTURE_NAV_ITEMS.map(({ to, labelKey }) => (
+          {canPromptCache && (
             <NavLink
-              key={to}
-              to={to}
+              to="prompt-cache"
               className={({ isActive }) =>
                 `block px-3 py-2 rounded-md text-sm transition-colors ${
                   isActive
@@ -224,9 +266,37 @@ function AiPlatformShell({
                 }`
               }
             >
-              {tc(labelKey)}
+              {tc(PROMPT_CACHE_HEADING)}
             </NavLink>
-          ))}
+          )}
+          {canFlows && (
+            <NavLink
+              to="flows"
+              className={({ isActive }) =>
+                `block px-3 py-2 rounded-md text-sm transition-colors ${
+                  isActive
+                    ? 'bg-primary/10 text-primary font-medium'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                }`
+              }
+            >
+              {tc(FLOWS_HEADING)}
+            </NavLink>
+          )}
+          {canRuns && (
+            <NavLink
+              to="runs"
+              className={({ isActive }) =>
+                `block px-3 py-2 rounded-md text-sm transition-colors ${
+                  isActive
+                    ? 'bg-primary/10 text-primary font-medium'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                }`
+              }
+            >
+              {tc(RUNS_HEADING)}
+            </NavLink>
+          )}
         </div>
       </nav>
 
@@ -235,6 +305,18 @@ function AiPlatformShell({
         <Routes>
           <Route index element={defaultElement} />
           <Route path="overview" element={<Overview />} />
+          <Route
+            path="prompts"
+            element={
+              canPrompts ? (
+                <Prompts />
+              ) : (
+                <div className="p-6">
+                  <p className="text-sm text-muted-foreground">{tc(NO_ACCESS)}</p>
+                </div>
+              )
+            }
+          />
           <Route path="mcp" element={<McpServers />} />
           <Route path="output-guard" element={<OutputGuard />} />
           <Route
@@ -255,10 +337,43 @@ function AiPlatformShell({
             }
           />
 
-          {/* Future US5–US7 screens — placeholder until implemented */}
-          <Route path="prompt-cache" element={<NotImplemented title={tc(PROMPT_CACHE_HEADING)} />} />
-          <Route path="flows" element={<NotImplemented title={tc(FLOWS_HEADING)} />} />
-          <Route path="runs" element={<NotImplemented title={tc(RUNS_HEADING)} />} />
+          <Route
+            path="prompt-cache"
+            element={
+              canPromptCache ? (
+                <PromptCache />
+              ) : (
+                <div className="p-6">
+                  <p className="text-sm text-muted-foreground">{tc(NO_ACCESS)}</p>
+                </div>
+              )
+            }
+          />
+
+          <Route
+            path="flows"
+            element={
+              canFlows ? (
+                <Flows />
+              ) : (
+                <div className="p-6">
+                  <p className="text-sm text-muted-foreground">{tc(NO_ACCESS)}</p>
+                </div>
+              )
+            }
+          />
+          <Route
+            path="runs"
+            element={
+              canRuns ? (
+                <Runs />
+              ) : (
+                <div className="p-6">
+                  <p className="text-sm text-muted-foreground">{tc(NO_ACCESS)}</p>
+                </div>
+              )
+            }
+          />
 
           {/* Catch-all */}
           <Route path="*" element={defaultElement} />

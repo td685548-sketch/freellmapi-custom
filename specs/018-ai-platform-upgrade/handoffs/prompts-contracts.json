@@ -1,0 +1,154 @@
+{
+  "version": 1,
+  "phase": "Delivery stage 6 / US6 / tasks Phase 8 (T104-T114)",
+  "baseSha": "2cdaa6c2",
+  "sharedContractFile": "shared/ai-platform-prompts.ts",
+  "limits": {
+    "maxBodyChars": 32000,
+    "maxNoteChars": 500,
+    "maxRetainedVersions": 50,
+    "maxVarNameChars": 32,
+    "maxCallerVarsHeaderBytes": 2048,
+    "maxCallerVarValueChars": 200,
+    "maxTryMessageChars": 8000,
+    "varNameRegex": "^[a-z][a-z0-9_]{0,31}$"
+  },
+  "systemVariables": [
+    "date",
+    "profile_name",
+    "end_user_id",
+    "end_user_name",
+    "language"
+  ],
+  "ddl": {
+    "migrationFile": "server/src/db/migrations/20261113_150000_custom_ai_prompt_versions.ts",
+    "tables": {
+      "custom_ai_prompt_versions": {
+        "primaryKey": ["id"],
+        "unique": ["scope_kind", "scope_id", "version"],
+        "columns": {
+          "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+          "scope_kind": "TEXT NOT NULL",
+          "scope_id": "TEXT NOT NULL",
+          "version": "INTEGER NOT NULL",
+          "body": "TEXT NOT NULL",
+          "variables_json": "TEXT NOT NULL DEFAULT '[]'",
+          "note": "TEXT NOT NULL DEFAULT ''",
+          "status": "TEXT NOT NULL CHECK (status IN ('draft', 'published', 'archived'))",
+          "restored_from": "INTEGER",
+          "author_id": "INTEGER",
+          "created_at": "TEXT NOT NULL DEFAULT (datetime('now'))"
+        }
+      },
+      "custom_ai_prompt_heads": {
+        "primaryKey": ["scope_kind", "scope_id"],
+        "columns": {
+          "scope_kind": "TEXT NOT NULL",
+          "scope_id": "TEXT NOT NULL",
+          "published_version": "INTEGER",
+          "draft_version": "INTEGER",
+          "revision": "INTEGER NOT NULL DEFAULT 1"
+        }
+      }
+    },
+    "indexes": [
+      "idx_custom_ai_prompt_versions_scope_status"
+    ],
+    "triggers": [
+      "trg_client_profiles_delete_prompts"
+    ],
+    "triggerSideEffectsTableUpdates": {
+      "client_profiles": [
+        "custom_ai_prompt_versions",
+        "custom_ai_prompt_heads"
+      ]
+    },
+    "backfill": {
+      "client_profiles": "Where system_prompt IS NOT NULL AND TRIM(system_prompt) != '' -> version=1 status='published' + head (published_version=1, draft_version=NULL, revision=1)",
+      "x_support_tenants": "When table exists and system_prompt IS NOT NULL AND TRIM(system_prompt) != '' -> scope_kind='support_tenant', scope_id=CAST(id AS TEXT), version=1 status='published' + head"
+    }
+  },
+  "internalFunctions": {
+    "prompts/template.ts": [
+      "sanitizeVariableValue(raw: string): string",
+      "validateTemplate(body: string, declared: PromptVariable[]): { ok: true } | { ok: false; line: number; column: number; reason: string }",
+      "renderWith(template: string, values: Record<string, string>, declared: PromptVariable[]): { rendered: string; missing: string[] }"
+    ],
+    "prompts/store.ts": [
+      "PromptStoreError",
+      "RevisionConflictError",
+      "PromptValidationError",
+      "PromptNotFoundError",
+      "getPromptScopeState(scope: Scope): PromptScopeStateResponse",
+      "getPromptVersion(scope: Scope, version: number): PromptVersion",
+      "getPublishedPrompt(scope: Scope): { version: number; body: string; variables: PromptVariable[] } | null",
+      "saveDraft(scope: Scope, input: PromptDraftInput, actorId: number | null): PromptVersion",
+      "discardDraft(scope: Scope, revision?: number): PromptHead",
+      "publish(scope: Scope, revision: number, actorId: number | null): PromptHead",
+      "restore(scope: Scope, version: number, revision: number, actorId: number | null): PromptHead",
+      "diffPromptVersions(scope: Scope, fromVersion: number, toVersion: number): PromptDiffResponse"
+    ],
+    "prompts/render.ts": [
+      "parseCallerVarsHeader(rawHeader: string | string[] | undefined): Record<string, string>",
+      "capturePromptRequestContext(req: Request, profile: GateProfile, endUser: string | null): void",
+      "renderPrompt(template: string | null | undefined): string | null | undefined",
+      "renderTenantSystemPrompt(tenant: { id: number | string; name: string; systemPrompt: string }, userContext: { userId: string; name?: string }): string"
+    ]
+  },
+  "routes": {
+    "mountPrefix": "/api/ai-platform",
+    "endpoints": [
+      { "method": "GET", "path": "/prompts/variables", "permission": "view_prompts", "status": [200, 403] },
+      { "method": "GET", "path": "/prompts/:scopeKind/:scopeId", "permission": "view_prompts", "status": [200, 400, 403] },
+      { "method": "GET", "path": "/prompts/:scopeKind/:scopeId/versions/:version", "permission": "view_prompts", "status": [200, 400, 403, 404] },
+      { "method": "GET", "path": "/prompts/:scopeKind/:scopeId/diff", "permission": "view_prompts", "status": [200, 400, 403, 404] },
+      { "method": "PUT", "path": "/prompts/:scopeKind/:scopeId/draft", "permission": "edit_prompts", "status": [200, 400, 403, 409, 422] },
+      { "method": "DELETE", "path": "/prompts/:scopeKind/:scopeId/draft", "permission": "edit_prompts", "status": [200, 400, 403, 409] },
+      { "method": "POST", "path": "/prompts/:scopeKind/:scopeId/preview", "permission": "edit_prompts", "status": [200, 400, 403, 404, 422] },
+      { "method": "POST", "path": "/prompts/:scopeKind/:scopeId/try", "permission": "edit_prompts", "status": [200, 400, 403, 404, 409, 422, 502] },
+      { "method": "POST", "path": "/prompts/:scopeKind/:scopeId/publish", "permission": "publish_prompts", "status": [200, 400, 403, 409] },
+      { "method": "POST", "path": "/prompts/:scopeKind/:scopeId/restore", "permission": "publish_prompts", "status": [200, 400, 403, 404, 409] }
+    ]
+  },
+  "errorContracts": {
+    "missing_permission": { "status": 403, "body": { "error": { "type": "forbidden", "code": "missing_permission", "permission": "string", "message": "string" } } },
+    "revision_conflict": { "status": 409, "body": { "error": { "type": "conflict", "code": "revision_conflict", "message": "string", "current": "PromptScopeStateResponse" } } },
+    "pillar_disabled": { "status": 409, "body": { "error": { "type": "conflict", "code": "pillar_disabled", "message": "string" } } },
+    "invalid_template": { "status": 422, "body": { "error": { "type": "invalid_request_error", "code": "invalid_template", "message": "string", "line": "number", "column": "number", "reason": "string" }, "line": "number", "column": "number", "reason": "string" } } }
+  },
+  "workerOwnership": {
+    "prompts-template": [
+      "server/src/custom/ai-platform/prompts/template.ts",
+      "server/src/__tests__/custom/ai-platform/prompt-template.test.ts"
+    ],
+    "prompts-store": [
+      "server/src/db/migrations/20261113_150000_custom_ai_prompt_versions.ts",
+      "server/src/db/migrate/defaults.ts",
+      "server/src/db/turso.ts",
+      "server/src/__tests__/db/migrate/roundtrip.test.ts",
+      "server/src/__tests__/db/turso-read-cache.test.ts",
+      "server/src/__tests__/db/migrate/ai-platform-prompts.test.ts",
+      "server/src/custom/ai-platform/prompts/store.ts",
+      "server/src/__tests__/custom/ai-platform/prompt-store.test.ts"
+    ],
+    "prompts-runtime": [
+      "server/src/custom/ai-platform/prompts/render.ts",
+      "server/src/custom/ai-platform/prompts/router.ts",
+      "server/src/lib/system-prompt.ts",
+      "server/src/custom/x-gateway/support-router.ts",
+      "server/src/custom/ai-platform/pipeline.ts",
+      "server/src/custom/ai-platform/router.ts",
+      "server/src/__tests__/custom/ai-platform/prompt-e2e.test.ts"
+    ],
+    "prompts-ui": [
+      "client/src/custom/ai-platform/prompts-api.ts",
+      "client/src/custom/ai-platform/prompts-strings.ts",
+      "client/src/custom/ai-platform/components/DiffView.tsx",
+      "client/src/custom/ai-platform/components/VariableEditor.tsx",
+      "client/src/custom/ai-platform/pages/Prompts.tsx",
+      "client/src/custom/ai-platform/prompts.test.tsx",
+      "client/src/custom/ai-platform/AiPlatformApp.tsx",
+      "client/src/custom/i18n/vi.ts"
+    ]
+  }
+}

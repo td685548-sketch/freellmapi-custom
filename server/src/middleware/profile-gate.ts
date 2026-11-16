@@ -16,6 +16,10 @@ import { extractInferenceToken } from './user-rate-limit.js';
 import { installOutputGuardIfNeeded, runPreRequest } from '../custom/ai-platform/pipeline.js';
 import { captureInternalCall, isEnrichmentAlreadyApplied, isInternalCall } from '../custom/ai-platform/loopback.js';
 import { prepareMcpTakeover, refreshMcpTakeoverMessages } from '../custom/ai-platform/mcp-client/admission.js';
+import { isPillarEnabled } from '../custom/ai-platform/flags.js';
+import { listGrantedFlowsForProfile } from '../custom/ai-platform/orchestrator/definitions.js';
+import { extractRequestedModel, recordServerLocalAddress } from '../custom/ai-platform/orchestrator/engine.js';
+import { detectWire } from '../custom/ai-platform/wire/detect.js';
 
 /**
  * Attributes /v1 and /v1beta traffic made with a client-profile key (`sk-cp-…`) to
@@ -28,6 +32,7 @@ import { prepareMcpTakeover, refreshMcpTakeoverMessages } from '../custom/ai-pla
  * authentication, which rejects them exactly as before.
  */
 export function profileInferenceGate(req: Request, res: Response, next: NextFunction): void {
+  recordServerLocalAddress(req);
   captureInternalCall(req);
   const token = extractInferenceToken(req);
   if (!token || !token.startsWith(CLIENT_PROFILE_KEY_PREFIX)) return next();
@@ -35,23 +40,83 @@ export function profileInferenceGate(req: Request, res: Response, next: NextFunc
   const profile = profileForGate(token);
   if (!profile) return next();
 
+  const reqPath = req.originalUrl.split('?')[0]!.replace(/\/+$/, '');
+  if (req.method === 'GET' && reqPath === '/v1/models' && isPillarEnabled('orchestrator')) {
+    const grantedFlows = listGrantedFlowsForProfile(profile.id).filter(
+      (f) => f.enabled && f.published && f.publishedVersion > 0,
+    );
+    if (grantedFlows.length > 0) {
+      const origJson = res.json.bind(res);
+      res.json = ((body: unknown) => {
+        if (body && typeof body === 'object' && !Array.isArray(body)) {
+          const rec = body as Record<string, unknown>;
+          if (rec.object === 'list' && Array.isArray(rec.data)) {
+            const existingIds = new Set(
+              rec.data
+                .map((item) => (item && typeof item === 'object' ? (item as { id?: unknown }).id : null))
+                .filter((id): id is string => typeof id === 'string'),
+            );
+            const extra = grantedFlows
+              .filter((f) => !existingIds.has(`flow:${f.slug}`))
+              .map((f) => ({
+                id: `flow:${f.slug}`,
+                object: 'model',
+                created: 0,
+                owned_by: 'freellmapi-flow',
+                name: f.name,
+                available: 1,
+                execution_status: 'ready',
+              }));
+            return origJson({ ...rec, data: [...rec.data, ...extra] });
+          }
+          if (Array.isArray(rec.data) && 'has_more' in rec) {
+            const existingIds = new Set(
+              rec.data
+                .map((item) => (item && typeof item === 'object' ? (item as { id?: unknown }).id : null))
+                .filter((id): id is string => typeof id === 'string'),
+            );
+            const extra = grantedFlows
+              .filter((f) => !existingIds.has(`flow:${f.slug}`))
+              .map((f) => ({
+                type: 'model' as const,
+                id: `flow:${f.slug}`,
+                display_name: f.name,
+                created_at: '2026-11-13T00:00:00Z',
+              }));
+            const nextData = [...rec.data, ...extra];
+            const lastId =
+              nextData.length > 0
+                ? ((nextData[nextData.length - 1] as { id?: string }).id ?? rec.last_id ?? null)
+                : (rec.last_id ?? null);
+            return origJson({ ...rec, data: nextData, last_id: lastId });
+          }
+        }
+        return origJson(body);
+      }) as Response['json'];
+    }
+  }
+
   const context = setRequestProfile(profile.id);
   const endUser = endUserOf(req);
   if (endUser) setRequestEndUser(endUser);
 
+  const internalCall = isInternalCall(req) !== null;
+  const detectedWire = !internalCall ? detectWire(req) : null;
+  const reqModel = detectedWire ? extractRequestedModel(detectedWire.wire, req).trim() : '';
+  const isFlowReq = reqModel.startsWith('flow:');
+
   // Restrictions first: a refused request costs the key neither a rate-limit slot nor an allowance.
-  if (profile.allowedModels.length > 0) {
+  if (!isFlowReq && profile.allowedModels.length > 0) {
     const allowed = new Set(profile.allowedModels);
     const refusal = checkModel(req, allowed);
     if (refusal) { refuse(res, refusal, allowed); return; }
     setRequestAllowedModels(allowed);
   }
-  if (profile.maxTokens !== null) capOutputTokens(req, profile.maxTokens);
+  if (!isFlowReq && profile.maxTokens !== null) capOutputTokens(req, profile.maxTokens);
   // Content rules next, for the same reason: a blocked message costs nothing.
   if (!screenContent(req, res, profile.id, endUser, profile.contentFilter)) return;
 
   const tokens = () => context?.userTokens ?? 0;
-  const internalCall = isInternalCall(req) !== null;
   let conversationApplied = false;
 
   // F06: Apply stored conversation ONCE on outer request so history & reply capture
@@ -73,6 +138,45 @@ export function profileInferenceGate(req: Request, res: Response, next: NextFunc
         quickAnswerMatches = true;
       }
     }
+  }
+
+  // Orchestrator flow takeover BEFORE outer RPM/quota admission and before outer output guard,
+  // so inner agent model steps settle exact requests/tokens once and engine handles final guard.
+  if (isFlowReq) {
+    if (!isPillarEnabled('orchestrator')) {
+      res.status(404).json({
+        error: {
+          message: 'Flow not found.',
+          type: 'not_found_error',
+          code: 'flow_not_found',
+        },
+      });
+      return;
+    }
+    runPreRequest(req, res, profile, endUser)
+      .then((result) => {
+        if (result !== 'handled' && !res.headersSent) {
+          res.status(500).json({
+            error: {
+              message: 'Orchestrator flow takeover failed to complete.',
+              type: 'internal_error',
+              code: 'flow_takeover_unhandled',
+            },
+          });
+        }
+      })
+      .catch(() => {
+        if (!res.headersSent) {
+          res.status(500).json({
+            error: {
+              message: 'Orchestrator flow takeover failed.',
+              type: 'internal_error',
+              code: 'flow_takeover_error',
+            },
+          });
+        }
+      });
+    return;
   }
 
   // Install output guard idempotently before any early-handled response

@@ -205,24 +205,24 @@ description: "Task list for AI Platform Upgrade"
 
 ### Tests for User Story 5 ⚠️
 
-- [ ] T089 [US5] Khảo sát đường gửi tới nhà cung cấp (`server/src/lib/fallback-loop.ts`, `server/src/providers/base.ts`, `server/src/custom/provider-accounts/execution.ts`) để tìm MỘT điểm nơi nền tảng và model đích đã biết cho mỗi lần thử, và xác minh bằng test rằng khối nội dung có `cache_control` còn nguyên tới điểm đó; ghi kết quả vào research.md mục R4. Nếu cần hơn một điểm móc: DỪNG và trình bày lựa chọn cho chủ repo
-- [ ] T090 [US5] Lập danh mục khả năng dựng sẵn từ tài liệu hiện hành của từng nhà cung cấp đang có trong `server/src/providers/` và `server/src/custom/provider-accounts/` (kiểu `explicit|implicit|none`, số điểm tối đa, ngưỡng token tối thiểu, thời hạn); ghi nguồn và ngày tra cứu vào research.md mục R4
-- [ ] T091 [P] [US5] Viết test roundtrip migration trong `server/src/__tests__/db/migrate/ai-platform-prompt-cache.test.ts`
-- [ ] T092 [P] [US5] Viết test khả năng: ghi đè thắng dựng sẵn; mẫu dài nhất thắng; không khớp là `none`; trong `T/cache-capabilities.test.ts`
-- [ ] T093 [P] [US5] Viết test điểm đánh dấu: đích `explicit` giữ nguyên vị trí; đích `none`/`implicit` không còn trường `cache_control` nào; tự đặt theo thứ tự công cụ → chỉ dẫn → tri thức cố định, không vượt `max_breakpoints` trừ số của người gọi; khối dưới `min_tokens` bị bỏ qua; đầu vào không bị sửa tại chỗ; trụ cột tắt trả đúng tham chiếu; trong `T/cache-breakpoints.test.ts`
-- [ ] T094 [P] [US5] Viết test ổn định phần đầu: hai yêu cầu chỉ khác câu hỏi cuối có phần trước điểm đánh dấu cuối trùng từng byte khi bật đồng thời chỉ dẫn, tri thức, công cụ, nén; trong `T/cache-prefix-stability.test.ts`
-- [ ] T095 [P] [US5] Viết test thống kê: đọc usage của 4 giao thức; cộng theo ngày, client key, nền tảng, model; ước tính tiết kiệm theo `server/src/custom/x-gateway/pricing.ts`; trong `T/cache-stats.test.ts`
+- [x] T089 [US5] Khảo sát đường gửi tới nhà cung cấp (`server/src/lib/fallback-loop.ts`, `server/src/providers/base.ts`, `server/src/custom/provider-accounts/execution.ts`) để tìm MỘT điểm nơi nền tảng và model đích đã biết cho mỗi lần thử, và xác minh bằng test rằng khối nội dung có `cache_control` còn nguyên tới điểm đó; ghi kết quả vào research.md mục R4. Nếu cần hơn một điểm móc: DỪNG và trình bày lựa chọn cho chủ repo
+- [x] T090 [US5] Lập danh mục khả năng dựng sẵn từ tài liệu hiện hành của từng nhà cung cấp đang có trong `server/src/providers/` và `server/src/custom/provider-accounts/` (kiểu `explicit|implicit|none`, số điểm tối đa, ngưỡng token tối thiểu, thời hạn); ghi nguồn và ngày tra cứu vào research.md mục R4
+- [x] T091 [P] [US5] Viết test roundtrip migration trong `server/src/__tests__/db/migrate/ai-platform-prompt-cache.test.ts`
+- [x] T092 [P] [US5] Viết test khả năng: ghi đè thắng dựng sẵn; mẫu dài nhất thắng; không khớp là `none`; trong `T/cache-capabilities.test.ts`
+- [x] T093 [P] [US5] Viết test điểm đánh dấu: đích `explicit` giữ nguyên vị trí; đích `none`/`implicit` không còn trường `cache_control` nào; tự đặt theo thứ tự công cụ → chỉ dẫn → tri thức cố định, không vượt `max_breakpoints` trừ số của người gọi; khối dưới `min_tokens` bị bỏ qua; đầu vào không bị sửa tại chỗ; trụ cột tắt trả đúng tham chiếu; trong `T/cache-breakpoints.test.ts`
+- [x] T094 [P] [US5] Viết test ổn định phần đầu: hai yêu cầu chỉ khác câu hỏi cuối có phần trước điểm đánh dấu cuối trùng từng byte khi bật đồng thời chỉ dẫn, tri thức, công cụ, nén; trong `T/cache-prefix-stability.test.ts`
+- [x] T095 [P] [US5] Viết test thống kê: đọc usage của 4 giao thức; cộng theo ngày, client key, nền tảng, model; ước tính tiết kiệm theo `server/src/custom/x-gateway/pricing.ts`; trong `T/cache-stats.test.ts`
 
 ### Implementation for User Story 5
 
-- [ ] T096 [US5] Tạo `M/20261113_140000_custom_ai_prompt_cache.ts` với `custom_ai_cache_capabilities` (nạp hàng `builtin` từ T090) và `custom_ai_cache_usage_daily`
-- [ ] T097 [US5] Cài `S/prompt-cache/capabilities.ts` và `S/prompt-cache/breakpoints.ts` (`applyCacheBreakpoints`)
-- [ ] T098 [US5] Thêm lời gọi `applyCacheBreakpoints` tại điểm đã chọn ở T089 (một dòng); thêm ca chuỗi dự phòng đổi loại đích vào `T/cache-e2e.test.ts`
-- [ ] T099 [US5] Sửa `addSystemBlock` trong `S/wire/extract.ts` và nơi gọi nó để khối `stable` luôn đứng trước khối `volatile`; khối tri thức theo câu hỏi là `volatile`
-- [ ] T100 [US5] Cài `S/prompt-cache/stats.ts` (`cacheUsageFilter`) và nối vào bước 10 của `S/pipeline.ts`
-- [ ] T101 [US5] Cài `S/prompt-cache/router.ts` (mọi tuyến `/prompt-cache/*`) và gắn vào `S/router.ts`
-- [ ] T102 [P] [US5] Viết test giao diện cho bảng khả năng và biểu đồ tiết kiệm trong `C/prompt-cache.test.tsx`
-- [ ] T103 [US5] Cài `C/pages/PromptCache.tsx`, chuỗi tiếng Việt; chạy `T/regression.test.ts`
+- [x] T096 [US5] Tạo `M/20261113_140000_custom_ai_prompt_cache.ts` với `custom_ai_cache_capabilities` (nạp hàng `builtin` từ T090) và `custom_ai_cache_usage_daily`
+- [x] T097 [US5] Cài `S/prompt-cache/capabilities.ts` và `S/prompt-cache/breakpoints.ts` (`applyCacheBreakpoints`)
+- [x] T098 [US5] Thêm lời gọi `applyCacheBreakpoints` tại điểm đã chọn ở T089 (một dòng); thêm ca chuỗi dự phòng đổi loại đích vào `T/cache-e2e.test.ts`
+- [x] T099 [US5] Sửa `addSystemBlock` trong `S/wire/extract.ts` và nơi gọi nó để khối `stable` luôn đứng trước khối `volatile`; khối tri thức theo câu hỏi là `volatile`
+- [x] T100 [US5] Cài `S/prompt-cache/stats.ts` (`cacheUsageFilter`) và nối vào bước 10 của `S/pipeline.ts`
+- [x] T101 [US5] Cài `S/prompt-cache/router.ts` (mọi tuyến `/prompt-cache/*`) và gắn vào `S/router.ts`
+- [x] T102 [P] [US5] Viết test giao diện cho bảng khả năng và biểu đồ tiết kiệm trong `C/prompt-cache.test.tsx`
+- [x] T103 [US5] Cài `C/pages/PromptCache.tsx`, chuỗi tiếng Việt; chạy `T/regression.test.ts`
 
 **Checkpoint**: US5 đạt và tự kiểm chứng được. Ưu tiên giữ tuyến (FR-041, mức SHOULD) hoãn tới khi có số liệu từ `custom_ai_cache_usage_daily`.
 
@@ -236,20 +236,20 @@ description: "Task list for AI Platform Upgrade"
 
 ### Tests for User Story 6 ⚠️
 
-- [ ] T104 [P] [US6] Viết test migration: mỗi `client_profiles.system_prompt` khác rỗng và mỗi tenant có `systemPrompt` thành phiên bản 1 `published`; `down` giữ nguyên cột hiện có; trong `server/src/__tests__/db/migrate/ai-platform-prompts.test.ts`
-- [ ] T105 [P] [US6] Viết test mẫu: `{{tên}}` và `{{tên|mặc định}}`; tên khớp `^[a-z][a-z0-9_]{0,31}$`; lỗi kèm dòng và cột; thay một lượt, giá trị chứa `{{date}}` không bị thay tiếp; giá trị người gọi cắt 200 ký tự và loại ký tự điều khiển; chuỗi không có `{{` trả đúng tham chiếu; trong `T/prompt-template.test.ts`
-- [ ] T106 [P] [US6] Viết test kho: phiên bản bất biến; nhiều nhất một `published` và một `draft`; phát hành ghi `body` vào cột hiện có trong cùng giao dịch; khôi phục tạo phiên bản mới có `restored_from`; 409 khi `revision` sai; giữ 50 phiên bản, không dọn bản `published`; trong `T/prompt-store.test.ts`
-- [ ] T107 [P] [US6] Viết test HTTP đầu-cuối: nháp không ảnh hưởng chat; phát hành có hiệu lực ở yêu cầu kế tiếp; `x-freellm-vars` sai định dạng bị bỏ qua không lỗi; `try` không ghi vào sử dụng của client key; trong `T/prompt-e2e.test.ts`
+- [x] T104 [P] [US6] Viết test migration: mỗi `client_profiles.system_prompt` khác rỗng và mỗi tenant có `systemPrompt` thành phiên bản 1 `published`; `down` giữ nguyên cột hiện có; trong `server/src/__tests__/db/migrate/ai-platform-prompts.test.ts`
+- [x] T105 [P] [US6] Viết test mẫu: `{{tên}}` và `{{tên|mặc định}}`; tên khớp `^[a-z][a-z0-9_]{0,31}$`; lỗi kèm dòng và cột; thay một lượt, giá trị chứa `{{date}}` không bị thay tiếp; giá trị người gọi cắt 200 ký tự và loại ký tự điều khiển; chuỗi không có `{{` trả đúng tham chiếu; trong `T/prompt-template.test.ts`
+- [x] T106 [P] [US6] Viết test kho: phiên bản bất biến; nhiều nhất một `published` và một `draft`; phát hành ghi `body` vào cột hiện có trong cùng giao dịch; khôi phục tạo phiên bản mới có `restored_from`; 409 khi `revision` sai; giữ 50 phiên bản, không dọn bản `published`; trong `T/prompt-store.test.ts`
+- [x] T107 [P] [US6] Viết test HTTP đầu-cuối: nháp không ảnh hưởng chat; phát hành có hiệu lực ở yêu cầu kế tiếp; `x-freellm-vars` sai định dạng bị bỏ qua không lỗi; `try` không ghi vào sử dụng của client key; trong `T/prompt-e2e.test.ts`
 
 ### Implementation for User Story 6
 
-- [ ] T108 [US6] Tạo `M/20261113_150000_custom_ai_prompt_versions.ts` với `custom_ai_prompt_versions` (`status` thuộc `draft|published|archived`, `note` tối đa 500) và `custom_ai_prompt_heads`, kèm di trú phiên bản 1
-- [ ] T109 [US6] Cài `S/prompts/template.ts` (`validateTemplate`, `renderWith`) và `S/prompts/store.ts` (`saveDraft`, `publish`, `restore`, `getPublishedPrompt`, diff theo dòng)
-- [ ] T110 [US6] Cài `S/prompts/render.ts` (`renderPrompt` lấy ngữ cảnh từ `server/src/lib/client-context.ts` và `x-freellm-vars`) và thêm một dòng gọi nó trong `prependSystemPrompt` của `server/src/lib/system-prompt.ts`
-- [ ] T111 [US6] Áp dụng `renderWith` cho `systemPrompt` của tenant tại nơi dựng chỉ dẫn trong `server/src/custom/x-gateway/support-router.ts`
-- [ ] T112 [US6] Cài `S/prompts/router.ts` (mọi tuyến `/prompts/*`) và gắn vào `S/router.ts`
-- [ ] T113 [P] [US6] Viết test giao diện cho lịch sử, so sánh, trình sửa biến, xem trước, cảnh báo biến làm mất ổn định cache trong `C/prompts.test.tsx`
-- [ ] T114 [US6] Cài `C/pages/Prompts.tsx`, `C/components/DiffView.tsx`, `C/components/VariableEditor.tsx`, chuỗi tiếng Việt; chạy `T/regression.test.ts`
+- [x] T108 [US6] Tạo `M/20261113_150000_custom_ai_prompt_versions.ts` với `custom_ai_prompt_versions` (`status` thuộc `draft|published|archived`, `note` tối đa 500) và `custom_ai_prompt_heads`, kèm di trú phiên bản 1
+- [x] T109 [US6] Cài `S/prompts/template.ts` (`validateTemplate`, `renderWith`) và `S/prompts/store.ts` (`saveDraft`, `publish`, `restore`, `getPublishedPrompt`, diff theo dòng)
+- [x] T110 [US6] Cài `S/prompts/render.ts` (`renderPrompt` lấy ngữ cảnh từ `server/src/lib/client-context.ts` và `x-freellm-vars`) và thêm một dòng gọi nó trong `prependSystemPrompt` của `server/src/lib/system-prompt.ts`
+- [x] T111 [US6] Áp dụng `renderWith` cho `systemPrompt` của tenant tại nơi dựng chỉ dẫn trong `server/src/custom/x-gateway/support-router.ts`
+- [x] T112 [US6] Cài `S/prompts/router.ts` (mọi tuyến `/prompts/*`) và gắn vào `S/router.ts`
+- [x] T113 [P] [US6] Viết test giao diện cho lịch sử, so sánh, trình sửa biến, xem trước, cảnh báo biến làm mất ổn định cache trong `C/prompts.test.tsx`
+- [x] T114 [US6] Cài `C/pages/Prompts.tsx`, `C/components/DiffView.tsx`, `C/components/VariableEditor.tsx`, chuỗi tiếng Việt; chạy `T/regression.test.ts`
 
 **Checkpoint**: US6 đạt và tự kiểm chứng được.
 
@@ -263,26 +263,26 @@ description: "Task list for AI Platform Upgrade"
 
 ### Tests for User Story 7 ⚠️
 
-- [ ] T115 [P] [US7] Viết test roundtrip migration trong `server/src/__tests__/db/migrate/ai-platform-orchestrator.test.ts`
-- [ ] T116 [P] [US7] Viết test định nghĩa: kiểm tra `entryAgent`, `handoffs`, agent `enabled`; trần cứng 50 bước, 100 lời gọi công cụ, 10 chuyển giao, 500.000 token, 600 giây; phát hành chụp phiên bản chỉ dẫn của từng agent; `slug` khớp `^[a-z0-9-]{1,48}$`; trong `T/flow-definitions.test.ts`
-- [ ] T117 [P] [US7] Viết test giới hạn và phát hiện lặp: mỗi `stop_reason`; vượt token tối đa một bước; cùng (công cụ, tham số) lần thứ 3 bị cắt; A→B→A→B bị cắt; trong `T/flow-limits.test.ts`
-- [ ] T118 [P] [US7] Viết test engine: `single` và `handoff`; công cụ ảo `transfer_to_<agent>` chỉ cho đích được phép; agent sau chuyển giao không thấy công cụ và tri thức của agent trước; mọi chuyển trạng thái trong data-model.md mục 7; trong `T/flow-engine.test.ts`
-- [ ] T119 [P] [US7] Viết test duyệt và gián đoạn: tạm dừng, duyệt thì tiếp tục đúng bước, từ chối thì kết thúc có giải thích, hết hạn thì `stopped`; khởi động lại chuyển `running` thành `interrupted` và không lặp lời gọi công cụ; trong `T/flow-approvals.test.ts`
-- [ ] T120 [P] [US7] Viết test HTTP đầu-cuối: `flow:<slug>` trên 4 giao thức; 403 `flow_not_granted`; 400 `flow_requires_client_key`; 404 khi trụ cột tắt; tiến độ là dòng chú thích SSE; ngắt kết nối và hủy; tổng token khớp phân tích của client key; hết hạn mức giữa chừng dừng `quota_exhausted`; câu trả lời cuối qua kiểm soát đầu ra; `GET /v1/ai/runs/{id}` chỉ cho key khởi tạo; trong `T/flow-e2e.test.ts`
+- [x] T115 [P] [US7] Viết test roundtrip migration trong `server/src/__tests__/db/migrate/ai-platform-orchestrator.test.ts`
+- [x] T116 [P] [US7] Viết test định nghĩa: kiểm tra `entryAgent`, `handoffs`, agent `enabled`; trần cứng 50 bước, 100 lời gọi công cụ, 10 chuyển giao, 500.000 token, 600 giây; phát hành chụp phiên bản chỉ dẫn của từng agent; `slug` khớp `^[a-z0-9-]{1,48}$`; trong `T/flow-definitions.test.ts`
+- [x] T117 [P] [US7] Viết test giới hạn và phát hiện lặp: mỗi `stop_reason`; vượt token tối đa một bước; cùng (công cụ, tham số) lần thứ 3 bị cắt; A→B→A→B bị cắt; trong `T/flow-limits.test.ts`
+- [x] T118 [P] [US7] Viết test engine: `single` và `handoff`; công cụ ảo `transfer_to_<agent>` chỉ cho đích được phép; agent sau chuyển giao không thấy công cụ và tri thức của agent trước; mọi chuyển trạng thái trong data-model.md mục 7; trong `T/flow-engine.test.ts`
+- [x] T119 [P] [US7] Viết test duyệt và gián đoạn: tạm dừng, duyệt thì tiếp tục đúng bước, từ chối thì kết thúc có giải thích, hết hạn thì `stopped`; khởi động lại chuyển `running` thành `interrupted` và không lặp lời gọi công cụ; trong `T/flow-approvals.test.ts`
+- [x] T120 [P] [US7] Viết test HTTP đầu-cuối: `flow:<slug>` trên 4 giao thức; 403 `flow_not_granted`; 400 `flow_requires_client_key`; 404 khi trụ cột tắt; tiến độ là dòng chú thích SSE; ngắt kết nối và hủy; tổng token khớp phân tích của client key; hết hạn mức giữa chừng dừng `quota_exhausted`; câu trả lời cuối qua kiểm soát đầu ra; `GET /v1/ai/runs/{id}` chỉ cho key khởi tạo; trong `T/flow-e2e.test.ts`
 
 ### Implementation for User Story 7
 
-- [ ] T121 [US7] Tạo `M/20261113_160000_custom_ai_orchestrator.ts` với `custom_ai_agents`, `custom_ai_flows`, `custom_ai_flow_grants`, `custom_ai_runs`, `custom_ai_run_steps` đúng data-model.md mục 7
-- [ ] T122 [US7] Thêm `flow:` vào `RESERVED_PREFIXES` trong `server/src/custom/x-gateway/combos.ts` và ca test tương ứng
-- [ ] T123 [US7] Cài `S/orchestrator/definitions.ts` (CRUD agent và quy trình, kiểm tra, phát hành, cấp cho client key)
-- [ ] T124 [US7] Cài `S/orchestrator/limits.ts` (bộ đếm, mặc định 12 bước / 20 lời gọi công cụ / 4 chuyển giao / 60.000 token / 120 giây, phát hiện lặp)
-- [ ] T125 [US7] Cài `S/orchestrator/trace.ts` (ghi bước ngay khi xong, che và cắt 8 KB, dọn theo thời hạn lưu)
-- [ ] T126 [US7] Cài `S/orchestrator/engine.ts` (`isFlowModel`, `startRun`, `resumeRun`, `cancelRun`, `markInterruptedRuns`) dùng `runToolLoop`, `retrieve`, `getPublishedPrompt`, `evaluateOutput`
-- [ ] T127 [US7] Nối bước 4 trong `S/pipeline.ts` (nhận diện `flow:<slug>` trước các bước khác); gọi `markInterruptedRuns` lúc khởi động từ `server/src/custom/register.ts`; nối `resumeRun` vào quyết định duyệt trong `S/orchestrator/approvals.ts`
-- [ ] T128 [US7] Cài `S/orchestrator/runs-public.ts` (`GET /v1/ai/runs/:id`) và gắn `app.use('/v1/ai', …)` trong `server/src/custom/register.ts`
-- [ ] T129 [US7] Cài `S/orchestrator/router.ts` (mọi tuyến `/agents*`, `/flows*`, `/runs*`) và gắn vào `S/router.ts`
-- [ ] T130 [P] [US7] Viết test giao diện cho trình sửa quy trình, chạy thử, vết chạy trực tiếp, hủy trong `C/flows.test.tsx`
-- [ ] T131 [US7] Cài `C/pages/Flows.tsx`, `C/pages/Runs.tsx`, `C/components/RunTrace.tsx`, chuỗi tiếng Việt; chạy `T/regression.test.ts`
+- [x] T121 [US7] Tạo `M/20261113_160000_custom_ai_orchestrator.ts` với `custom_ai_agents`, `custom_ai_flows`, `custom_ai_flow_grants`, `custom_ai_runs`, `custom_ai_run_steps` đúng data-model.md mục 7
+- [x] T122 [US7] Thêm `flow:` vào `RESERVED_PREFIXES` trong `server/src/custom/x-gateway/combos.ts` và ca test tương ứng
+- [x] T123 [US7] Cài `S/orchestrator/definitions.ts` (CRUD agent và quy trình, kiểm tra, phát hành, cấp cho client key)
+- [x] T124 [US7] Cài `S/orchestrator/limits.ts` (bộ đếm, mặc định 12 bước / 20 lời gọi công cụ / 4 chuyển giao / 60.000 token / 120 giây, phát hiện lặp)
+- [x] T125 [US7] Cài `S/orchestrator/trace.ts` (ghi bước ngay khi xong, che và cắt 8 KB, dọn theo thời hạn lưu)
+- [x] T126 [US7] Cài `S/orchestrator/engine.ts` (`isFlowModel`, `startRun`, `resumeRun`, `cancelRun`, `markInterruptedRuns`) dùng `runToolLoop`, `retrieve`, `getPublishedPrompt`, `evaluateOutput`
+- [x] T127 [US7] Nối bước 4 trong `S/pipeline.ts` (nhận diện `flow:<slug>` trước các bước khác); gọi `markInterruptedRuns` lúc khởi động từ `server/src/custom/register.ts`; nối `resumeRun` vào quyết định duyệt trong `S/orchestrator/approvals.ts`
+- [x] T128 [US7] Cài `S/orchestrator/runs-public.ts` (`GET /v1/ai/runs/:id`) và gắn `app.use('/v1/ai', …)` trong `server/src/custom/register.ts`
+- [x] T129 [US7] Cài `S/orchestrator/router.ts` (mọi tuyến `/agents*`, `/flows*`, `/runs*`) và gắn vào `S/router.ts`
+- [x] T130 [P] [US7] Viết test giao diện cho trình sửa quy trình, chạy thử, vết chạy trực tiếp, hủy trong `C/flows.test.tsx`
+- [x] T131 [US7] Cài `C/pages/Flows.tsx`, `C/pages/Runs.tsx`, `C/components/RunTrace.tsx`, chuỗi tiếng Việt; chạy `T/regression.test.ts`
 
 **Checkpoint**: Cả bảy story hoạt động.
 

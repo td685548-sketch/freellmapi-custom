@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import type { Request } from 'express';
 import type { Scope } from '@freellmapi/shared/ai-platform.js';
 import {
   MCP_LIMITS,
@@ -33,6 +34,7 @@ import {
   McpValidationError,
   canonicalJson,
 } from '../mcp-client/store.js';
+import { resumeRun, type OrchestratorEngineDeps } from './engine.js';
 
 interface ApprovalRow {
   id: number;
@@ -345,6 +347,24 @@ export function expireApprovals(now: Date = new Date()): number {
         WHERE status = 'pending' AND expires_at <= ?`,
     )
     .run(now.toISOString());
+
+  const hasRunsTable = db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'custom_ai_runs'")
+    .get();
+  if (hasRunsTable) {
+    db.prepare(
+      `UPDATE custom_ai_runs
+          SET status = 'stopped',
+              stop_reason = 'expired',
+              finished_at = datetime('now')
+        WHERE status = 'awaiting_approval'
+          AND id IN (
+            SELECT run_id FROM custom_ai_approvals
+             WHERE run_id IS NOT NULL AND status = 'expired'
+          )`,
+    ).run();
+  }
+
   return res.changes;
 }
 
@@ -353,8 +373,9 @@ export async function approveAction(
   actorId: number | null,
   input?: McpApprovalDecisionInput,
   executor?: WriteApprovalExecutor,
+  opts?: { req?: Request; deps?: OrchestratorEngineDeps },
 ): Promise<McpApprovalView> {
-  if (!isPillarEnabled('mcpClient')) {
+  if (!isPillarEnabled('mcpClient') && !isPillarEnabled('orchestrator')) {
     throw new McpPillarDisabledError();
   }
 
@@ -499,13 +520,26 @@ export async function approveAction(
     resultBytes,
   });
 
-  return toApprovalView(selectApprovalById(id)!);
+  const view = toApprovalView(selectApprovalById(id)!);
+  if (view.runId) {
+    try {
+      await resumeRun(
+        view.runId,
+        { id: view.id, approved: true, ...(view.decisionNote ? { note: view.decisionNote } : {}) },
+        opts,
+      );
+    } catch {
+      // resumeRun persists terminal run error; keep approval outcome intact.
+    }
+  }
+  return view;
 }
 
 export async function rejectAction(
   id: number,
   actorId: number | null,
   input?: McpApprovalDecisionInput,
+  opts?: { req?: Request; deps?: OrchestratorEngineDeps },
 ): Promise<McpApprovalView> {
   const rawNote = validateNote(input?.note);
   const db = getDb();
@@ -570,5 +604,17 @@ export async function rejectAction(
     });
   }
 
-  return toApprovalView(updatedRow);
+  const view = toApprovalView(updatedRow);
+  if (view.runId) {
+    try {
+      await resumeRun(
+        view.runId,
+        { id: view.id, approved: false, ...(view.decisionNote ? { note: view.decisionNote } : {}) },
+        opts,
+      );
+    } catch {
+      // Keep rejection outcome intact.
+    }
+  }
+  return view;
 }

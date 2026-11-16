@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 describe('MCP bindings (T045:bindings)', () => {
-  it('validates profile existence, support_tenant existence, and returns 409 scope_unavailable for agent before US7', () => {
+  it('validates profile existence, support_tenant existence, and agent existence', () => {
     const profileId = Number(
       getDb()
         .prepare("INSERT INTO client_profiles (name, token_hash, encrypted_key, iv, auth_tag) VALUES ('P1', 'th1', 'ek1', 'iv1', 'tag1')")
@@ -38,7 +38,7 @@ describe('MCP bindings (T045:bindings)', () => {
     );
 
     expect(() => validateScope({ kind: 'agent', id: '1' })).toThrowError(
-      expect.objectContaining({ status: 409, code: 'scope_unavailable' }),
+      expect.objectContaining({ status: 404, code: 'scope_not_found' }),
     );
   });
 
