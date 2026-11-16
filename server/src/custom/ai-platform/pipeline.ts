@@ -17,6 +17,8 @@ import { detectWire } from './wire/detect.js';
 import { installInterceptor, type OutputFilter } from './wire/interceptor.js';
 import { injectRetrievedKnowledgeForSlot6 } from '../knowledge-inject.js';
 import { capturePromptRequestContext } from './prompts/render.js';
+import { getFlowBySlug, isFlowGrantedToProfile } from './orchestrator/definitions.js';
+import { executeFlowHttpRequest, extractRequestedModel, isFlowModel } from './orchestrator/engine.js';
 
 export type OutputFilterProvider = (ctx: ProfileGuardContext) => OutputFilter | null;
 
@@ -132,6 +134,50 @@ export async function runPreRequest(
 
   // Fixed FR-008 order:
   // 4. SLOT: orchestrator (flow:<slug> takeover)
+  if (flags.orchestrator) {
+    const detected = detectWire(req);
+    if (detected) {
+      const reqModel = extractRequestedModel(detected.wire, req).trim();
+      if (reqModel.startsWith('flow:')) {
+        const flowSlug = isFlowModel(reqModel);
+        const flow = flowSlug ? getFlowBySlug(flowSlug) : null;
+        if (!flow || !flow.enabled || !flow.published || flow.publishedVersion <= 0) {
+          if (!res.headersSent) {
+            res.status(404).json({
+              error: {
+                message: 'Flow not found.',
+                type: 'not_found_error',
+                code: 'flow_not_found',
+              },
+            });
+          }
+          return 'handled';
+        }
+        if (!isFlowGrantedToProfile(flow.id, _profile.id)) {
+          if (!res.headersSent) {
+            res.status(403).json({
+              error: {
+                message: 'Client key is not granted access to this flow.',
+                type: 'permission_error',
+                code: 'flow_not_granted',
+              },
+            });
+          }
+          return 'handled';
+        }
+        await executeFlowHttpRequest(
+          req,
+          res,
+          _profile.id,
+          _endUser,
+          detected.wire,
+          detected.stream,
+          flowSlug!,
+        );
+        return 'handled';
+      }
+    }
+  }
   // 5. SLOT: prompts (variable substitution)
   if (flags.prompts) {
     capturePromptRequestContext(req, _profile, _endUser);

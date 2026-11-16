@@ -54,6 +54,12 @@ import { xGatewayOllamaRouter } from './x-gateway/ollama-router.js';
 import { proxyWebhookRouter } from './proxy-webhook/router.js';
 import { aiPlatformRouter } from './ai-platform/router.js';
 import { startIndexWorker } from './ai-platform/retrieval/indexer.js';
+import { isPillarEnabled } from './ai-platform/flags.js';
+import { extractRequestedModel, markInterruptedRuns, recordServerLocalAddress } from './ai-platform/orchestrator/engine.js';
+import { runsPublicRouter } from './ai-platform/orchestrator/runs-public.js';
+import { detectWire } from './ai-platform/wire/detect.js';
+import { CLIENT_PROFILE_KEY_PREFIX, resolveAuth } from '../lib/system-prompt.js';
+import { extractInferenceToken } from '../middleware/user-rate-limit.js';
 
 // Everything this fork adds to the HTTP surface is wired here, so upstream's
 // app.ts keeps a handful of added lines instead of edited mount statements.
@@ -138,6 +144,19 @@ function installGate(app: Express, gate: PermissionGate): void {
 }
 
 export function registerCustomRoutes(app: Express): void {
+  // Mark any orphaned running orchestrator runs as interrupted without re-executing steps.
+  try {
+    markInterruptedRuns();
+  } catch {
+    // DB may not yet be initialized when createApp() is imported prior to initDb.
+  }
+
+  // Record the local server port for asynchronous orchestrator resume loopbacks.
+  app.use(['/v1', '/v1beta', '/api'], (req, _res, next) => {
+    recordServerLocalAddress(req);
+    next();
+  });
+
   // Public probes answer from a 5 s copy so anonymous callers cannot turn them into database load.
   app.use(['/livez', '/readyz'], statusCache);
   app.use('/api', (_req, _res, next) => withRoutingSettingsScope(next));
@@ -157,6 +176,52 @@ export function registerCustomRoutes(app: Express): void {
       return;
     }
     next();
+  });
+  // Public read-only status for a client key's own orchestrator flow runs (ahead of user/profile gates).
+  app.use('/v1/ai', runsPublicRouter);
+  // Reject flow:<slug> calls made with non-client-profile keys (unified/personal) cleanly.
+  app.use(['/v1', '/v1beta'], (req: Request, res: Response, next: NextFunction) => {
+    if (req.method !== 'POST') {
+      next();
+      return;
+    }
+    const token = extractInferenceToken(req);
+    if (!token || token.startsWith(CLIENT_PROFILE_KEY_PREFIX)) {
+      next();
+      return;
+    }
+    const detected = detectWire(req);
+    if (!detected) {
+      next();
+      return;
+    }
+    const model = extractRequestedModel(detected.wire, req).trim();
+    if (!model.startsWith('flow:')) {
+      next();
+      return;
+    }
+    const auth = resolveAuth(token);
+    if (!auth || auth.kind === 'profile') {
+      next();
+      return;
+    }
+    if (!isPillarEnabled('orchestrator')) {
+      res.status(404).json({
+        error: {
+          message: 'Flow not found.',
+          type: 'not_found_error',
+          code: 'flow_not_found',
+        },
+      });
+      return;
+    }
+    res.status(400).json({
+      error: {
+        message: 'Flows require a client profile key (sk-cp-...).',
+        type: 'invalid_request_error',
+        code: 'flow_requires_client_key',
+      },
+    });
   });
   // Rate-limiting and usage tracking gate for member personal API keys (/v1, /v1beta and /thruline/v1 inference)
   app.use(['/v1', '/v1beta', '/thruline/v1'], userInferenceGate);
