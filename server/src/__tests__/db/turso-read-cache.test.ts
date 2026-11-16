@@ -170,6 +170,7 @@ describe('Turso SELECT result cache', () => {
       '20261111_000001_model_monthly_usage.ts',
       '20261113_120000_custom_ai_output_guard.ts',
       '20261113_130000_custom_ai_retrieval.ts',
+      '20261113_140000_custom_ai_prompt_cache.ts',
     ]);
   });
 });

@@ -91,6 +91,7 @@ const TRIGGER_SIDE_EFFECTS: Readonly<Record<string, readonly string[]>> = {
     'custom_ai_chunk_embeddings',
     'custom_ai_index_jobs',
     'custom_ai_embedding_usage',
+    'custom_ai_cache_usage_daily',
   ],
 };
 // Results that depend on something other than table contents.
