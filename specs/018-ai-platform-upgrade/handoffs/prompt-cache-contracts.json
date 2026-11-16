@@ -1,0 +1,227 @@
+{
+  "version": 1,
+  "phase": "Delivery stage 5 / US5 / tasks Phase 7 (T089-T103)",
+  "baseSha": "f11c5d99142fae0d5483588da73dff9806c207c0",
+  "sharedContractFile": "shared/ai-platform-prompt-cache.ts",
+  "settingsKey": "ai_platform_prompt_cache_v1",
+  "defaults": {
+    "settings": {
+      "forward": true,
+      "autoBreakpoints": false,
+      "preferStickyRoute": false
+    },
+    "unknownCapability": {
+      "mode": "none",
+      "maxBreakpoints": 0,
+      "minTokens": 0,
+      "ttlSeconds": 0,
+      "source": "builtin"
+    }
+  },
+  "ddl": {
+    "migrationFile": "server/src/db/migrations/20261113_140000_custom_ai_prompt_cache.ts",
+    "tables": {
+      "custom_ai_cache_capabilities": {
+        "primaryKey": ["platform", "model_pattern", "source"],
+        "columns": {
+          "platform": "TEXT NOT NULL",
+          "model_pattern": "TEXT NOT NULL",
+          "source": "TEXT NOT NULL CHECK (source IN ('builtin', 'override'))",
+          "mode": "TEXT NOT NULL CHECK (mode IN ('explicit', 'implicit', 'none'))",
+          "max_breakpoints": "INTEGER NOT NULL DEFAULT 4",
+          "min_tokens": "INTEGER NOT NULL DEFAULT 1024",
+          "ttl_seconds": "INTEGER NOT NULL DEFAULT 300",
+          "updated_at": "TEXT NOT NULL DEFAULT '2026-11-13 00:00:00'"
+        }
+      },
+      "custom_ai_cache_usage_daily": {
+        "primaryKey": ["day", "profile_id", "platform", "model"],
+        "columns": {
+          "day": "TEXT NOT NULL",
+          "profile_id": "INTEGER NOT NULL DEFAULT 0",
+          "platform": "TEXT NOT NULL",
+          "model": "TEXT NOT NULL",
+          "requests": "INTEGER NOT NULL DEFAULT 0",
+          "requests_with_hit": "INTEGER NOT NULL DEFAULT 0",
+          "input_tokens": "INTEGER NOT NULL DEFAULT 0",
+          "cache_read_tokens": "INTEGER NOT NULL DEFAULT 0",
+          "cache_write_tokens": "INTEGER NOT NULL DEFAULT 0",
+          "est_saved_micro_usd": "INTEGER NOT NULL DEFAULT 0"
+        }
+      }
+    },
+    "triggers": [
+      "trg_client_profiles_delete_prompt_cache AFTER DELETE ON client_profiles: DELETE FROM custom_ai_cache_usage_daily WHERE profile_id = OLD.id"
+    ],
+    "builtinSeeds": [
+      ["anthropic", "claude-3-5-haiku*", "builtin", "explicit", 4, 2048, 300],
+      ["anthropic", "claude-haiku*", "builtin", "explicit", 4, 2048, 300],
+      ["anthropic", "claude-*", "builtin", "explicit", 4, 1024, 300],
+      ["claude", "claude-*", "builtin", "explicit", 4, 1024, 300],
+      ["openrouter", "anthropic/claude-3-5-haiku*", "builtin", "explicit", 4, 2048, 300],
+      ["openrouter", "anthropic/claude-*", "builtin", "explicit", 4, 1024, 300],
+      ["custom", "claude-*", "builtin", "explicit", 4, 1024, 300],
+      ["openai", "gpt-*", "builtin", "implicit", 0, 1024, 300],
+      ["openai", "o*", "builtin", "implicit", 0, 1024, 300],
+      ["codex", "*", "builtin", "implicit", 0, 1024, 300],
+      ["google", "gemini-*", "builtin", "implicit", 0, 1024, 300],
+      ["gemini", "gemini-*", "builtin", "implicit", 0, 1024, 300],
+      ["deepseek", "deepseek-*", "builtin", "implicit", 0, 64, 3600],
+      ["openrouter", "openai/*", "builtin", "implicit", 0, 1024, 300],
+      ["openrouter", "deepseek/*", "builtin", "implicit", 0, 64, 3600],
+      ["openrouter", "google/gemini-*", "builtin", "implicit", 0, 1024, 300],
+      ["sail", "*", "builtin", "implicit", 0, 1024, 300],
+      ["aclide", "*", "builtin", "implicit", 0, 1024, 300],
+      ["kimi", "kimi-*", "builtin", "implicit", 0, 1024, 300],
+      ["xai", "grok-*", "builtin", "implicit", 0, 1024, 300],
+      ["groq", "*", "builtin", "none", 0, 0, 0],
+      ["cerebras", "*", "builtin", "none", 0, 0, 0],
+      ["mistral", "*", "builtin", "none", 0, 0, 0],
+      ["nvidia", "*", "builtin", "none", 0, 0, 0],
+      ["cloudflare", "*", "builtin", "none", 0, 0, 0],
+      ["cohere", "*", "builtin", "none", 0, 0, 0],
+      ["ollama", "*", "builtin", "none", 0, 0, 0],
+      ["huggingface", "*", "builtin", "none", 0, 0, 0]
+    ]
+  },
+  "api": {
+    "basePath": "/api/ai-platform",
+    "endpoints": {
+      "GET /api/ai-platform/prompt-cache/settings": {
+        "permission": "view_prompt_cache",
+        "response": "PromptCacheSettingsResponse ({ settings: PromptCacheSettings })"
+      },
+      "PUT /api/ai-platform/prompt-cache/settings": {
+        "permission": "edit_prompt_cache",
+        "request": "Partial<PromptCacheSettings>",
+        "response": "PromptCacheSettingsResponse ({ settings: PromptCacheSettings })"
+      },
+      "GET /api/ai-platform/prompt-cache/capabilities": {
+        "permission": "view_prompt_cache",
+        "response": "PromptCacheCapabilitiesResponse ({ capabilities: PromptCacheCapability[] })"
+      },
+      "PUT /api/ai-platform/prompt-cache/capabilities": {
+        "permission": "edit_prompt_cache",
+        "request": "PromptCacheCapabilityInput",
+        "response": "PromptCacheCapabilityResponse ({ capability: PromptCacheCapability })"
+      },
+      "DELETE /api/ai-platform/prompt-cache/capabilities": {
+        "permission": "edit_prompt_cache",
+        "request": "PromptCacheCapabilityDeleteInput ({ platform, modelPattern })",
+        "response": "PromptCacheCapabilityDeleteResponse ({ deleted: boolean })"
+      },
+      "GET /api/ai-platform/prompt-cache/stats": {
+        "permission": "view_prompt_cache",
+        "query": "days? (1..365, default 30), groupBy? ('day'|'profile'|'model', default 'day')",
+        "response": "PromptCacheStatsResponse ({ days, groupBy, rows })"
+      }
+    }
+  },
+  "internalSignatures": {
+    "cacheCore": {
+      "server/src/custom/ai-platform/prompt-cache/capabilities.ts": {
+        "getPromptCacheSettings": "() => PromptCacheSettings",
+        "setPromptCacheSettings": "(patch: Partial<PromptCacheSettings>) => PromptCacheSettings",
+        "listCacheCapabilities": "() => PromptCacheCapability[]",
+        "upsertCacheCapabilityOverride": "(input: PromptCacheCapabilityInput) => PromptCacheCapability",
+        "deleteCacheCapabilityOverride": "(platform: string, modelPattern: string) => boolean",
+        "resolveCacheCapability": "(platform: string, modelId: string) => PromptCacheCapability"
+      },
+      "server/src/custom/ai-platform/prompt-cache/stats.ts": {
+        "ExtractedCacheUsage": "{ inputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }",
+        "CacheUsageFilterContext": "{ getRoute?: () => { platform: string; modelId: string } | null; getUpstreamUsage?: () => ExtractedCacheUsage | null; res?: Response }",
+        "extractCacheUsage": "(wire: Wire, usage: unknown) => ExtractedCacheUsage | null",
+        "estimateCacheSavingsMicroUsd": "(platform: string, model: string, cacheReadTokens: number, cacheWriteTokens: number) => number",
+        "recordCacheUsage": "(input: { day?: string; profileId: number; platform: string; model: string; inputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }) => void",
+        "cacheUsageFilter": "(profileId: number, wire: Wire, context?: CacheUsageFilterContext) => OutputFilter",
+        "getCacheStats": "(opts?: { days?: number; groupBy?: PromptCacheGroupBy }) => PromptCacheStatsResponse"
+      },
+      "server/src/custom/ai-platform/prompt-cache/router.ts": {
+        "promptCacheAdminRouter": "Router"
+      }
+    },
+    "cacheBreakpoints": {
+      "server/src/custom/ai-platform/wire/extract.ts": {
+        "markVolatileSystemText": "(text: string) => void",
+        "markStableSystemText": "(text: string) => void",
+        "isVolatileSystemMessage": "(msg: unknown) => boolean"
+      },
+      "server/src/custom/ai-platform/prompt-cache/breakpoints.ts": {
+        "applyCacheBreakpoints": "<T extends ChatMessage[]>(messages: T, tools: unknown[] | undefined, target: { platform: string; modelId: string }) => { messages: T; tools: unknown[] | undefined }"
+      }
+    },
+    "cacheRuntime": {
+      "server/src/custom/ai-platform/prompt-cache/runtime.ts": {
+        "captureCallerCacheControl": "(req: Request) => void",
+        "withPromptCacheRoute": "(route: RouteResult) => RouteResult",
+        "getActiveCacheTargetForRequest": "(res?: Response) => { platform: string; modelId: string } | null",
+        "getCapturedCacheUsageForRequest": "(res?: Response) => { inputTokens: number; cacheReadTokens: number; cacheWriteTokens: number } | null"
+      }
+    }
+  },
+  "workerOwnership": {
+    "cache-core": {
+      "branch": "codex/ai-platform-prompt-cache-core",
+      "worktree": "/home/dotha/wt-prompt-cache-core",
+      "tasks": ["T090", "T091", "T092", "T095", "T096", "T097(capabilities)", "T100(stats)", "T101(prompt-cache/router)"],
+      "create": [
+        "server/src/db/migrations/20261113_140000_custom_ai_prompt_cache.ts",
+        "server/src/custom/ai-platform/prompt-cache/capabilities.ts",
+        "server/src/custom/ai-platform/prompt-cache/stats.ts",
+        "server/src/custom/ai-platform/prompt-cache/router.ts",
+        "server/src/__tests__/db/migrate/ai-platform-prompt-cache.test.ts",
+        "server/src/__tests__/custom/ai-platform/cache-capabilities.test.ts",
+        "server/src/__tests__/custom/ai-platform/cache-stats.test.ts"
+      ],
+      "edit": [
+        "server/src/db/migrate/defaults.ts",
+        "server/src/__tests__/db/migrate/roundtrip.test.ts",
+        "server/src/db/turso.ts",
+        "server/src/__tests__/db/turso-read-cache.test.ts"
+      ]
+    },
+    "cache-breakpoints": {
+      "branch": "codex/ai-platform-prompt-cache-breakpoints",
+      "worktree": "/home/dotha/wt-prompt-cache-breakpoints",
+      "tasks": ["T093", "T094", "T097(breakpoints)", "T099(wire/extract)"],
+      "create": [
+        "server/src/custom/ai-platform/prompt-cache/breakpoints.ts",
+        "server/src/__tests__/custom/ai-platform/cache-breakpoints.test.ts",
+        "server/src/__tests__/custom/ai-platform/cache-prefix-stability.test.ts"
+      ],
+      "edit": [
+        "server/src/custom/ai-platform/wire/extract.ts"
+      ]
+    },
+    "cache-runtime": {
+      "branch": "codex/ai-platform-prompt-cache-runtime",
+      "worktree": "/home/dotha/wt-prompt-cache-runtime",
+      "tasks": ["T098", "T099(knowledge-inject)", "T100(pipeline)", "T101(ai-platform/router)"],
+      "create": [
+        "server/src/custom/ai-platform/prompt-cache/runtime.ts",
+        "server/src/__tests__/custom/ai-platform/cache-e2e.test.ts"
+      ],
+      "edit": [
+        "server/src/lib/fallback-loop.ts",
+        "server/src/custom/knowledge-inject.ts",
+        "server/src/custom/ai-platform/pipeline.ts",
+        "server/src/custom/ai-platform/router.ts"
+      ]
+    },
+    "cache-ui": {
+      "branch": "codex/ai-platform-prompt-cache-ui",
+      "worktree": "/home/dotha/wt-prompt-cache-ui",
+      "tasks": ["T102", "T103"],
+      "create": [
+        "client/src/custom/ai-platform/prompt-cache-api.ts",
+        "client/src/custom/ai-platform/prompt-cache-strings.ts",
+        "client/src/custom/ai-platform/pages/PromptCache.tsx",
+        "client/src/custom/ai-platform/prompt-cache.test.tsx"
+      ],
+      "edit": [
+        "client/src/custom/ai-platform/AiPlatformApp.tsx",
+        "client/src/custom/i18n/vi.ts"
+      ]
+    }
+  }
+}
