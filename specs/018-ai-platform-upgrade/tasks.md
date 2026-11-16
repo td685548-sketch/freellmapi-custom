@@ -205,24 +205,24 @@ description: "Task list for AI Platform Upgrade"
 
 ### Tests for User Story 5 ⚠️
 
-- [ ] T089 [US5] Khảo sát đường gửi tới nhà cung cấp (`server/src/lib/fallback-loop.ts`, `server/src/providers/base.ts`, `server/src/custom/provider-accounts/execution.ts`) để tìm MỘT điểm nơi nền tảng và model đích đã biết cho mỗi lần thử, và xác minh bằng test rằng khối nội dung có `cache_control` còn nguyên tới điểm đó; ghi kết quả vào research.md mục R4. Nếu cần hơn một điểm móc: DỪNG và trình bày lựa chọn cho chủ repo
-- [ ] T090 [US5] Lập danh mục khả năng dựng sẵn từ tài liệu hiện hành của từng nhà cung cấp đang có trong `server/src/providers/` và `server/src/custom/provider-accounts/` (kiểu `explicit|implicit|none`, số điểm tối đa, ngưỡng token tối thiểu, thời hạn); ghi nguồn và ngày tra cứu vào research.md mục R4
-- [ ] T091 [P] [US5] Viết test roundtrip migration trong `server/src/__tests__/db/migrate/ai-platform-prompt-cache.test.ts`
-- [ ] T092 [P] [US5] Viết test khả năng: ghi đè thắng dựng sẵn; mẫu dài nhất thắng; không khớp là `none`; trong `T/cache-capabilities.test.ts`
-- [ ] T093 [P] [US5] Viết test điểm đánh dấu: đích `explicit` giữ nguyên vị trí; đích `none`/`implicit` không còn trường `cache_control` nào; tự đặt theo thứ tự công cụ → chỉ dẫn → tri thức cố định, không vượt `max_breakpoints` trừ số của người gọi; khối dưới `min_tokens` bị bỏ qua; đầu vào không bị sửa tại chỗ; trụ cột tắt trả đúng tham chiếu; trong `T/cache-breakpoints.test.ts`
-- [ ] T094 [P] [US5] Viết test ổn định phần đầu: hai yêu cầu chỉ khác câu hỏi cuối có phần trước điểm đánh dấu cuối trùng từng byte khi bật đồng thời chỉ dẫn, tri thức, công cụ, nén; trong `T/cache-prefix-stability.test.ts`
-- [ ] T095 [P] [US5] Viết test thống kê: đọc usage của 4 giao thức; cộng theo ngày, client key, nền tảng, model; ước tính tiết kiệm theo `server/src/custom/x-gateway/pricing.ts`; trong `T/cache-stats.test.ts`
+- [x] T089 [US5] Khảo sát đường gửi tới nhà cung cấp (`server/src/lib/fallback-loop.ts`, `server/src/providers/base.ts`, `server/src/custom/provider-accounts/execution.ts`) để tìm MỘT điểm nơi nền tảng và model đích đã biết cho mỗi lần thử, và xác minh bằng test rằng khối nội dung có `cache_control` còn nguyên tới điểm đó; ghi kết quả vào research.md mục R4. Nếu cần hơn một điểm móc: DỪNG và trình bày lựa chọn cho chủ repo
+- [x] T090 [US5] Lập danh mục khả năng dựng sẵn từ tài liệu hiện hành của từng nhà cung cấp đang có trong `server/src/providers/` và `server/src/custom/provider-accounts/` (kiểu `explicit|implicit|none`, số điểm tối đa, ngưỡng token tối thiểu, thời hạn); ghi nguồn và ngày tra cứu vào research.md mục R4
+- [x] T091 [P] [US5] Viết test roundtrip migration trong `server/src/__tests__/db/migrate/ai-platform-prompt-cache.test.ts`
+- [x] T092 [P] [US5] Viết test khả năng: ghi đè thắng dựng sẵn; mẫu dài nhất thắng; không khớp là `none`; trong `T/cache-capabilities.test.ts`
+- [x] T093 [P] [US5] Viết test điểm đánh dấu: đích `explicit` giữ nguyên vị trí; đích `none`/`implicit` không còn trường `cache_control` nào; tự đặt theo thứ tự công cụ → chỉ dẫn → tri thức cố định, không vượt `max_breakpoints` trừ số của người gọi; khối dưới `min_tokens` bị bỏ qua; đầu vào không bị sửa tại chỗ; trụ cột tắt trả đúng tham chiếu; trong `T/cache-breakpoints.test.ts`
+- [x] T094 [P] [US5] Viết test ổn định phần đầu: hai yêu cầu chỉ khác câu hỏi cuối có phần trước điểm đánh dấu cuối trùng từng byte khi bật đồng thời chỉ dẫn, tri thức, công cụ, nén; trong `T/cache-prefix-stability.test.ts`
+- [x] T095 [P] [US5] Viết test thống kê: đọc usage của 4 giao thức; cộng theo ngày, client key, nền tảng, model; ước tính tiết kiệm theo `server/src/custom/x-gateway/pricing.ts`; trong `T/cache-stats.test.ts`
 
 ### Implementation for User Story 5
 
-- [ ] T096 [US5] Tạo `M/20261113_140000_custom_ai_prompt_cache.ts` với `custom_ai_cache_capabilities` (nạp hàng `builtin` từ T090) và `custom_ai_cache_usage_daily`
-- [ ] T097 [US5] Cài `S/prompt-cache/capabilities.ts` và `S/prompt-cache/breakpoints.ts` (`applyCacheBreakpoints`)
-- [ ] T098 [US5] Thêm lời gọi `applyCacheBreakpoints` tại điểm đã chọn ở T089 (một dòng); thêm ca chuỗi dự phòng đổi loại đích vào `T/cache-e2e.test.ts`
-- [ ] T099 [US5] Sửa `addSystemBlock` trong `S/wire/extract.ts` và nơi gọi nó để khối `stable` luôn đứng trước khối `volatile`; khối tri thức theo câu hỏi là `volatile`
-- [ ] T100 [US5] Cài `S/prompt-cache/stats.ts` (`cacheUsageFilter`) và nối vào bước 10 của `S/pipeline.ts`
-- [ ] T101 [US5] Cài `S/prompt-cache/router.ts` (mọi tuyến `/prompt-cache/*`) và gắn vào `S/router.ts`
-- [ ] T102 [P] [US5] Viết test giao diện cho bảng khả năng và biểu đồ tiết kiệm trong `C/prompt-cache.test.tsx`
-- [ ] T103 [US5] Cài `C/pages/PromptCache.tsx`, chuỗi tiếng Việt; chạy `T/regression.test.ts`
+- [x] T096 [US5] Tạo `M/20261113_140000_custom_ai_prompt_cache.ts` với `custom_ai_cache_capabilities` (nạp hàng `builtin` từ T090) và `custom_ai_cache_usage_daily`
+- [x] T097 [US5] Cài `S/prompt-cache/capabilities.ts` và `S/prompt-cache/breakpoints.ts` (`applyCacheBreakpoints`)
+- [x] T098 [US5] Thêm lời gọi `applyCacheBreakpoints` tại điểm đã chọn ở T089 (một dòng); thêm ca chuỗi dự phòng đổi loại đích vào `T/cache-e2e.test.ts`
+- [x] T099 [US5] Sửa `addSystemBlock` trong `S/wire/extract.ts` và nơi gọi nó để khối `stable` luôn đứng trước khối `volatile`; khối tri thức theo câu hỏi là `volatile`
+- [x] T100 [US5] Cài `S/prompt-cache/stats.ts` (`cacheUsageFilter`) và nối vào bước 10 của `S/pipeline.ts`
+- [x] T101 [US5] Cài `S/prompt-cache/router.ts` (mọi tuyến `/prompt-cache/*`) và gắn vào `S/router.ts`
+- [x] T102 [P] [US5] Viết test giao diện cho bảng khả năng và biểu đồ tiết kiệm trong `C/prompt-cache.test.tsx`
+- [x] T103 [US5] Cài `C/pages/PromptCache.tsx`, chuỗi tiếng Việt; chạy `T/regression.test.ts`
 
 **Checkpoint**: US5 đạt và tự kiểm chứng được. Ưu tiên giữ tuyến (FR-041, mức SHOULD) hoãn tới khi có số liệu từ `custom_ai_cache_usage_daily`.
 
