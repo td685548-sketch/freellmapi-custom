@@ -3,7 +3,7 @@
 **Feature Branch**: `claude/beautiful-goldberg-6uxvyu`
 **Feature Directory**: `specs/018-ai-platform-upgrade`
 **Created**: 2026-11-13
-**Status**: Đã triển khai US1–US7; còn Phase Polish (T132–T140) — xem [specs/README.md](../README.md)
+**Status**: Hoàn thành (US1–US7 và Phase Polish); nghiệm thu trong [acceptance.md](acceptance.md) — xem [specs/README.md](../README.md)
 **Input**: Nâng cấp toàn diện nền tảng AI của gateway để lấp các khoảng trống đã rà soát trong code hiện tại ở 7 trụ cột: System prompt, RAG, Phân quyền, Prompt caching, MCP, Guardrails, Orchestrator. Tuân thủ nguyên tắc Zero-Conflict, giữ tương thích ngược cho các endpoint công khai và triển khai single-user; mọi tính năng mới mặc định tắt.
 
 ## Bối cảnh: hiện trạng đã rà soát (2026-11-13)

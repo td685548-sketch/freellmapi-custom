@@ -22,6 +22,8 @@ const _KEY: Buffer = crypto.randomBytes(32);
 
 const HEADER_NAME = 'x-ai-platform-internal';
 const MAX_DEPTH = 1;
+/** Caller headers the versioned-prompt renderer reads (prompts/render.ts). */
+const PROMPT_CONTEXT_HEADERS = ['x-freellm-vars', 'x-end-user-name', 'accept-language'] as const;
 const MAX_STALENESS_SEC = 30;
 type InternalCall = { runId?: string; depth: number } | null;
 const admittedCalls = new WeakMap<Request, InternalCall>();
@@ -324,6 +326,12 @@ export async function callGateway(
   // Propagate profile/end-user so isInternalCall can reconstruct the message.
   if (profile) headers['x-profile'] = profile;
   if (endUser) headers['x-end-user'] = endUser;
+  // The sub-call renders the profile's versioned prompt, so it needs the caller's
+  // prompt inputs too. They are the caller's own values; nothing is elevated.
+  for (const name of PROMPT_CONTEXT_HEADERS) {
+    const value = req.headers[name];
+    if (typeof value === 'string' && value.length > 0) headers[name] = value;
+  }
 
   return new Promise<{ message: ChatMessage; finishReason: string; usage: Usage; servedModel: string }>(
     (resolve, reject) => {
