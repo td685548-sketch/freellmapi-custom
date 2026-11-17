@@ -9,7 +9,11 @@ import {
 import { connectDb } from '../../../db/index.js';
 import { runMigrations } from '../../../db/migrate/runner.js';
 import { newRequestTrace, runWithRequestTrace } from '../../../lib/attempt-trace.js';
-import { getCalibrationFactor, resetCalibration } from '../../../custom/context-budget/estimate.js';
+import {
+  estimateMessagesTokens,
+  getCalibrationFactor,
+  resetCalibration,
+} from '../../../custom/context-budget/estimate.js';
 import { fitContextForRoute } from '../../../custom/context-budget/hooks.js';
 import { clearContextPolicyCache, saveContextPolicy } from '../../../custom/context-budget/policy.js';
 import { createRegistry, registerUnit } from '../../../custom/context-budget/registry.js';
@@ -21,6 +25,8 @@ import {
   pruneContextReports,
   resetReportPruneState,
 } from '../../../custom/context-budget/report.js';
+import { getContextStats } from '../../../custom/context-budget/stats.js';
+import { makeConversation, type ConversationLanguage } from './fixtures/conversations.js';
 
 type TestDb = ReturnType<typeof connectDb>;
 
@@ -364,5 +370,89 @@ describe('context-budget report & header formatting (T031)', () => {
     expect(stored).toEqual(reg.report);
     const rawRow = db.prepare('SELECT * FROM custom_context_reports WHERE request_id = ?').get(requestRowId);
     expect(JSON.stringify(rawRow)).not.toContain(secretUserText);
+  });
+
+  it('applies calibration factor in fitContextForRoute without decaying back to 1.0 across EN/VI/ZH (T060)', async () => {
+    const langs: readonly ConversationLanguage[] = ['en', 'vi', 'zh'];
+    const platformConfigs = [
+      { platform: 'groq', modelId: 'llama-3.3-70b', multiplier: 1.08 },
+      { platform: 'google', modelId: 'gemini-2.5-flash', multiplier: 0.86 },
+    ] as const;
+
+    const policy = makePolicy({ profileId: 1, enabled: true, maxInputTokens: 16000 });
+    const factorsByPlatform = new Map<string, number[]>([
+      ['groq', []],
+      ['google', []],
+    ]);
+
+    for (const cfg of platformConfigs) {
+      for (let i = 0; i < 25; i++) {
+        const lang = langs[i % langs.length]!;
+        const turns = makeConversation({ turns: 4 + (i % 4), lang, seed: 100 + i });
+        const req = {} as Request;
+        const reg = createRegistry(req, policy);
+        for (let k = 0; k < turns.length - 1; k++) {
+          registerUnit(req, {
+            kind: 'history',
+            role: turns[k]!.role,
+            text: turns[k]!.content,
+            seq: k + 1,
+            messageId: k + 1,
+          });
+        }
+
+        const { res } = makeEventRes(false);
+        const trace = newRequestTrace();
+        let fitted!: ReturnType<typeof fitContextForRoute>;
+        runWithRequestTrace(trace, () => {
+          fitted = fitContextForRoute(
+            req,
+            res,
+            [{ role: 'system', content: 'Be accurate and concise.' }, ...turns],
+            { contextWindow: 16384, platform: cfg.platform, modelId: cfg.modelId },
+            1024,
+          );
+        });
+
+        // Estimate rendered payload with calibrated platform multiplier and ensure budget holds
+        const calibratedEstimate = estimateMessagesTokens(fitted, {
+          imageTokens: reg.imageTokens,
+          platform: cfg.platform,
+        });
+        expect(calibratedEstimate).toBeLessThanOrEqual(reg.report!.budget);
+        expect(reg.report!.estimatedTokens).toBe(calibratedEstimate);
+
+        const rawTokens = estimateMessagesTokens(fitted, { imageTokens: reg.imageTokens });
+        const jitter = ((i % 3) - 1) * 0.02;
+        let providerInputTokens = Math.max(1, Math.round(rawTokens * cfg.multiplier * (1 + jitter)));
+        if (providerInputTokens === reg.report!.heuristicTokens) {
+          providerInputTokens += 1;
+        }
+
+        const requestRowId = insertRequestRow(db, {
+          platform: cfg.platform,
+          modelId: cfg.modelId,
+          inputTokens: providerInputTokens,
+        });
+        trace.lastRequestRowId = requestRowId;
+        res.emit('finish');
+        await flushImmediate();
+
+        factorsByPlatform.get(cfg.platform)!.push(getCalibrationFactor(cfg.platform));
+      }
+    }
+
+    const groqFactors = factorsByPlatform.get('groq')!;
+    const googleFactors = factorsByPlatform.get('google')!;
+    // EMA moves monotonically toward target multiplier and does not decay back toward 1.0
+    expect(groqFactors[groqFactors.length - 1]!).toBeGreaterThan(1.06);
+    expect(groqFactors[groqFactors.length - 1]!).toBeGreaterThan(groqFactors[0]!);
+    expect(googleFactors[googleFactors.length - 1]!).toBeLessThan(0.89);
+    expect(googleFactors[googleFactors.length - 1]!).toBeLessThan(googleFactors[0]!);
+
+    const stats = getContextStats(1, 7);
+    expect(stats.requests).toBe(50);
+    expect(stats.estimateError.samples).toBe(50);
+    expect(stats.estimateError.within15PctRate).toBeGreaterThanOrEqual(0.95);
   });
 });

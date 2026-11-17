@@ -124,6 +124,7 @@ export function ContextPolicyCard({ profileId, canEdit }: { profileId: number; c
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['context-policy', profileId] })
     void queryClient.invalidateQueries({ queryKey: ['conversations', profileId] })
+    void queryClient.invalidateQueries({ queryKey: ['context-preview', profileId] })
   }
 
   const save = useMutation({
@@ -205,32 +206,33 @@ export function ContextPolicyCard({ profileId, canEdit }: { profileId: number; c
     })
   }
 
+  const buildDraftBody = (enabled: boolean): ContextPolicyInput =>
+    draft.preset === 'custom'
+      ? {
+          enabled,
+          preset: 'custom',
+          maxInputTokens,
+          outputReserveTokens,
+          safetyMarginPct,
+          summarySharePct,
+          knowledgeSharePct,
+          dropBlockTurns,
+          summarize: draft.summarize,
+          clientHistoryMode: draft.clientHistoryMode,
+          knowledgeMinScore,
+        }
+      : {
+          enabled,
+          preset: draft.preset,
+          summarize: draft.summarize,
+          clientHistoryMode: draft.clientHistoryMode,
+          knowledgeMinScore,
+        }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!canEdit || !valid || !dirty || save.isPending) return
-    const body: ContextPolicyInput =
-      draft.preset === 'custom'
-        ? {
-            enabled: policy.enabled,
-            preset: 'custom',
-            maxInputTokens,
-            outputReserveTokens,
-            safetyMarginPct,
-            summarySharePct,
-            knowledgeSharePct,
-            dropBlockTurns,
-            summarize: draft.summarize,
-            clientHistoryMode: draft.clientHistoryMode,
-            knowledgeMinScore,
-          }
-        : {
-            enabled: policy.enabled,
-            preset: draft.preset,
-            summarize: draft.summarize,
-            clientHistoryMode: draft.clientHistoryMode,
-            knowledgeMinScore,
-          }
-    save.mutate(body)
+    save.mutate(buildDraftBody(policy.enabled))
   }
 
   const stats = statsQuery.data && typeof statsQuery.data.requests === 'number' ? statsQuery.data : null
@@ -264,7 +266,9 @@ export function ContextPolicyCard({ profileId, canEdit }: { profileId: number; c
               size="sm"
               checked={policy.enabled}
               disabled={!canEdit || save.isPending}
-              onCheckedChange={(enabled) => save.mutate({ enabled })}
+              onCheckedChange={(enabled) =>
+                save.mutate(dirty && valid ? buildDraftBody(enabled) : { enabled })
+              }
               aria-label="Enable context policy"
             />
             {policy.enabled ? tc('On') : tc('Off')}

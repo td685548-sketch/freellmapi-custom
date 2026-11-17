@@ -64,7 +64,10 @@ export function ConversationsCard({ profileId, canEdit }: { profileId: number; c
     enabled: canEdit,
   })
   const contextPolicyEnabled = Boolean(policyQuery.data?.policy?.enabled)
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ['conversations', profileId] })
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: ['conversations', profileId] })
+    void queryClient.invalidateQueries({ queryKey: ['context-policy', profileId] })
+  }
   const messages = useQuery<{ messages: StoredMessage[]; conversation?: { summary?: string | null } }>({
     queryKey: ['conversation', profileId, open],
     queryFn: () => apiFetch(`${base}/conversations/${encodeURIComponent(open!)}`),

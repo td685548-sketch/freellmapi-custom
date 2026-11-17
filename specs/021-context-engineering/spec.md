@@ -6,7 +6,7 @@
 
 **Created**: 2026-11-17
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: User description: "Context Engineering cho gateway đa ứng dụng, đa người dùng: thống nhất 5 thành phần Conversation Storage, Context Manager, Conversation Summarizer, RAG Retrieval, Token Budget Manager thành một pipeline lắp ráp ngữ cảnh có ngân sách token; không mặc định gửi toàn bộ lịch sử vô hạn."
 

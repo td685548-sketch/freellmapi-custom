@@ -51,6 +51,7 @@ export interface SegmentRegistry {
   trace: unknown;
   imageTokens: number;
   knowledgeDropped: boolean;
+  uncalibratedTokens: number | null;
 }
 
 export interface CreateRegistryOptions {
@@ -100,6 +101,7 @@ export function createRegistry(
     trace: null,
     imageTokens: options.imageTokens ?? CONTEXT_POLICY_DEFAULT.imageTokens,
     knowledgeDropped: false,
+    uncalibratedTokens: null,
   };
   registries.set(req, registry);
   return registry;

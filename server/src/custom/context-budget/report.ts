@@ -150,7 +150,8 @@ export function persistReportOnFinish(req: Request, res: Response): void {
           .get(requestId) as { platform: string; input_tokens: number } | undefined;
         if (reqRow && reqRow.input_tokens > 0 && reqRow.input_tokens !== summary.heuristicTokens) {
           const platform = reqRow.platform || summary.modelKey.split(':')[0] || '';
-          recordCalibrationSample(platform, reqRow.input_tokens, summary.estimatedTokens);
+          const baselineTokens = registry.uncalibratedTokens ?? summary.estimatedTokens;
+          recordCalibrationSample(platform, reqRow.input_tokens, baselineTokens);
         }
       } catch {
         // Non-fatal: report persistence and calibration must never disrupt completed requests.
