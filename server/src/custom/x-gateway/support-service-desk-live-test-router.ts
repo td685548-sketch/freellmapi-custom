@@ -18,6 +18,12 @@ import {
 import { xSupportServiceDeskPublicRouter } from './support-service-desk-router.js';
 import { xSupportEnterprisePublicRouter } from './support-enterprise-router.js';
 import { xSupportGovernancePublicRouter } from './support-governance-router.js';
+import {
+  getLiveTestSandboxStats,
+  purgeLiveTestSandboxData,
+  recordLiveTestIntakeRequest,
+  runWithLiveTestContext,
+} from './support-live-test-sandbox.js';
 
 function paramStr(val: string | string[] | undefined): string {
   return Array.isArray(val) ? val[0] ?? '' : val ?? '';
@@ -314,6 +320,24 @@ xSupportServiceDeskLiveTestRouter.post(
   },
 );
 
+xSupportServiceDeskLiveTestRouter.get(
+  '/tenants/:id/service-desk/live-test/sandbox',
+  (req: Request, res: Response): void => {
+    const tenant = resolveNumericConsoleTenant(req, res);
+    if (!tenant) return;
+    res.json(getLiveTestSandboxStats(tenant.id));
+  },
+);
+
+xSupportServiceDeskLiveTestRouter.delete(
+  '/tenants/:id/service-desk/live-test/sandbox',
+  (req: Request, res: Response): void => {
+    const tenant = resolveNumericConsoleTenant(req, res);
+    if (!tenant) return;
+    res.json(purgeLiveTestSandboxData(tenant.id));
+  },
+);
+
 xSupportServiceDeskLiveTestRouter.use(
   '/tenants/:id/service-desk/live-test',
   (req: Request, res: Response, next: NextFunction): void => {
@@ -371,7 +395,18 @@ xSupportServiceDeskLiveTestRouter.use(
       delete req.headers.origin;
     }
 
-    next();
+    if (
+      req.method.toUpperCase() === 'POST' &&
+      req.path === '/widget/intake' &&
+      isPlainObject(req.body) &&
+      typeof req.body.requestId === 'string' &&
+      req.body.requestId.trim()
+    ) {
+      recordLiveTestIntakeRequest(tenant.id, req.body.requestId);
+    }
+
+    runWithLiveTestContext(tenant.id, () => {
+      liveTestPublicBridge(req, res, next);
+    });
   },
-  liveTestPublicBridge,
 );

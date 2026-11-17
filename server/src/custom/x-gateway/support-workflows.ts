@@ -14,6 +14,7 @@ import {
   onTicketCreatedLifecycle,
   onTicketUpdatedLifecycle,
 } from './support-service-desk-lifecycle.js';
+import { isInLiveTestContext } from './support-live-test-sandbox.js';
 
 const CONVERSATIONS_KEY = 'x_gateway_support_conversations_v1';
 const TICKETS_KEY = 'x_gateway_support_tickets_v1';
@@ -71,6 +72,7 @@ export interface SupportConversation {
   messages: SupportConversationMessage[];
   assignedAgent?: string;
   intake?: SupportDeskConversationIntake;
+  isLiveTest?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -91,6 +93,7 @@ export interface SupportEscalationTicket {
   status: SupportTicketStatus;
   assignedTo?: string;
   resolutionNotes?: string;
+  isLiveTest?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -111,6 +114,7 @@ export interface SupportPendingAction {
   reviewedBy?: string;
   reviewNote?: string;
   executionResult?: unknown;
+  isLiveTest?: boolean;
   createdAt: string;
   reviewedAt?: string;
 }
@@ -384,6 +388,7 @@ export function createOrAppendSupportConversation(
       subject: (input.subject ?? 'Support Conversation').trim(),
       status: 'active',
       ...(persistedIntake ? { intake: persistedIntake } : {}),
+      ...(isInLiveTestContext() ? { isLiveTest: true } : {}),
       messages: [newMsg],
       createdAt: now,
       updatedAt: now,
@@ -481,6 +486,15 @@ export function createSupportEscalationTicket(
     const store = readStore<SupportEscalationTicket[]>(TICKETS_KEY);
     const list = Array.isArray(store[tid]) ? store[tid] : [];
     const now = new Date().toISOString();
+    const convStoreForCheck = input.conversationId
+      ? readStore<SupportConversation[]>(CONVERSATIONS_KEY)[tid]
+      : undefined;
+    const linkedToLiveTest = Boolean(
+      input.conversationId &&
+        Array.isArray(convStoreForCheck) &&
+        convStoreForCheck.some((c) => c.id === input.conversationId && c.isLiveTest === true),
+    );
+    const isLiveTest = isInLiveTestContext() || linkedToLiveTest;
 
     const ticket: SupportEscalationTicket = {
       id: `tkt_${randomUUID()}`,
@@ -493,6 +507,7 @@ export function createSupportEscalationTicket(
       reason: input.reason.trim(),
       priority: input.priority ?? 'medium',
       status: 'open',
+      ...(isLiveTest ? { isLiveTest: true } : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -606,6 +621,15 @@ export function proposeSupportPendingAction(
   const store = readStore<SupportPendingAction[]>(ACTIONS_KEY);
   const list = Array.isArray(store[tid]) ? store[tid] : [];
   const now = new Date().toISOString();
+  const convStoreForCheck = input.conversationId
+    ? readStore<SupportConversation[]>(CONVERSATIONS_KEY)[tid]
+    : undefined;
+  const linkedToLiveTest = Boolean(
+    input.conversationId &&
+      Array.isArray(convStoreForCheck) &&
+      convStoreForCheck.some((c) => c.id === input.conversationId && c.isLiveTest === true),
+  );
+  const isLiveTest = isInLiveTestContext() || linkedToLiveTest;
 
   const action: SupportPendingAction = {
     id: `act_${randomUUID()}`,
@@ -618,6 +642,7 @@ export function proposeSupportPendingAction(
     actionSummary: input.actionSummary.trim(),
     payload: input.payload,
     status: 'pending',
+    ...(isLiveTest ? { isLiveTest: true } : {}),
     createdAt: now,
   };
 
@@ -664,11 +689,16 @@ export function reviewSupportPendingAction(
 // Analytics Summary
 // ---------------------------------------------------------------------------
 
-export function getSupportAnalyticsSummary(tenantId: string): SupportAnalyticsSummary {
+export function getSupportAnalyticsSummary(
+  tenantId: string,
+  options?: { includeLiveTest?: boolean },
+): SupportAnalyticsSummary {
   const tid = String(tenantId);
-  const convs = listSupportConversations(tid);
-  const tickets = listSupportEscalationTickets(tid);
-  const actions = listSupportPendingActions(tid);
+  const keepItem = (item: { isLiveTest?: boolean }) =>
+    options?.includeLiveTest ? true : item.isLiveTest !== true;
+  const convs = listSupportConversations(tid).filter(keepItem);
+  const tickets = listSupportEscalationTickets(tid).filter(keepItem);
+  const actions = listSupportPendingActions(tid).filter(keepItem);
 
   const totalConversations = convs.length;
   const activeConversations = convs.filter((c) => c.status === 'active').length;
