@@ -527,6 +527,55 @@ describe('fitToBudget (pure context budget fitting)', () => {
     expect(starts[6]).toBe(1016);
   });
 
+  it('keeps windowStartMessageId pinned across 3+ consecutive turns even when older turns slide off the front (conv_max_messages)', () => {
+    const sys: ChatMessage = { role: 'system', content: 'Sys.' };
+    const finalUser: ChatMessage = { role: 'user', content: 'Latest prompt' };
+    const turnUser: ChatMessage = { role: 'user', content: 'Turn 10: ' + 'User turn text '.repeat(6) };
+    const turnAsst: ChatMessage = { role: 'assistant', content: 'Reply 10: ' + 'Assistant turn text '.repeat(6) };
+    const turnTokens = estimateMessageTokens(turnUser) + estimateMessageTokens(turnAsst);
+    const mandatoryTokens = estimateMessageTokens(sys) + estimateMessageTokens(finalUser);
+
+    const budget = mandatoryTokens + turnTokens * 6 + 10;
+    const policy = makePolicy({
+      maxInputTokens: budget,
+      dropBlockTurns: 4,
+      summarySharePct: 0,
+      knowledgeSharePct: 0,
+    });
+
+    // Simulate conv_max_messages = 16 messages (8 turns) sliding forward 1 turn at a time
+    const maxCandidateTurns = 8;
+    const starts: Array<number | null> = [];
+    for (let totalTurns = 7; totalTurns <= 13; totalTurns++) {
+      const firstCandidateTurn = Math.max(0, totalTurns - maxCandidateTurns);
+      const historyMsgs: ChatMessage[] = [];
+      for (let t = firstCandidateTurn; t < totalTurns; t++) {
+        historyMsgs.push({ role: 'user', content: `Turn ${t}: ` + 'User turn text '.repeat(6) });
+        historyMsgs.push({ role: 'assistant', content: `Reply ${t}: ` + 'Assistant turn text '.repeat(6) });
+      }
+      const messages = [sys, ...historyMsgs, finalUser];
+      const segments = makeSimpleSegments(messages, {
+        historyRange: [1, historyMsgs.length],
+        startMessageId: 1000 + firstCandidateTurn * 2,
+      });
+
+      const res = fitToBudget({
+        messages,
+        segments,
+        policy,
+        contextWindow: 100_000,
+        outputReserve: 1024,
+        fallbackWindowTokens: 8192,
+      });
+      expect(res.ok).toBe(true);
+      if (!res.ok) return;
+      starts.push(res.windowStartMessageId);
+    }
+
+    // Even as turns[0] slides (1000 -> 1002 -> 1004 -> 1006), windowStartMessageId stays pinned at 1008 for 4 turns, then jumps by 4 turns to 1016
+    expect(starts).toEqual([1008, 1008, 1008, 1008, 1016, 1016, 1016]);
+  });
+
   it('drops leading assistant messages after trimming so history always begins with a user turn', () => {
     const messages: ChatMessage[] = [
       { role: 'system', content: 'Sys.' },

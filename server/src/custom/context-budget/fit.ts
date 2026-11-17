@@ -70,6 +70,7 @@ export type FitResult = FitSuccessResult | FitExceedsResult;
 interface HistoryTurn {
   segmentIndexes: number[];
   tokens: number;
+  startSeq: number;
 }
 
 function computeWindowBudget(
@@ -514,7 +515,7 @@ export function fitToBudget(input: FitToBudgetInput): FitResult {
     const role = segmentFirstRole(messages, seg);
     if (role === 'user') {
       if (currentTurn) turns.push(currentTurn);
-      currentTurn = { segmentIndexes: [idx], tokens: seg.tokens };
+      currentTurn = { segmentIndexes: [idx], tokens: seg.tokens, startSeq: seg.seq };
     } else if (currentTurn) {
       currentTurn.segmentIndexes.push(idx);
       currentTurn.tokens += seg.tokens;
@@ -531,7 +532,9 @@ export function fitToBudget(input: FitToBudgetInput): FitResult {
     decisions[idx]!.tokens = 0;
   }
 
-  // Compute minimum suffix of turns that fits within historyCap, then align drop count to dropBlockTurns.
+  // Compute minimum suffix of turns that fits within historyCap, then anchor eviction
+  // to multiples of `dropBlockTurns` using each turn's `seq` so prefix start stays
+  // stable even when older turns slide off the front of the candidate list.
   const totalTurnsTokens = turns.reduce((sum, t) => sum + t.tokens, 0);
   let historyTokensUsed = totalTurnsTokens;
 
@@ -548,10 +551,28 @@ export function fitToBudget(input: FitToBudgetInput): FitResult {
     }
 
     const block = Math.max(1, policy.dropBlockTurns);
-    const alignedStart =
-      minKeepStart === 0
-        ? 0
-        : Math.min(turns.length, Math.ceil(minKeepStart / block) * block);
+    let alignedStart = 0;
+    if (minKeepStart > 0) {
+      let minPositiveStep = Number.POSITIVE_INFINITY;
+      for (let t = 1; t < turns.length; t++) {
+        const delta = turns[t]!.startSeq - turns[t - 1]!.startSeq;
+        if (delta > 0 && delta < minPositiveStep) {
+          minPositiveStep = delta;
+        }
+      }
+      const stride = Number.isFinite(minPositiveStep) ? minPositiveStep : 2;
+      const bucketOf = (turnIdx: number): number =>
+        Math.floor(Math.floor(turns[turnIdx]!.startSeq / stride) / block);
+
+      const evictedBucket = bucketOf(minKeepStart - 1);
+      alignedStart = turns.length;
+      for (let t = minKeepStart; t < turns.length; t++) {
+        if (bucketOf(t) > evictedBucket) {
+          alignedStart = t;
+          break;
+        }
+      }
+    }
 
     for (let t = 0; t < alignedStart; t++) {
       const reason: ContextDropReason = t < minKeepStart ? 'budget' : 'block_alignment';
