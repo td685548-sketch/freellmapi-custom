@@ -144,7 +144,7 @@ Một số ứng dụng gửi cả lịch sử trong mỗi yêu cầu (giao th�
 - **FR-006**: Với mỗi yêu cầu thuộc key bật chính sách, hệ thống MUST tính ngân sách hiệu lực = nhỏ nhất giữa (ngân sách đầu vào của key) và (cửa sổ ngữ cảnh của model đích − phần dành cho câu trả lời − biên an toàn).
 - **FR-007**: Phần dành cho câu trả lời MUST lấy theo số token đầu ra mà client yêu cầu nếu có, nếu không thì theo cấu hình của key.
 - **FR-008**: Hệ thống MUST ước lượng token cho từng phần ngữ cảnh theo cùng một phương pháp ở mọi giao thức chat (OpenAI, Anthropic, Responses, Gemini) và MUST đối chiếu với số token đầu vào nhà cung cấp báo về để theo dõi sai số.
-- **FR-009**: Tổng token ước lượng của ngữ cảnh đã lắp MUST không vượt ngân sách hiệu lực.
+- **FR-009**: Tổng token ước lượng của ngữ cảnh đã lắp MUST không vượt ngân sách hiệu lực. Ngoại lệ duy nhất: lịch sử do client gửi ở chế độ **Giữ nguyên** không bị cắt, nên chỉ bị giới hạn bởi cửa sổ model (như hiện nay); khi đó gateway vẫn bỏ hết phần do chính nó thêm vào (lịch sử phía server, tri thức, tóm tắt) trước khi vượt trần của key.
 - **FR-010**: Khi chuỗi dự phòng chuyển sang model có cửa sổ nhỏ hơn ngân sách đã dùng, hệ thống MUST lắp lại ngữ cảnh cho model đó theo cùng quy tắc ưu tiên trước khi gửi.
 - **FR-011**: Khi phần bắt buộc (chỉ dẫn hệ thống, prompt ép của key, tin nhắn mới, chuỗi gọi công cụ đang dở) đã vượt ngân sách hiệu lực của mọi model khả dụng, hệ thống MUST từ chối yêu cầu với mã lỗi riêng, kèm số token ước lượng và ngân sách, theo định dạng lỗi của giao thức tương ứng.
 

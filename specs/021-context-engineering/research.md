@@ -135,6 +135,8 @@ Giới hạn khi tùy chỉnh: ngân sách 2.000–1.000.000 token; phần câu 
 
 **Decision**: Chế độ `passthrough` (mặc định) | `trim_on_overflow` | `enforce_budget`. Ở hai chế độ thu gọn, giai đoạn 2 coi mọi tin không đăng ký và không bắt buộc là lịch sử có thể bỏ, áp R6. Với `trim_on_overflow`, ngân sách hiệu lực bỏ qua `maxInputTokens` (chỉ theo cửa sổ model); với `enforce_budget`, dùng đầy đủ công thức R7. Không tạo tóm tắt (FR-028).
 
+Ở chế độ `passthrough`, tin do client gửi là **ghim**: không bị bỏ và không tính vào kiểm tra `context_budget_exceeded` ở gate (kiểm tra đó chỉ gồm chỉ dẫn hệ thống, tin người dùng cuối và chuỗi công cụ đang dở, đúng FR-011). Khi phần ghim làm tổng vượt trần của key, giai đoạn 2 bỏ hết đơn vị do gateway thêm rồi gửi nếu vừa cửa sổ model (bỏ qua trần key, spec FR-009 ngoại lệ); nếu vẫn không vừa cửa sổ thì áp R3.
+
 Móc R cũng tính phần có thể bỏ này, nên với `trim_on_overflow` request sẽ không còn bị trả lỗi "không có model phù hợp" (US5 kịch bản 2).
 
 ## R12. Báo cáo lắp ráp, header và lưu trữ
