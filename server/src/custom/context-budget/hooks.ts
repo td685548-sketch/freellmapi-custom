@@ -1,10 +1,18 @@
 import type { Request, Response } from 'express';
+import type { ContextAssemblySummary } from '@freellmapi/shared/context-budget.js';
 import type { ChatMessage } from '@freellmapi/shared/types.js';
 import { contentToString } from '../../lib/content.js';
 import type { RouteResult } from '../../services/router.js';
+import { heuristicTokens } from './estimate.js';
 import { fitToBudget } from './fit.js';
 import { getContextPolicyDefault } from './policy.js';
 import { getRegistry } from './registry.js';
+import {
+  beginReport,
+  formatContextHeader,
+  persistReportOnFinish,
+  pruneContextReports,
+} from './report.js';
 import { classifySegments, type ContextSegment } from './segments.js';
 
 function messageHeuristicChars(message: ChatMessage): number {
@@ -73,7 +81,7 @@ export function fitContextForRoute(
   req: Request,
   res: Response,
   messages: ChatMessage[],
-  route: Pick<RouteResult, 'contextWindow'>,
+  route: Pick<RouteResult, 'contextWindow'> & Partial<Pick<RouteResult, 'platform' | 'modelId'>>,
   outputReserve: number,
 ): ChatMessage[] {
   const registry = getRegistry(req);
@@ -109,7 +117,10 @@ export function fitContextForRoute(
     });
   }
 
-  if (registry.fitted) {
+  const isFirstFit = !registry.fitted;
+  if (isFirstFit) {
+    beginReport(req);
+  } else {
     registry.refits += 1;
   }
   registry.fitted = true;
@@ -117,8 +128,42 @@ export function fitContextForRoute(
   registry.lastOutput = result.messages;
   registry.knowledgeDropped = result.knowledgeDropped;
 
-  if (!res.headersSent && registry.conversation) {
-    res.setHeader('X-Conversation-History', String(result.counts.historySent));
+  const modelKey =
+    route.platform && route.modelId
+      ? `${route.platform}:${route.modelId}`
+      : (route.modelId ?? route.platform ?? 'unknown');
+  const summary: ContextAssemblySummary = {
+    budget: result.budget,
+    window: route.contextWindow ?? null,
+    mandatory: result.tokens.mandatory,
+    summary: result.tokens.summary,
+    knowledge: result.tokens.knowledge,
+    history: result.tokens.history,
+    histSent: result.counts.historySent,
+    histDropped: result.counts.historyDropped,
+    kbSent: result.counts.knowledgeSent,
+    kbDropped: result.counts.knowledgeDropped,
+    clientDropped: result.counts.clientHistoryDropped,
+    refits: registry.refits,
+    estimatedTokens: result.tokens.total,
+    heuristicTokens: heuristicTokens(result.messages),
+    modelKey,
+    createdAt: new Date().toISOString(),
+  };
+  registry.report = summary;
+
+  if (!res.headersSent) {
+    res.setHeader('X-FreeLLM-Context', formatContextHeader(summary));
+    if (registry.conversation) {
+      res.setHeader('X-Conversation-History', String(result.counts.historySent));
+    }
+  }
+
+  if (isFirstFit) {
+    persistReportOnFinish(req, res);
+    setImmediate(() => {
+      pruneContextReports();
+    });
   }
 
   return result.messages;

@@ -216,11 +216,12 @@ describe('context-budget hooks', () => {
     fitContextForRoute(req2, sentRes, messages2, { contextWindow: 8192 }, 500);
     expect(setHeader).not.toHaveBeenCalled();
 
-    // Does not set X-Conversation-History when registry.conversation is null
+    // Does not set X-Conversation-History when registry.conversation is null, while setting X-FreeLLM-Context
     const req3 = makeReq();
     createRegistry(req3, makePolicy({ enabled: true, maxInputTokens: 16000 }));
-    const { res: noConvRes, setHeader: setHeader3 } = makeRes(false);
+    const { res: noConvRes, headers: headers3 } = makeRes(false);
     fitContextForRoute(req3, noConvRes, [{ role: 'user', content: 'hi' }], { contextWindow: 8192 }, 500);
-    expect(setHeader3).not.toHaveBeenCalled();
+    expect(headers3.has('x-conversation-history')).toBe(false);
+    expect(headers3.get('x-freellm-context')).toMatch(/^budget=6451;/);
   });
 });
