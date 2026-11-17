@@ -4,7 +4,7 @@ import type { ContextAssemblySummary } from '@freellmapi/shared/context-budget.j
 import type { ChatMessage } from '@freellmapi/shared/types.js';
 import { contentToString } from '../../lib/content.js';
 import type { RouteResult } from '../../services/router.js';
-import { heuristicTokens } from './estimate.js';
+import { estimateMessagesTokens, getCalibrationFactor, heuristicTokens } from './estimate.js';
 import { fitToBudget } from './fit.js';
 import { getContextPolicyDefault } from './policy.js';
 import { getRegistry } from './registry.js';
@@ -99,13 +99,22 @@ export function fitContextForRoute(
   }
 
   const segments = classifySegments(sourceMessages, registry);
+  const calibrationFactor = getCalibrationFactor(route.platform);
+  const fitFactor = Math.max(1.0, calibrationFactor);
+  const scaledSegments =
+    fitFactor === 1.0
+      ? segments
+      : segments.map((seg) => ({
+          ...seg,
+          tokens: seg.tokens > 0 ? Math.ceil(seg.tokens * fitFactor) : 0,
+        }));
   const { fallbackWindowTokens } = getContextPolicyDefault();
   const effectiveReserve =
     registry.clientMaxTokens !== null ? outputReserve : registry.policy.outputReserveTokens;
 
   const result = fitToBudget({
     messages: sourceMessages,
-    segments,
+    segments: scaledSegments,
     policy: registry.policy,
     contextWindow: route.contextWindow,
     outputReserve: effectiveReserve,
@@ -118,6 +127,18 @@ export function fitContextForRoute(
     });
   }
 
+  const rawTotal =
+    calibrationFactor === 1.0
+      ? result.tokens.total
+      : estimateMessagesTokens(result.messages, { imageTokens: registry.imageTokens });
+  const calibratedTotal =
+    calibrationFactor === 1.0
+      ? result.tokens.total
+      : estimateMessagesTokens(result.messages, {
+          imageTokens: registry.imageTokens,
+          platform: route.platform,
+        });
+
   const isFirstFit = !registry.fitted;
   if (isFirstFit) {
     beginReport(req);
@@ -128,6 +149,7 @@ export function fitContextForRoute(
   registry.windowStartMessageId = result.windowStartMessageId;
   registry.lastOutput = result.messages;
   registry.knowledgeDropped = result.knowledgeDropped;
+  registry.uncalibratedTokens = rawTotal;
 
   const modelKey =
     route.platform && route.modelId
@@ -146,7 +168,7 @@ export function fitContextForRoute(
     kbDropped: result.counts.knowledgeDropped,
     clientDropped: result.counts.clientHistoryDropped,
     refits: registry.refits,
-    estimatedTokens: result.tokens.total,
+    estimatedTokens: calibratedTotal,
     heuristicTokens: heuristicTokens(result.messages),
     modelKey,
     createdAt: new Date().toISOString(),

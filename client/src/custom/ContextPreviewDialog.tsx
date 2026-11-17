@@ -161,7 +161,7 @@ export function ContextPreviewDialog({
               <p className="text-xs text-muted-foreground">{data.knowledgeNote}</p>
             )}
 
-            <div className="rounded-xl border">
+            <div className="max-h-[50vh] overflow-auto rounded-xl border">
               <Table>
                 <TableHeader>
                   <TableRow>

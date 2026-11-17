@@ -1,6 +1,6 @@
 # Trạng thái các spec
 
-Cập nhật: 2026-11-16, đối chiếu với `main` tại PR #81.
+Cập nhật: 2026-11-18, đối chiếu với `main` sau PR #94 và nhánh `feat/021-stage5-polish`.
 
 File này tổng hợp trạng thái mọi spec trong `specs/`. Những spec đã xong được ghi chung trong bảng dưới đây. Chỉ những việc **chưa làm** (mục 3) mới cần spec mới theo quy trình Spec Kit.
 
@@ -32,6 +32,7 @@ Cách xác định trạng thái: đếm checkbox trong `tasks.md`, rồi đối
 | 020-ai-support-output-controls | Kiểm soát đầu ra cho support | 19/19 | PR #73, #78 | Trùng số 020 với spec dưới |
 | 020-azure-document-storage | Lưu archive tài liệu tenant lên Azure Blob | 5/5 | PR #41 | Code xong; chưa bật trên production (mục 2) |
 | 018-ai-platform-upgrade | 6 trụ cột AI: prompts, retrieval, prompt cache, MCP, output guard, orchestrator | 140/140 | PR #48, #52, #69, #74, #77; Phase Polish trên nhánh `chore/ai-platform-polish` | Tài liệu vận hành: [`docs/ai-platform.md`](../docs/ai-platform.md); nghiệm thu: [`acceptance.md`](018-ai-platform-upgrade/acceptance.md) |
+| 021-context-engineering | Lắp ráp ngữ cảnh có ngân sách token (Context Engineering) | 64/64 | PR #90, #92, #94 và nhánh `feat/021-stage5-polish`; `server/src/custom/context-budget/`, `server/src/routes/context-policy.ts`, `ContextPolicyCard.tsx` | Tài liệu vận hành: [`docs/context-budget.md`](../docs/context-budget.md); nghiệm thu: [`acceptance.md`](021-context-engineering/acceptance.md) |
 
 ## 2. Việc vận hành (không cần spec)
 
@@ -57,9 +58,7 @@ Chi tiết và kết quả nghiệm thu: `specs/018-ai-platform-upgrade/acceptan
 
 ### 3B. Cần spec mới (chưa bắt đầu)
 
-Đánh số tiếp từ **021**. Thứ tự dưới đây là đề xuất, chưa chốt.
-
-Đã bắt đầu: **021-context-engineering** — lắp ráp ngữ cảnh có ngân sách token (lưu hội thoại, chọn lịch sử, tóm tắt, truy hồi tri thức, ngân sách token). Mới có `spec.md`, chưa có `plan.md`.
+Đánh số tiếp từ **023** (`021-context-engineering` và `022-thruline-settings-routing` đã có). Thứ tự dưới đây là đề xuất, chưa chốt.
 
 1. **Vận hành Azure archive**: thêm key id vào envelope và công cụ mã hóa lại khi xoay `ENCRYPTION_KEY`; backfill tài liệu cũ; dọn object mồ côi; lifecycle/retention và xóa prefix khi xóa tenant; nhận file PDF/DOCX gốc. Nguồn: phần "Assumptions" của `020-azure-document-storage/spec.md`.
 2. **Cache câu trả lời theo ngữ nghĩa**: cache tách theo scope, không cache khi có tool call hoặc dữ liệu cá nhân, hết hiệu lực khi đổi phiên bản prompt. Spec 018 đã ghi mục này là ngoài phạm vi.
@@ -71,5 +70,5 @@ Chi tiết và kết quả nghiệm thu: `specs/018-ai-platform-upgrade/acceptan
 ## 4. Quy ước đánh số
 
 - Có ba cặp trùng số: `009`, `018`, `020`. Số `016` không được dùng. Không đổi tên các thư mục này vì nhiều handoff, review và commit đã tham chiếu đường dẫn của chúng.
-- Spec mới bắt đầu từ `021` và không dùng lại số đã có.
+- Spec mới bắt đầu từ `023` và không dùng lại số đã có.
 - Khi một spec xong, cập nhật dòng `**Status**` trong `spec.md` và thêm một dòng vào bảng ở mục 1.

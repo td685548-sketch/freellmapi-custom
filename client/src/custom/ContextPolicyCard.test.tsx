@@ -287,6 +287,27 @@ describe('ContextPolicyCard', () => {
       clientHistoryMode: 'enforce_budget',
     })
   })
+
+  it('saves dirty valid draft preset together with toggle when flipping the enable switch', async () => {
+    await render()
+    await click(tab('Saver'))
+    await click(container.querySelector('[aria-label="Enable context policy"]'))
+
+    const putCall = vi.mocked(apiFetch).mock.calls.find(([, i]) => i?.method === 'PUT')
+    expect(putCall).toBeDefined()
+    expect(JSON.parse(String(putCall![1]!.body))).toMatchObject({
+      enabled: true,
+      preset: 'saver',
+    })
+  })
+
+  it('invalidates cached context-preview queries after saving policy changes', async () => {
+    await render()
+    const invalidateSpy = vi.spyOn(client, 'invalidateQueries')
+    await click(tab('Saver'))
+    await click(button('Save'))
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['context-preview', 5] })
+  })
 })
 
 describe('ContextPreviewDialog & ConversationsCard integration', () => {
@@ -368,6 +389,49 @@ describe('ContextPreviewDialog & ConversationsCard integration', () => {
     expect(dialogText).toContain('Older question')
     expect(dialogText).toContain('Budget')
     expect(dialogText).toContain('Summarized through message #9 · 2 messages pending fold')
+  })
+
+  it('refreshes ContextPolicyCard suggested banner when Stored Conversations settings change', async () => {
+    let convEnabled = false
+    const convPayload = () => ({
+      settings: { enabled: convEnabled, ttlHours: 168, maxMessages: 20, maxChars: 12000, summarize: true },
+      conversations: [],
+    })
+
+    vi.mocked(apiFetch).mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/conversation-settings') && init?.method === 'PUT') {
+        const body = JSON.parse(String(init.body)) as { enabled?: boolean }
+        convEnabled = Boolean(body.enabled)
+        return convPayload() as never
+      }
+      if (url.endsWith('/conversations')) return convPayload() as never
+      if (url.endsWith('/context-policy')) {
+        return {
+          ...policyState,
+          policy: makePolicy({ enabled: false, inherited: true }),
+          suggested: convEnabled ? { maxInputTokens: 4000, summarize: true } : null,
+        } as never
+      }
+      if (url.endsWith('/context-stats?days=7')) return statsState as never
+      return {} as never
+    })
+
+    await act(async () =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <ConversationsCard profileId={5} canEdit={true} />
+          <ContextPolicyCard profileId={5} canEdit={true} />
+        </QueryClientProvider>,
+      ),
+    )
+    await flush()
+
+    expect(container.querySelector('[aria-label="Suggested policy values"]')).toBeNull()
+    await click(container.querySelector('[aria-label="Keep conversations on the server"]'))
+
+    const suggestedBox = container.querySelector('[aria-label="Suggested policy values"]')
+    expect(suggestedBox).not.toBeNull()
+    expect(suggestedBox!.textContent).toContain('4,000')
   })
 })
 
