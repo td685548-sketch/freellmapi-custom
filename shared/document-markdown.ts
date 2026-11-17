@@ -1,6 +1,6 @@
 /**
  * Shared constants and DTOs for converting uploaded Word, Excel, and text
- * documents to Markdown (.md) for RAG knowledge ingestion (Spec 025).
+ * documents to Markdown (.md) for RAG knowledge ingestion (Spec 026).
  */
 
 export const DOCUMENT_MARKDOWN_LIMITS = {

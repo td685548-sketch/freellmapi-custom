@@ -2,7 +2,7 @@
 
 **Feature Branch**: `feat/025-rag-office-markdown`
 
-**Feature Directory**: `specs/025-rag-office-markdown`
+**Feature Directory**: `specs/026-rag-office-markdown`
 
 **Created**: 2026-11-18
 

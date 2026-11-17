@@ -1,6 +1,6 @@
-# Tasks: Tự động chuyển đổi Word & Excel sang Markdown (.md) cho RAG (Spec 025)
+# Tasks: Tự động chuyển đổi Word & Excel sang Markdown (.md) cho RAG (Spec 026)
 
-**Directory**: `specs/025-rag-office-markdown` | **Plan**: [plan.md](./plan.md)
+**Directory**: `specs/026-rag-office-markdown` | **Plan**: [plan.md](./plan.md)
 
 - [x] **T001** Tạo shared constants & DTOs tại `shared/document-markdown.ts` và biên dịch `@freellmapi/shared`.
 - [x] **T002** Xây dựng bộ chuyển đổi không phụ thuộc ngoài tại `server/src/services/document-markdown.ts` (DOCX, XLSX, CSV/TSV, SpreadsheetML 2003, HTML Office, bảo vệ zip-bomb/XXE/encrypted/OLE2).

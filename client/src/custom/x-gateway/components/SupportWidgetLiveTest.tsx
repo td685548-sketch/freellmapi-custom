@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
   ArrowRight,
@@ -9,6 +10,7 @@ import {
   RefreshCw,
   RotateCcw,
   ShieldCheck,
+  Trash2,
   UserCheck,
 } from 'lucide-react'
 import type { SupportDeskPublicWidgetConfig } from '@freellmapi/shared/support-service-desk.js'
@@ -18,6 +20,8 @@ import {
   type SupportLiveTestPersonaInput,
   type SupportLiveTestPersonaMode,
   type SupportLiveTestPersonaSessionResponse,
+  type SupportLiveTestSandboxCleanupResponse,
+  type SupportLiveTestSandboxStats,
   type SupportLiveTestTurnDiagnostic,
   type SupportLiveTestViewMode,
 } from '@freellmapi/shared/support-service-desk-live-test.js'
@@ -210,6 +214,20 @@ export function SupportWidgetLiveTest({
 }: SupportWidgetLiveTestProps) {
   const { locale } = useI18n()
   const s = useSupportServiceDeskLiveTestStrings()
+  const queryClient = useQueryClient()
+
+  const [cleanupNotice, setCleanupNotice] = useState<string | null>(null)
+  const [cleanupError, setCleanupError] = useState<string | null>(null)
+
+  const sandboxQuery = useQuery({
+    queryKey: ['x-support-live-test-sandbox', tenant.id],
+    enabled: mode === 'live',
+    queryFn: ({ signal }) =>
+      apiFetch<SupportLiveTestSandboxStats>(
+        `/api/thruline/support/tenants/${tenant.id}/service-desk/live-test/sandbox`,
+        { signal },
+      ),
+  })
 
   const containerRef = useRef<HTMLDivElement | null>(null)
   const widgetInstanceRef = useRef<WidgetRuntimeInstance | null>(null)
@@ -221,6 +239,7 @@ export function SupportWidgetLiveTest({
   const onAppendDiagnosticRef = useRef(onAppendDiagnostic)
   const onConversationIdDetectedRef = useRef(onConversationIdDetected)
   const onRefreshTenantQueriesRef = useRef(onRefreshTenantQueries)
+  const onRefreshSandboxRef = useRef<() => void>(() => {})
 
   useEffect(() => {
     enforceOriginRef.current = enforceSimulatedOrigin
@@ -228,12 +247,19 @@ export function SupportWidgetLiveTest({
     onAppendDiagnosticRef.current = onAppendDiagnostic
     onConversationIdDetectedRef.current = onConversationIdDetected
     onRefreshTenantQueriesRef.current = onRefreshTenantQueries
+    onRefreshSandboxRef.current = () => {
+      setCleanupNotice(null)
+      setCleanupError(null)
+      void queryClient.invalidateQueries({ queryKey: ['x-support-live-test-sandbox', tenant.id] })
+    }
   }, [
     enforceSimulatedOrigin,
     simulatedOrigin,
     onAppendDiagnostic,
     onConversationIdDetected,
     onRefreshTenantQueries,
+    queryClient,
+    tenant.id,
   ])
 
   const currentPersonaSignature = buildPersonaSignature(persona)
@@ -566,7 +592,8 @@ export function SupportWidgetLiveTest({
                 onAppendDiagnosticRef.current(entry)
               }
 
-              if (response.ok && (isChat || isEscalate || isCsat)) {
+              if (response.ok && (isChat || isIntake || isEscalate || isCsat)) {
+                onRefreshSandboxRef.current()
                 onRefreshTenantQueriesRef.current?.()
               }
             }
@@ -658,6 +685,24 @@ export function SupportWidgetLiveTest({
     }
     onResetConversation()
   }
+
+  const cleanupMutation = useMutation({
+    mutationFn: () =>
+      apiFetch<SupportLiveTestSandboxCleanupResponse>(
+        `/api/thruline/support/tenants/${tenant.id}/service-desk/live-test/sandbox`,
+        { method: 'DELETE' },
+      ),
+    onSuccess: () => {
+      setCleanupError(null)
+      setCleanupNotice(s.sandboxClearedNotice)
+      handleReset()
+      void queryClient.invalidateQueries({ queryKey: ['x-support-live-test-sandbox', tenant.id] })
+      onRefreshTenantQueriesRef.current?.()
+    },
+    onError: (err) => {
+      setCleanupError(err instanceof Error ? err.message : 'Failed to clean up sandbox data.')
+    },
+  })
 
   const resolvedConversationId = activeConversationId
 
@@ -1098,6 +1143,58 @@ export function SupportWidgetLiveTest({
                 )}
                 <strong>{originCheckResult.allowed ? s.originAllowed : s.originDenied}:</strong>
                 <span>{s.originReasons[originCheckResult.reason] ?? originCheckResult.reason}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Live Test Sandbox Data & Cleanup Panel */}
+          <div
+            data-testid="live-test-sandbox-panel"
+            className="x-panel"
+            style={{
+              padding: 12,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+              borderRadius: 10,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>{s.sandboxHeading}</span>
+              <button
+                type="button"
+                data-testid="live-test-cleanup-btn"
+                className="x-button"
+                style={{ fontSize: 11, padding: '4px 10px' }}
+                disabled={!sandboxQuery.data || sandboxQuery.data.totalCount === 0 || cleanupMutation.isPending}
+                onClick={() => cleanupMutation.mutate()}
+              >
+                <Trash2 size={13} />
+                <span>{cleanupMutation.isPending ? s.cleaningSandbox : s.cleanupSandboxBtn}</span>
+              </button>
+            </div>
+            <p className="x-hint" style={{ margin: 0, fontSize: 11 }}>
+              {s.sandboxCleanNote}
+            </p>
+            <div data-testid="live-test-sandbox-counts" style={{ fontSize: 12 }}>
+              <code>
+                {sandboxQuery.data
+                  ? `${sandboxQuery.data.conversationsCount} ${s.chatsLabel} · ${sandboxQuery.data.ticketsCount} ${s.ticketsLabel} · ${sandboxQuery.data.pendingActionsCount} ${s.actionsLabel} · ${sandboxQuery.data.csatRatingsCount} ${s.csatLabel}`
+                  : `0 ${s.chatsLabel} · 0 ${s.ticketsLabel} · 0 ${s.actionsLabel} · 0 ${s.csatLabel}`}
+              </code>
+            </div>
+            {cleanupNotice && (
+              <div
+                data-testid="live-test-cleanup-status"
+                role="status"
+                style={{ fontSize: 11, color: '#059669' }}
+              >
+                {cleanupNotice}
+              </div>
+            )}
+            {cleanupError && (
+              <div role="alert" style={{ fontSize: 11, color: '#dc2626' }}>
+                {cleanupError}
               </div>
             )}
           </div>

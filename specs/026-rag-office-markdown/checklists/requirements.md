@@ -1,6 +1,6 @@
 # Specification Quality Checklist: Word & Excel to Markdown Conversion for RAG
 
-**Purpose**: Validate specification completeness and quality for Spec 025
+**Purpose**: Validate specification completeness and quality for Spec 026
 **Created**: 2026-11-18
 **Feature**: [spec.md](../spec.md)
 

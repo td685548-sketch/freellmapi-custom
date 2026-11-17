@@ -287,6 +287,31 @@ beforeEach(() => {
       return resp
     }
 
+    if (path.includes('/service-desk/live-test/sandbox')) {
+      if (method === 'DELETE') {
+        const prevConvs = (conversationsByTenant[tenantId] ?? []).length
+        const prevCsat = recordedCsatSubmissions.filter((c) => c.tenantId === tenantId).length
+        conversationsByTenant[tenantId] = []
+        recordedCsatSubmissions = recordedCsatSubmissions.filter((c) => c.tenantId !== tenantId)
+        return {
+          ok: true,
+          tenantId,
+          deleted: { conversations: prevConvs, tickets: 0, pendingActions: 0, csatRatings: prevCsat },
+        }
+      }
+      const conversationsCount = (conversationsByTenant[tenantId] ?? []).length
+      const csatRatingsCount = recordedCsatSubmissions.filter((c) => c.tenantId === tenantId).length
+      return {
+        ok: true,
+        tenantId,
+        conversationsCount,
+        ticketsCount: 0,
+        pendingActionsCount: 0,
+        csatRatingsCount,
+        totalCount: conversationsCount + csatRatingsCount,
+      }
+    }
+
     if (path.endsWith('/conversations')) {
       return { ok: true, conversations: conversationsByTenant[tenantId] ?? [] }
     }
@@ -756,5 +781,32 @@ describe('Service Desk Studio Live End-User Widget Testing UI (Spec 023)', () =>
     expect(byId('live-test-reset-btn').textContent).toContain('Tạo hội thoại mới')
     expect(byId('live-test-origin-panel').textContent).toContain('Kiểm tra Origin & Tên miền')
     expect(byId('live-test-diagnostics-panel').textContent).toContain('Chẩn đoán vận hành')
+    expect(byId('live-test-sandbox-panel').textContent).toContain('Dữ liệu thử nghiệm')
+    expect(byId('live-test-cleanup-btn').textContent).toContain('Xóa dữ liệu test')
+  })
+
+  it('tracks live-test sandbox counts and cleans up tenant sandbox data cleanly', async () => {
+    await mountStudio()
+    await click(byId('widget-mode-live'))
+    await waitFor(() => expect(byId('live-test-sandbox-panel')).toBeTruthy())
+    expect(byId('live-test-sandbox-counts').textContent).toContain('0 chats')
+    expect(byId<HTMLButtonElement>('live-test-cleanup-btn').disabled).toBe(true)
+
+    await click(byId('live-test-preset-customer_alice'))
+    await waitFor(() => expect(byId('widget-intake-input-order_id')).toBeTruthy())
+    await setWidgetDomValue('[data-testid="widget-intake-input-order_id"]', 'ORD-500')
+    await click(byId('widget-intake-submit-btn'))
+    await waitFor(() => expect(byId('widget-intake-form').style.display).toBe('none'))
+
+    await setWidgetDomValue('[data-testid="widget-input"]', 'Test sandbox count')
+    await click(byId('widget-send-btn'))
+
+    await waitFor(() => expect(byId('live-test-sandbox-counts').textContent).toContain('1 chats'))
+    expect(byId<HTMLButtonElement>('live-test-cleanup-btn').disabled).toBe(false)
+
+    await click(byId('live-test-cleanup-btn'))
+    await waitFor(() => expect(byId('live-test-cleanup-status')).toBeTruthy())
+    await waitFor(() => expect(byId('live-test-sandbox-counts').textContent).toContain('0 chats'))
+    expect(byId<HTMLButtonElement>('live-test-cleanup-btn').disabled).toBe(true)
   })
 })

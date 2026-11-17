@@ -1,4 +1,4 @@
-# Implementation Plan: Automatic Word & Excel to Markdown (.md) Conversion for RAG Uploads (Spec 025)
+# Implementation Plan: Automatic Word & Excel to Markdown (.md) Conversion for RAG Uploads (Spec 026)
 
 **Branch**: `feat/025-rag-office-markdown` | **Date**: 2026-11-18 | **Spec**: [spec.md](./spec.md)
 
