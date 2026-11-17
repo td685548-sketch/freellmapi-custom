@@ -115,7 +115,12 @@ describe('Output Guard secret leak & excerpt security', () => {
     vi.restoreAllMocks();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await fakeProvider.close();
-    fs.rmSync(fixtureDirectory, { recursive: true, force: true });
+    try {
+      getDb().close?.();
+    } catch {
+      // Ignore if DB was not initialized
+    }
+    fs.rmSync(fixtureDirectory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
 
   it('never leaks excerpts, ciphertext, systemPrompt, or opaque credentials in events, audit, stdout/stderr, or backups', async () => {
