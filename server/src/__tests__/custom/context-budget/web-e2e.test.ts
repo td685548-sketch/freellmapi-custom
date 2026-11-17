@@ -371,7 +371,26 @@ describe('context-budget full-stack web E2E flow', () => {
     }
     expect(chatReports.some((c) => c.histSent > 0 && c.histDropped > 0)).toBe(true);
 
-    // 5. Dynamic budget increase reflected immediately + DELETE reset restores Suggested
+    // 5. Dynamic budget increase reflected immediately + ?model= target simulation + ?days=30 stats + system settings
+    const defaultSettingsRes = await requestJson<{ enabled: boolean; preset: string; fallbackWindowTokens: number; imageTokens: number }>(
+      '/api/settings/context-policy',
+      { token: ownerToken },
+    );
+    expect(defaultSettingsRes.status).toBe(200);
+    expect(defaultSettingsRes.body.enabled).toBe(false);
+
+    const putDefaultRes = await requestJson<{ enabled: boolean; preset: string; fallbackWindowTokens: number; imageTokens: number }>(
+      '/api/settings/context-policy',
+      {
+        method: 'PUT',
+        token: ownerToken,
+        body: { fallbackWindowTokens: 16384, imageTokens: 512 },
+      },
+    );
+    expect(putDefaultRes.status).toBe(200);
+    expect(putDefaultRes.body.fallbackWindowTokens).toBe(16384);
+    expect(putDefaultRes.body.imageTokens).toBe(512);
+
     const updateBudget = await requestJson<ContextPolicyResponse>(
       `/api/client-profiles/${profileId}/context-policy`,
       {
@@ -388,6 +407,23 @@ describe('context-budget full-stack web E2E flow', () => {
     );
     expect(updatedPreview.status).toBe(200);
     expect(updatedPreview.body.budget.effective).toBe(12000);
+
+    const simulated8k = await requestJson<ContextPreview>(
+      `/api/client-profiles/${profileId}/conversations/conv-web-01/context-preview?endUser=khach-vip-01&model=${encodeURIComponent('groq:web-e2e-8k')}`,
+      { token: ownerToken },
+    );
+    expect(simulated8k.status).toBe(200);
+    expect(simulated8k.body.model.key).toBe('groq:web-e2e-8k');
+    expect(simulated8k.body.model.contextWindow).toBe(8192);
+    expect(simulated8k.body.budget.effective).toBeLessThan(12000);
+
+    const stats30Res = await requestJson<ContextStats>(
+      `/api/client-profiles/${profileId}/context-stats?days=30`,
+      { token: ownerToken },
+    );
+    expect(stats30Res.status).toBe(200);
+    expect(stats30Res.body.days).toBe(30);
+    expect(stats30Res.body.requests).toBeGreaterThanOrEqual(32);
 
     // 6. RBAC: member with view_client_profiles can read policy/stats, but gets 403 on write/delete/preview
     const viewerPolicy = await requestJson(`/api/client-profiles/${profileId}/context-policy`, {

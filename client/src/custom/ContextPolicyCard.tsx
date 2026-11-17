@@ -109,14 +109,16 @@ export function ContextPolicyCard({ profileId, canEdit }: { profileId: number; c
   const queryClient = useQueryClient()
   const base = `/api/client-profiles/${profileId}`
 
+  const [statsDays, setStatsDays] = useState<'7' | '30' | '90'>('7')
+
   const { data } = useQuery<ContextPolicyResponse>({
     queryKey: ['context-policy', profileId],
     queryFn: () => apiFetch(`${base}/context-policy`),
   })
 
   const statsQuery = useQuery<ContextStats>({
-    queryKey: ['context-stats', profileId],
-    queryFn: () => apiFetch(`${base}/context-stats?days=7`),
+    queryKey: ['context-stats', profileId, Number(statsDays)],
+    queryFn: () => apiFetch(`${base}/context-stats?days=${statsDays}`),
   })
 
   const [edits, setEdits] = useState<Partial<Draft> | null>(null)
@@ -525,8 +527,22 @@ export function ContextPolicyCard({ profileId, canEdit }: { profileId: number; c
 
       {stats && (
         <div className="space-y-2 border-t pt-3" aria-label="Context budget statistics">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-xs font-medium text-muted-foreground">{tc('Last 7 days')}</p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-xs font-medium text-muted-foreground">
+                {tc('Last {days} days', { days: Number(statsDays) })}
+              </p>
+              <SegmentedControl
+                ariaLabel={tc('Statistics window')}
+                value={statsDays}
+                onValueChange={setStatsDays}
+                options={[
+                  { value: '7', label: tc('7d') },
+                  { value: '30', label: tc('30d') },
+                  { value: '90', label: tc('90d') },
+                ]}
+              />
+            </div>
             <p className="text-[11px] text-muted-foreground">
               {tc('{requests} requests', { requests: stats.requests.toLocaleString() })}
             </p>
@@ -577,6 +593,39 @@ export function ContextPolicyCard({ profileId, canEdit }: { profileId: number; c
               )}
             </div>
           </div>
+          {Array.isArray(stats.byDay) && stats.byDay.length > 0 && (
+            <details className="text-xs">
+              <summary className="cursor-pointer text-muted-foreground">
+                {tc('Daily breakdown ({days})', { days: stats.byDay.length })}
+              </summary>
+              <div className="mt-2 max-h-48 overflow-auto rounded-xl border">
+                <table className="w-full text-xs" aria-label="Daily context statistics">
+                  <thead className="bg-muted/30 text-[11px] text-muted-foreground">
+                    <tr>
+                      <th className="px-2.5 py-1.5 text-left font-medium">{tc('Date')}</th>
+                      <th className="px-2.5 py-1.5 text-right font-medium">{tc('Requests')}</th>
+                      <th className="px-2.5 py-1.5 text-right font-medium">{tc('Avg input tokens')}</th>
+                      <th className="px-2.5 py-1.5 text-right font-medium">{tc('Trimmed rate')}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {stats.byDay.map((d) => (
+                      <tr key={d.day}>
+                        <td className="px-2.5 py-1.5 font-mono">{d.day}</td>
+                        <td className="px-2.5 py-1.5 text-right tabular-nums">{d.requests.toLocaleString()}</td>
+                        <td className="px-2.5 py-1.5 text-right tabular-nums">
+                          {Math.round(d.avgInputTokens).toLocaleString()}
+                        </td>
+                        <td className="px-2.5 py-1.5 text-right tabular-nums">
+                          {Math.round(d.trimmedRate * 100)}%
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          )}
         </div>
       )}
     </section>
