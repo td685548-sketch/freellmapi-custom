@@ -66,7 +66,7 @@ Gemini (theo dạng lỗi Google API mà `routes/gemini.ts` đang dùng):
 
 Header kèm theo: `X-FreeLLM-Context: budget=16000;mandatory=21000`. `budget` ở đây là ngân sách tạm ở gate ([research.md R7](../research.md#r7-chia-ngân-sách-giữa-các-phần)).
 
-Khi phần bắt buộc vừa ngân sách của key nhưng không vừa **mọi** model khả dụng, vòng fallback trả lỗi `context_too_large` hiện có (không đổi định dạng).
+Khi phần bắt buộc vừa ngân sách tạm ở gate nhưng không vừa **mọi** model khả dụng (ví dụ model có cửa sổ lớn nhất đang hết quota, hoặc ước lượng ở dispatch cao hơn ở gate), vòng fallback trả lỗi `context_too_large` hiện có (không đổi định dạng).
 
 ## 3. Header yêu cầu
 
