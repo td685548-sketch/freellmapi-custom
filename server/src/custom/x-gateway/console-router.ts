@@ -48,6 +48,7 @@ import {
 import { AccountError } from '../provider-accounts/http.js';
 import { listCustomProviderNodes, listProviderModelConfigs } from '../provider-accounts/store.js';
 import { xGatewayManagementRouter } from './management-router.js';
+import { xRoutingDefaultsRouter } from './routing-defaults-router.js';
 import { xQuotaRouter } from './quota/router.js';
 import { xPlaygroundRouter } from './playground-router.js';
 import { xProxyPoolRouter } from './proxy-pool-router.js';
@@ -474,6 +475,7 @@ xGatewayConsoleRouter.use(xPlaygroundRouter);
 xGatewayConsoleRouter.use(xGatewayManagementRouter);
 xGatewayConsoleRouter.use(xGatewayMediaRouter);
 xGatewayConsoleRouter.use(xQuotaRouter);
+xGatewayConsoleRouter.use(xRoutingDefaultsRouter);
 xGatewayConsoleRouter.use('/proxy-pool', xProxyPoolRouter);
 xGatewayConsoleRouter.use('/tools', xCliToolsRouter);
 xGatewayConsoleRouter.use('/translator', xTranslatorRouter);
