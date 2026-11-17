@@ -78,7 +78,8 @@ error statistics use the full calibrated estimate.
 
 Manage per-key policies from the **Context policy** card on each client profile
 page (`GET/PUT/DELETE /api/client-profiles/:id/context-policy`), or configure
-system defaults on `GET/PUT /api/settings/context-policy`:
+installation-wide defaults in **Settings → General → Default context budget policy**
+(`GET/PUT /api/settings/context-policy`):
 
 | Setting | Saver (`saver`) | Balanced (`balanced`) | Max Context (`max_context`) | Custom (`custom`) Range |
 | --- | --- | --- | --- | --- |
@@ -131,14 +132,15 @@ for OpenAI Chat / Responses, `invalid_request_error` for Anthropic Messages,
 
 - **Context Preview**: `GET /api/client-profiles/:id/conversations/:conversationId/context-preview`
   (also accessible from the **Preview context** button in the Conversations card)
-  simulates the next turn without calling any upstream provider, showing per-segment
-  tokens, first-200-character previews, drop reasons (`budget`, `block_alignment`,
-  `leading_assistant`, `max_messages`), and summary boundary progress
-  (`coversThroughMessageId`, `pendingFoldMessages`).
-- **7-Day Statistics**: `GET /api/client-profiles/:id/context-stats?days=7` (`1`–`90`)
+  simulates the next turn without calling any upstream provider, showing a target
+  model simulator (`?model=platform:model_id`), visual token-budget allocation bar,
+  per-segment tokens, first-200-character previews, drop reasons (`budget`,
+  `block_alignment`, `leading_assistant`, `max_messages`), and summary boundary
+  progress (`coversThroughMessageId`, `pendingFoldMessages`).
+- **Time-Windowed Statistics (`7d` / `30d` / `90d`)**: `GET /api/client-profiles/:id/context-stats?days=7` (`1`–`90`)
   aggregates average input tokens, average budget, trimmed request rate, tokens saved,
-  and estimator error percentiles (`p50Pct`, `p95Pct`, `within15PctRate`) across rows
-  with real provider usage.
+  estimator error percentiles (`p50Pct`, `p95Pct`, `within15PctRate`), and expandable
+  daily breakdown rows (`byDay`) across rows with real provider usage.
 - **Per-Request Reports**: `GET /api/client-profiles/:id/requests/:requestId/context`
   (shown inside expanded rows of **Recent Requests**) returns the stored
   `ContextAssemblySummary` without storing message content. Orphan reports and
