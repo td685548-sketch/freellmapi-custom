@@ -59,6 +59,8 @@ Chi tiết và kết quả nghiệm thu: `specs/018-ai-platform-upgrade/acceptan
 
 Đánh số tiếp từ **021**. Thứ tự dưới đây là đề xuất, chưa chốt.
 
+Đã bắt đầu: **021-context-engineering** — lắp ráp ngữ cảnh có ngân sách token (lưu hội thoại, chọn lịch sử, tóm tắt, truy hồi tri thức, ngân sách token). Mới có `spec.md`, chưa có `plan.md`.
+
 1. **Vận hành Azure archive**: thêm key id vào envelope và công cụ mã hóa lại khi xoay `ENCRYPTION_KEY`; backfill tài liệu cũ; dọn object mồ côi; lifecycle/retention và xóa prefix khi xóa tenant; nhận file PDF/DOCX gốc. Nguồn: phần "Assumptions" của `020-azure-document-storage/spec.md`.
 2. **Cache câu trả lời theo ngữ nghĩa**: cache tách theo scope, không cache khi có tool call hoặc dữ liệu cá nhân, hết hiệu lực khi đổi phiên bản prompt. Spec 018 đã ghi mục này là ngoài phạm vi.
 3. **MCP OAuth 2.1**: hiện chỉ hỗ trợ bearer token và header tĩnh.
