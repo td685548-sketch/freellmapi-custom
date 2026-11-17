@@ -72,7 +72,7 @@ async function generateGeminiImages(input: ImageGenerationInput): Promise<ImageG
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     },
-    account.platform,
+    account.base_url?.trim() ? 'custom' : account.platform,
     'image',
     120_000,
   );
@@ -172,7 +172,7 @@ export async function executeImageGeneration(input: ImageGenerationInput): Promi
         n,
       }),
     },
-    account.platform,
+    account.base_url?.trim() ? 'custom' : account.platform,
     'image',
     120_000,
   );

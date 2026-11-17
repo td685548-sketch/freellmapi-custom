@@ -109,6 +109,9 @@ describe('guest access', () => {
     expect(seen.body.available.map((p: any) => p.key)).toEqual(['view_models', 'view_usage_profiles', 'view_usage_accounts', 'try_playground', 'view_assistants']);
     expect((await get('/api/admin/guest-access', delegateToken, 'PUT', { permissions: ['view_models'] })).status).toBe(403);
     setUserPermissions(delegateId, ['edit_user_permissions'], ownerId);
+    expect((await get('/api/admin/guest-access', delegateToken, 'PUT', { permissions: ['view_models'] })).status).toBe(403);
+    expect((await get('/api/admin/guest-access', delegateToken, 'PUT', { permissions: [], trial: { perIpPerHour: 2 } })).status).toBe(403);
+    setUserPermissions(delegateId, ['edit_user_permissions', 'view_token_budget', 'view_keys'], ownerId);
     expect((await get('/api/admin/guest-access', delegateToken, 'PUT', { permissions: ['view_models'] })).status).toBe(200);
     setUserPermissions(delegateId, [], ownerId);
     expect((await get('/api/admin/guest-access')).status).toBe(401); // a guest cannot open its own door

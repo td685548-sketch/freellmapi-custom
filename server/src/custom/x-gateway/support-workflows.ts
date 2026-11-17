@@ -175,28 +175,29 @@ function writeStore<T>(key: string, store: Record<string, T>): void {
 
 /**
  * Applies current 017 sensitive-text masking read-only to AI assistant messages
- * using the conversation's original userRole, leaving human/customer messages untouched.
+ * using the requester's role, leaving human/customer messages untouched.
  */
-function maskConversationAiMessagesForOriginalRole(
+function maskConversationAiMessagesForRole(
   tenantId: string,
   conv: SupportConversation,
+  viewerRole: string,
 ): SupportConversation {
   const hasAiMessages = conv.messages.some((m) => m.senderType === 'ai_assistant');
   if (!hasAiMessages) {
     return conv;
   }
 
-  const originalRole = conv.userRole || 'customer';
+  const effectiveRole = viewerRole || 'guest';
   const maskedMessages = conv.messages.map((msg): SupportConversationMessage => {
     if (msg.senderType !== 'ai_assistant') {
       return msg;
     }
 
-    const maskedContent = maskSupportSensitiveText(tenantId, msg.content, originalRole).masked;
+    const maskedContent = maskSupportSensitiveText(tenantId, msg.content, effectiveRole).masked;
     const maskedToolTrace = msg.toolTrace
       ? msg.toolTrace.map((trace) => ({
           ...trace,
-          toolName: maskSupportSensitiveText(tenantId, trace.toolName, originalRole).masked,
+          toolName: maskSupportSensitiveText(tenantId, trace.toolName, effectiveRole).masked,
         }))
       : undefined;
     const maskedEvidence = msg.evidence
@@ -204,8 +205,8 @@ function maskConversationAiMessagesForOriginalRole(
           ...msg.evidence,
           citations: msg.evidence.citations.map((c) => ({
             ...c,
-            title: maskSupportSensitiveText(tenantId, c.title, originalRole).masked,
-            excerpt: maskSupportSensitiveText(tenantId, c.excerpt, originalRole).masked,
+            title: maskSupportSensitiveText(tenantId, c.title, effectiveRole).masked,
+            excerpt: maskSupportSensitiveText(tenantId, c.excerpt, effectiveRole).masked,
           })),
         }
       : undefined;
@@ -224,31 +225,55 @@ function maskConversationAiMessagesForOriginalRole(
   };
 }
 
+const SUPPORT_ROLE_RANK: Record<string, number> = {
+  guest: 0,
+  customer: 1,
+  staff: 2,
+  admin: 3,
+};
+
+function resolveLeastPrivilegeSupportRole(
+  ownerRoleRaw: string | undefined,
+  viewerRoleRaw: string | undefined,
+): string {
+  const viewer = String(viewerRoleRaw || 'guest').trim().toLowerCase();
+  if (!(viewer in SUPPORT_ROLE_RANK)) {
+    return viewer || 'guest';
+  }
+  const owner = String(ownerRoleRaw || 'customer').trim().toLowerCase();
+  if (!(owner in SUPPORT_ROLE_RANK)) {
+    return viewer;
+  }
+  return SUPPORT_ROLE_RANK[viewer] <= SUPPORT_ROLE_RANK[owner] ? viewer : owner;
+}
+
 /**
  * Composes canonical read-only sanitization: 018 evidence -> 019 intake hydration
- * -> 017 AI masking under original conversation role -> 020 output policy.
+ * -> 017 AI masking under least-privilege role -> 020 output policy.
  */
 function sanitizeConversationRead(
   tenantId: string,
   conv: SupportConversation,
-  intakeViewerRole: string,
+  viewerRole: string,
 ): SupportConversation {
   const numericTenantId = Number(tenantId);
   if (!Number.isInteger(numericTenantId) || numericTenantId <= 0) {
     return conv;
   }
 
+  const effectiveViewerRole = String(viewerRole || 'guest').trim().toLowerCase() || 'guest';
+  const leastPrivilegeRole = resolveLeastPrivilegeSupportRole(conv.userRole, effectiveViewerRole);
   const evidenceSanitized = sanitizeSupportEvidenceConversation({
     tenantId: numericTenantId,
     conversation: conv,
-    viewerRole: conv.userRole || intakeViewerRole,
+    viewerRole: leastPrivilegeRole,
   });
   const intakeHydrated = hydrateSupportConversationIntake({
     tenantId: numericTenantId,
     conversation: evidenceSanitized,
-    viewerRole: intakeViewerRole,
+    viewerRole: effectiveViewerRole,
   });
-  const maskedAiHistory = maskConversationAiMessagesForOriginalRole(tenantId, intakeHydrated);
+  const maskedAiHistory = maskConversationAiMessagesForRole(tenantId, intakeHydrated, leastPrivilegeRole);
   return sanitizeSupportConversationOutput({
     tenantId: numericTenantId,
     conversation: maskedAiHistory,
@@ -258,6 +283,7 @@ function sanitizeConversationRead(
 export function listSupportConversations(
   tenantId: string,
   filter?: { userId?: string; status?: SupportConversationStatus },
+  viewerRole = 'admin',
 ): SupportConversation[] {
   const tid = String(tenantId);
   const store = readStore<SupportConversation[]>(CONVERSATIONS_KEY);
@@ -269,7 +295,7 @@ export function listSupportConversations(
       if (filter?.status && conv.status !== filter.status) return false;
       return true;
     })
-    .map((conv) => sanitizeConversationRead(tid, conv, conv.userRole));
+    .map((conv) => sanitizeConversationRead(tid, conv, viewerRole));
 }
 
 export function getSupportConversationForUser(

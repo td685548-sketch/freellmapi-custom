@@ -1,10 +1,11 @@
 import http from 'http';
 import https from 'https';
+import net from 'node:net';
 import { execFileSync } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { getSetting } from '../db/index.js';
 import { decrypt, encrypt } from './crypto.js';
-import { assertProviderUrlAllowed, isLoopbackOrPrivateHostname } from './url-guard.js';
+import { assertProviderUrlAllowedWithPin, isLoopbackOrPrivateHostname } from './url-guard.js';
 import type { ProxyMode } from '@freellmapi/shared/types.js';
 
 // #590 (per-key proxy): the SAME provider may be reached through different
@@ -842,35 +843,56 @@ function socksFetch(
  */
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
+export interface ProxySsrfOptions {
+  guardSsrf?: boolean;
+  blockPrivate?: boolean;
+  allowManualRedirectResponse?: boolean;
+}
+
+function isMockedFetch(): boolean {
+  return typeof (globalThis.fetch as unknown as { mock?: unknown })?.mock === 'object';
+}
+
+function urlTargetsIpOrMetadata(rawUrl: string): boolean {
+  try {
+    const host = new URL(rawUrl).hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '').toLowerCase();
+    return net.isIP(host) !== 0 || host === 'localhost' || host.endsWith('.localhost') || host.includes('metadata.');
+  } catch {
+    return true;
+  }
+}
+
 export async function proxyFetch(
   url: string,
   init?: RequestInit,
   platform?: string,
   requestType: ProxyRequestType = 'unknown',
   timeoutMs?: number,
+  ssrfOpts?: ProxySsrfOptions,
 ): Promise<Response> {
+  let pinnedDispatcher: import('undici').Dispatcher | undefined;
   try {
-    // SSRF guard (#440): 'custom' is the only platform whose target URL is
-    // user-supplied (base_url on the api_keys row), so it is re-assessed on
-    // every request — a URL saved before the guard existed, edited in the DB,
-    // or whose DNS now points somewhere blocked still can't reach cloud
-    // metadata / link-local addresses.
-    if (platform === 'custom') {
-      await assertProviderUrlAllowed(url);
-      // Redirects are never followed for custom providers: fetch()'s default
-      // 'follow' would re-request the Location target WITHOUT re-running the
-      // guard above, so a public base_url answering 302 → an internal or
-      // metadata address would defeat the check. socksFetch (http.request)
-      // never followed redirects; forcing redirect: 'manual' here makes every
-      // path behave the same, and the 3xx is converted to an explicit error
-      // below so the operator sees why instead of a confusing empty body.
+    const shouldGuard =
+      platform === 'custom' ||
+      Boolean(ssrfOpts?.guardSsrf) ||
+      urlTargetsIpOrMetadata(url);
+
+    if (shouldGuard) {
+      const checked = await assertProviderUrlAllowedWithPin(
+        url,
+        ssrfOpts?.blockPrivate !== undefined ? { blockPrivate: ssrfOpts.blockPrivate } : {},
+      );
+      if (!isMockedFetch()) {
+        pinnedDispatcher = await checked.createDispatcher();
+      }
+      // Redirects are never followed automatically when SSRF-guarded.
       init = { ...init, redirect: 'manual' };
     }
 
-    const response = await dispatchFetch(url, init, platform, requestType, timeoutMs);
+    const response = await dispatchFetch(url, init, platform, requestType, timeoutMs, pinnedDispatcher);
     try { responseObserverStore.getStore()?.(response); } catch { /* Observations must not break inference. */ }
 
-    if (platform === 'custom' && REDIRECT_STATUSES.has(response.status)) {
+    if (shouldGuard && !ssrfOpts?.allowManualRedirectResponse && REDIRECT_STATUSES.has(response.status)) {
       const location = response.headers.get('location') ?? 'an unspecified location';
       throw new Error(
         `Custom provider URL blocked: upstream redirected (${response.status}) to ${location}; ` +
@@ -884,6 +906,8 @@ export async function proxyFetch(
     // compact triage tag. Preserves the AbortError name so
     // `isRetryableError()` still classifies the failure as retryable.
     throw enrichAbort(err, platform, requestType, timeoutMs);
+  } finally {
+    await pinnedDispatcher?.close().catch(() => {});
   }
 }
 
@@ -935,6 +959,7 @@ async function dispatchFetch(
   platform: string | undefined,
   requestType: ProxyRequestType,
   timeoutMs: number | undefined,
+  pinnedDispatcher?: import('undici').Dispatcher,
 ): Promise<Response> {
   // #590: a per-key proxy override (set via withKeyProxy around the provider
   // call) takes precedence over the global proxy for THIS request. Empty
@@ -965,11 +990,14 @@ async function dispatchFetch(
   // Bypass check: disabled globally, this platform is exempt, the upstream
   // host is listed in NO_PROXY, or it is a local/LAN destination no proxy can
   // reach (#951).
+  const directInit = pinnedDispatcher
+    ? ({ ...init, dispatcher: pinnedDispatcher } as unknown as RequestInit)
+    : init;
   if (shouldBypassProxy(url, platform)) {
     if (proxyRequired) {
       throw proxyRequiredError(platform, 'proxy routing disabled or bypassed');
     }
-    return fetch(url, init);
+    return fetch(url, directInit);
   }
 
   if (_proxyMode === 'fetch-relay' && _proxyUrl) {
@@ -984,7 +1012,7 @@ async function dispatchFetch(
     if (proxyRequired) {
       throw proxyRequiredError(platform, 'proxy not configured or proxy agent unavailable');
     }
-    return fetch(url, init);
+    return fetch(url, directInit);
   }
 
   // SOCKS proxy → http/https fallback

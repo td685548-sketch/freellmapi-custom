@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { Router } from 'express';
 import { getDb } from '../../db/index.js';
+import { assertProviderUrlAllowedWithPin } from '../../lib/url-guard.js';
 
 /**
  * Provider images re-hosted for the Playground.
@@ -119,6 +120,9 @@ export function readPlaygroundMedia(id: string): { contentType: string; bytes: B
  * falling back to an anonymous request (Google publishes some assets). Returns
  * null for a host outside the allowlist, a non-image response, or a failure.
  */
+const MAX_MEDIA_REDIRECTS = 3;
+const MEDIA_REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
 export async function downloadProviderImage(
   rawUrl: string,
   credential?: string,
@@ -126,42 +130,66 @@ export async function downloadProviderImage(
 ): Promise<{ bytes: Buffer; contentType: string } | null> {
   // Payload URLs sometimes arrive as `http://`; the CDN serves the same asset
   // over TLS, and only https is ever fetched.
-  const url = rawUrl.replace(/^http:\/\//i, 'https://');
-  if (!isProviderImageUrl(url)) return null;
+  const initialUrl = rawUrl.replace(/^http:\/\//i, 'https://');
+  if (!isProviderImageUrl(initialUrl)) return null;
+  const initialHost = new URL(initialUrl).hostname.toLowerCase();
+  const isMockFetch = typeof (globalThis.fetch as unknown as { mock?: unknown })?.mock === 'object';
 
   const attempts: Array<Record<string, string>> = credential ? [{ Cookie: credential }, {}] : [{}];
   for (const auth of attempts) {
     try {
-      const res = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-            + '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-          Accept: 'image/avif,image/webp,image/png,image/*;q=0.8,*/*;q=0.5',
-          Referer: 'https://gemini.google.com/',
-          ...auth,
-        },
-        signal,
-        redirect: 'follow',
-      });
-      if (!res.ok) {
-        await res.body?.cancel().catch(() => {});
-        continue;
+      let currentUrl = initialUrl;
+      for (let hop = 0; hop <= MAX_MEDIA_REDIRECTS; hop++) {
+        if (!isProviderImageUrl(currentUrl)) break;
+        const checked = await assertProviderUrlAllowedWithPin(currentUrl, { blockPrivate: true });
+        const dispatcher = isMockFetch ? undefined : await checked.createDispatcher();
+        const sameOriginHost = new URL(currentUrl).hostname.toLowerCase() === initialHost;
+        let res: Response;
+        try {
+          res = await fetch(currentUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                + '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+              Accept: 'image/avif,image/webp,image/png,image/*;q=0.8,*/*;q=0.5',
+              Referer: 'https://gemini.google.com/',
+              ...(sameOriginHost ? auth : {}),
+            },
+            signal,
+            redirect: 'manual',
+            ...(dispatcher ? { dispatcher } : {}),
+          } as unknown as RequestInit);
+        } finally {
+          await dispatcher?.close().catch(() => {});
+        }
+        if (MEDIA_REDIRECT_STATUSES.has(res.status)) {
+          await res.body?.cancel().catch(() => {});
+          const location = res.headers.get('location');
+          if (!location || hop >= MAX_MEDIA_REDIRECTS) {
+            break;
+          }
+          currentUrl = new URL(location, currentUrl).href;
+          continue;
+        }
+        if (!res.ok) {
+          await res.body?.cancel().catch(() => {});
+          break;
+        }
+        const contentType = (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+        if (!contentType.startsWith('image/')) {
+          await res.body?.cancel().catch(() => {});
+          break;
+        }
+        const declared = Number(res.headers.get('content-length') ?? 0);
+        if (declared > PLAYGROUND_MEDIA_MAX_BYTES) {
+          await res.body?.cancel().catch(() => {});
+          return null;
+        }
+        const bytes = Buffer.from(await res.arrayBuffer());
+        if (bytes.length === 0 || bytes.length > PLAYGROUND_MEDIA_MAX_BYTES) return null;
+        return { bytes, contentType };
       }
-      const contentType = (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
-      if (!contentType.startsWith('image/')) {
-        await res.body?.cancel().catch(() => {});
-        continue;
-      }
-      const declared = Number(res.headers.get('content-length') ?? 0);
-      if (declared > PLAYGROUND_MEDIA_MAX_BYTES) {
-        await res.body?.cancel().catch(() => {});
-        return null;
-      }
-      const bytes = Buffer.from(await res.arrayBuffer());
-      if (bytes.length === 0 || bytes.length > PLAYGROUND_MEDIA_MAX_BYTES) return null;
-      return { bytes, contentType };
     } catch {
-      // Try the next header set; a cancelled download is not fatal.
+      // Try the next header set; a cancelled/blocked download is not fatal.
     }
   }
   return null;

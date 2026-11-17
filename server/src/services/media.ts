@@ -315,7 +315,10 @@ async function downloadCheckedMedia(
     const timeoutMs = remaining();
     const timeoutSignal = AbortSignal.timeout(timeoutMs);
     const signal = clientSignal ? AbortSignal.any([timeoutSignal, clientSignal]) : timeoutSignal;
-    const res = await proxyFetch(url, { method: 'GET', redirect: 'manual', signal }, platform, modality, timeoutMs);
+    const res = await proxyFetch(url, { method: 'GET', redirect: 'manual', signal }, platform, modality, timeoutMs, {
+      guardSsrf: true,
+      allowManualRedirectResponse: true,
+    });
     if (MEDIA_REDIRECT_STATUSES.has(res.status)) {
       await res.body?.cancel().catch(() => {});
       const location = res.headers.get('location');

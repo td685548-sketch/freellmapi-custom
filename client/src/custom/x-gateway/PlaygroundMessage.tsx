@@ -288,9 +288,10 @@ function parseHtmlFragment(rawHtml: string): HastNode[] {
     } else {
       const properties: Record<string, unknown> = {};
       const attrRegex = /([a-zA-Z0-9_-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|\{([^}]*)\}|([^\s>]+)))?/g;
+      const URL_HTML_ATTRS = new Set(['href', 'src', 'xlink:href', 'action', 'formaction', 'poster']);
       let attrMatch: RegExpExecArray | null;
       while ((attrMatch = attrRegex.exec(rawAttrs)) !== null) {
-        const key = attrMatch[1];
+        const lowerKey = attrMatch[1].toLowerCase();
         const val =
           attrMatch[2] !== undefined
             ? attrMatch[2]
@@ -301,15 +302,22 @@ function parseHtmlFragment(rawHtml: string): HastNode[] {
             : attrMatch[5] !== undefined
             ? attrMatch[5]
             : true;
-        if (!isSafeHtmlAttr(key)) continue;
-        if (key === 'class' || key === 'className') {
+        if (!isSafeHtmlAttr(lowerKey)) continue;
+        if (lowerKey === 'class' || lowerKey === 'classname') {
           if (typeof val !== 'string') continue;
           const sanitized = sanitizeHtmlClassName(val);
           if (!sanitized) continue;
-          properties[key] = sanitized;
+          properties.className = sanitized;
           continue;
         }
-        properties[key] = val;
+        if (URL_HTML_ATTRS.has(lowerKey)) {
+          if (typeof val !== 'string') continue;
+          const safeUrl = playgroundUrlTransform(val);
+          if (!safeUrl) continue;
+          properties[lowerKey] = safeUrl;
+          continue;
+        }
+        properties[lowerKey] = val;
       }
 
       const elementNode: HastNode = {
@@ -760,10 +768,23 @@ const customComponents: Components = {
 
 function playgroundUrlTransform(url: string): string {
   const trimmed = url.trim();
+  if (!trimmed) return '';
   if (/^data:image\/(?:png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=\s]+$/i.test(trimmed)) {
     return trimmed;
   }
-  return defaultUrlTransform(url);
+  const transformed = defaultUrlTransform(trimmed);
+  if (!transformed) return '';
+  if (
+    transformed.startsWith('/') ||
+    transformed.startsWith('#') ||
+    transformed.startsWith('?') ||
+    /^https?:/i.test(transformed) ||
+    /^mailto:/i.test(transformed) ||
+    !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(transformed)
+  ) {
+    return transformed;
+  }
+  return '';
 }
 
 interface PlaygroundMessageContentProps {

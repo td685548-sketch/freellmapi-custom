@@ -458,13 +458,19 @@ xSupportGovernancePublicRouter.patch(
   partnerAuthMiddleware,
   (req: Request, res: Response): void => {
     const { tenant, userContext } = req as AuthenticatedPartnerRequest;
+    const roleLower = String(userContext.role ?? '').toLowerCase();
+    if (roleLower === 'guest') {
+      res.status(403).json({ error: { message: 'Guests cannot modify customer profiles.', status: 403 } });
+      return;
+    }
+    const canModifyPrivilegeFields = roleLower === 'admin' || roleLower === 'staff';
 
     const profile = upsertSupportCustomerProfile(String(tenant.id), {
       userId: userContext.userId,
       name: userContext.name,
       email: userContext.email,
       role: userContext.role,
-      tags: Array.isArray(req.body?.tags) ? (req.body.tags as string[]) : undefined,
+      tags: canModifyPrivilegeFields && Array.isArray(req.body?.tags) ? (req.body.tags as string[]) : undefined,
       customAttributes:
         req.body?.customAttributes && typeof req.body.customAttributes === 'object'
           ? (req.body.customAttributes as Record<string, string | number | boolean>)
@@ -472,7 +478,7 @@ xSupportGovernancePublicRouter.patch(
       memoryFacts: Array.isArray(req.body?.memoryFacts)
         ? (req.body.memoryFacts as string[])
         : undefined,
-      tier: req.body?.tier ? String(req.body.tier) : undefined,
+      tier: canModifyPrivilegeFields && req.body?.tier ? String(req.body.tier) : undefined,
     });
 
     res.json({

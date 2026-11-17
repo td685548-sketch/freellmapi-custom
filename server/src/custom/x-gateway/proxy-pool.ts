@@ -516,42 +516,76 @@ export function isStrictProxyEnabled(): boolean {
   return getProxyPoolConfig().strictProxy;
 }
 
-export const CLOUDFLARE_WORKER_RELAY_CODE = `addEventListener('fetch', event => {
-  event.respondWith(handleRequest(event.request));
-});
+export const CLOUDFLARE_WORKER_RELAY_CODE = `function verifyRelayToken(provided, expected) {
+  if (!expected || !provided) return false;
+  const token = provided.replace(/^Bearer\\s+/i, '').trim();
+  if (token.length !== expected.length) return false;
+  let diff = 0;
+  for (let i = 0; i < token.length; i++) diff |= token.charCodeAt(i) ^ expected.charCodeAt(i);
+  return diff === 0;
+}
 
-async function handleRequest(request) {
-  const target = request.headers.get('fetch-relay-target');
-  if (!target) {
-    return new Response(JSON.stringify({ status: 'ok', service: 'freellmapi-worker-relay' }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' }
-    });
+export default {
+  async fetch(request, env) {
+    const target = request.headers.get('fetch-relay-target');
+    if (!target) {
+      return new Response(JSON.stringify({ status: 'ok', service: 'freellmapi-worker-relay' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    }
+    const configuredToken = (env && env.RELAY_TOKEN) || (typeof RELAY_TOKEN !== 'undefined' ? RELAY_TOKEN : '');
+    if (!configuredToken) {
+      return new Response(JSON.stringify({ error: 'Relay token not configured' }), {
+        status: 503,
+        headers: { 'content-type': 'application/json' }
+      });
+    }
+    if (!verifyRelayToken(request.headers.get('fetch-relay-authorization'), configuredToken)) {
+      return new Response(JSON.stringify({ error: 'Unauthorized relay request' }), {
+        status: 401,
+        headers: { 'content-type': 'application/json' }
+      });
+    }
+    let parsedTarget;
+    try { parsedTarget = new URL(target); } catch {
+      return new Response(JSON.stringify({ error: 'Invalid relay target' }), { status: 400, headers: { 'content-type': 'application/json' } });
+    }
+    if (!['http:', 'https:'].includes(parsedTarget.protocol)) {
+      return new Response(JSON.stringify({ error: 'Unsupported target protocol' }), { status: 400, headers: { 'content-type': 'application/json' } });
+    }
+
+    try {
+      const reqHeaders = new Headers(request.headers);
+      reqHeaders.delete('fetch-relay-target');
+      reqHeaders.delete('fetch-relay-authorization');
+      reqHeaders.delete('host');
+
+      return await fetch(parsedTarget.toString(), {
+        method: request.method,
+        headers: reqHeaders,
+        body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,
+        redirect: 'manual'
+      });
+    } catch (err) {
+      return new Response(JSON.stringify({ error: String(err && err.message ? err.message : err) }), {
+        status: 502,
+        headers: { 'content-type': 'application/json' }
+      });
+    }
   }
-
-  try {
-    const reqHeaders = new Headers(request.headers);
-    reqHeaders.delete('fetch-relay-target');
-    reqHeaders.delete('fetch-relay-authorization');
-    reqHeaders.delete('host');
-
-    const response = await fetch(target, {
-      method: request.method,
-      headers: reqHeaders,
-      body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,
-      redirect: 'manual'
-    });
-
-    return response;
-  } catch (err) {
-    return new Response(JSON.stringify({ error: String(err && err.message ? err.message : err) }), {
-      status: 502,
-      headers: { 'content-type': 'application/json' }
-    });
-  }
-}`;
+};`;
 
 export const VERCEL_RELAY_CODE = `export const config = { runtime: 'edge' };
+
+function verifyRelayToken(provided, expected) {
+  if (!expected || !provided) return false;
+  const token = provided.replace(/^Bearer\\s+/i, '').trim();
+  if (token.length !== expected.length) return false;
+  let diff = 0;
+  for (let i = 0; i < token.length; i++) diff |= token.charCodeAt(i) ^ expected.charCodeAt(i);
+  return diff === 0;
+}
 
 export default async function handler(request) {
   const target = request.headers.get('fetch-relay-target');
@@ -561,6 +595,26 @@ export default async function handler(request) {
       headers: { 'content-type': 'application/json' }
     });
   }
+  const configuredToken = typeof process !== 'undefined' && process.env ? (process.env.RELAY_TOKEN || '') : '';
+  if (!configuredToken) {
+    return new Response(JSON.stringify({ error: 'Relay token not configured' }), {
+      status: 503,
+      headers: { 'content-type': 'application/json' }
+    });
+  }
+  if (!verifyRelayToken(request.headers.get('fetch-relay-authorization'), configuredToken)) {
+    return new Response(JSON.stringify({ error: 'Unauthorized relay request' }), {
+      status: 401,
+      headers: { 'content-type': 'application/json' }
+    });
+  }
+  let parsedTarget;
+  try { parsedTarget = new URL(target); } catch {
+    return new Response(JSON.stringify({ error: 'Invalid relay target' }), { status: 400, headers: { 'content-type': 'application/json' } });
+  }
+  if (!['http:', 'https:'].includes(parsedTarget.protocol)) {
+    return new Response(JSON.stringify({ error: 'Unsupported target protocol' }), { status: 400, headers: { 'content-type': 'application/json' } });
+  }
 
   try {
     const reqHeaders = new Headers(request.headers);
@@ -568,7 +622,7 @@ export default async function handler(request) {
     reqHeaders.delete('fetch-relay-authorization');
     reqHeaders.delete('host');
 
-    return await fetch(target, {
+    return await fetch(parsedTarget.toString(), {
       method: request.method,
       headers: reqHeaders,
       body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,
@@ -582,9 +636,23 @@ export default async function handler(request) {
   }
 }`;
 
-export const DENO_RELAY_CODE = `Deno.serve(async (request) => {
+export const DENO_RELAY_CODE = `function verifyRelayToken(provided, expected) {
+  if (!expected || !provided) return false;
+  const token = provided.replace(/^Bearer\\s+/i, '').trim();
+  if (token.length !== expected.length) return false;
+  let diff = 0;
+  for (let i = 0; i < token.length; i++) diff |= token.charCodeAt(i) ^ expected.charCodeAt(i);
+  return diff === 0;
+}
+
+Deno.serve(async (request) => {
   const target = request.headers.get('fetch-relay-target');
   if (!target) return Response.json({ status: 'ok', service: 'freellmapi-deno-relay' });
+  const configuredToken = Deno.env.get('RELAY_TOKEN') || '';
+  if (!configuredToken) return Response.json({ error: 'Relay token not configured' }, { status: 503 });
+  if (!verifyRelayToken(request.headers.get('fetch-relay-authorization'), configuredToken)) {
+    return Response.json({ error: 'Unauthorized relay request' }, { status: 401 });
+  }
   let url;
   try { url = new URL(target); } catch { return Response.json({ error: 'Invalid relay target' }, { status: 400 }); }
   if (!['http:', 'https:'].includes(url.protocol)) return Response.json({ error: 'Unsupported target protocol' }, { status: 400 });
@@ -603,7 +671,16 @@ export const DENO_RELAY_CODE = `Deno.serve(async (request) => {
 
 // Digest-deployed Netlify Functions use the Lambda handler contract. Binary
 // bodies round-trip as base64; SSE remains valid but is buffered by this runtime.
-export const NETLIFY_RELAY_CODE = `exports.handler = async (event) => {
+export const NETLIFY_RELAY_CODE = `function verifyRelayToken(provided, expected) {
+  if (!expected || !provided) return false;
+  const token = String(provided).replace(/^Bearer\\s+/i, '').trim();
+  if (token.length !== expected.length) return false;
+  let diff = 0;
+  for (let i = 0; i < token.length; i++) diff |= token.charCodeAt(i) ^ expected.charCodeAt(i);
+  return diff === 0;
+}
+
+exports.handler = async (event) => {
   const headers = {};
   for (const [key, value] of Object.entries(event.headers || {})) {
     if (value != null) headers[key.toLowerCase()] = value;
@@ -611,6 +688,9 @@ export const NETLIFY_RELAY_CODE = `exports.handler = async (event) => {
   const reply = (statusCode, data) => ({ statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
   const target = headers['fetch-relay-target'];
   if (!target) return reply(200, { status: 'ok', service: 'freellmapi-netlify-relay' });
+  const configuredToken = (typeof process !== 'undefined' && process.env ? process.env.RELAY_TOKEN : '') || '';
+  if (!configuredToken) return reply(503, { error: 'Relay token not configured' });
+  if (!verifyRelayToken(headers['fetch-relay-authorization'], configuredToken)) return reply(401, { error: 'Unauthorized relay request' });
   let url;
   try { url = new URL(target); } catch { return reply(400, { error: 'Invalid relay target' }); }
   if (!['http:', 'https:'].includes(url.protocol)) return reply(400, { error: 'Unsupported target protocol' });

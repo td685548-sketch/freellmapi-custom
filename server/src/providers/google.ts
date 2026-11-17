@@ -357,10 +357,14 @@ async function fetchImageChecked(rawUrl: string): Promise<Response | null> {
   let url = rawUrl;
   const signal = AbortSignal.timeout(30_000);
   for (let hop = 0; hop <= MAX_IMAGE_REDIRECTS; hop++) {
-    if (!(await assessProviderUrl(url)).allowed) return null;
+    if (!(await assessProviderUrl(url, { blockPrivate: true })).allowed) return null;
     // 30s cap so a stalled image host cannot hang the whole request;
     // classified as `image` for triage.
-    const res = await proxyFetch(url, { signal, redirect: 'manual' }, 'google', 'image', 30_000);
+    const res = await proxyFetch(url, { signal, redirect: 'manual' }, 'google', 'image', 30_000, {
+      guardSsrf: true,
+      blockPrivate: true,
+      allowManualRedirectResponse: true,
+    });
     if (!IMAGE_REDIRECT_STATUSES.has(res.status)) return res;
     const location = res.headers.get('location');
     if (!location) return null;

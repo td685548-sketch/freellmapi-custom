@@ -6,6 +6,7 @@ import { createSession, createUser } from '../../services/auth.js';
 import { setEnabled } from '../../custom/x-gateway/config.js';
 import {
   createSupportTenant,
+  createSupportTool,
   mintSupportUserToken,
   type SupportTenant,
 } from '../../custom/x-gateway/support-store.js';
@@ -384,6 +385,22 @@ describe('AI Support Enterprise Suite (/api/thruline/support/* & /thruline/v1/su
     });
 
     it('10. GET /tenants/:id/actions, POST .../approve and POST .../reject review actions', async () => {
+      createSupportTool(tenant.id, {
+        name: 'process_refund',
+        description: 'Refund an order',
+        method: 'POST',
+        endpointUrl: 'https://example.com/api/actions',
+        allowedRoles: ['customer', 'staff', 'admin'],
+        enabled: true,
+      });
+      createSupportTool(tenant.id, {
+        name: 'cancel_account',
+        description: 'Cancel a subscription',
+        method: 'POST',
+        endpointUrl: 'https://example.com/api/actions',
+        allowedRoles: ['customer', 'staff', 'admin'],
+        enabled: true,
+      });
       // Propose action 1 via partner API
       const act1Res = await apiCall('/thruline/v1/support/actions/propose', {
         method: 'POST',
@@ -666,6 +683,14 @@ describe('AI Support Enterprise Suite (/api/thruline/support/* & /thruline/v1/su
     });
 
     it('18. POST /actions/propose & GET /actions creates and lists customer-scoped pending actions', async () => {
+      createSupportTool(tenant.id, {
+        name: 'extend_warranty',
+        description: 'Extend warranty',
+        method: 'POST',
+        endpointUrl: 'https://example.com/api/actions',
+        allowedRoles: ['customer', 'staff', 'admin'],
+        enabled: true,
+      });
       const proposeRes = await apiCall('/thruline/v1/support/actions/propose', {
         method: 'POST',
         headers: {

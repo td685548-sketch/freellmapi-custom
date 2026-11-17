@@ -56,7 +56,9 @@ function authenticate(req: Request, res: Response): ResolvedAuth | null {
     // shell history, reverse-proxy logs, and referrer telemetry.
     console.warn('[Gemini] API key supplied in ?key=; prefer x-goog-api-key to avoid URL leakage');
   }
-  const auth = resolveAuth(extractApiToken(req) ?? queryKey);
+  const googHeader = req.headers['x-goog-api-key'];
+  const googKey = (Array.isArray(googHeader) ? googHeader[0] : googHeader)?.trim() || '';
+  const auth = resolveAuth(googKey || queryKey || extractApiToken(req));
   if (!auth) {
     sendError(res, 401, 'Invalid API key', 'UNAUTHENTICATED');
     return null;

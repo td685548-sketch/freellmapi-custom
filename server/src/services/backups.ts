@@ -464,14 +464,128 @@ export function deleteBackup(db: Db, id: number): void {
   db.prepare('DELETE FROM backups WHERE id = ?').run(id);
 }
 
-/** Statements naming a table the dump policy excludes. A dump this server
- *  wrote never contains them, so hitting this means the file was edited or
- *  produced elsewhere — and restoring it would overwrite the operator's own
- *  accounts and sessions. */
-const EXCLUDED_STATEMENT_RE = new RegExp(
-  `\\b(?:INSERT\\s+INTO|DELETE\\s+FROM|UPDATE|DROP\\s+TABLE)\\s+"?(?:${[...EXCLUDED_TABLES].join('|')})"?\\b`,
-  'i',
-);
+/** Rejects any backup SQL dump whose body is not strictly CREATE TABLE IF NOT EXISTS,
+ *  DELETE FROM, or INSERT INTO targeting explicitly allowlisted header tables. */
+function validateBackupSqlStatements(sql: string, headerTables: string[]): void {
+  const allowedTables = new Set<string>();
+  for (const t of headerTables) {
+    if (!isBackupableTable(t)) {
+      throw httpError(
+        `This backup writes to ${t}, which backups never include. Refusing to restore it.`,
+        400,
+      );
+    }
+    allowedTables.add(t);
+  }
+
+  // Strip leading header `--` comment lines only; comments inside statements are forbidden.
+  const lines = sql.split(/\r?\n/);
+  let bodyStartLine = 0;
+  while (bodyStartLine < lines.length) {
+    const trimmed = lines[bodyStartLine].trim();
+    if (trimmed === '' || trimmed.startsWith('--')) {
+      bodyStartLine += 1;
+    } else {
+      break;
+    }
+  }
+  const body = lines.slice(bodyStartLine).join('\n');
+
+  const statements: string[] = [];
+  let skeleton = '';
+  let inString = false;
+
+  for (let i = 0; i < body.length; i += 1) {
+    const ch = body[i];
+    if (inString) {
+      if (ch === "'") {
+        if (body[i + 1] === "'") {
+          i += 1;
+        } else {
+          inString = false;
+        }
+      }
+      continue;
+    }
+
+    if (ch === "'") {
+      inString = true;
+      skeleton += '?';
+      continue;
+    }
+    if ((ch === '-' && body[i + 1] === '-') || (ch === '/' && body[i + 1] === '*')) {
+      throw httpError('Backup SQL contains unexpected comments outside header. Refusing to restore it.', 400);
+    }
+    if (ch === ';') {
+      const trimmedStmt = skeleton.trim();
+      if (trimmedStmt.length > 0) statements.push(trimmedStmt);
+      skeleton = '';
+      continue;
+    }
+    skeleton += ch;
+  }
+
+  if (inString) {
+    throw httpError('Backup SQL contains an unterminated string literal. Refusing to restore it.', 400);
+  }
+  const trailing = skeleton.trim();
+  if (trailing.length > 0) {
+    throw httpError('Backup SQL contains an unterminated trailing statement. Refusing to restore it.', 400);
+  }
+
+  const assertTableAllowed = (rawTable: string): void => {
+    if (!isBackupableTable(rawTable) || !allowedTables.has(rawTable)) {
+      throw httpError(
+        `This backup writes to ${isExcludedTable(rawTable) ? rawTable : 'an unpermitted table'}, which backups never include. Refusing to restore it.`,
+        400,
+      );
+    }
+  };
+
+  for (const stmt of statements) {
+    const deleteMatch = /^DELETE\s+FROM\s+("?)([A-Za-z_][A-Za-z0-9_]*)\1$/i.exec(stmt);
+    if (deleteMatch) {
+      assertTableAllowed(deleteMatch[2]);
+      continue;
+    }
+
+    const insertMatch = /^INSERT\s+INTO\s+("?)([A-Za-z_][A-Za-z0-9_]*)\1\s*\([^;()]+\)\s*VALUES\s*[\s\S]+$/i.exec(stmt);
+    if (insertMatch) {
+      if (/\b(?:SELECT|WITH|ATTACH|DETACH|PRAGMA|TRIGGER|DROP|ALTER|UPDATE|DELETE|REPLACE)\b/i.test(stmt)) {
+        throw httpError('Backup SQL contains an unsupported INSERT construct. Refusing to restore it.', 400);
+      }
+      assertTableAllowed(insertMatch[2]);
+      continue;
+    }
+
+    const createMatch = /^CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+("?)([A-Za-z_][A-Za-z0-9_]*)\1\s*(\([\s\S]+\))$/i.exec(stmt);
+    if (createMatch) {
+      assertTableAllowed(createMatch[2]);
+      // Ensure the trailing paren closes the CREATE TABLE column block with no trailing statement.
+      let depth = 0;
+      const ddl = createMatch[3];
+      for (let i = 0; i < ddl.length; i += 1) {
+        if (ddl[i] === '(') depth += 1;
+        else if (ddl[i] === ')') {
+          depth -= 1;
+          if (depth === 0 && i < ddl.length - 1) {
+            throw httpError('Backup SQL contains an unsupported CREATE TABLE statement. Refusing to restore it.', 400);
+          }
+          if (depth < 0) break;
+        }
+      }
+      if (depth !== 0) {
+        throw httpError('Backup SQL contains a malformed CREATE TABLE statement. Refusing to restore it.', 400);
+      }
+      continue;
+    }
+
+    throw httpError(
+      'This backup contains an unsupported or disallowed SQL statement. Refusing to restore it.',
+      400,
+    );
+  }
+}
 
 export interface RestoreResult {
   backup: BackupMeta;
@@ -518,13 +632,7 @@ export function restoreBackup(db: Db, id: number): RestoreResult {
     );
   }
 
-  const offending = header.tables.find(isExcludedTable);
-  if (offending || EXCLUDED_STATEMENT_RE.test(sql)) {
-    throw httpError(
-      `This backup writes to ${offending ?? 'an account or session table'}, which backups never include. Refusing to restore it.`,
-      400,
-    );
-  }
+  validateBackupSqlStatements(sql, header.tables);
 
   // Written before a single row changes, so a restore that turns out to be the
   // wrong file is one restore away from being undone.

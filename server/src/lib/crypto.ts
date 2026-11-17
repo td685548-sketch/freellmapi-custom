@@ -228,22 +228,71 @@ export function decrypt(encrypted: string, iv: string, authTag: string): string 
  * Returns null when there is nothing to check: no key init yet, no `api_keys`
  * table, or no stored secret.
  */
+const SECRET_COLUMN_PROBES: ReadonlyArray<{ table: string; encrypted: string; iv: string; authTag: string }> = [
+  { table: 'api_keys', encrypted: 'encrypted_key', iv: 'iv', authTag: 'auth_tag' },
+  { table: 'api_keys', encrypted: 'proxy_encrypted', iv: 'proxy_iv', authTag: 'proxy_auth_tag' },
+  { table: 'client_profiles', encrypted: 'encrypted_key', iv: 'iv', authTag: 'auth_tag' },
+  { table: 'x_gateway_keys', encrypted: 'encrypted_key', iv: 'iv', authTag: 'auth_tag' },
+  { table: 'x_gateway_keys', encrypted: 'proxy_encrypted', iv: 'proxy_iv', authTag: 'proxy_auth_tag' },
+  { table: 'x_gateway_proxy_pool', encrypted: 'proxy_encrypted', iv: 'proxy_iv', authTag: 'proxy_auth_tag' },
+  { table: 'custom_ai_mcp_servers', encrypted: 'auth_ciphertext', iv: 'auth_iv', authTag: 'auth_tag' },
+  { table: 'custom_ai_approvals', encrypted: 'args_ciphertext', iv: 'args_iv', authTag: 'args_tag' },
+  { table: 'custom_ai_guard_events', encrypted: 'excerpt_ciphertext', iv: 'excerpt_iv', authTag: 'excerpt_tag' },
+  { table: 'x_support_tenants', encrypted: 'secret_encrypted', iv: 'secret_iv', authTag: 'secret_auth_tag' },
+  { table: 'x_support_db_sources', encrypted: 'token_encrypted', iv: 'token_iv', authTag: 'token_auth_tag' },
+  { table: 'x_support_action_executions', encrypted: 'requester_encrypted', iv: 'requester_iv', authTag: 'requester_auth_tag' },
+  { table: 'x_support_partner_events', encrypted: 'payload_encrypted', iv: 'payload_iv', authTag: 'payload_auth_tag' },
+  { table: 'x_support_evidence_sources', encrypted: 'import_url_encrypted', iv: 'import_url_iv', authTag: 'import_url_auth_tag' },
+  { table: 'x_support_evidence_revisions', encrypted: 'payload_encrypted', iv: 'payload_iv', authTag: 'payload_auth_tag' },
+  { table: 'x_support_output_policies', encrypted: 'payload_encrypted', iv: 'payload_iv', authTag: 'payload_auth_tag' },
+  { table: 'x_support_runtime_turns', encrypted: 'masked_response_encrypted', iv: 'iv', authTag: 'auth_tag' },
+  { table: 'x_support_desk_widget_configs', encrypted: 'payload_encrypted', iv: 'payload_iv', authTag: 'payload_auth_tag' },
+];
+
+const SECRET_JSON_PROBES: ReadonlyArray<{ table: string; settingKey: string }> = [
+  { table: 'settings', settingKey: 'fetch_relay_token' },
+  { table: 'x_gateway_config', settingKey: 'outbound_proxy' },
+];
+
 export function probeStoredSecrets(db: Db): boolean | null {
-  let row: { encrypted: string; iv: string; auth_tag: string } | undefined;
-  try {
-    row = db.prepare(
-      'SELECT encrypted_key AS encrypted, iv, auth_tag FROM api_keys WHERE length(encrypted_key) > 0 LIMIT 1',
-    ).get() as typeof row;
-  } catch {
-    return null;
+  let checked = 0;
+  for (const target of SECRET_COLUMN_PROBES) {
+    let row: { encrypted: string; iv: string; auth_tag: string } | undefined;
+    try {
+      row = db.prepare(
+        `SELECT ${target.encrypted} AS encrypted, ${target.iv} AS iv, ${target.authTag} AS auth_tag FROM ${target.table} WHERE length(${target.encrypted}) > 0 LIMIT 1`,
+      ).get() as typeof row;
+    } catch {
+      continue;
+    }
+    if (!row) continue;
+    checked += 1;
+    try {
+      decrypt(row.encrypted, row.iv, row.auth_tag);
+    } catch {
+      return false;
+    }
   }
-  if (!row) return null;
-  try {
-    decrypt(row.encrypted, row.iv, row.auth_tag);
-    return true;
-  } catch {
-    return false;
+
+  for (const target of SECRET_JSON_PROBES) {
+    let row: { value: string } | undefined;
+    try {
+      row = db.prepare(`SELECT value FROM ${target.table} WHERE key = ? AND length(value) > 0 LIMIT 1`).get(target.settingKey) as typeof row;
+    } catch {
+      continue;
+    }
+    if (!row?.value) continue;
+    checked += 1;
+    try {
+      const parsed = JSON.parse(row.value) as { encrypted?: string; iv?: string; authTag?: string };
+      if (!parsed.encrypted || !parsed.iv || !parsed.authTag) return false;
+      decrypt(parsed.encrypted, parsed.iv, parsed.authTag);
+    } catch {
+      return false;
+    }
   }
+
+  return checked > 0 ? true : null;
 }
 
 // A masked key is display-only — it feeds the `maskedKey` field every key,
