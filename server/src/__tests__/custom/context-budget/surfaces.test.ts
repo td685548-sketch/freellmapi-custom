@@ -122,12 +122,17 @@ describe('context-budget surface fallback & refit across /v1/chat/completions an
     setKeyCacheTestOverride(true);
     initDb(':memory:', { factory: () => wrapTursoDatabase(defaultDbFactory()(':memory:'), true) });
 
-    const enc = encrypt('gsk_surf_test');
+    const encGroq = encrypt('gsk_surf_groq');
+    const encCerebras = encrypt('csk_surf_cerebras');
     const db = getDb();
     db.prepare(
       `INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled)
-       VALUES ('groq', 'surf-key', ?, ?, ?, 'healthy', 1)`,
-    ).run(enc.encrypted, enc.iv, enc.authTag);
+       VALUES ('groq', 'surf-groq', ?, ?, ?, 'healthy', 1)`,
+    ).run(encGroq.encrypted, encGroq.iv, encGroq.authTag);
+    db.prepare(
+      `INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled)
+       VALUES ('cerebras', 'surf-cerebras', ?, ?, ?, 'healthy', 1)`,
+    ).run(encCerebras.encrypted, encCerebras.iv, encCerebras.authTag);
 
     db.prepare('UPDATE models SET enabled = 0').run();
     db.prepare('UPDATE fallback_config SET enabled = 0').run();
@@ -141,7 +146,7 @@ describe('context-budget surface fallback & refit across /v1/chat/completions an
     const smallRes = db
       .prepare(
         `INSERT INTO models (platform, model_id, display_name, intelligence_rank, speed_rank, size_label, context_window, enabled)
-         VALUES ('groq', 'small-8k', 'Small 8k', 10, 10, 'Small', 8192, 1)`,
+         VALUES ('cerebras', 'small-8k', 'Small 8k', 10, 10, 'Small', 8192, 1)`,
       )
       .run();
     const largeId = Number(largeRes.lastInsertRowid);
@@ -244,7 +249,7 @@ describe('context-budget surface fallback & refit across /v1/chat/completions an
     expect(recordedAttempts[1]!.modelId).toBe('small-8k');
 
     const effective8kBudget = Math.floor((8192 - 1024) * 0.9);
-    const smallAttemptTokens = estimateMessagesTokens(recordedAttempts[1]!.messages, { platform: 'groq' });
+    const smallAttemptTokens = estimateMessagesTokens(recordedAttempts[1]!.messages, { platform: 'cerebras' });
     expect(smallAttemptTokens).toBeLessThanOrEqual(effective8kBudget);
     expect(recordedAttempts[1]!.messages.length).toBeLessThan(recordedAttempts[0]!.messages.length);
 
@@ -295,7 +300,7 @@ describe('context-budget surface fallback & refit across /v1/chat/completions an
     expect(recordedAttempts[1]!.modelId).toBe('small-8k');
 
     const effective8kBudget = Math.floor((8192 - 1024) * 0.9);
-    const smallAttemptTokens = estimateMessagesTokens(recordedAttempts[1]!.messages, { platform: 'groq' });
+    const smallAttemptTokens = estimateMessagesTokens(recordedAttempts[1]!.messages, { platform: 'cerebras' });
     expect(smallAttemptTokens).toBeLessThanOrEqual(effective8kBudget);
     expect(recordedAttempts[1]!.messages.length).toBeLessThan(recordedAttempts[0]!.messages.length);
 

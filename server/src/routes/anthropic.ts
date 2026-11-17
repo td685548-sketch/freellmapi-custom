@@ -36,6 +36,7 @@ import { compressRequest, formatCompressionHeader } from '../services/compressio
 import { normalizeMessageImages } from '../lib/image-normalize.js';
 import { maybeServeAnthropicWebSearch, serverToolUseToText, webSearchResultToText } from '../lib/anthropic-web-search.js';
 import { applyDecisionRouting, routingStrategyHeader } from '../services/routing-decision.js';
+import { contextRoutingTokens, fitContextForRoute } from '../custom/context-budget/hooks.js';
 
 // Anthropic-compatible Messages API (`POST /v1/messages`). This is a thin
 // translation layer over the SAME router/fallback/analytics machinery the
@@ -754,9 +755,10 @@ export async function handleMessages(req: Request, res: Response): Promise<void>
       // size latched onto state so the existing size gates in router.ts skip
       // low-TPM / small-context models on retry.
       const routingTotal = fallbackRoutingTokens(state, estimatedTotal, outputReserve);
-      return routeRequest(routingTotal, state.skipKeys.size > 0 ? state.skipKeys : undefined, preferredModel, hasImage, wantsTools, state.skipModels.size > 0 ? state.skipModels : undefined, groupChain ?? resolvedChain?.chain, false, state.skipPlatforms.size > 0 ? state.skipPlatforms : undefined, outputReserve, taskType, resolvedChain?.strategyOverride);
+      return routeRequest(contextRoutingTokens(req, routingTotal, messages), state.skipKeys.size > 0 ? state.skipKeys : undefined, preferredModel, hasImage, wantsTools, state.skipModels.size > 0 ? state.skipModels : undefined, groupChain ?? resolvedChain?.chain, false, state.skipPlatforms.size > 0 ? state.skipPlatforms : undefined, outputReserve, taskType, resolvedChain?.strategyOverride);
     },
     dispatch: async (route, attempt, dispatchCtx) => {
+      messages = fitContextForRoute(req, res, messages, route, outputReserve);
       const contextBudget = routeOutputBudget(route, estimatedInputTokens);
       const routeOptions = { ...dispatchOptions, contextBudget };
       if (stream) {
