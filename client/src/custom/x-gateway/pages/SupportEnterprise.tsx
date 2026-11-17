@@ -1,7 +1,8 @@
-import { useState, type ReactNode } from 'react'
+import { useState, type ChangeEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { BookOpen, ShieldCheck, Inbox, CheckCircle2, BarChart3 } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
+import { convertFileToMarkdown, DOCUMENT_MARKDOWN_LIMITS, RAG_UPLOAD_ACCEPT } from '../../document-markdown-upload'
 import { useSessionRevision } from '../../session-state'
 import { useUserSession } from '../../use-session'
 import { useSupportEnterpriseStrings } from '../support-enterprise-strings'
@@ -134,7 +135,41 @@ function KnowledgeTab(scope: Scope) {
   const [draft, setDraft] = useState(emptyDoc)
   const [role, setRole] = useState('guest')
   const [query, setQuery] = useState('')
-  const resetDraft = () => { setDraft(emptyDoc); setEditingId(undefined) }
+  const [convertingFile, setConvertingFile] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [uploadNotice, setUploadNotice] = useState<string | null>(null)
+  const resetDraft = () => { setDraft(emptyDoc); setEditingId(undefined); setUploadError(null); setUploadNotice(null) }
+
+  async function handleFileUpload(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    if (file.size > DOCUMENT_MARKDOWN_LIMITS.maxUploadBytes) {
+      setUploadError(s.uploadTooLarge)
+      setUploadNotice(null)
+      return
+    }
+    setUploadError(null)
+    setUploadNotice(null)
+    setConvertingFile(true)
+    try {
+      const res = await convertFileToMarkdown(`${basePath(scope)}/knowledge/convert`, file)
+      setDraft(prev => ({
+        ...prev,
+        title: prev.title.trim() ? prev.title : res.title,
+        content: res.markdown,
+      }))
+      setUploadNotice(
+        s.convertedFile
+          .replace('{name}', file.name)
+          .replace('{chars}', res.markdown.length.toLocaleString()),
+      )
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : s.uploadError)
+    } finally {
+      setConvertingFile(false)
+    }
+  }
   return <>
     <Panel title={s.knowledge}>
       <p>{s.knowledgeHelp}</p>
@@ -158,7 +193,12 @@ function KnowledgeTab(scope: Scope) {
         write.mutate({ path: '/knowledge', body: { id: editingId, title: draft.title.trim(), category: draft.category.trim(),
           content: draft.content, allowedRoles: split(draft.allowedRoles), tags: split(draft.tags) } }, { onSuccess: resetDraft })
       }}>
-        <fieldset disabled={!scope.canEdit || write.isPending} style={{ border: 0, padding: 0, display: 'grid', gap: 12 }}>
+        <fieldset disabled={!scope.canEdit || write.isPending || convertingFile} style={{ border: 0, padding: 0, display: 'grid', gap: 12 }}>
+          <label>{s.uploadFile}<input data-testid="enterprise-kb-file-input" type="file" accept={RAG_UPLOAD_ACCEPT} onChange={e => void handleFileUpload(e)} /></label>
+          <small>{s.uploadHint}</small>
+          {convertingFile && <p role="status">{s.convertingFile}</p>}
+          {uploadError && <p role="alert">{uploadError}</p>}
+          {uploadNotice && <p role="status">{uploadNotice}</p>}
           <label>{s.titleLabel}<input required value={draft.title} onChange={e => setDraft({ ...draft, title: e.target.value })} /></label>
           <label>{s.category}<input value={draft.category} onChange={e => setDraft({ ...draft, category: e.target.value })} /></label>
           <label>{s.allowedRoles}<input aria-describedby="ops-roles-help" value={draft.allowedRoles} onChange={e => setDraft({ ...draft, allowedRoles: e.target.value })} /></label><small id="ops-roles-help">{s.rolesHelp}</small>

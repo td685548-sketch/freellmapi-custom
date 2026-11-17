@@ -1417,4 +1417,10 @@ export const VI: Record<string, string> = {
   "Knowledge sent / dropped": "Tri thức gửi / bỏ",
   "Client dropped": "Tin client bỏ",
   "Refits": "Số lần khớp lại",
+  "Upload file (.docx, .xlsx, .csv, .md)": "Tải tệp lên (.docx, .xlsx, .csv, .md)",
+  "Converting…": "Đang chuyển đổi…",
+  "File exceeds {maxMb} MiB upload limit": "Tệp vượt quá giới hạn tải lên {maxMb} MiB",
+  "Converted Markdown has {chars} characters (limit {max}). Trim before saving.": "Nội dung Markdown sau khi chuyển có {chars} ký tự (giới hạn {max}). Hãy rút gọn trước khi lưu.",
+  "Converted {name} to Markdown": "Đã chuyển {name} sang Markdown",
+  "Could not convert file": "Không chuyển đổi được tệp",
 }

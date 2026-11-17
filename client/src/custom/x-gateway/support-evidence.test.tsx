@@ -135,7 +135,7 @@ function within(root: ParentNode) {
 
 interface MockFetchInit {
   method?: string
-  body?: string
+  body?: string | FormData
 }
 
 function parseJsonBody<T = Record<string, unknown>>(body: unknown): T {
@@ -1050,6 +1050,102 @@ describe('SupportKnowledgeStudio (Knowledge Studio & Evidence)', () => {
     await waitFor(() => {
       const tenant2Sources = mockApiFetch.mock.calls.find(c => c[0].includes('/tenants/2/knowledge-library/sources'))
       expect(tenant2Sources).toBeTruthy()
+    })
+  })
+
+  // 12. Word/Excel automatic Markdown conversion upload
+  it('sources tab: converts uploaded Excel/Word file to Markdown before importing draft revision', async () => {
+    mockApiFetch.mockImplementation(async (url: string, init?: MockFetchInit) => {
+      if (url.endsWith('/api/thruline/support/tenants')) return { ok: true, tenants: mockTenants }
+      if (url.endsWith('/knowledge-library/convert') && init?.method === 'POST') {
+        return {
+          ok: true,
+          title: 'Pricing 2026',
+          format: 'markdown',
+          sourceFormat: 'xlsx',
+          markdown: '## Pricing\n\n| Tier | Price |\n| --- | --- |\n| Pro | $20 |',
+          charCount: 53,
+          truncated: false,
+          sheetCount: 1,
+          warnings: [],
+        }
+      }
+      if (url.includes('/knowledge-library/sources/src_office/revisions') && init?.method === 'POST') {
+        const body = parseJsonBody(init.body)
+        return {
+          ok: true,
+          deduplicated: false,
+          revision: {
+            id: 'rev_office_1',
+            tenantId: 1,
+            sourceId: 'src_office',
+            format: body.format,
+            title: body.title,
+            tags: [],
+            contentHash: 'hash_office',
+            chunkCount: 1,
+            createdAt: '2026-11-18T00:00:00.000Z',
+          },
+          source: { id: 'src_office', version: 2 },
+        }
+      }
+      if (url.includes('/knowledge-library/sources/src_office/revisions')) {
+        return { ok: true, revisions: [] }
+      }
+      if (url.includes('/knowledge-library/sources')) {
+        return {
+          ok: true,
+          sources: [
+            {
+              id: 'src_office',
+              tenantId: 1,
+              name: 'Pricing Sheet',
+              kind: 'markdown',
+              status: 'active',
+              allowedRoles: ['customer'],
+              version: 1,
+              publishedRevisionId: null,
+              draftRevisionId: null,
+              revisionCount: 0,
+            },
+          ],
+        }
+      }
+      return { ok: true }
+    })
+
+    const { container } = renderStudio()
+    const utils = within(container)
+
+    await utils.findByTestId('select-source-btn-src_office')
+    fireEvent.click(utils.getByTestId('select-source-btn-src_office'))
+
+    const fileInput = (await utils.findByTestId('revision-file-input')) as HTMLInputElement
+    const xlsxFile = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04])], 'Pricing 2026.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    await act(async () => {
+      Object.defineProperty(fileInput, 'files', { configurable: true, value: [xlsxFile] })
+      fileInput.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+
+    await waitFor(() => {
+      const convertCall = mockApiFetch.mock.calls.find(c => c[0].endsWith('/knowledge-library/convert'))
+      expect(convertCall).toBeTruthy()
+      expect(convertCall![1].body).toBeInstanceOf(FormData)
+      expect((utils.getByTestId('revision-title-input') as HTMLInputElement).value).toBe('Pricing 2026')
+      expect((utils.getByTestId('revision-content-input') as HTMLTextAreaElement).value).toContain('| Pro | $20 |')
+    })
+
+    fireEvent.click(utils.getByTestId('import-revision-btn'))
+    await waitFor(() => {
+      const importCall = mockApiFetch.mock.calls.find(c => c[0].endsWith('/revisions') && c[1]?.method === 'POST')
+      expect(importCall).toBeTruthy()
+      expect(parseJsonBody(importCall![1].body)).toMatchObject({
+        title: 'Pricing 2026',
+        format: 'markdown',
+        content: '## Pricing\n\n| Tier | Price |\n| --- | --- |\n| Pro | $20 |',
+      })
     })
   })
 })

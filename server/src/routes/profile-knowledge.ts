@@ -6,6 +6,7 @@ import {
   addDoc, deleteDoc, docCount, getKnowledgeSettings, knowledgeBlock, listDocs, searchKnowledge, setKnowledgeSettings, updateDoc,
 } from '../services/profile-knowledge.js';
 import { onDocumentChanged, onDocumentDeleted } from '../custom/ai-platform/retrieval/indexer.js';
+import { handleKnowledgeDocumentConvert } from './knowledge-document-upload.js';
 
 // A client key's knowledge base. Mounted in custom/register.ts at /api/client-profiles behind the profile
 // permissions: reads (list, search) need view_client_profiles, changes need edit_client_profiles.
@@ -45,6 +46,11 @@ profileKnowledgeRouter.put('/:id/knowledge-settings', (req, res) => {
   const current = getKnowledgeSettings(id)!;
   setKnowledgeSettings(id, { enabled: parsed.data.enabled ?? current.enabled, maxChars: parsed.data.maxChars ?? current.maxChars });
   res.json({ settings: getKnowledgeSettings(id) });
+});
+
+profileKnowledgeRouter.post('/:id/knowledge/convert', (req, res) => {
+  if (profileId(req, res) === null) return;
+  handleKnowledgeDocumentConvert(req, res, { maxRecommendedChars: L.maxDocChars });
 });
 
 profileKnowledgeRouter.post('/:id/knowledge', (req, res) => {

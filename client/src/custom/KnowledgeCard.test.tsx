@@ -20,6 +20,19 @@ beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   vi.mocked(apiFetch).mockReset()
   vi.mocked(apiFetch).mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/knowledge/convert')) {
+      return {
+        ok: true,
+        title: 'Bảng giá dịch vụ',
+        format: 'markdown',
+        sourceFormat: 'xlsx',
+        markdown: '## Giá\n\n| Gói | Giá |\n| --- | --- |\n| Pro | 100k |',
+        charCount: 54,
+        truncated: false,
+        sheetCount: 1,
+        warnings: [],
+      } as never
+    }
     if (url.includes('/search')) return { hits: url.includes('ship') ? [{ docId: 1, title: 'Shipping', text: 'We ship in 2 days.', score: 1.2 }] : [] } as never
     if (url.endsWith('/knowledge-settings')) { state.settings = { ...state.settings, ...JSON.parse(String(init!.body)) }; return { settings: state.settings } as never }
     if (init?.method === 'POST') { const b = JSON.parse(String(init.body)); state.docs.push({ id: 2, ...b, size: b.content.length, chunks: 1, updatedAt: '' }); return {} as never }
@@ -75,6 +88,36 @@ describe('KnowledgeCard', () => {
     await act(async () => { button('Search')!.click() })
     await flush()
     expect(container.textContent).toContain('Nothing matches')
+  })
+
+  it('uploads Word/Excel files, auto-converts to Markdown, and submits', async () => {
+    await render()
+    const fileInput = container.querySelector('[data-testid="kb-file-input"]') as HTMLInputElement
+    expect(fileInput).not.toBeNull()
+    const file = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04])], 'Bảng giá dịch vụ.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    await act(async () => {
+      Object.defineProperty(fileInput, 'files', { configurable: true, value: [file] })
+      fileInput.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    await flush()
+
+    const convertCall = vi.mocked(apiFetch).mock.calls.find(([u]) => u === '/api/client-profiles/5/knowledge/convert')
+    expect(convertCall).toBeTruthy()
+    expect(convertCall![1]?.body).toBeInstanceOf(FormData)
+    expect((container.querySelector('[aria-label="Document title"]') as HTMLInputElement).value).toBe('Bảng giá dịch vụ')
+    expect((container.querySelector('[aria-label="Document content"]') as HTMLTextAreaElement).value).toContain('| Pro | 100k |')
+
+    await act(async () => { button('Add')!.click() })
+    await flush()
+    expect(apiFetch).toHaveBeenCalledWith('/api/client-profiles/5/knowledge', {
+      method: 'POST',
+      body: JSON.stringify({
+        title: 'Bảng giá dịch vụ',
+        content: '## Giá\n\n| Gói | Giá |\n| --- | --- |\n| Pro | 100k |',
+      }),
+    })
   })
 
   it('is read-only without edit rights', async () => {

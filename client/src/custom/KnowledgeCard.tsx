@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useRef, useState, type ChangeEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { BookOpen, Pencil, Trash2 } from 'lucide-react'
+import { BookOpen, Pencil, Trash2, Upload } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { toast } from '@/lib/toast'
 import { Button } from '@/components/ui/button'
@@ -10,6 +10,7 @@ import { Switch } from '@/components/ui/switch'
 import { ConfirmButton } from '@/components/confirm-button'
 import type { KnowledgeDoc, KnowledgeHit, KnowledgeSettings } from '../../../shared/knowledge'
 import { KNOWLEDGE_LIMITS as L } from '../../../shared/knowledge'
+import { convertFileToMarkdown, DOCUMENT_MARKDOWN_LIMITS, RAG_UPLOAD_ACCEPT } from './document-markdown-upload'
 import { useCustomT } from './i18n/use-custom-t'
 
 interface KbState { settings: KnowledgeSettings; docs: KnowledgeDoc[] }
@@ -29,6 +30,38 @@ export function KnowledgeCard({ profileId, canEdit }: { profileId: number; canEd
   const [budget, setBudget] = useState<string | null>(null)
   const [q, setQ] = useState('')
   const [hits, setHits] = useState<KnowledgeHit[] | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  const convertFile = useMutation({
+    mutationFn: (file: File) => convertFileToMarkdown(`${base}/convert`, file),
+    onSuccess: (res, file) => {
+      setForm(f => ({
+        ...f,
+        title: f.title.trim() ? f.title : res.title.slice(0, L.maxTitle),
+        content: res.markdown,
+      }))
+      if (res.markdown.length > L.maxDocChars) {
+        toast.error(tc('Converted Markdown has {chars} characters (limit {max}). Trim before saving.', {
+          chars: res.markdown.length.toLocaleString(),
+          max: L.maxDocChars.toLocaleString(),
+        }))
+      } else {
+        toast.success(tc('Converted {name} to Markdown', { name: file.name }))
+      }
+    },
+    onError: (err: Error) => toast.error(err.message || tc('Could not convert file')),
+  })
+
+  function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    if (file.size > DOCUMENT_MARKDOWN_LIMITS.maxUploadBytes) {
+      toast.error(tc('File exceeds {maxMb} MiB upload limit', { maxMb: DOCUMENT_MARKDOWN_LIMITS.maxUploadBytes / (1024 * 1024) }))
+      return
+    }
+    convertFile.mutate(file)
+  }
 
   const saveSettings = useMutation({
     mutationFn: (body: Partial<KnowledgeSettings>) => apiFetch(`/api/client-profiles/${profileId}/knowledge-settings`, { method: 'PUT', body: JSON.stringify(body) }),
@@ -98,7 +131,31 @@ export function KnowledgeCard({ profileId, canEdit }: { profileId: number; canEd
 
       {canEdit && (
         <form className="space-y-2 border-t pt-3" onSubmit={(e) => { e.preventDefault(); if (formValid && !saveDoc.isPending) saveDoc.mutate() }}>
-          <p className="text-xs font-medium text-muted-foreground">{form.id ? tc('Edit document') : tc('Add a document ({length}/{maxDocs})', { length: docs.length, maxDocs: L.maxDocs })}</p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-medium text-muted-foreground">{form.id ? tc('Edit document') : tc('Add a document ({length}/{maxDocs})', { length: docs.length, maxDocs: L.maxDocs })}</p>
+            <div className="flex items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={RAG_UPLOAD_ACCEPT}
+                data-testid="kb-file-input"
+                aria-label="Upload document file"
+                className="sr-only"
+                onChange={handleFileChange}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                disabled={convertFile.isPending || saveDoc.isPending}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Upload className="mr-1.5 size-3.5" />
+                {convertFile.isPending ? tc('Converting…') : tc('Upload file (.docx, .xlsx, .csv, .md)')}
+              </Button>
+            </div>
+          </div>
           <Input value={form.title} onChange={(e) => setForm(f => ({ ...f, title: e.target.value }))} placeholder={tc('Title, e.g. Shipping')} aria-label="Document title" maxLength={L.maxTitle} className="h-8 text-xs" />
           <Textarea value={form.content} onChange={(e) => setForm(f => ({ ...f, content: e.target.value }))} placeholder={tc('Text. Blank lines separate passages.')} aria-label="Document content" rows={6} className="text-xs" />
           <div className="flex flex-wrap items-center gap-2">

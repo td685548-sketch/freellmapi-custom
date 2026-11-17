@@ -42,6 +42,7 @@ import {
 } from './support-workflows.js';
 import { resolveTenant, validateSupportPublicAuth } from './support-router.js';
 import { dispatchActionReview, dispatchPartnerEvent } from './support-runtime-router.js';
+import { handleKnowledgeDocumentConvert } from '../../routes/knowledge-document-upload.js';
 
 // ---------------------------------------------------------------------------
 // Audit Log Persistence
@@ -157,6 +158,23 @@ xSupportEnterpriseConsoleRouter.get(
     const tid = resolveTenantIdParam(req.params.tenantId);
     const docs = listSupportKnowledgeDocs(tid);
     res.json({ ok: true, docs });
+  },
+);
+
+// POST /tenants/:tenantId/knowledge/convert
+xSupportEnterpriseConsoleRouter.post(
+  '/tenants/:tenantId/knowledge/convert',
+  (req: Request, res: Response): void => {
+    try {
+      resolveTenantIdParam(req.params.tenantId);
+    } catch (err) {
+      const status = err instanceof SupportStoreError ? err.status : 404;
+      res.status(status === 400 ? 400 : 404).json({
+        error: { message: err instanceof Error ? err.message : 'Support tenant not found.', status: status === 400 ? 400 : 404 },
+      });
+      return;
+    }
+    handleKnowledgeDocumentConvert(req, res, { maxRecommendedChars: 64_000 });
   },
 );
 
