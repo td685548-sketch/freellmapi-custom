@@ -1,0 +1,169 @@
+import { useI18n } from '@/i18n'
+
+const en = {
+  designMode: 'Design Preview',
+  liveMode: 'Live End-User Test',
+  designNote:
+    'Preview renders locally inside this box with network transport disabled. No sessions, RAG lookups, or AI calls are sent.',
+  liveNote:
+    'Runs the real end-user widget against this tenant’s saved AI model, RAG knowledge base, RBAC roles, DB/webhook tools, guardrails, CRM memory, and escalation flow.',
+  unsavedBanner:
+    'You have unsaved appearance or intake edits. Live End-User Test runs against the tenant’s saved configuration.',
+  saveAndApplyNow: 'Save & Apply Now',
+  saving: 'Saving…',
+  savedDisabledNotice:
+    'Branded Widget & Intake is currently disabled in the saved configuration. End-user chat, RAG, RBAC, and escalation still run using default styling without intake gating.',
+  personaHeading: 'Test Persona & RBAC Identity',
+  presetLabels: {
+    guest: 'Guest',
+    customer_alice: 'Customer (Alice)',
+    customer_bob: 'Customer (Bob)',
+    staff: 'Staff',
+    admin: 'Admin',
+  } as Record<string, string>,
+  modeGuest: 'Guest Session',
+  modeAuthenticated: 'Authenticated User',
+  roleLabel: 'Role',
+  userIdLabel: 'User ID',
+  nameLabel: 'Display Name',
+  emailLabel: 'Email',
+  permissionsLabel: 'Extra Permissions (comma-separated)',
+  applyPersona: 'Apply Persona',
+  resetSession: 'Reset Conversation',
+  refreshWidget: 'Reload Widget Profile',
+  guestDisabledHint:
+    'Guest sessions are disabled for this tenant (allowGuest = false). The widget will show its login-required lock just as on a live site.',
+  activeIdentity: 'Active session',
+  signingSecretSafe: 'Partner signing secret stays server-side via console test bridge.',
+  originHeading: 'Origin Allowlist Simulator',
+  originPlaceholder: 'https://shop.example.com',
+  checkOrigin: 'Check Origin',
+  checkingOrigin: 'Checking…',
+  enforceOrigin: 'Enforce simulated Origin on live requests',
+  originAllowed: 'Allowed',
+  originDenied: 'Blocked',
+  configuredAllowlist: 'Configured allowlist',
+  unrestrictedLabel: 'All origins allowed (empty allowlist)',
+  originReasons: {
+    invalid_origin: 'Invalid http/https origin format',
+    unrestricted: 'Tenant allowlist is empty (allows any origin)',
+    wildcard: 'Wildcard (*) allowlist enabled',
+    matched: 'Matches tenant allowlist',
+    not_in_allowlist: 'Origin is not in tenant allowlist',
+  } as Record<string, string>,
+  diagnosticsHeading: 'Operator Diagnostics (External)',
+  diagnosticsHint:
+    'Shown outside the widget container so the embedded chat remains 100% identical to the end-user experience.',
+  openInCopilot: 'Open in Copilot',
+  noDiagnostics:
+    'Send a message or submit intake inside the widget to inspect model routing, RAG citations, tool traces, guardrails, approvals, and quotas.',
+  conversationLabel: 'Conversation',
+  modelLabel: 'Model',
+  sourceLabel: 'Source',
+  toolsLabel: 'Tools',
+  citationsLabel: 'Citations',
+  pendingApprovalsLabel: 'Pending Approvals',
+  usageLabel: 'Tokens',
+  errorLabel: 'Runtime Error',
+  loadingWidget: 'Starting live end-user widget session…',
+  copilotResolveOnSend: 'Also mark conversation resolved on send',
+  intakeSubmittedEvent: 'Intake submitted',
+  escalatedEvent: 'Escalated to human queue',
+  csatSubmittedEvent: 'CSAT submitted',
+  roleOptionLabels: {
+    guest: 'guest',
+    customer: 'customer',
+    staff: 'staff',
+    admin: 'admin',
+  } as Record<string, string>,
+}
+
+export type SupportServiceDeskLiveTestStrings = typeof en
+
+const vi: SupportServiceDeskLiveTestStrings = {
+  designMode: 'Xem trước giao diện',
+  liveMode: 'Test trực tiếp người dùng cuối',
+  designNote:
+    'Chế độ xem trước hiển thị cục bộ trong khung này và tắt toàn bộ mạng. Không tạo phiên chat hay gọi AI.',
+  liveNote:
+    'Chạy đúng widget thật của người dùng cuối với AI, tri thức RAG, phân quyền RBAC, công cụ DB/Webhook, tường lửa, bộ nhớ CRM và chuyển tiếp nhân viên của tenant đang chọn.',
+  unsavedBanner:
+    'Bạn có thay đổi giao diện hoặc biểu mẫu chưa lưu. Chế độ test trực tiếp luôn chạy theo cấu hình đã lưu trên máy chủ.',
+  saveAndApplyNow: 'Lưu & Áp dụng ngay',
+  saving: 'Đang lưu…',
+  savedDisabledNotice:
+    'Widget tùy biến & Biểu mẫu đầu vào đang tắt trong cấu hình đã lưu. AI chat, RAG, phân quyền và chuyển nhân viên vẫn hoạt động bình thường với giao diện mặc định.',
+  personaHeading: 'Danh tính & Phân quyền test (Persona)',
+  presetLabels: {
+    guest: 'Khách',
+    customer_alice: 'Khách hàng (Alice)',
+    customer_bob: 'Khách hàng (Bob)',
+    staff: 'Nhân viên',
+    admin: 'Quản trị viên',
+  },
+  modeGuest: 'Phiên Khách',
+  modeAuthenticated: 'Người dùng đăng nhập',
+  roleLabel: 'Vai trò',
+  userIdLabel: 'Mã người dùng',
+  nameLabel: 'Tên hiển thị',
+  emailLabel: 'Email',
+  permissionsLabel: 'Quyền bổ sung (ngăn cách dấu phẩy)',
+  applyPersona: 'Áp dụng danh tính',
+  resetSession: 'Tạo hội thoại mới',
+  refreshWidget: 'Tải lại cấu hình widget',
+  guestDisabledHint:
+    'Tenant này đã tắt phiên khách (allowGuest = false). Widget sẽ hiển thị màn hình yêu cầu đăng nhập giống hệt website thật.',
+  activeIdentity: 'Phiên đang chạy',
+  signingSecretSafe: 'Signing secret luôn được giữ an toàn trên máy chủ qua cầu nối test.',
+  originHeading: 'Kiểm tra Origin & Tên miền',
+  originPlaceholder: 'https://shop.example.com',
+  checkOrigin: 'Kiểm tra Origin',
+  checkingOrigin: 'Đang kiểm tra…',
+  enforceOrigin: 'Áp dụng Origin giả lập vào các request trực tiếp',
+  originAllowed: 'Được phép',
+  originDenied: 'Bị chặn',
+  configuredAllowlist: 'Danh sách tên miền cho phép',
+  unrestrictedLabel: 'Cho phép mọi tên miền (danh sách trống)',
+  originReasons: {
+    invalid_origin: 'Định dạng origin http/https không hợp lệ',
+    unrestricted: 'Danh sách cho phép đang trống (mọi origin đều hợp lệ)',
+    wildcard: 'Đang bật ký tự đại diện (*)',
+    matched: 'Khớp chính xác với danh sách cho phép',
+    not_in_allowlist: 'Origin không nằm trong danh sách cho phép của tenant',
+  },
+  diagnosticsHeading: 'Chẩn đoán vận hành (Ngoài Widget)',
+  diagnosticsHint:
+    'Hiển thị bên ngoài khung widget để giao diện chat giữ nguyên 100% trải nghiệm người dùng cuối.',
+  openInCopilot: 'Mở trong Copilot',
+  noDiagnostics:
+    'Hãy gửi tin nhắn hoặc biểu mẫu trong widget để xem model, trích dẫn RAG, truy vết tool, tường lửa, phê duyệt và hạn mức.',
+  conversationLabel: 'Mã hội thoại',
+  modelLabel: 'Model',
+  sourceLabel: 'Nguồn',
+  toolsLabel: 'Công cụ',
+  citationsLabel: 'Trích dẫn RAG',
+  pendingApprovalsLabel: 'Chờ phê duyệt',
+  usageLabel: 'Token',
+  errorLabel: 'Lỗi runtime',
+  loadingWidget: 'Đang khởi tạo phiên widget trực tiếp…',
+  copilotResolveOnSend: 'Đánh dấu đã giải quyết hội thoại khi gửi',
+  intakeSubmittedEvent: 'Đã gửi biểu mẫu đầu vào',
+  escalatedEvent: 'Đã chuyển tới hàng đợi nhân viên',
+  csatSubmittedEvent: 'Đã gửi đánh giá CSAT',
+  roleOptionLabels: {
+    guest: 'guest (Khách)',
+    customer: 'customer (Khách hàng)',
+    staff: 'staff (Nhân viên)',
+    admin: 'admin (Quản trị)',
+  },
+}
+
+export const SUPPORT_SERVICE_DESK_LIVE_TEST_STRINGS: Record<'en' | 'vi', SupportServiceDeskLiveTestStrings> = {
+  en,
+  vi,
+}
+
+export function useSupportServiceDeskLiveTestStrings(): SupportServiceDeskLiveTestStrings {
+  const { locale } = useI18n()
+  return SUPPORT_SERVICE_DESK_LIVE_TEST_STRINGS[locale === 'vi' ? 'vi' : 'en']
+}

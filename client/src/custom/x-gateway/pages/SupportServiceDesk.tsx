@@ -60,7 +60,16 @@ import { apiFetch } from '@/lib/api'
 import { useSessionRevision } from '../../session-state'
 import { useUserSession } from '../../use-session'
 import { useSupportServiceDeskStrings } from '../support-service-desk-strings'
-import SupportWidgetPreview from '../components/SupportWidgetPreview'
+import {
+  SUPPORT_LIVE_TEST_PERSONA_PRESETS,
+  type SupportLiveTestOriginCheckResponse,
+  type SupportLiveTestPersonaInput,
+  type SupportLiveTestPersonaSessionResponse,
+  type SupportLiveTestTurnDiagnostic,
+  type SupportLiveTestViewMode,
+} from '@freellmapi/shared/support-service-desk-live-test.js'
+import { SupportWidgetLiveTest } from '../components/SupportWidgetLiveTest'
+import { useSupportServiceDeskLiveTestStrings } from '../support-service-desk-live-test-strings'
 
 export interface SupportTenant {
   id: number
@@ -70,6 +79,42 @@ export interface SupportTenant {
   defaultModel: string
   allowedOrigins: string[]
   enabled: boolean
+  allowGuest?: boolean
+  rolesConfig?: Array<{
+    role: string
+    label?: string
+    description?: string
+    permissions: string[]
+  }>
+}
+
+function normalizeWidgetAppearance(app: SupportDeskWidgetAppearance): SupportDeskWidgetAppearance {
+  const defaults = DEFAULT_SUPPORT_DESK_WIDGET_CONFIG.appearance
+  const out: Record<string, unknown> = {}
+  for (const key of Object.keys(defaults)) {
+    const val = (app as unknown as Record<string, unknown>)[key]
+    out[key] = val !== undefined ? val : (defaults as unknown as Record<string, unknown>)[key]
+  }
+  return out as unknown as SupportDeskWidgetAppearance
+}
+
+function hasUnsavedWidgetChanges(
+  saved: SupportDeskWidgetConfig | undefined,
+  draft: SupportDeskPublicWidgetConfig,
+): boolean {
+  if (!saved) return false
+  if (saved.enabled !== draft.enabled) return true
+  if (saved.intake.required !== draft.intake.required) return true
+  if (JSON.stringify(saved.intake.fields) !== JSON.stringify(draft.intake.fields)) return true
+  return (
+    JSON.stringify(normalizeWidgetAppearance(saved.appearance)) !==
+    JSON.stringify(normalizeWidgetAppearance(draft.appearance))
+  )
+}
+
+function getLiveTestPersonaCacheKey(input: SupportLiveTestPersonaInput, epoch: number): string {
+  const perms = [...(input.permissions ?? [])].sort().join(',')
+  return `${epoch}:${input.mode}:${input.role ?? ''}:${input.userId ?? ''}:${input.name ?? ''}:${input.email ?? ''}:${perms}`
 }
 
 export interface SupportConversation {
@@ -194,12 +239,40 @@ function useMutationAbort() {
 // ---------------------------------------------------------
 // Tab 1: Widget & Intake
 // ---------------------------------------------------------
+interface LiveTestStudioBridgeProps {
+  tenant: SupportTenant
+  mode: SupportLiveTestViewMode
+  onModeChange: (mode: SupportLiveTestViewMode) => void
+  persona: SupportLiveTestPersonaInput
+  sessionEpoch: number
+  personaSession: SupportLiveTestPersonaSessionResponse | null
+  onApplyPersona: (
+    nextPersona: SupportLiveTestPersonaInput,
+    nextSession: SupportLiveTestPersonaSessionResponse,
+  ) => void
+  onResetConversation: () => void
+  simulatedOrigin: string
+  onSimulatedOriginChange: (origin: string) => void
+  enforceSimulatedOrigin: boolean
+  onEnforceSimulatedOriginChange: (enforce: boolean) => void
+  originCheckResult: SupportLiveTestOriginCheckResponse | null
+  onOriginCheckResult: (result: SupportLiveTestOriginCheckResponse | null) => void
+  diagnostics: SupportLiveTestTurnDiagnostic[]
+  onAppendDiagnostic: (entry: SupportLiveTestTurnDiagnostic) => void
+  activeConversationId: string | null
+  onConversationIdDetected: (convId: string | null) => void
+  onOpenInCopilot: (convId: string) => void
+  onRefreshTenantQueries: () => void
+}
+
 function WidgetTabPanel({
   tenantBase,
   tenantKey,
+  liveTestProps,
 }: {
   tenantBase: string
   tenantKey: readonly unknown[]
+  liveTestProps: LiveTestStudioBridgeProps
 }) {
   const s = useSupportServiceDeskStrings()
   const queryClient = useQueryClient()
@@ -534,7 +607,7 @@ function WidgetTabPanel({
   }
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(340px, 1fr) minmax(320px, 420px)', gap: 24, alignItems: 'start' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(340px, 1fr) minmax(360px, 460px)', gap: 24, alignItems: 'start' }}>
       <div>
         <Feedback
           error={clientError ? new Error(clientError) : saveMutation.error ? (saveMutation.error as Error) : null}
@@ -1232,13 +1305,22 @@ function WidgetTabPanel({
         </div>
       </div>
 
-      {/* Live Preview Column */}
+      {/* Live Preview & End-User Test Column */}
       <div style={{ position: 'sticky', top: 20 }}>
         <h3 style={{ margin: '0 0 4px 0', fontSize: 15, fontWeight: 600 }}>{s.widget.previewHeading}</h3>
         <p className="x-hint" style={{ margin: '0 0 12px 0', fontSize: 12 }}>
           {s.widget.previewNote}
         </p>
-        <SupportWidgetPreview publicConfig={livePreviewConfig} />
+        <SupportWidgetLiveTest
+          {...liveTestProps}
+          publicConfig={livePreviewConfig}
+          hasUnsavedChanges={hasUnsavedWidgetChanges(configQuery.data?.config, livePreviewConfig)}
+          onSaveAndApply={() => {
+            void handleSave()
+          }}
+          savedEnabled={configQuery.data?.config?.enabled ?? false}
+          savedConfigVersion={configQuery.data?.config?.version ?? 1}
+        />
       </div>
     </div>
   )
@@ -1251,10 +1333,14 @@ function CopilotTabPanel({
   tenantBase,
   tenantKey,
   tenant,
+  preferredConvId,
+  focusSeq,
 }: {
   tenantBase: string
   tenantKey: readonly unknown[]
   tenant: SupportTenant
+  preferredConvId?: string | null
+  focusSeq?: number
 }) {
 
   // 1. Fetch conversations
@@ -1268,14 +1354,19 @@ function CopilotTabPanel({
   })
 
   const conversations = useMemo(() => conversationsQuery.data || [], [conversationsQuery.data])
-  const [selectedConvId, setSelectedConvId] = useState<string | null>(null)
+  const [manualSelection, setManualSelection] = useState<{ seq: number; id: string } | null>(null)
+  const targetFocusSeq = focusSeq ?? 0
+  const effectiveConvId =
+    manualSelection && manualSelection.seq === targetFocusSeq
+      ? manualSelection.id
+      : (preferredConvId ?? null)
 
-  const activeConv = conversations.find(c => c.id === selectedConvId) || (conversations.length > 0 ? conversations[0] : null)
+  const activeConv = conversations.find(c => c.id === effectiveConvId) || (conversations.length > 0 ? conversations[0] : null)
 
   return <CopilotConversationPanel key={activeConv?.id ?? 'empty'}
     tenantBase={tenantBase} tenantKey={tenantKey} tenant={tenant}
     activeConv={activeConv} conversations={conversations}
-    conversationsLoading={conversationsQuery.isPending} onSelect={setSelectedConvId} />
+    conversationsLoading={conversationsQuery.isPending} onSelect={id => setManualSelection({ seq: targetFocusSeq, id })} />
 }
 
 function CopilotConversationPanel({ tenantBase, tenantKey, tenant, activeConv, conversations, conversationsLoading, onSelect }: {
@@ -1288,6 +1379,7 @@ function CopilotConversationPanel({ tenantBase, tenantKey, tenant, activeConv, c
   onSelect: (id: string) => void
 }) {
   const s = useSupportServiceDeskStrings()
+  const liveS = useSupportServiceDeskLiveTestStrings()
   const queryClient = useQueryClient()
   const session = useUserSession()
   const generateAbort = useMutationAbort()
@@ -1297,6 +1389,7 @@ function CopilotConversationPanel({ tenantBase, tenantKey, tenant, activeConv, c
   const [copilotResult, setCopilotResult] = useState<SupportDeskCopilotResult | null>(null)
   const [composerText, setComposerText] = useState('')
   const [replySuccess, setReplySuccess] = useState(false)
+  const [resolveOnSend, setResolveOnSend] = useState(false)
   const [copilotError, setCopilotError] = useState<string | null>(null)
 
   const generateMutation = useMutation({
@@ -1349,6 +1442,7 @@ function CopilotConversationPanel({ tenantBase, tenantKey, tenant, activeConv, c
         body: JSON.stringify({
           content: args.message,
           agentName: session.session?.email || 'Support Agent',
+          ...(resolveOnSend ? { resolveConversation: true } : {}),
         }),
         signal: replyAbort.nextSignal(),
       })
@@ -1359,6 +1453,7 @@ function CopilotConversationPanel({ tenantBase, tenantKey, tenant, activeConv, c
       setComposerText('')
       setCopilotResult(null)
       queryClient.invalidateQueries({ queryKey: [...tenantKey, 'conversations'] })
+      queryClient.invalidateQueries({ queryKey: [...tenantKey, 'queue'] })
     },
     onError: () => {
       if (!replyAbort.isMountedAndActive()) return
@@ -1685,7 +1780,16 @@ function CopilotConversationPanel({ tenantBase, tenantKey, tenant, activeConv, c
                 onChange={e => setComposerText(e.target.value)}
                 placeholder={s.copilot.composerPlaceholder}
               />
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    data-testid="copilot-resolve-on-send"
+                    checked={resolveOnSend}
+                    onChange={e => setResolveOnSend(e.target.checked)}
+                  />
+                  <span>{liveS.copilotResolveOnSend}</span>
+                </label>
                 {replySuccess && (
                   <span
                     data-testid="copilot-reply-success"
@@ -2313,10 +2417,91 @@ function TenantServiceDeskContent({
   revision: number
 }) {
   const s = useSupportServiceDeskStrings()
+  const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<TabId>('widget')
 
   const tenantBase = `/api/thruline/support/tenants/${tenant.id}/service-desk`
-  const tenantKey = ['x-support-desk', revision, tenant.id] as const
+  const tenantKey = useMemo(() => ['x-support-desk', revision, tenant.id] as const, [revision, tenant.id])
+
+  const [liveMode, setLiveMode] = useState<SupportLiveTestViewMode>('design')
+  const [sessionEpoch, setSessionEpoch] = useState(0)
+  const [persona, setPersona] = useState<SupportLiveTestPersonaInput>(() => {
+    const initialPreset = SUPPORT_LIVE_TEST_PERSONA_PRESETS[0]
+    return {
+      mode: initialPreset.mode,
+      userId: initialPreset.userId,
+      role: initialPreset.role,
+      name: initialPreset.name,
+      permissions: [...initialPreset.permissions],
+    }
+  })
+  const [personaSessionCache, setPersonaSessionCache] = useState<
+    Record<string, SupportLiveTestPersonaSessionResponse>
+  >({})
+  const [simulatedOrigin, setSimulatedOrigin] = useState('')
+  const [enforceSimulatedOrigin, setEnforceSimulatedOrigin] = useState(false)
+  const [originCheckResult, setOriginCheckResult] = useState<SupportLiveTestOriginCheckResponse | null>(null)
+  const [diagnostics, setDiagnostics] = useState<SupportLiveTestTurnDiagnostic[]>([])
+  const [activeLiveConvId, setActiveLiveConvId] = useState<string | null>(null)
+  const [preferredCopilotConvId, setPreferredCopilotConvId] = useState<string | null>(null)
+  const [copilotFocusSeq, setCopilotFocusSeq] = useState(0)
+
+  const activePersonaSession =
+    personaSessionCache[getLiveTestPersonaCacheKey(persona, sessionEpoch)] ?? null
+
+  const handleApplyPersona = (
+    nextPersona: SupportLiveTestPersonaInput,
+    nextSession: SupportLiveTestPersonaSessionResponse,
+  ) => {
+    const identityChanged =
+      getLiveTestPersonaCacheKey(nextPersona, 0) !== getLiveTestPersonaCacheKey(persona, 0)
+    if (identityChanged) {
+      setActiveLiveConvId(null)
+      setDiagnostics([])
+    }
+    const cacheKey = getLiveTestPersonaCacheKey(nextPersona, sessionEpoch)
+    setPersonaSessionCache(prev => ({ ...prev, [cacheKey]: nextSession }))
+    setPersona(nextPersona)
+  }
+
+  const handleResetLiveConversation = () => {
+    setSessionEpoch(prev => prev + 1)
+    setDiagnostics([])
+    setActiveLiveConvId(null)
+  }
+
+  const handleOpenInCopilot = (convId: string) => {
+    setPreferredCopilotConvId(convId)
+    setCopilotFocusSeq(n => n + 1)
+    setActiveTab('copilot')
+  }
+
+  const handleRefreshTenantQueries = () => {
+    void queryClient.invalidateQueries({ queryKey: tenantKey })
+  }
+
+  const liveTestProps: LiveTestStudioBridgeProps = {
+    tenant,
+    mode: liveMode,
+    onModeChange: setLiveMode,
+    persona,
+    sessionEpoch,
+    personaSession: activePersonaSession,
+    onApplyPersona: handleApplyPersona,
+    onResetConversation: handleResetLiveConversation,
+    simulatedOrigin,
+    onSimulatedOriginChange: setSimulatedOrigin,
+    enforceSimulatedOrigin,
+    onEnforceSimulatedOriginChange: setEnforceSimulatedOrigin,
+    originCheckResult,
+    onOriginCheckResult: setOriginCheckResult,
+    diagnostics,
+    onAppendDiagnostic: entry => setDiagnostics(prev => [entry, ...prev]),
+    activeConversationId: activeLiveConvId,
+    onConversationIdDetected: setActiveLiveConvId,
+    onOpenInCopilot: handleOpenInCopilot,
+    onRefreshTenantQueries: handleRefreshTenantQueries,
+  }
 
   return (
     <div>
@@ -2351,13 +2536,19 @@ function TenantServiceDeskContent({
       >
         {activeTab === 'widget' && (
           <Panel title={s.widget.heading}>
-            <WidgetTabPanel tenantBase={tenantBase} tenantKey={tenantKey} />
+            <WidgetTabPanel tenantBase={tenantBase} tenantKey={tenantKey} liveTestProps={liveTestProps} />
           </Panel>
         )}
 
         {activeTab === 'copilot' && (
           <Panel title={s.copilot.heading}>
-            <CopilotTabPanel tenantBase={tenantBase} tenantKey={tenantKey} tenant={tenant} />
+            <CopilotTabPanel
+              tenantBase={tenantBase}
+              tenantKey={tenantKey}
+              tenant={tenant}
+              preferredConvId={preferredCopilotConvId}
+              focusSeq={copilotFocusSeq}
+            />
           </Panel>
         )}
 

@@ -1755,4 +1755,146 @@ describe('AI Support Runtime Widget (support-runtime-widget.ts)', () => {
     expect((box.querySelector('input[type="text"]') as HTMLInputElement).placeholder).toBe('Write here...');
     preview.destroy();
   });
+
+  it('supports embedded container mode with custom transport, isolated storageScope, startOpen, refreshProfile, and preserves global _instance', async () => {
+    loadWidgetScript();
+    const globalLive = window.FreeLLMAPISupport.init({ tenantKey: 'global_tenant', contextToken: 'global_tok' });
+    expect(window.FreeLLMAPISupport._instance).toBe(globalLive);
+
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const customTransport = vi.fn().mockImplementation(async (url: string) => {
+      if (url.endsWith('/widget/config')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ok: true,
+            config: {
+              version: 2,
+              enabled: true,
+              appearance: {
+                primaryColor: '#059669',
+                title: 'Embedded Live',
+                welcomeMessage: 'Welcome live!',
+                position: 'bottom-left',
+                quickPrompts: ['Check order'],
+              },
+              intake: { required: false, fields: [] },
+            },
+          }),
+        };
+      }
+      if (url.endsWith('/chat')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            reply: 'Live reply via custom transport',
+            runtime: { conversationId: 'conv-emb-1' },
+          }),
+        };
+      }
+      throw new Error(`Unexpected url ${url}`);
+    });
+
+    const embedded = window.FreeLLMAPISupport.init({
+      container: host,
+      tenantKey: 'tenant_emb',
+      contextToken: 'tok_emb',
+      startOpen: true,
+      storageScope: 'studio_t1_e1',
+      loadTenantProfile: true,
+      transport: customTransport,
+    });
+
+    expect(window.FreeLLMAPISupport._instance).toBe(globalLive);
+    expect(mockFetch).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect((host.querySelector('[data-testid="widget-title"]') as HTMLElement).textContent).toBe('Embedded Live');
+    });
+
+    const box = host.querySelector('[data-testid="widget-box"]') as HTMLElement;
+    expect(box.style.display).toBe('flex');
+    expect((host.querySelector('[data-testid="widget-embedded-launcher-row"]') as HTMLElement).style.justifyContent).toBe('flex-start');
+
+    const closeBtn = host.querySelector('[data-testid="widget-close-btn"]') as HTMLButtonElement;
+    closeBtn.click();
+    expect(box.style.display).toBe('none');
+    const toggleBtn = host.querySelector('[data-testid="widget-toggle-btn"]') as HTMLButtonElement;
+    toggleBtn.click();
+    expect(box.style.display).toBe('flex');
+
+    embedded.sendMessage('Hi live');
+    await vi.waitFor(() => expect(embedded.getConversationId()).toBe('conv-emb-1'));
+    expect(host.textContent).toContain('Live reply via custom transport');
+
+    await embedded.refreshProfile();
+    expect(customTransport.mock.calls.filter(([u]) => String(u).endsWith('/widget/config')).length).toBe(2);
+
+    embedded.destroy();
+    expect(host.innerHTML).toBe('');
+    expect(window.FreeLLMAPISupport._instance).toBe(globalLive);
+    globalLive.destroy();
+  });
+
+  it('shows authRequired and locks input when allowGuestSession is false without contextToken', () => {
+    loadWidgetScript();
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const onAuthRequired = vi.fn();
+
+    const instance = window.FreeLLMAPISupport.init({
+      container: host,
+      tenantKey: 'tenant_no_guest',
+      allowGuestSession: false,
+      startOpen: true,
+      onAuthRequired,
+    });
+
+    const banner = host.querySelector('[data-testid="widget-banner"]') as HTMLElement;
+    expect(banner.style.display).toBe('block');
+    expect(banner.textContent).toContain('Authentication required');
+    expect((host.querySelector('[data-testid="widget-input"]') as HTMLInputElement).disabled).toBe(true);
+    expect((host.querySelector('[data-testid="widget-send-btn"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((host.querySelector('[data-testid="widget-escalate-btn"]') as HTMLButtonElement).disabled).toBe(true);
+    expect(onAuthRequired).toHaveBeenCalledWith('guests_not_allowed');
+    instance.destroy();
+  });
+
+  it('renders structured server error message safely inside widget-error-box while keeping network fallback', async () => {
+    loadWidgetScript();
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const transport = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        json: async () => ({
+          error: { code: 'guardrail_blocked', message: 'Blocked by tenant firewall: <script>alert(1)</script>' },
+        }),
+      })
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'));
+
+    const instance = window.FreeLLMAPISupport.init({
+      container: host,
+      tenantKey: 'tenant_err',
+      contextToken: 'tok_err',
+      startOpen: true,
+      transport,
+    });
+
+    instance.sendMessage('bad prompt');
+    await vi.waitFor(() => expect(host.querySelector('[data-testid="widget-error-box"]')).toBeTruthy());
+    const box1 = host.querySelector('[data-testid="widget-error-box"]') as HTMLElement;
+    expect(box1.textContent).toContain('Blocked by tenant firewall: <script>alert(1)</script>');
+    expect(box1.querySelector('script')).toBeNull();
+
+    instance.sendMessage('offline prompt');
+    await vi.waitFor(() => expect(host.querySelectorAll('[data-testid="widget-error-box"]').length).toBe(2));
+    const box2 = host.querySelectorAll('[data-testid="widget-error-box"]')[1] as HTMLElement;
+    expect(box2.textContent).toContain('Network error. Please try again.');
+    instance.destroy();
+  });
 });

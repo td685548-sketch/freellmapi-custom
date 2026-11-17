@@ -6,7 +6,7 @@
 
 **Created**: 2026-11-18
 
-**Status**: Draft
+**Status**: Hoàn thành — xem [specs/README.md](../README.md)
 
 **Input**: User description: "Ở trang Service Desk Studio (/thruline/support-desk), không chỉ tùy biến giao diện mà còn có thể test trực tiếp theo từng tenant được chọn về AI, các tính năng, RAG, phân quyền,... tất cả các tính năng mà người dùng cuối có thể thấy và chat với AI như nào thì ở đây y hệt như thế."
 
