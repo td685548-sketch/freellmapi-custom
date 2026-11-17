@@ -48,6 +48,7 @@ import { newClientAbortError, isUpstreamClassificationOutput } from './error-cla
 import { logRequest } from './request-log.js';
 import { getStickyModel, setStickyModel } from '../routes/proxy.js';
 import type { CompletionOptions } from '../providers/base.js';
+import { contextRoutingTokens, fitContextForRoute } from '../custom/context-budget/hooks.js';
 
 export interface InboundChatRequest {
   model?: string;
@@ -239,7 +240,7 @@ export async function runInboundChat(
       // are skipped by the existing gates in router.ts instead of re-firing.
       const routingTotal = fallbackRoutingTokens(state, estimatedTotal, outputReserve);
       return routeRequest(
-        routingTotal,
+        contextRoutingTokens(req, routingTotal, input.messages),
         state.skipKeys.size ? state.skipKeys : undefined,
         pin.preferredModel,
         imageRequest,
@@ -252,6 +253,7 @@ export async function runInboundChat(
       );
     },
     dispatch: async (route, attempt) => {
+      input.messages = fitContextForRoute(req, res, input.messages, route, outputReserve);
       if (!input.stream) {
         const result = await route.provider.chatCompletion(
           route.apiKey,

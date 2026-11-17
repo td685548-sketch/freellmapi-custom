@@ -53,6 +53,7 @@ import {
 } from '../services/fusion.js';
 import { applyDecisionRouting, routingStrategyHeader } from '../services/routing-decision.js';
 import { resolveListedClaudeAlias } from '../services/anthropic-map.js';
+import { contextRoutingTokens, fitContextForRoute } from '../custom/context-budget/hooks.js';
 
 export const responsesRouter = Router();
 
@@ -1230,9 +1231,10 @@ export async function handleResponses(req: Request, res: Response): Promise<void
       // size latched onto state so the existing size gates in router.ts skip
       // low-TPM / small-context models on retry.
       const routingTotal = fallbackRoutingTokens(state, estimatedTotal, outputReserve);
-      return routeRequest(routingTotal, state.skipKeys.size > 0 ? state.skipKeys : undefined, preferredModel, hasImage, wantsTools, state.skipModels.size > 0 ? state.skipModels : undefined, groupChain ?? resolvedChain?.chain, completionOpts.response_format !== undefined, state.skipPlatforms.size > 0 ? state.skipPlatforms : undefined, outputReserve, taskType, resolvedChain?.strategyOverride);
+      return routeRequest(contextRoutingTokens(req, routingTotal, messages), state.skipKeys.size > 0 ? state.skipKeys : undefined, preferredModel, hasImage, wantsTools, state.skipModels.size > 0 ? state.skipModels : undefined, groupChain ?? resolvedChain?.chain, completionOpts.response_format !== undefined, state.skipPlatforms.size > 0 ? state.skipPlatforms : undefined, outputReserve, taskType, resolvedChain?.strategyOverride);
     },
     dispatch: async (route, attempt, ctx) => {
+      messages = fitContextForRoute(req, res, messages, route, outputReserve);
       const contextBudget = routeOutputBudget(route, estimatedInputTokens);
       const routeOpts = contextBudget != null ? { ...dispatchOpts, contextBudget } : dispatchOpts;
       traceRouteEvent('Responses', {

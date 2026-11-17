@@ -1,4 +1,4 @@
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import {
   CITATIONS_HEADER_NAME,
   RETRIEVAL_HEADER_NAME,
@@ -8,6 +8,7 @@ import {
   type RetrievalMode,
   type Wire,
 } from '@freellmapi/shared/ai-platform-retrieval.js';
+import { getRegistry } from '../../context-budget/registry.js';
 import type { OutputFilter, OutputFilterContext } from '../wire/interceptor.js';
 
 export type CitationOutputFilter = OutputFilter & {
@@ -159,7 +160,7 @@ export function applyCitationsHeader(
 export function citationFilter(
   wire: Wire,
   hits: RetrievalHit[],
-  opts?: { disabled?: boolean; allowedDocIds?: Set<string> },
+  opts?: { disabled?: boolean; allowedDocIds?: Set<string>; req?: Request },
 ): CitationOutputFilter | null {
   if (opts?.disabled) return null;
   const filteredHits = opts?.allowedDocIds
@@ -177,6 +178,9 @@ export function citationFilter(
     },
     onResponseObject(obj: Record<string, unknown>, ctx?: OutputFilterContext) {
       if (ctx?.blocked) {
+        return undefined;
+      }
+      if (opts?.req && getRegistry(opts.req)?.knowledgeDropped) {
         return undefined;
       }
       if (wire !== 'openai-chat' && wire !== 'responses') {

@@ -26,6 +26,7 @@ import { feedbackIngestRouter, profileFeedbackRouter } from '../routes/feedback.
 import { maybeRollUp } from '../services/usage-daily.js';
 import { maybeSendWeeklyReport } from '../services/usage-report.js';
 import { usageReportSettingsRouter } from '../routes/usage-report-settings.js';
+import { contextPolicyRouter, contextPolicySettingsRouter } from '../routes/context-policy.js';
 import { auditMiddleware } from '../services/audit-log.js';
 import { auditLogRouter } from '../routes/audit-log.js';
 import { playgroundAttribution } from './playground-attribution.js';
@@ -256,11 +257,13 @@ export function registerCustomRoutes(app: Express): void {
   app.use('/api/analytics', analyticsMemo);
   app.use(['/api/keys', '/api/embeddings', '/api/media', '/api/decisions'], guardKeyAddition);
   // Usage and request cap per client profile; the manage_settings gate for this prefix is installed just above.
-  app.use('/api/client-profiles', profileAnalyticsRouter, profileQuotaRouter, profileRestrictionsRouter, profileTestRouter, profileKeyRotationRouter, profileRequestsRouter, endUsersRouter, profileKnowledgeRouter, profileConversationsRouter, contentFilterRouter, quickAnswersRouter, profileFeedbackRouter);
+  app.use('/api/client-profiles', profileAnalyticsRouter, profileQuotaRouter, profileRestrictionsRouter, profileTestRouter, profileKeyRotationRouter, profileRequestsRouter, endUsersRouter, profileKnowledgeRouter, profileConversationsRouter, contentFilterRouter, quickAnswersRouter, profileFeedbackRouter, contextPolicyRouter);
   // Where usage alerts go; the /api/settings gate above covers it (view_settings / edit_settings).
   app.use('/api/settings/usage-alerts', usageAlertSettingsRouter);
   // The weekly usage report; same gate (view_settings / edit_settings, see permission-actions.ts).
   app.use('/api/settings/usage-report', usageReportSettingsRouter);
+  // System default context budget policy; same gate (view_settings / edit_settings, see permission-actions.ts).
+  app.use('/api/settings/context-policy', contextPolicySettingsRouter);
   // Usage ranking of accounts and client keys; its view_usage gate is in PERMISSION_GATES.
   app.use('/api/usage', usageRouter);
 

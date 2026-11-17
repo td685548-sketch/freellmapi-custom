@@ -61,16 +61,29 @@ function deleteConversationRows(ids: number[]): void {
   ]);
 }
 
+export interface HistoryCandidateMessage {
+  id: number;
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 export type HistoryResult =
   | { ok: true; conversationId: number | null; history: Array<{ role: 'user' | 'assistant'; content: string }>; summary: string | null }
   | { ok: false; reason: 'end_user_mismatch' };
 
-/**
- * The earlier turns to put in front of the new messages: the newest ones within `maxMessages` and
- * `maxChars`, starting with a user turn. A conversation started for an end user can only be continued
- * for that same end user; one started without an end user can be continued by any request of the key.
- */
-export function loadHistory(profileId: number, key: string, endUser: string | null, s: ConversationSettings, now = Date.now()): HistoryResult {
+export type HistoryCandidatesResult =
+  | { ok: true; conversationId: number | null; history: HistoryCandidateMessage[]; summary: string | null }
+  | { ok: false; reason: 'end_user_mismatch' };
+
+function loadHistoryRows(
+  profileId: number,
+  key: string,
+  endUser: string | null,
+  s: ConversationSettings,
+  maxMessages: number,
+  maxChars: number,
+  now: number,
+): HistoryCandidatesResult {
   const db = getDb();
   const row = db.prepare('SELECT id, end_user AS endUser, updated_at AS updatedAt, summary FROM custom_conversations WHERE profile_id = ? AND conv_key = ?')
     .get(profileId, key) as (ConvRow & { summary: string | null }) | undefined;
@@ -81,12 +94,12 @@ export function loadHistory(profileId: number, key: string, endUser: string | nu
   }
   if (row.endUser !== null && row.endUser !== endUser) return { ok: false, reason: 'end_user_mismatch' };
 
-  const newest = db.prepare('SELECT role, content FROM custom_conversation_messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?')
-    .all(row.id, s.maxMessages) as Array<{ role: 'user' | 'assistant'; content: string }>;
-  const kept: typeof newest = [];
+  const newest = db.prepare('SELECT id, role, content FROM custom_conversation_messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?')
+    .all(row.id, maxMessages) as HistoryCandidateMessage[];
+  const kept: HistoryCandidateMessage[] = [];
   let chars = 0;
   for (const m of newest) {
-    if (chars + m.content.length > s.maxChars) break;
+    if (chars + m.content.length > maxChars) break;
     chars += m.content.length;
     kept.push(m);
   }
@@ -95,31 +108,75 @@ export function loadHistory(profileId: number, key: string, endUser: string | nu
   return { ok: true, conversationId: row.id, history: kept, summary: s.summarize && row.summary ? row.summary : null };
 }
 
+/**
+ * The earlier turns to put in front of the new messages: the newest ones within `maxMessages` and
+ * `maxChars`, starting with a user turn. A conversation started for an end user can only be continued
+ * for that same end user; one started without an end user can be continued by any request of the key.
+ */
+export function loadHistory(profileId: number, key: string, endUser: string | null, s: ConversationSettings, now = Date.now()): HistoryResult {
+  const res = loadHistoryRows(profileId, key, endUser, s, s.maxMessages, s.maxChars, now);
+  if (!res.ok) return res;
+  return {
+    ok: true,
+    conversationId: res.conversationId,
+    history: res.history.map(({ role, content }) => ({ role, content })),
+    summary: res.summary,
+  };
+}
+
+/**
+ * Loads candidate history messages (each carrying its DB `id`) up to caller-supplied
+ * message/character ceilings so token-budgeted context assembly can fit them at dispatch.
+ */
+export function loadHistoryCandidates(
+  profileId: number,
+  key: string,
+  endUser: string | null,
+  s: ConversationSettings,
+  limits: { maxMessages: number; maxChars: number },
+  now = Date.now(),
+): HistoryCandidatesResult {
+  return loadHistoryRows(profileId, key, endUser, s, limits.maxMessages, limits.maxChars, now);
+}
+
 /** Most characters of earlier turns folded into the summary in one call. */
 const MAX_FOLD_CHARS = 16_000;
 
 /**
  * Turns that no longer fit the history window and are not in the summary yet, oldest first, within
  * MAX_FOLD_CHARS; with the current summary. Null when there is nothing to fold.
+ * When `boundaryId` is provided, folds messages with `summarized_through < id < boundaryId`
+ * instead of recomputing the window from `maxMessages` / `maxChars`.
  */
-export function foldableTurns(conversationId: number, s: ConversationSettings): { summary: string | null; turns: Array<{ id: number; role: string; content: string }> } | null {
+export function foldableTurns(
+  conversationId: number,
+  s: ConversationSettings,
+  boundaryId?: number | null,
+): { summary: string | null; turns: Array<{ id: number; role: string; content: string }> } | null {
   const db = getDb();
   const conv = db.prepare('SELECT summary, summarized_through AS through FROM custom_conversations WHERE id = ?').get(conversationId) as { summary: string | null; through: number } | undefined;
   if (!conv) return null;
-  // The oldest message still sent as history, by the same count and character rules as loadHistory;
-  // everything older (and newer than the summary) is foldable.
-  const newest = db.prepare('SELECT id, role, LENGTH(content) AS len FROM custom_conversation_messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?')
-    .all(conversationId, s.maxMessages + 1) as Array<{ id: number; role: string; len: number }>;
-  const kept: typeof newest = [];
-  let used = 0;
-  for (const m of newest.slice(0, s.maxMessages)) {
-    if (used + m.len > s.maxChars) break;
-    used += m.len;
-    kept.push(m);
+
+  let firstKept: number;
+  if (boundaryId !== undefined && boundaryId !== null) {
+    firstKept = boundaryId;
+  } else {
+    // The oldest message still sent as history, by the same count and character rules as loadHistory;
+    // everything older (and newer than the summary) is foldable.
+    const newest = db.prepare('SELECT id, role, LENGTH(content) AS len FROM custom_conversation_messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?')
+      .all(conversationId, s.maxMessages + 1) as Array<{ id: number; role: string; len: number }>;
+    const kept: typeof newest = [];
+    let used = 0;
+    for (const m of newest.slice(0, s.maxMessages)) {
+      if (used + m.len > s.maxChars) break;
+      used += m.len;
+      kept.push(m);
+    }
+    while (kept.length > 0 && kept[kept.length - 1]!.role !== 'user') kept.pop(); // oldest first must be a user turn
+    if (kept.length === newest.length) return null; // everything still fits
+    firstKept = kept.length ? kept[kept.length - 1]!.id : Number.MAX_SAFE_INTEGER;
   }
-  while (kept.length > 0 && kept[kept.length - 1]!.role !== 'user') kept.pop(); // oldest first must be a user turn
-  if (kept.length === newest.length) return null; // everything still fits
-  const firstKept = kept.length ? kept[kept.length - 1]!.id : Number.MAX_SAFE_INTEGER;
+
   const rows = db.prepare('SELECT id, role, content FROM custom_conversation_messages WHERE conversation_id = ? AND id > ? AND id < ? ORDER BY id LIMIT 200')
     .all(conversationId, conv.through, firstKept) as Array<{ id: number; role: string; content: string }>;
   const turns: typeof rows = [];
@@ -130,6 +187,13 @@ export function foldableTurns(conversationId: number, s: ConversationSettings): 
     turns.push(r);
   }
   return turns.length ? { summary: conv.summary, turns } : null;
+}
+
+/** Persists the oldest history message id actually sent in the latest budget-fitted turn. */
+export function saveWindowStart(conversationId: number, messageId: number | null): void {
+  getDb()
+    .prepare('UPDATE custom_conversations SET context_window_start_id = ? WHERE id = ?')
+    .run(messageId, conversationId);
 }
 
 export function saveSummary(conversationId: number, summary: string, throughId: number): void {
