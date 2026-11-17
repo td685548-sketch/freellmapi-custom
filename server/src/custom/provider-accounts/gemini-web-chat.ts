@@ -511,8 +511,7 @@ export async function rotateGeminiCookies(
 
   let inflight = rotateInFlight.get(rotationKey);
   if (!inflight) {
-    let task!: Promise<RotateCookiesRawResult>;
-    task = (async (): Promise<RotateCookiesRawResult> => {
+    const task = (async (): Promise<RotateCookiesRawResult> => {
       const { signal, cleanup } = createRequestSignal(REQUEST_TIMEOUT_MS, externalSignal);
       try {
         await assertProviderUrlAllowed(GEMINI_ROTATE_COOKIES_URL);
@@ -549,11 +548,12 @@ export async function rotateGeminiCookies(
         return { ok: false, setCookies: [] };
       } finally {
         cleanup();
-        if (rotateInFlight.get(rotationKey) === task) {
-          rotateInFlight.delete(rotationKey);
-        }
       }
-    })();
+    })().finally(() => {
+      if (rotateInFlight.get(rotationKey) === task) {
+        rotateInFlight.delete(rotationKey);
+      }
+    });
 
     rotateInFlight.set(rotationKey, task);
     inflight = task;
