@@ -442,4 +442,44 @@ describe('Support Operations Center', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
     await screen.findByRole('option', { name: 'Demo Shop' })
   })
+
+  it('converts uploaded Word/Excel files to Markdown before saving in KnowledgeTab', async () => {
+    const normal = vi.mocked(apiFetch).getMockImplementation()!
+    vi.mocked(apiFetch).mockImplementation(async (path, options) => {
+      if (path === '/api/thruline/support/tenants/1/knowledge/convert') {
+        return {
+          ok: true,
+          title: 'SLA Guide',
+          format: 'markdown',
+          sourceFormat: 'docx',
+          markdown: '# SLA Guide\n\nResponse within 1 hour.',
+          charCount: 38,
+          truncated: false,
+          warnings: [],
+        }
+      }
+      return normal(path, options)
+    })
+
+    await mount()
+    const fileInput = screen.getByTestId('enterprise-kb-file-input') as HTMLInputElement
+    const docxFile = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04])], 'SLA Guide.docx', {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    })
+    await act(async () => {
+      Object.defineProperty(fileInput, 'files', { configurable: true, value: [docxFile] })
+      fileInput.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+
+    await screen.findByText(/Converted SLA Guide\.docx to Markdown/)
+    expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('SLA Guide')
+    expect((screen.getByLabelText('Content') as HTMLTextAreaElement).value).toContain('# SLA Guide')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save document' }))
+    await waitFor(() => expect(writes('/knowledge')).toHaveLength(1))
+    expect(JSON.parse(String(writes('/knowledge')[0]![1]!.body))).toMatchObject({
+      title: 'SLA Guide',
+      content: '# SLA Guide\n\nResponse within 1 hour.',
+    })
+  })
 })

@@ -30,6 +30,7 @@ import { SupportStoreError, type SupportTenant } from './support-store.js';
 import { resolveTenant } from './support-router.js';
 import { getSupportRuntimePolicy } from './support-runtime-store.js';
 import { maskSupportSensitiveText } from './support-knowledge.js';
+import { handleKnowledgeDocumentConvert } from '../../routes/knowledge-document-upload.js';
 
 export const xSupportEvidenceConsoleRouter = Router();
 
@@ -322,6 +323,16 @@ xSupportEvidenceConsoleRouter.get(
     } catch (err) {
       sendEvidenceError(res, err, 'Failed to read source revision.');
     }
+  },
+);
+
+xSupportEvidenceConsoleRouter.post(
+  '/tenants/:id/knowledge-library/convert',
+  (req: Request, res: Response): void => {
+    if (!resolveKnowledgeTenant(req, res)) return;
+    handleKnowledgeDocumentConvert(req, res, {
+      maxRecommendedChars: SUPPORT_EVIDENCE_LIMITS.maxNormalizedChars,
+    });
   },
 );
 

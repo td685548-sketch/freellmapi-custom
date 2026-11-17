@@ -1440,7 +1440,6 @@ export const VI: Record<string, string> = {
   "90d": "90 ngày",
   "Daily breakdown ({days})": "Chi tiết theo ngày ({days})",
   "Date": "Ngày",
-
   // Customer AI Hub, Smart Personal-Key Routing & Anomaly Radar (Spec 024)
   "AI Assistants catalog": "Danh mục Trợ lý AI",
   "The published AI Assistants catalog (guest-preview cards and starter prompts only, never internal system prompts).": "Danh mục Trợ lý AI đã phát hành (chỉ gồm thẻ xem trước và gợi ý mẫu cho khách, không bao giờ lộ chỉ dẫn hệ thống nội bộ).",
@@ -1547,4 +1546,12 @@ export const VI: Record<string, string> = {
   "Applying…": "Đang áp dụng…",
   "Switch key to Eco": "Chuyển key sang Eco",
   "Switch all keys to Eco": "Chuyển tất cả sang Eco",
+
+  // Automatic Word & Excel to Markdown conversion for RAG (Spec 026)
+  "Upload file (.docx, .xlsx, .csv, .md)": "Tải tệp lên (.docx, .xlsx, .csv, .md)",
+  "Converting…": "Đang chuyển đổi…",
+  "File exceeds {maxMb} MiB upload limit": "Tệp vượt quá giới hạn tải lên {maxMb} MiB",
+  "Converted Markdown has {chars} characters (limit {max}). Trim before saving.": "Nội dung Markdown sau khi chuyển có {chars} ký tự (giới hạn {max}). Hãy rút gọn trước khi lưu.",
+  "Converted {name} to Markdown": "Đã chuyển {name} sang Markdown",
+  "Could not convert file": "Không chuyển đổi được tệp",
 }
