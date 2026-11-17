@@ -781,12 +781,25 @@ function socksFetch(
         },
       });
 
-      const hdrs: Record<string, string> = {};
+      const hdrs = new Headers();
       for (const [k, v] of Object.entries(res.headers)) {
-        hdrs[k] = v as string;
+        if (v === undefined) continue;
+        if (Array.isArray(v)) {
+          for (const item of v) hdrs.append(k, item);
+        } else {
+          hdrs.append(k, v);
+        }
       }
 
-      resolve(new Response(body, { status, statusText, headers: hdrs }));
+      const response = new Response(body, { status, statusText, headers: hdrs });
+      if (!response.url) {
+        try {
+          Object.defineProperty(response, 'url', { value: urlStr, configurable: true });
+        } catch {
+          // Ignore if Response.url cannot be defined in this runtime
+        }
+      }
+      resolve(response);
     });
 
     req.on('error', (err) => reject(err));

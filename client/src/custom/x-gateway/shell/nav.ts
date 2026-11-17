@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { ArrowLeftRight, BarChart3, BookOpen, Film, Gauge, Headphones, Headset, Home, KeyRound, Layers, LifeBuoy, MessageSquare, Network, Scissors, ScrollText, Server, ShieldCheck, Sparkles, Terminal } from 'lucide-react'
+import { ArrowLeftRight, BarChart3, BookOpen, Film, Gauge, Headphones, Headset, Home, KeyRound, Layers, LifeBuoy, MessageSquare, Network, Scissors, ScrollText, Server, Settings, ShieldCheck, Sparkles, Terminal } from 'lucide-react'
 import { useUserSession } from '../../use-session'
 import { useXStrings } from '../strings'
 import { useMgmtStrings } from '../management-strings'
@@ -16,6 +16,7 @@ import { useSupportEvidenceStrings } from '../support-evidence-strings'
 import { useSupportServiceDeskStrings } from '../support-service-desk-strings'
 import { useSupportOutputStrings } from '../support-output-strings'
 import { useShellStrings } from '../shell-strings'
+import { useSettingsStrings } from '../settings-strings'
 
 export interface NavItem { to: string; label: string; icon: LucideIcon }
 export interface NavGroup { id: string; label: string; items: NavItem[] }
@@ -37,6 +38,7 @@ export function useNavGroups(): NavGroup[] {
   const desk = useSupportServiceDeskStrings()
   const output = useSupportOutputStrings()
   const sh = useShellStrings()
+  const set = useSettingsStrings()
   const session = useUserSession()
   const canView = session.hasPermission('view_keys')
   const canUsage = session.hasPermission('view_x_usage')
@@ -72,6 +74,9 @@ export function useNavGroups(): NavGroup[] {
     { id: 'monitor', label: sh.groupMonitor, items: [
       ...(canUsage ? [{ to: '/thruline/quota', label: 'Quota', icon: Gauge }] : []),
       ...(canView ? [{ to: '/thruline/usage', label: s.usage, icon: BarChart3 }, { to: '/thruline/logs', label: m.logs, icon: ScrollText }] : []),
+    ] },
+    { id: 'preferences', label: set.settingsNav, items: [
+      { to: '/thruline/settings', label: set.settingsNav, icon: Settings },
     ] },
   ]
   return groups.filter(group => group.items.length > 0)

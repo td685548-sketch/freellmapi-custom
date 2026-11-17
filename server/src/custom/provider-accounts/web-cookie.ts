@@ -9,7 +9,7 @@ import type {
   Platform,
 } from '@freellmapi/shared/types.js';
 import { contentToString, estimateInputTokens } from '../../lib/content.js';
-import { BaseProvider, providerHttpError, type CompletionOptions, type KeyValidationResult } from '../../providers/base.js';
+import { BaseProvider, providerHttpError, type CompletionOptions, type KeyValidationOptions, type KeyValidationResult } from '../../providers/base.js';
 import { streamStallTimeoutMs } from '../../lib/provider-timeout.js';
 import type { QuotaObservationContext } from '../../services/provider-quota.js';
 import { runChatGptWebChat } from './chatgpt-web-chat.js';
@@ -1014,7 +1014,7 @@ export class WebCookieProvider extends BaseProvider {
   override async validateKey(
     apiKey: string,
     _quotaContext?: QuotaObservationContext,
-    options?: { onCredentialUpdate?: (nextCredential: string) => void },
+    options?: KeyValidationOptions,
   ): Promise<KeyValidationResult> {
     if (!apiKey || !apiKey.trim()) {
       return { valid: false, error: 'Empty web session cookie or token' };
@@ -1049,7 +1049,7 @@ export class WebCookieProvider extends BaseProvider {
         return true;
       } catch (err) {
         const status = (err as { status?: unknown } | null)?.status;
-        if (status === 401 || status === 403) {
+        if (status === 400 || status === 401 || status === 403) {
           return {
             valid: false,
             error: err instanceof Error ? err.message : 'Gemini Web session is not signed in',

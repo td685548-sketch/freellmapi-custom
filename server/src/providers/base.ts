@@ -252,6 +252,11 @@ export interface KeyValidationFailure {
 
 export type KeyValidationResult = boolean | KeyValidationFailure;
 
+export interface KeyValidationOptions {
+  /** Callback invoked when key validation rotates a session credential (e.g. Gemini Web cookies). */
+  onCredentialUpdate?: (nextCredential: string) => void;
+}
+
 export abstract class BaseProvider {
   abstract readonly platform: Platform;
   abstract readonly name: string;
@@ -288,7 +293,7 @@ export abstract class BaseProvider {
   abstract validateKey(
     apiKey: string,
     quotaContext?: QuotaObservationContext,
-    options?: { onCredentialUpdate?: (nextCredential: string) => void },
+    options?: KeyValidationOptions,
   ): Promise<KeyValidationResult>;
 
   /**
