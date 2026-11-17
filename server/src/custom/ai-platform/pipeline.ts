@@ -16,6 +16,13 @@ import { cacheUsageFilter } from './prompt-cache/stats.js';
 import { detectWire } from './wire/detect.js';
 import { installInterceptor, type OutputFilter } from './wire/interceptor.js';
 import { injectRetrievedKnowledgeForSlot6 } from '../knowledge-inject.js';
+import {
+  getKnowledgeTokenCap,
+  knowledgeCandidateMaxChars,
+  selectPassagesWithinTokens,
+  type PassageCandidate,
+  type SelectPassagesOptions,
+} from '../context-budget/gate.js';
 import { capturePromptRequestContext } from './prompts/render.js';
 import { getFlowBySlug, isFlowGrantedToProfile } from './orchestrator/definitions.js';
 import { executeFlowHttpRequest, extractRequestedModel, isFlowModel } from './orchestrator/engine.js';
@@ -191,10 +198,23 @@ export async function runPreRequest(
     installPromptCacheFilterIfNeeded(req, res, _profile);
   }
   if (flags.retrieval) {
+    const tokenCap = getKnowledgeTokenCap(req);
     await injectRetrievedKnowledgeForSlot6(req, res, {
       profileId: _profile.id,
-      maxChars: _profile.knowledge?.maxChars,
+      maxChars:
+        tokenCap !== null
+          ? knowledgeCandidateMaxChars(tokenCap)
+          : _profile.knowledge?.maxChars,
       knowledgeEnabled: _profile.knowledge?.enabled,
+      ...(tokenCap !== null
+        ? {
+            tokenCap,
+            selectPassages: <T extends PassageCandidate>(
+              passages: readonly T[],
+              options?: SelectPassagesOptions,
+            ) => selectPassagesWithinTokens(passages, tokenCap, options),
+          }
+        : {}),
     });
     refreshMcpTakeoverMessages(req);
   }
