@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import type { ConversationSettings } from '@freellmapi/shared/conversations.js';
-import { appendTurn, loadHistory, loadHistoryCandidates, normalizeConversationId } from '../services/profile-conversations.js';
+import { appendTurn, loadHistory, loadHistoryCandidates, normalizeConversationId, saveWindowStart } from '../services/profile-conversations.js';
 import { scheduleSummary } from './conversation-summary.js';
 import { historyCandidateLimits, registerHistory, registerSummary } from './context-budget/gate.js';
 import { getRegistry } from './context-budget/registry.js';
@@ -109,7 +109,25 @@ export function applyConversation(req: Request, res: Response, profileId: number
 
   captureReply(res, wire, (reply) => {
     const id = appendTurn(profileId, key, endUser, loaded.conversationId, turn, reply, settings);
-    scheduleSummary(req, profileId, id, settings);
+    if (registry && registry.fitted) {
+      saveWindowStart(id, registry.windowStartMessageId);
+      if (!registry.policy.summarize) return;
+      const budget = registry.report?.budget ?? registry.provisionalBudget ?? 0;
+      const mandatory = registry.report?.mandatory ?? registry.mandatoryTokens ?? 0;
+      const summaryCapTokens = Math.floor(
+        (Math.max(0, budget - mandatory) * registry.policy.summarySharePct) / 100,
+      );
+      const lastCandidate = (loaded.history as Array<{ id?: number }>).at(-1);
+      const boundaryId =
+        registry.windowStartMessageId ??
+        (lastCandidate?.id !== undefined ? lastCandidate.id + 1 : undefined);
+      scheduleSummary(req, profileId, id, settings, {
+        boundaryId,
+        summaryCapTokens,
+      });
+    } else {
+      scheduleSummary(req, profileId, id, settings);
+    }
   });
   return true;
 }

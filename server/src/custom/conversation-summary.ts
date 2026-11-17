@@ -20,13 +20,22 @@ function selfHost(req: Request): { host: string; port: number } {
   return { host, port: req.socket.localPort ?? 0 };
 }
 
-export function summaryPrompt(previous: string | null, turns: Array<{ role: string; content: string }>): Array<{ role: string; content: string }> {
+export interface SummaryOptions {
+  boundaryId?: number | null;
+  summaryCapTokens?: number;
+}
+
+export function summaryPrompt(
+  previous: string | null,
+  turns: Array<{ role: string; content: string }>,
+  targetWords = 200,
+): Array<{ role: string; content: string }> {
   const transcript = turns.map(t => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.content}`).join('\n\n');
   return [
     {
       role: 'system',
       content: 'You keep a running summary of a chat between a website visitor and its assistant. Write it in the language of the chat, '
-        + 'at most 200 words, as plain notes: who the visitor is, facts and preferences they gave, what was asked and answered, and anything still open. '
+        + `at most ${targetWords} words, as plain notes: who the visitor is, facts and preferences they gave, what was asked and answered, and anything still open. `
         + 'Keep names, numbers, order ids and dates exactly. Output only the summary.',
     },
     { role: 'user', content: `${previous ? `Summary so far:\n${previous}\n\n` : ''}Newer part of the chat:\n${transcript}\n\nWrite the updated summary.` },
@@ -34,19 +43,28 @@ export function summaryPrompt(previous: string | null, turns: Array<{ role: stri
 }
 
 /** Fold what no longer fits into the summary; resolves when done (never rejects). */
-export async function summarizeConversation(profileId: number, conversationId: number, s: ConversationSettings, target: { host: string; port: number }): Promise<boolean> {
+export async function summarizeConversation(
+  profileId: number,
+  conversationId: number,
+  s: ConversationSettings,
+  target: { host: string; port: number },
+  options: SummaryOptions = {},
+): Promise<boolean> {
   if (inFlight.has(conversationId)) return false;
   inFlight.add(conversationId);
   try {
-    const fold = foldableTurns(conversationId, s);
+    const fold = foldableTurns(conversationId, s, options.boundaryId);
     if (!fold) return false;
     const row = getDb().prepare('SELECT encrypted_key, iv, auth_tag FROM client_profiles WHERE id = ? AND enabled = 1').get(profileId) as { encrypted_key: string; iv: string; auth_tag: string } | undefined;
     if (!row) return false;
     const key = decrypt(row.encrypted_key, row.iv, row.auth_tag);
+    const cap = options.summaryCapTokens;
+    const targetWords = cap !== undefined ? Math.min(400, Math.max(80, Math.round(cap * 0.6))) : 200;
+    const maxTokens = cap !== undefined ? cap : 500;
     const res = await fetch(`http://${target.host}:${target.port}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${key}`, 'user-agent': SUMMARY_USER_AGENT, host: `127.0.0.1:${target.port}` },
-      body: JSON.stringify({ model: 'auto', max_tokens: 500, messages: summaryPrompt(fold.summary, fold.turns) }),
+      body: JSON.stringify({ model: 'auto', max_tokens: maxTokens, messages: summaryPrompt(fold.summary, fold.turns, targetWords) }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     if (!res.ok) return false;
@@ -64,8 +82,14 @@ export async function summarizeConversation(profileId: number, conversationId: n
 }
 
 /** Start a background summary after this request's turn was stored. */
-export function scheduleSummary(req: Request, profileId: number, conversationId: number, s: ConversationSettings): void {
+export function scheduleSummary(
+  req: Request,
+  profileId: number,
+  conversationId: number,
+  s: ConversationSettings,
+  options?: SummaryOptions,
+): void {
   if (!s.summarize) return;
   const target = selfHost(req);
-  setImmediate(() => { void summarizeConversation(profileId, conversationId, s, target); });
+  setImmediate(() => { void summarizeConversation(profileId, conversationId, s, target, options); });
 }

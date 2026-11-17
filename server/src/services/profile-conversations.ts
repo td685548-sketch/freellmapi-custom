@@ -145,25 +145,38 @@ const MAX_FOLD_CHARS = 16_000;
 /**
  * Turns that no longer fit the history window and are not in the summary yet, oldest first, within
  * MAX_FOLD_CHARS; with the current summary. Null when there is nothing to fold.
+ * When `boundaryId` is provided, folds messages with `summarized_through < id < boundaryId`
+ * instead of recomputing the window from `maxMessages` / `maxChars`.
  */
-export function foldableTurns(conversationId: number, s: ConversationSettings): { summary: string | null; turns: Array<{ id: number; role: string; content: string }> } | null {
+export function foldableTurns(
+  conversationId: number,
+  s: ConversationSettings,
+  boundaryId?: number | null,
+): { summary: string | null; turns: Array<{ id: number; role: string; content: string }> } | null {
   const db = getDb();
   const conv = db.prepare('SELECT summary, summarized_through AS through FROM custom_conversations WHERE id = ?').get(conversationId) as { summary: string | null; through: number } | undefined;
   if (!conv) return null;
-  // The oldest message still sent as history, by the same count and character rules as loadHistory;
-  // everything older (and newer than the summary) is foldable.
-  const newest = db.prepare('SELECT id, role, LENGTH(content) AS len FROM custom_conversation_messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?')
-    .all(conversationId, s.maxMessages + 1) as Array<{ id: number; role: string; len: number }>;
-  const kept: typeof newest = [];
-  let used = 0;
-  for (const m of newest.slice(0, s.maxMessages)) {
-    if (used + m.len > s.maxChars) break;
-    used += m.len;
-    kept.push(m);
+
+  let firstKept: number;
+  if (boundaryId !== undefined && boundaryId !== null) {
+    firstKept = boundaryId;
+  } else {
+    // The oldest message still sent as history, by the same count and character rules as loadHistory;
+    // everything older (and newer than the summary) is foldable.
+    const newest = db.prepare('SELECT id, role, LENGTH(content) AS len FROM custom_conversation_messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?')
+      .all(conversationId, s.maxMessages + 1) as Array<{ id: number; role: string; len: number }>;
+    const kept: typeof newest = [];
+    let used = 0;
+    for (const m of newest.slice(0, s.maxMessages)) {
+      if (used + m.len > s.maxChars) break;
+      used += m.len;
+      kept.push(m);
+    }
+    while (kept.length > 0 && kept[kept.length - 1]!.role !== 'user') kept.pop(); // oldest first must be a user turn
+    if (kept.length === newest.length) return null; // everything still fits
+    firstKept = kept.length ? kept[kept.length - 1]!.id : Number.MAX_SAFE_INTEGER;
   }
-  while (kept.length > 0 && kept[kept.length - 1]!.role !== 'user') kept.pop(); // oldest first must be a user turn
-  if (kept.length === newest.length) return null; // everything still fits
-  const firstKept = kept.length ? kept[kept.length - 1]!.id : Number.MAX_SAFE_INTEGER;
+
   const rows = db.prepare('SELECT id, role, content FROM custom_conversation_messages WHERE conversation_id = ? AND id > ? AND id < ? ORDER BY id LIMIT 200')
     .all(conversationId, conv.through, firstKept) as Array<{ id: number; role: string; content: string }>;
   const turns: typeof rows = [];
@@ -174,6 +187,13 @@ export function foldableTurns(conversationId: number, s: ConversationSettings): 
     turns.push(r);
   }
   return turns.length ? { summary: conv.summary, turns } : null;
+}
+
+/** Persists the oldest history message id actually sent in the latest budget-fitted turn. */
+export function saveWindowStart(conversationId: number, messageId: number | null): void {
+  getDb()
+    .prepare('UPDATE custom_conversations SET context_window_start_id = ? WHERE id = ?')
+    .run(messageId, conversationId);
 }
 
 export function saveSummary(conversationId: number, summary: string, throughId: number): void {
