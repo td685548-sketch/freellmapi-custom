@@ -267,6 +267,26 @@ describe('ContextPolicyCard', () => {
     await click(button('Reset to default'))
     expect(apiFetch).toHaveBeenCalledWith('/api/client-profiles/5/context-policy', { method: 'DELETE' })
   })
+
+  it('explains all three clientHistoryMode options and highlights trimming alteration warning', async () => {
+    await render()
+    const explanations = container.querySelector('[aria-label="Client-sent history mode explanations"]')!
+    expect(explanations.textContent).toContain('Keep as sent')
+    expect(explanations.textContent).toContain('Trim on overflow')
+    expect(explanations.textContent).toContain('Enforce budget')
+    expect(explanations.textContent).toContain('Forwards client-sent messages unchanged')
+    expect(explanations.textContent).toContain('Alters the client-sent history')
+    expect(container.textContent).not.toContain('Note: trimming modes modify')
+
+    await click(tab('Enforce budget'))
+    expect(container.textContent).toContain('Note: trimming modes modify the message history sent by the client')
+
+    await click(button('Save'))
+    const putCall = vi.mocked(apiFetch).mock.calls.find(([, i]) => i?.method === 'PUT')
+    expect(JSON.parse(String(putCall![1]!.body))).toMatchObject({
+      clientHistoryMode: 'enforce_budget',
+    })
+  })
 })
 
 describe('ContextPreviewDialog & ConversationsCard integration', () => {
@@ -347,7 +367,7 @@ describe('ContextPreviewDialog & ConversationsCard integration', () => {
     expect(dialogText).toContain('14,400')
     expect(dialogText).toContain('Older question')
     expect(dialogText).toContain('Budget')
-    expect(dialogText).toContain('Summarized through #9 · 2 pending')
+    expect(dialogText).toContain('Summarized through message #9 · 2 messages pending fold')
   })
 })
 

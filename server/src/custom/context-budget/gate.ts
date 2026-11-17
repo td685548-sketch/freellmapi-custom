@@ -179,6 +179,179 @@ export function registerSummary(req: Request, text: string | null | undefined): 
   });
 }
 
+/**
+ * Register an injected knowledge block or passage on the request's `SegmentRegistry`.
+ */
+export function registerKnowledge(
+  req: Request,
+  text: string | null | undefined,
+  seq = 0,
+): void {
+  if (!text) return;
+  registerUnit(req, {
+    kind: 'knowledge',
+    role: 'system',
+    text,
+    seq,
+  });
+}
+
+export interface PassageCandidate {
+  text: string;
+  score?: number;
+}
+
+export interface SelectPassagesOptions {
+  /** Registered context units (`history` / `summary`) to deduplicate against; falls back to `getRegistry(req)?.units`. */
+  existingUnits?: readonly { kind: string; text: string }[];
+  /** Express request whose `SegmentRegistry` supplies `history`/`summary` units when `existingUnits` is omitted. */
+  req?: Request;
+  /** Minimum absolute score threshold (e.g. `policy.knowledgeMinScore` for semantic retrieval). */
+  minScore?: number | null;
+  /** Optional 5-word shingle overlap threshold (default 0.8). */
+  dedupThreshold?: number;
+  /** Optional fixed overhead tokens (e.g. wrapper header) reserved from `tokenCap`. */
+  headerTokens?: number;
+  /** Optional per-passage wrapper overhead tokens (e.g. `### Title\n`). */
+  perPassageOverheadTokens?: number;
+}
+
+const DEFAULT_SHINGLE_SIZE = 5;
+const DEFAULT_DEDUP_THRESHOLD = 0.8;
+
+function wordTokensForShingles(text: string): string[] {
+  return text.normalize('NFC').toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+
+function extractShingles(text: string, size = DEFAULT_SHINGLE_SIZE): string[] {
+  const words = wordTokensForShingles(text);
+  if (words.length < size) return [];
+  const shingles: string[] = [];
+  for (let i = 0; i <= words.length - size; i++) {
+    shingles.push(words.slice(i, i + size).join(' '));
+  }
+  return shingles;
+}
+
+/**
+ * Returns `true` when at least `threshold` (default 0.8 = 80%) of `text`'s 5-word
+ * shingles already appear in `referenceTexts`.
+ */
+export function isShingleDuplicate(
+  text: string,
+  referenceTexts: readonly string[],
+  threshold = DEFAULT_DEDUP_THRESHOLD,
+): boolean {
+  const candidateShingles = extractShingles(text);
+  if (candidateShingles.length === 0) return false;
+
+  const refSet = new Set<string>();
+  for (const ref of referenceTexts) {
+    for (const s of extractShingles(ref)) {
+      refSet.add(s);
+    }
+  }
+  if (refSet.size === 0) return false;
+
+  let overlap = 0;
+  for (const s of candidateShingles) {
+    if (refSet.has(s)) overlap += 1;
+  }
+  return overlap / candidateShingles.length >= threshold;
+}
+
+/**
+ * Computes the provisional knowledge token cap at gate time per R7:
+ * `floor(max(0, provisionalBudget - mandatoryTokens) * knowledgeSharePct / 100)`.
+ * Returns `null` when the request has no active enabled context policy registry.
+ */
+export function getKnowledgeTokenCap(req: Request): number | null {
+  const registry = getRegistry(req);
+  if (!registry || !registry.policy.enabled) return null;
+  const available = Math.max(0, (registry.provisionalBudget ?? 0) - (registry.mandatoryTokens ?? 0));
+  return Math.floor(available * (registry.policy.knowledgeSharePct / 100));
+}
+
+/**
+ * Computes the wide character fetch limit (`tokenCap * 4`) so candidate retrieval
+ * never under-fetches non-ASCII / Vietnamese / CJK passages before token filtering.
+ */
+export function knowledgeCandidateMaxChars(tokenCap: number): number {
+  if (!Number.isFinite(tokenCap) || tokenCap <= 0) return 0;
+  return Math.floor(tokenCap) * 4;
+}
+
+/**
+ * Selects whole passages in descending score order that fit within `tokenCap`
+ * using `estimateTextTokens`, dropping any below `minScore` or with >= 80%
+ * 5-word shingle overlap against registered `history`/`summary` units.
+ */
+export function selectPassagesWithinTokens<T extends PassageCandidate>(
+  passages: readonly T[],
+  tokenCap: number,
+  options: SelectPassagesOptions = {},
+): T[] {
+  if (!Number.isFinite(tokenCap) || tokenCap <= 0 || passages.length === 0) {
+    return [];
+  }
+
+  const units =
+    options.existingUnits ??
+    (options.req ? getRegistry(options.req)?.units : undefined) ??
+    [];
+  const referenceTexts = units
+    .filter((u) => u.kind === 'history' || u.kind === 'summary')
+    .map((u) => u.text);
+
+  const refShingles = new Set<string>();
+  for (const ref of referenceTexts) {
+    for (const s of extractShingles(ref)) {
+      refShingles.add(s);
+    }
+  }
+
+  const threshold = options.dedupThreshold ?? DEFAULT_DEDUP_THRESHOLD;
+  const minScore = options.minScore;
+  const headerTokens = Math.max(0, options.headerTokens ?? 0);
+  const perPassageOverhead = Math.max(0, options.perPassageOverheadTokens ?? 0);
+
+  const ordered = [...passages].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  const selected: T[] = [];
+  let usedTokens = headerTokens;
+
+  for (const passage of ordered) {
+    if (
+      minScore !== undefined &&
+      minScore !== null &&
+      typeof passage.score === 'number' &&
+      passage.score < minScore
+    ) {
+      continue;
+    }
+
+    if (refShingles.size > 0) {
+      const shingles = extractShingles(passage.text);
+      if (shingles.length > 0) {
+        let overlap = 0;
+        for (const s of shingles) {
+          if (refShingles.has(s)) overlap += 1;
+        }
+        if (overlap / shingles.length >= threshold) {
+          continue;
+        }
+      }
+    }
+
+    const tok = estimateTextTokens(passage.text) + perPassageOverhead;
+    if (usedTokens + tok <= tokenCap) {
+      selected.push(passage);
+      usedTokens += tok;
+    }
+  }
+
+  return selected;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)

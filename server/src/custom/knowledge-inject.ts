@@ -14,6 +14,16 @@ import { getRetrievalSettingsInternal } from './ai-platform/retrieval/settings.j
 import type { Wire } from './ai-platform/wire/detect.js';
 import { markVolatileSystemText } from './ai-platform/wire/extract.js';
 import { installInterceptor } from './ai-platform/wire/interceptor.js';
+import { estimateTextTokens } from './context-budget/estimate.js';
+import {
+  getKnowledgeTokenCap,
+  knowledgeCandidateMaxChars,
+  registerKnowledge,
+  selectPassagesWithinTokens,
+  type PassageCandidate,
+  type SelectPassagesOptions,
+} from './context-budget/gate.js';
+import { getRegistry } from './context-budget/registry.js';
 
 // Adds a client key's best-matching knowledge passages to a chat request before it is routed. Works on
 // the four chat wires; the question is the latest user turn. Never throws: a failure here only means the
@@ -122,17 +132,86 @@ function isCitationsOptOut(req: Request): boolean {
   return String(val ?? '').trim().toLowerCase() === 'off';
 }
 
+const KNOWLEDGE_HEADER_TEXT =
+  'Reference material from this website. Use it when it answers the question; if it does not, answer normally. Do not mention that you were given it.\n\n';
+const MESSAGE_OVERHEAD_TOKENS = 4;
+const KNOWLEDGE_HEADER_TOKENS = MESSAGE_OVERHEAD_TOKENS + estimateTextTokens(KNOWLEDGE_HEADER_TEXT);
+const PASSAGE_OVERHEAD_TOKENS = 4;
+
+export type PassageSelector = <T extends PassageCandidate>(
+  passages: readonly T[],
+  options?: SelectPassagesOptions,
+) => T[];
+
+function fitBlockWithinTokenCap<
+  T extends { docId: number | string; title: string; text: string; score: number },
+>(
+  req: Request,
+  hits: readonly T[],
+  tokenCap: number,
+  options: {
+    minScore?: number | null;
+    selector?: PassageSelector;
+  },
+): { selected: T[]; block: string | null } {
+  if (tokenCap <= 0 || hits.length === 0) {
+    return { selected: [], block: null };
+  }
+  const selectFn =
+    options.selector ??
+    ((passages: readonly T[], opts?: SelectPassagesOptions) =>
+      selectPassagesWithinTokens(passages, tokenCap, opts));
+
+  const selected = selectFn(hits, {
+    req,
+    minScore: options.minScore ?? null,
+    headerTokens: KNOWLEDGE_HEADER_TOKENS,
+    perPassageOverheadTokens: PASSAGE_OVERHEAD_TOKENS,
+  });
+
+  while (selected.length > 0) {
+    const block = knowledgeBlock(
+      selected.map((h) => ({
+        docId: Number(h.docId),
+        title: h.title,
+        text: h.text,
+        score: h.score,
+      })),
+    );
+    if (block && MESSAGE_OVERHEAD_TOKENS + estimateTextTokens(block) <= tokenCap) {
+      return { selected, block };
+    }
+    selected.pop();
+  }
+  return { selected: [], block: null };
+}
+
 /** Returns how many passages were added (0 when none matched or the wire is not a chat wire). */
 export function injectKnowledge(req: Request, profileId: number, maxChars: number): number {
   try {
+    const tokenCap = getKnowledgeTokenCap(req);
+    const effectiveMaxChars =
+      tokenCap !== null ? knowledgeCandidateMaxChars(tokenCap) : maxChars;
+
     if (isPillarEnabled('retrieval')) {
       if (req.method !== 'POST' || !req.body || typeof req.body !== 'object') return 0;
-      pendingRetrievals.set(req, { profileId, maxChars });
+      pendingRetrievals.set(req, { profileId, maxChars: effectiveMaxChars });
       return 0;
     }
 
     const plan = resolveWireInjection(req);
     if (!plan) return 0;
+
+    if (tokenCap !== null) {
+      if (tokenCap <= 0) return 0;
+      const hits = searchKnowledge(profileId, plan.question, effectiveMaxChars);
+      const { selected, block } = fitBlockWithinTokenCap(req, hits, tokenCap, {});
+      if (!block || selected.length === 0) return 0;
+      registerKnowledge(req, block, 1);
+      markVolatileSystemText(block);
+      plan.apply(block);
+      return selected.length;
+    }
 
     const hits = searchKnowledge(profileId, plan.question, maxChars);
     const block = knowledgeBlock(hits);
@@ -149,6 +228,8 @@ export interface Slot6RetrievalOptions {
   profileId?: number;
   maxChars?: number;
   knowledgeEnabled?: boolean;
+  tokenCap?: number | null;
+  selectPassages?: PassageSelector;
 }
 
 /**
@@ -173,7 +254,12 @@ export async function injectRetrievedKnowledgeForSlot6(
   const plan = resolveWireInjection(req);
   if (!plan) return 0;
 
-  const maxChars = pending?.maxChars ?? opts?.maxChars ?? KNOWLEDGE_LIMITS.defaultMaxChars;
+  const registry = getRegistry(req);
+  const tokenCap = opts?.tokenCap !== undefined ? opts.tokenCap : getKnowledgeTokenCap(req);
+  const maxChars =
+    tokenCap !== null
+      ? knowledgeCandidateMaxChars(tokenCap)
+      : (pending?.maxChars ?? opts?.maxChars ?? KNOWLEDGE_LIMITS.defaultMaxChars);
 
   const ac = new AbortController();
   const onClose = () => {
@@ -189,16 +275,35 @@ export async function injectRetrievedKnowledgeForSlot6(
       respectPillarFlag: true,
     });
 
-    const budgetedHits = budgetHitsByChars(result.hits, maxChars);
-    const block = knowledgeBlock(
-      budgetedHits.map((h) => ({
-        docId: Number(h.docId),
-        title: h.title,
-        text: h.text,
-        score: h.score,
-      })),
-    );
+    let budgetedHits: RetrievalHit[];
+    let block: string | null;
+    if (tokenCap !== null) {
+      const minScore =
+        result.modeUsed === 'semantic'
+          ? (registry?.policy.knowledgeMinScore ?? null)
+          : null;
+      const fitted = fitBlockWithinTokenCap(req, result.hits, tokenCap, {
+        minScore,
+        selector: opts?.selectPassages,
+      });
+      budgetedHits = fitted.selected;
+      block = fitted.block;
+    } else {
+      budgetedHits = budgetHitsByChars(result.hits, maxChars);
+      block = knowledgeBlock(
+        budgetedHits.map((h) => ({
+          docId: Number(h.docId),
+          title: h.title,
+          text: h.text,
+          score: h.score,
+        })),
+      );
+    }
+
     if (block) {
+      if (tokenCap !== null) {
+        registerKnowledge(req, block, 1);
+      }
       markVolatileSystemText(block);
       plan.apply(block);
     }
@@ -213,7 +318,7 @@ export async function injectRetrievedKnowledgeForSlot6(
     });
 
     if (citationsActive && citations.length > 0) {
-      const filter = citationFilter(plan.wire, budgetedHits);
+      const filter = citationFilter(plan.wire, budgetedHits, { req });
       if (filter) {
         installInterceptor(req, res, plan.wire, [filter]);
       }
