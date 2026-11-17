@@ -41,10 +41,29 @@ const PRESET_OPTIONS: Array<{ value: ContextPreset; label: string }> = [
   { value: 'custom', label: 'Custom' },
 ]
 
-const CLIENT_HISTORY_OPTIONS: Array<{ value: ClientHistoryMode; label: string }> = [
-  { value: 'passthrough', label: 'Keep as sent' },
-  { value: 'trim_on_overflow', label: 'Trim on overflow' },
-  { value: 'enforce_budget', label: 'Enforce budget' },
+const CLIENT_HISTORY_OPTIONS: Array<{
+  value: ClientHistoryMode
+  label: string
+  description: string
+}> = [
+  {
+    value: 'passthrough',
+    label: 'Keep as sent',
+    description:
+      'Forwards client-sent messages unchanged; only server-added history, summary, and knowledge are budgeted.',
+  },
+  {
+    value: 'trim_on_overflow',
+    label: 'Trim on overflow',
+    description:
+      'Alters the client-sent history by dropping oldest turns only when the request exceeds available model windows (no summaries stored).',
+  },
+  {
+    value: 'enforce_budget',
+    label: 'Enforce budget',
+    description:
+      'Always alters the client-sent history to stay within the effective token budget while preserving system instructions, the latest user message, and open tool-call chains (no summaries stored).',
+  },
 ]
 
 const toDraft = (p: ContextPolicy): Draft => ({
@@ -447,9 +466,24 @@ export function ContextPolicyCard({ profileId, canEdit }: { profileId: number; c
               </span>
             )}
           </div>
-          <p className="text-[11px] text-muted-foreground">
-            {tc('Controls requests where the client sends full message history without X-Conversation-Id. Keep as sent is the default; trimming modes alter client-sent messages without storing summaries.')}
-          </p>
+          <ul
+            className="space-y-1 rounded-xl border bg-muted/20 p-2.5 text-[11px] text-muted-foreground"
+            aria-label="Client-sent history mode explanations"
+          >
+            {CLIENT_HISTORY_OPTIONS.map((opt) => (
+              <li
+                key={opt.value}
+                className={draft.clientHistoryMode === opt.value ? 'text-foreground' : undefined}
+              >
+                <span className="font-medium">{tc(opt.label)}:</span> {tc(opt.description)}
+              </li>
+            ))}
+          </ul>
+          {draft.clientHistoryMode !== 'passthrough' && (
+            <p className="text-[11px] font-medium text-amber-600 dark:text-amber-400">
+              {tc('Note: trimming modes modify the message history sent by the client without creating server summaries.')}
+            </p>
+          )}
         </div>
 
         {!valid && (

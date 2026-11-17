@@ -143,15 +143,16 @@ export function ContextPreviewDialog({
                     history: data.budget.historyCap.toLocaleString(),
                   })}
                 </p>
-                <p className="mt-0.5 text-[11px] text-muted-foreground tabular-nums">
+                <p className="mt-0.5 text-[11px] text-muted-foreground tabular-nums" aria-label="Summary coverage">
                   {data.summary.coversThroughMessageId !== null
-                    ? tc('Summarized through #{id} · {pending} pending', {
+                    ? tc('Summarized through message #{id}', {
                         id: data.summary.coversThroughMessageId,
-                        pending: data.summary.pendingFoldMessages,
                       })
-                    : tc('No summary yet · {pending} pending', {
-                        pending: data.summary.pendingFoldMessages,
-                      })}
+                    : tc('No summary yet')}
+                  {' · '}
+                  {tc('{count} messages pending fold', {
+                    count: data.summary.pendingFoldMessages,
+                  })}
                 </p>
               </div>
             </div>
