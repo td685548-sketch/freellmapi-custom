@@ -131,3 +131,24 @@ export const SUPPORT_LIVE_TEST_PERSONA_PRESETS: readonly SupportLiveTestPersonaP
     permissions: [],
   },
 ] as const;
+
+export interface SupportLiveTestSandboxStats {
+  ok: true;
+  tenantId: number;
+  conversationsCount: number;
+  ticketsCount: number;
+  pendingActionsCount: number;
+  csatRatingsCount: number;
+  totalCount: number;
+}
+
+export interface SupportLiveTestSandboxCleanupResponse {
+  ok: true;
+  tenantId: number;
+  deleted: {
+    conversations: number;
+    tickets: number;
+    pendingActions: number;
+    csatRatings: number;
+  };
+}

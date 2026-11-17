@@ -7,6 +7,10 @@ import {
   isMetadataIp,
 } from './support-safe-http.js';
 import { getSupportTenantSigningSecret } from './support-store.js';
+import {
+  isInLiveTestContext,
+  isLiveTestConversation,
+} from './support-live-test-sandbox.js';
 
 const CRM_KEY = 'x_gateway_support_crm_v1';
 const CSAT_KEY = 'x_gateway_support_csat_v1';
@@ -60,6 +64,7 @@ export interface SupportCsatRating {
   score: number; // 1..5 integer
   category?: string; // e.g. 'accuracy' | 'speed' | 'politeness' | 'resolution'
   comment?: string;
+  isLiveTest?: boolean;
   createdAt: string;
 }
 
@@ -394,6 +399,9 @@ export function submitSupportCsatRating(
   const store = readStore<SupportCsatRating[]>(CSAT_KEY);
   const list = Array.isArray(store[tid]) ? store[tid] : [];
   const now = new Date().toISOString();
+  const isLiveTest =
+    isInLiveTestContext() ||
+    Boolean(input.conversationId && isLiveTestConversation(tid, input.conversationId));
 
   const rating: SupportCsatRating = {
     id: `csat_${randomUUID()}`,
@@ -405,6 +413,7 @@ export function submitSupportCsatRating(
     score: input.score,
     category: input.category,
     comment: input.comment?.trim(),
+    ...(isLiveTest ? { isLiveTest: true } : {}),
     createdAt: now,
   };
 
@@ -412,8 +421,12 @@ export function submitSupportCsatRating(
   store[tid] = list;
   writeStore(CSAT_KEY, store);
 
+  if (isLiveTest) {
+    return rating;
+  }
+
   // Recalculate averageCsat & csatCount on user's SupportCustomerProfile
-  const userRatings = list.filter((r) => r.userId === input.userId);
+  const userRatings = list.filter((r) => r.userId === input.userId && r.isLiveTest !== true);
   const csatCount = userRatings.length;
   const totalScore = userRatings.reduce((sum, r) => sum + r.score, 0);
   const averageCsat = csatCount > 0 ? Math.round((totalScore / csatCount) * 100) / 100 : null;
@@ -458,13 +471,14 @@ export function submitSupportCsatRating(
 
 export function listSupportCsatRatings(
   tenantId: string,
-  filter?: { userId?: string; minScore?: number; maxScore?: number },
+  filter?: { userId?: string; minScore?: number; maxScore?: number; includeLiveTest?: boolean },
 ): SupportCsatRating[] {
   const tid = String(tenantId);
   const store = readStore<SupportCsatRating[]>(CSAT_KEY);
   const list = Array.isArray(store[tid]) ? store[tid] : [];
 
   return list.filter((r) => {
+    if (!filter?.includeLiveTest && r.isLiveTest === true) return false;
     if (filter?.userId && r.userId !== filter.userId) return false;
     if (filter?.minScore !== undefined && r.score < filter.minScore) return false;
     if (filter?.maxScore !== undefined && r.score > filter.maxScore) return false;
@@ -472,10 +486,16 @@ export function listSupportCsatRatings(
   });
 }
 
-export function getSupportCsatSummary(tenantId: string): SupportCsatSummary {
+export function getSupportCsatSummary(
+  tenantId: string,
+  options?: { includeLiveTest?: boolean },
+): SupportCsatSummary {
   const tid = String(tenantId);
   const store = readStore<SupportCsatRating[]>(CSAT_KEY);
-  const list = Array.isArray(store[tid]) ? store[tid] : [];
+  const rawList = Array.isArray(store[tid]) ? store[tid] : [];
+  const list = options?.includeLiveTest
+    ? rawList
+    : rawList.filter((r) => r.isLiveTest !== true);
 
   const totalRatings = list.length;
   let positiveCount = 0;

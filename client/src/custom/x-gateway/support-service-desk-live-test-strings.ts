@@ -70,6 +70,16 @@ const en = {
   intakeSubmittedEvent: 'Intake submitted',
   escalatedEvent: 'Escalated to human queue',
   csatSubmittedEvent: 'CSAT submitted',
+  sandboxHeading: 'Live Test Sandbox Data',
+  sandboxCleanNote:
+    'Live test chats, tickets, and CSAT are tagged server-side and excluded from production metrics.',
+  chatsLabel: 'chats',
+  ticketsLabel: 'tickets',
+  actionsLabel: 'actions',
+  csatLabel: 'CSAT',
+  cleanupSandboxBtn: 'Clean Up Test Data',
+  cleaningSandbox: 'Cleaning…',
+  sandboxClearedNotice: 'Live test data cleaned up for this tenant.',
   roleOptionLabels: {
     guest: 'guest',
     customer: 'customer',
@@ -150,6 +160,16 @@ const vi: SupportServiceDeskLiveTestStrings = {
   intakeSubmittedEvent: 'Đã gửi biểu mẫu đầu vào',
   escalatedEvent: 'Đã chuyển tới hàng đợi nhân viên',
   csatSubmittedEvent: 'Đã gửi đánh giá CSAT',
+  sandboxHeading: 'Dữ liệu thử nghiệm (Sandbox)',
+  sandboxCleanNote:
+    'Hội thoại, ticket và đánh giá CSAT từ chế độ test được tự động tách khỏi thống kê khách hàng thật.',
+  chatsLabel: 'hội thoại',
+  ticketsLabel: 'ticket',
+  actionsLabel: 'phê duyệt',
+  csatLabel: 'CSAT',
+  cleanupSandboxBtn: 'Xóa dữ liệu test',
+  cleaningSandbox: 'Đang xóa…',
+  sandboxClearedNotice: 'Đã dọn sạch dữ liệu test của tenant này.',
   roleOptionLabels: {
     guest: 'guest (Khách)',
     customer: 'customer (Khách hàng)',
