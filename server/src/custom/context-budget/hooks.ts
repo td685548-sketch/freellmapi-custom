@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import { CITATIONS_HEADER_NAME } from '@freellmapi/shared/ai-platform-retrieval.js';
 import type { ContextAssemblySummary } from '@freellmapi/shared/context-budget.js';
 import type { ChatMessage } from '@freellmapi/shared/types.js';
 import { contentToString } from '../../lib/content.js';
@@ -156,6 +157,9 @@ export function fitContextForRoute(
     res.setHeader('X-FreeLLM-Context', formatContextHeader(summary));
     if (registry.conversation) {
       res.setHeader('X-Conversation-History', String(result.counts.historySent));
+    }
+    if (result.knowledgeDropped) {
+      res.removeHeader(CITATIONS_HEADER_NAME);
     }
   }
 
