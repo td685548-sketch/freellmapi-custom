@@ -151,6 +151,7 @@ describe('AiPlatformApp', () => {
       '/ai-platform/prompt-cache',
       '/ai-platform/flows',
       '/ai-platform/runs',
+      '/ai-platform/customer-ai',
     ]);
     // One page title, as on every other dashboard page.
     expect(container.querySelectorAll('h1')).toHaveLength(1);

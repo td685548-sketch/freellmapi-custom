@@ -4,6 +4,7 @@ export const GUEST_PERMISSIONS = [
   { key: 'view_usage_profiles', title: 'Client key ranking', description: 'The usage ranking of client keys (names and figures) and its CSV export.' },
   { key: 'view_usage_accounts', title: 'Account ranking', description: 'The usage ranking of accounts. It shows every account\'s email address to anyone on the internet.', warning: true },
   { key: 'try_playground', title: 'Try the chat', description: 'A small chat to try the models before signing in, within the limits below. It spends provider quota; nothing is stored.', warning: true },
+  { key: 'view_assistants', title: 'AI Assistants catalog', description: 'The published AI Assistants catalog (guest-preview cards and starter prompts only, never internal system prompts).' },
 ] as const
 
 export type GuestPermission = typeof GUEST_PERMISSIONS[number]['key']

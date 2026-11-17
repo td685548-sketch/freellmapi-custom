@@ -30,6 +30,7 @@ export const AnalyticsAccessPage = lazyNamed(() => import('@/custom/ScopedAdmini
 export const LogsAccessPage = lazyNamed(() => import('@/custom/ScopedAdministrativePages'), 'LogsAccessPage')
 export const XGatewayApp = lazyPage(() => import('@/custom/x-gateway/XGatewayApp'))
 export const AiPlatformApp = lazyNamed(() => import('@/custom/ai-platform/AiPlatformApp'), 'AiPlatformApp')
+export const CustomerAiHubPage = lazyNamed(() => import('@/custom/customer-ai/CustomerAiHubPage'), 'CustomerAiHubPage')
 
 type Preloadable = Pick<LazyPage, 'preload'>
 
@@ -37,6 +38,7 @@ type Preloadable = Pick<LazyPage, 'preload'>
 const ROUTES: ReadonlyArray<readonly [RegExp, readonly Preloadable[]]> = [
   [/^\/thruline(\/|$)/, [XGatewayApp]],
   [/^\/ai-platform(\/|$)/, [AiPlatformApp]],
+  [/^\/assistants(\/|$)/, [CustomerAiHubPage]],
   [/^\/models\/chat\/[^/]+/, [ModelDetailPage]],
   [/^\/(models(\/chat)?)?\/?$/, [FallbackPage]],
   [/^\/models\/fusion/, [FusionPage]],

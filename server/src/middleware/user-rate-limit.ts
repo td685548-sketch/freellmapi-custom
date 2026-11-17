@@ -1,7 +1,8 @@
 import type { Request, Response, NextFunction } from 'express';
 import { validateUserApiKey, withUserKeyMemo, type ValidatedUserKey } from '../services/user-keys.js';
 import { isXGatewayClientKey, validateXGatewayClientKey } from '../custom/x-gateway/client-keys.js';
-import { setRequestUser } from '../lib/client-context.js';
+import { setRequestKeyRoutingPreset, setRequestUser } from '../lib/client-context.js';
+import { routingModeToPreset } from '../custom/customer-ai/store.js';
 import { enforceUsageQuota } from '../custom/quota-gate.js';
 import { checkUserRateLimit, recordUserUsage } from '../services/user-quotas.js';
 
@@ -101,6 +102,9 @@ function gate(token: string, req: Request, res: Response, next: NextFunction): v
   // Every row logged while serving this request is attributed to the account, and
   // the tokens of the successful ones ride along with the request count below.
   const context = setRequestUser(userKey.userId);
+  if (!isXGatewayClientKey(token)) {
+    setRequestKeyRoutingPreset(routingModeToPreset(userKey.routingMode));
+  }
 
   // Daily / monthly allowance (no-op for an account without one).
   if (!enforceUsageQuota('user', userKey.userId, res, () => context?.userTokens ?? 0)) return;

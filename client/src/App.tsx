@@ -36,7 +36,7 @@ import { UsersNavBadge } from '@/custom/UsersNavBadge'
 import NotFoundPage from '@/pages/NotFoundPage'
 // Every routed page is downloaded on first use; see custom/route-splitting.
 import {
-  AgentsPage, AiPlatformApp, AnalyticsAccessPage, AuditLogPage, AudioPage, DecisionPage, EmbeddingDetailPage,
+  AgentsPage, AiPlatformApp, AnalyticsAccessPage, AuditLogPage, AudioPage, CustomerAiHubPage, DecisionPage, EmbeddingDetailPage,
   EmbeddingsPage, FallbackPage, FusionPage, ImagePage, InvitesAccessPage, KeysPage, LogsAccessPage,
   MediaDetailPage, ModelDetailPage, PlaygroundPage, PremiumPage, ProfileUsagePage, SearchPage,
   UsageRankingPage, UserAnalyticsPage, UsersAccessPage, VideoPage, XGatewayApp, preloadRoute,
@@ -287,6 +287,7 @@ export function Navbar() {
     }).map(i => i.to === '/analytics' && !hasPermission('view_analytics') ? { ...i, to: '/logs', labelKey: 'nav.logs' } : i),
     ...(canManageInvites ? [{ to: '/invites', labelKey: 'nav.invites', customLabel: 'Invites' }] : []),
     ...(canManageUsers ? [{ to: '/users', labelKey: 'nav.users', customLabel: 'Users' }] : []),
+    { to: '/assistants', labelKey: 'AI Hub', customLabel: tc('AI Hub') },
     // Usage and History live in the Analytics dropdown; keep them as top-level
     // tabs only when the Analytics tab itself is hidden for this account.
     ...(!analyticsFolded && canViewUsage ? [{ to: '/usage', labelKey: 'nav.usage', customLabel: 'Usage' }] : []),
@@ -553,6 +554,7 @@ function App() {
                         <Route path="/profiles/:id/usage" element={<ProfileUsagePage />} />
                         <Route path="/usage" element={<UsageRankingPage />} />
                         <Route path="/audit" element={<AuditLogPage />} />
+                        <Route path="/assistants" element={<CustomerAiHubPage />} />
                         <Route path="/ai-platform/*" element={<AiPlatformApp />} />
                         <Route path="/agents" element={<AgentsPage />} />
                         <Route path="/fallback" element={<Navigate to="/models/chat" replace />} />
