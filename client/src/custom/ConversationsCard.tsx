@@ -9,6 +9,8 @@ import { Switch } from '@/components/ui/switch'
 import { ConfirmButton } from '@/components/confirm-button'
 import type { ConversationSettings, StoredConversation, StoredMessage } from '../../../shared/conversations'
 import { CONVERSATION_LIMITS as L } from '../../../shared/conversations'
+import type { ContextPolicyResponse } from '@freellmapi/shared/context-budget.js'
+import { ContextPreviewDialog } from './ContextPreviewDialog'
 import { useCustomT } from './i18n/use-custom-t'
 
 interface ConvState { settings: ConversationSettings; conversations: StoredConversation[] }
@@ -49,12 +51,19 @@ export function ConversationsCard({ profileId, canEdit }: { profileId: number; c
   const [filter, setFilter] = useState('')
   const [draft, setDraft] = useState<Partial<Record<NumberField, string>>>({})
   const [open, setOpen] = useState<string | null>(null)
+  const [previewTarget, setPreviewTarget] = useState<{ id: string; endUser: string | null } | null>(null)
   const base = `/api/client-profiles/${profileId}`
   const key = ['conversations', profileId, filter]
   const { data } = useQuery<ConvState>({
     queryKey: key,
     queryFn: () => apiFetch(`${base}/conversations${filter ? `?endUser=${encodeURIComponent(filter)}` : ''}`),
   })
+  const policyQuery = useQuery<ContextPolicyResponse>({
+    queryKey: ['context-policy', profileId],
+    queryFn: () => apiFetch(`${base}/context-policy`),
+    enabled: canEdit,
+  })
+  const contextPolicyEnabled = Boolean(policyQuery.data?.policy?.enabled)
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['conversations', profileId] })
   const messages = useQuery<{ messages: StoredMessage[]; conversation?: { summary?: string | null } }>({
     queryKey: ['conversation', profileId, open],
@@ -138,7 +147,19 @@ export function ConversationsCard({ profileId, canEdit }: { profileId: number; c
                     {c.endUser ?? tc('no end user')} · {c.messages}{' '}{tc('message')}{c.messages === 1 ? '' : 's'}{' '}{tc('· last')}{' '}{when(c.updatedAt)}{' '}{tc('· deleted')}{' '}{when(c.expiresAt)}
                   </span>
                   {canEdit && (
-                    <ConfirmButton onConfirm={() => remove.mutate(`/${encodeURIComponent(c.id)}`)} size="icon-xs" armedSize="xs" aria-label={`Delete ${c.id}`} armedClassName="text-destructive"><Trash2 className="size-3.5" /></ConfirmButton>
+                    <div className="flex items-center gap-1.5">
+                      {contextPolicyEnabled && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="xs"
+                          onClick={() => setPreviewTarget({ id: c.id, endUser: c.endUser })}
+                        >
+                          {tc('Preview context')}
+                        </Button>
+                      )}
+                      <ConfirmButton onConfirm={() => remove.mutate(`/${encodeURIComponent(c.id)}`)} size="icon-xs" armedSize="xs" aria-label={`Delete ${c.id}`} armedClassName="text-destructive"><Trash2 className="size-3.5" /></ConfirmButton>
+                    </div>
                   )}
                 </div>
                 {open === c.id && messages.data?.conversation?.summary && (
@@ -161,6 +182,18 @@ export function ConversationsCard({ profileId, canEdit }: { profileId: number; c
           </ul>
         )}
       </div>
+
+      {canEdit && (
+        <ContextPreviewDialog
+          profileId={profileId}
+          conversationId={previewTarget?.id ?? null}
+          endUser={previewTarget?.endUser ?? null}
+          open={previewTarget !== null}
+          onOpenChange={(isOpen) => {
+            if (!isOpen) setPreviewTarget(null)
+          }}
+        />
+      )}
     </section>
   )
 }

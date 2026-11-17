@@ -16,6 +16,7 @@ import { RecentRequestsCard } from './RecentRequestsCard'
 import { EndUsersCard } from './EndUsersCard'
 import { KnowledgeCard } from './KnowledgeCard'
 import { ConversationsCard } from './ConversationsCard'
+import { ContextPolicyCard } from './ContextPolicyCard'
 import { ContentFilterCard } from './ContentFilterCard'
 import { QuickAnswersCard } from './QuickAnswersCard'
 import { FeedbackCard } from './FeedbackCard'
@@ -117,6 +118,7 @@ export function ProfileUsagePage() {
       <KnowledgeCard profileId={profileId} canEdit={can('edit_client_profiles')} />
       <QuickAnswersCard profileId={profileId} canEdit={can('edit_client_profiles')} />
       <ConversationsCard profileId={profileId} canEdit={can('edit_client_profiles')} />
+      <ContextPolicyCard profileId={profileId} canEdit={can('edit_client_profiles')} />
       <ContentFilterCard profileId={profileId} canEdit={can('edit_client_profiles')} />
       <EndUsersCard profileId={profileId} canEdit={can('edit_client_profiles')} />
       <FeedbackCard profileId={profileId} canReadComments={can('edit_client_profiles')} />
