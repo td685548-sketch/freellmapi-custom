@@ -42,7 +42,7 @@ export function hashClientProfileKey(key: string): string {
 export type ResolvedAuth =
   | { kind: 'unified'; systemPrompt: null }
   | { kind: 'profile'; profileId: number; name: string; systemPrompt: string | null }
-  | { kind: 'user'; userId: number; email: string; systemPrompt: null };
+  | { kind: 'user'; userId: number; email: string; systemPrompt: string | null };
 
 interface ProfileRow {
   id: number;
@@ -64,7 +64,7 @@ export function resolveAuth(token: string | undefined): ResolvedAuth | null {
   if (token.startsWith(USER_KEY_PREFIX)) {
     const valid = validateUserApiKey(token);
     if (!valid) return null;
-    return { kind: 'user', userId: valid.userId, email: valid.email, systemPrompt: null };
+    return { kind: 'user', userId: valid.userId, email: valid.email, systemPrompt: valid.systemPrompt ?? null };
   }
   if (!token.startsWith(CLIENT_PROFILE_KEY_PREFIX)) return null;
   const hash = hashClientProfileKey(token);

@@ -106,11 +106,35 @@ describe('guest access', () => {
     setUserPermissions(delegateId, ['view_users'], ownerId);
     const seen = await get('/api/admin/guest-access', delegateToken);
     expect(seen.status).toBe(200);
-    expect(seen.body.available.map((p: any) => p.key)).toEqual(['view_models', 'view_usage_profiles', 'view_usage_accounts', 'try_playground']);
+    expect(seen.body.available.map((p: any) => p.key)).toEqual(['view_models', 'view_usage_profiles', 'view_usage_accounts', 'try_playground', 'view_assistants']);
     expect((await get('/api/admin/guest-access', delegateToken, 'PUT', { permissions: ['view_models'] })).status).toBe(403);
     setUserPermissions(delegateId, ['edit_user_permissions'], ownerId);
     expect((await get('/api/admin/guest-access', delegateToken, 'PUT', { permissions: ['view_models'] })).status).toBe(200);
     setUserPermissions(delegateId, [], ownerId);
     expect((await get('/api/admin/guest-access')).status).toBe(401); // a guest cannot open its own door
+  });
+
+  it('opens the guest-preview AI Assistants catalog read-only when view_assistants is granted', async () => {
+    expect((await get('/api/user/ai-hub/catalog')).status).toBe(401);
+    setGuestPermissions(['view_assistants']);
+
+    const first = await get('/api/user/ai-hub/catalog');
+    expect(first.status).toBe(200);
+    expect(first.headers.get('x-guest-cache')).toBeNull();
+    expect(Array.isArray(first.body.assistants)).toBe(true);
+    expect(first.body.assistants.length).toBeGreaterThan(0);
+    expect(first.body.assistants.every((a: any) => a.audience === 'guest_preview')).toBe(true);
+    expect(first.body.assistants.every((a: any) => !('systemPrompt' in a) && !('system_prompt' in a))).toBe(true);
+
+    const second = await get('/api/user/ai-hub/catalog');
+    expect(second.status).toBe(200);
+    expect(second.headers.get('x-guest-cache')).toBe('hit');
+
+    // Guests can never read member preferences, quota coach, or run assistant chats
+    expect((await get('/api/user/ai-hub/preferences')).status).toBe(401);
+    expect((await get('/api/user/ai-hub/coach')).status).toBe(401);
+    expect((await get('/api/user/ai-hub/assistants/code-reviewer/chat', undefined, 'POST', {
+      messages: [{ role: 'user', content: 'hi' }],
+    })).status).toBe(401);
   });
 });

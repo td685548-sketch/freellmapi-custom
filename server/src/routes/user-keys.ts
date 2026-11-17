@@ -1,11 +1,13 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
+import { KEY_ROUTING_MODES } from '@freellmapi/shared/customer-ai.js';
 import {
   listUserApiKeys,
   mintUserApiKey,
   revokeUserApiKey,
 } from '../services/user-keys.js';
+import { CustomerAiError } from '../custom/customer-ai/store.js';
 import { getUserUsage } from '../services/user-quotas.js';
 import type { SessionUser } from '../services/auth.js';
 
@@ -13,6 +15,8 @@ export const userKeysRouter = Router();
 
 const createKeySchema = z.object({
   name: z.string().trim().max(100).optional(),
+  routingMode: z.enum(KEY_ROUTING_MODES).optional(),
+  assistantId: z.number().int().positive().nullable().optional(),
 });
 
 // GET /api/user/session — who the caller is, including role, isPrimary, and permissions.
@@ -45,8 +49,20 @@ userKeysRouter.post('/keys', (req: Request, res: Response) => {
     return;
   }
 
-  const created = mintUserApiKey(user.userId, parsed.data.name || 'Default Key');
-  res.status(201).json({ key: created });
+  try {
+    const created = mintUserApiKey(user.userId, parsed.data.name || 'Default Key', {
+      routingMode: parsed.data.routingMode,
+      assistantId: parsed.data.assistantId,
+      callerRole: user.role,
+    });
+    res.status(201).json({ key: created });
+  } catch (err) {
+    if (err instanceof CustomerAiError) {
+      res.status(err.status).json({ error: { message: err.message, code: err.code, type: err.code } });
+      return;
+    }
+    throw err;
+  }
 });
 
 // DELETE /api/user/keys/:id — revoke an API key belonging to the current user

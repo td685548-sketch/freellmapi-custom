@@ -763,6 +763,8 @@ function weightsWithPeak(strategy: RoutingStrategy): { weights: RoutingWeights |
  *  preset the decision model picked for the request, else Balanced; every
  *  other strategy is used as set. */
 export function effectiveRoutingStrategy(): RoutingStrategy {
+  const keyPreset = getClientContext().keyRoutingPreset;
+  if (keyPreset) return keyPreset;
   const strategy = getRoutingStrategy();
   if (strategy !== 'decision') return strategy;
   return getClientContext().routingStrategy ?? 'balanced';
@@ -2249,6 +2251,7 @@ export function routeRequest(estimatedTokens = 1000, skipKeys?: Set<string>, pre
     // rate-limit/failure penalties keep applying; only the base preset changes.
     const chainPreset = rawChain.find(e => e.profile_strategy)?.profile_strategy;
     const strategy = strategyOverride
+      ?? getClientContext().keyRoutingPreset
       ?? ((chainPreset && VALID_STRATEGIES.includes(chainPreset as RoutingStrategy))
         ? (chainPreset as RoutingStrategy)
         : effectiveRoutingStrategy());

@@ -11,6 +11,9 @@ import { toast } from '@/lib/toast'
 import { UserAnalyticsView } from './UserAnalyticsView'
 import { QuotaCard } from './QuotaCard'
 import { RecentRequestsCard } from './RecentRequestsCard'
+import { QuotaCoachCard } from './customer-ai/QuotaCoachCard'
+import { fetchCustomerAssistants, patchUserKeyAiConfig } from './customer-ai/api'
+import { KEY_ROUTING_MODES, type CustomerAiAssistant, type KeyRoutingMode } from '../../../shared/customer-ai'
 
 import type { UserApiKey } from '../../../shared/user-access'
 import { useCustomT } from './i18n/use-custom-t'
@@ -37,6 +40,26 @@ export function MemberKeysView() {
   const { data: usageData } = useQuery<{ usage: { requests: number; tokens: number; month: string } }>({
     queryKey: ['user-usage'],
     queryFn: () => apiFetch<{ usage: { requests: number; tokens: number; month: string } }>('/api/user/usage'),
+  })
+
+  const { data: catalogData } = useQuery<{ assistants: CustomerAiAssistant[] }>({
+    queryKey: ['customer-ai-catalog', 'keys'],
+    queryFn: () => fetchCustomerAssistants(),
+    staleTime: 30_000,
+  })
+  const assistants = Array.isArray(catalogData?.assistants) ? catalogData.assistants : []
+
+  const updateKeyAiMutation = useMutation({
+    mutationFn: ({ keyId, patch }: { keyId: number; patch: { routingMode?: KeyRoutingMode; assistantId?: number | null } }) =>
+      patchUserKeyAiConfig(keyId, patch),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['user-api-keys'] })
+      void queryClient.invalidateQueries({ queryKey: ['customer-ai-coach'] })
+      toast.success(tc('Key AI configuration updated'))
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || tc('Failed to update key AI configuration'))
+    },
   })
 
   const createKeyMutation = useMutation({
@@ -114,6 +137,7 @@ export function MemberKeysView() {
 
       <section className="space-y-3" aria-label="My usage">
         <h2 className="text-sm font-semibold">{tc('My usage')}</h2>
+        <QuotaCoachCard />
         <QuotaCard endpoint="/api/user/usage-quota" queryKey={['user-quota']} canEdit={false} />
         <UserAnalyticsView endpoint="/api/user/analytics" queryKey={['user-analytics']} />
         <RecentRequestsCard endpoint="/api/user/requests" title={tc('My recent requests')} />
@@ -154,17 +178,66 @@ export function MemberKeysView() {
           <div className="divide-y">
             {keys.map((k) => (
               <div key={k.id} className="p-4 flex flex-wrap sm:flex-nowrap items-center justify-between gap-4 hover:bg-muted/30 transition-colors">
-                <div className="min-w-0 space-y-1">
+                <div className="min-w-0 space-y-1 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-sm text-foreground">{k.name}</span>
                     <span className="font-mono text-xs text-muted-foreground bg-muted/60 px-2 py-0.5 rounded">
                       {k.keyPrefix}••••••••
                     </span>
                   </div>
-                  <div className="text-xs text-muted-foreground flex gap-4">
+                  <div className="text-xs text-muted-foreground flex flex-wrap gap-4">
                     <span>{tc('Created:')}{' '}{new Date(k.createdAt).toLocaleDateString()}</span>
                     <span>{tc('Last used:')}{' '}{k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleDateString() : tc('Never')}</span>
                   </div>
+                  {!k.revoked && (
+                    <div className="pt-1.5 flex flex-wrap items-center gap-2 text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-muted-foreground">{tc('Routing:')}</span>
+                        <select
+                          aria-label={`Routing mode for ${k.name}`}
+                          value={k.routingMode ?? 'default'}
+                          disabled={updateKeyAiMutation.isPending}
+                          onChange={(e) =>
+                            updateKeyAiMutation.mutate({
+                              keyId: k.id,
+                              patch: { routingMode: e.target.value as KeyRoutingMode },
+                            })
+                          }
+                          className="h-7 rounded-lg border bg-background px-2 text-xs"
+                        >
+                          {KEY_ROUTING_MODES.map((m) => (
+                            <option key={m} value={m}>
+                              {m === 'default' && tc('Default (global)')}
+                              {m === 'eco' && tc('Eco (Save Quota)')}
+                              {m === 'balanced' && tc('Balanced')}
+                              {m === 'max' && tc('Max Quality')}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-muted-foreground">{tc('Assistant:')}</span>
+                        <select
+                          aria-label={`Assistant preset for ${k.name}`}
+                          value={k.assistantId ? String(k.assistantId) : ''}
+                          disabled={updateKeyAiMutation.isPending}
+                          onChange={(e) => {
+                            const nextId = e.target.value ? Number(e.target.value) : null
+                            updateKeyAiMutation.mutate({
+                              keyId: k.id,
+                              patch: { assistantId: nextId },
+                            })
+                          }}
+                          className="h-7 rounded-lg border bg-background px-2 text-xs"
+                        >
+                          <option value="">{tc('None (raw prompt)')}</option>
+                          {assistants.map((a) => (
+                            <option key={a.id} value={String(a.id)}>{a.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 {k.revoked ? <span className="text-xs text-muted-foreground">{tc('Revoked')}</span> : <Button
                   disabled={revokeKeyMutation.isPending}
