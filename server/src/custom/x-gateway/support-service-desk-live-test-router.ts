@@ -1,6 +1,8 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import type {
+  SupportLiveTestActionReviewResponse,
   SupportLiveTestOriginCheckResponse,
+  SupportLiveTestPendingActionsListResponse,
   SupportLiveTestPersonaSessionResponse,
 } from '@freellmapi/shared/support-service-desk-live-test.js';
 import { requireAuth } from '../../middleware/requireAuth.js';
@@ -18,8 +20,11 @@ import {
 import { xSupportServiceDeskPublicRouter } from './support-service-desk-router.js';
 import { xSupportEnterprisePublicRouter } from './support-enterprise-router.js';
 import { xSupportGovernancePublicRouter } from './support-governance-router.js';
+import { dispatchActionReview } from './support-runtime-router.js';
+import { listSupportPendingActions } from './support-workflows.js';
 import {
   getLiveTestSandboxStats,
+  isLiveTestConversation,
   purgeLiveTestSandboxData,
   recordLiveTestIntakeRequest,
   runWithLiveTestContext,
@@ -335,6 +340,133 @@ xSupportServiceDeskLiveTestRouter.delete(
     const tenant = resolveNumericConsoleTenant(req, res);
     if (!tenant) return;
     res.json(purgeLiveTestSandboxData(tenant.id));
+  },
+);
+
+function isActionInLiveTestScope(
+  tenantId: number,
+  action: { isLiveTest?: boolean; conversationId?: string },
+): boolean {
+  return (
+    action.isLiveTest === true ||
+    Boolean(action.conversationId && isLiveTestConversation(tenantId, action.conversationId))
+  );
+}
+
+function extractDispatchErrorStatus(err: unknown): number {
+  if (err && typeof err === 'object') {
+    const rec = err as { status?: unknown; statusCode?: unknown };
+    if (typeof rec.status === 'number' && rec.status >= 400 && rec.status < 600) return rec.status;
+    if (typeof rec.statusCode === 'number' && rec.statusCode >= 400 && rec.statusCode < 600) {
+      return rec.statusCode;
+    }
+  }
+  return 500;
+}
+
+async function handleLiveTestActionReview(
+  req: Request,
+  res: Response,
+  decision: 'approved' | 'rejected',
+): Promise<void> {
+  const tenant = resolveNumericConsoleTenant(req, res);
+  if (!tenant) return;
+
+  const actionId = paramStr(req.params.actionId).trim();
+  if (!actionId) {
+    res.status(400).json({ error: { code: 'invalid_input', message: 'actionId is required.' } });
+    return;
+  }
+
+  let reviewNote: string | undefined;
+  if (req.body !== undefined) {
+    if (!isPlainObject(req.body)) {
+      res.status(400).json({ error: { code: 'invalid_input', message: 'Request body must be a JSON object.' } });
+      return;
+    }
+    const unknownKey = assertAllowedKeys(req.body, ['reviewNote']);
+    if (unknownKey) {
+      res.status(400).json({ error: { code: 'invalid_input', message: `Unsupported field "${unknownKey}".` } });
+      return;
+    }
+    if (req.body.reviewNote !== undefined) {
+      if (typeof req.body.reviewNote !== 'string' || req.body.reviewNote.trim().length > 500) {
+        res.status(400).json({
+          error: { code: 'invalid_input', message: 'reviewNote must be a string up to 500 characters.' },
+        });
+        return;
+      }
+      reviewNote = req.body.reviewNote.trim() || undefined;
+    }
+  }
+
+  const found = listSupportPendingActions(String(tenant.id)).find((a) => a.id === actionId);
+  if (!found || !isActionInLiveTestScope(tenant.id, found)) {
+    res.status(404).json({
+      error: { code: 'action_not_found', message: 'Live test pending action not found.' },
+    });
+    return;
+  }
+
+  const user = (req as Request & { user?: SessionUser }).user;
+  const reviewedBy = user?.email || (user?.userId ? String(user.userId) : '') || 'admin';
+
+  try {
+    const action = (await dispatchActionReview({
+      tenantId: tenant.id,
+      actionId,
+      decision,
+      reviewedBy,
+      reviewNote,
+    })) as SupportLiveTestActionReviewResponse['action'];
+    const payload: SupportLiveTestActionReviewResponse = { ok: true, action };
+    res.json(payload);
+  } catch (err) {
+    const status = extractDispatchErrorStatus(err);
+    res.status(status).json({
+      error: {
+        code: status === 409 ? 'action_conflict' : 'action_review_failed',
+        message: err instanceof Error ? err.message : 'Action review failed.',
+      },
+    });
+  }
+}
+
+xSupportServiceDeskLiveTestRouter.get(
+  '/tenants/:id/service-desk/live-test/pending-actions',
+  (req: Request, res: Response): void => {
+    const tenant = resolveNumericConsoleTenant(req, res);
+    if (!tenant) return;
+
+    const conversationId =
+      typeof req.query.conversationId === 'string' ? req.query.conversationId.trim() : '';
+    if (conversationId && !isLiveTestConversation(tenant.id, conversationId)) {
+      const empty: SupportLiveTestPendingActionsListResponse = { ok: true, actions: [] };
+      res.json(empty);
+      return;
+    }
+
+    const actions = listSupportPendingActions(String(tenant.id), { status: 'pending' }).filter((act) => {
+      if (!isActionInLiveTestScope(tenant.id, act)) return false;
+      if (conversationId && act.conversationId !== conversationId) return false;
+      return true;
+    });
+    const payload: SupportLiveTestPendingActionsListResponse = { ok: true, actions };
+    res.json(payload);
+  },
+);
+
+xSupportServiceDeskLiveTestRouter.post(
+  '/tenants/:id/service-desk/live-test/pending-actions/:actionId/approve',
+  async (req: Request, res: Response): Promise<void> => {
+    await handleLiveTestActionReview(req, res, 'approved');
+  },
+);
+
+xSupportServiceDeskLiveTestRouter.post(
+  '/tenants/:id/service-desk/live-test/pending-actions/:actionId/reject',
+  async (req: Request, res: Response): Promise<void> => {
+    await handleLiveTestActionReview(req, res, 'rejected');
   },
 );
 

@@ -80,6 +80,16 @@ const en = {
   cleanupSandboxBtn: 'Clean Up Test Data',
   cleaningSandbox: 'Cleaning…',
   sandboxClearedNotice: 'Live test data cleaned up for this tenant.',
+  pendingActionsPanelHeading: 'Pending Action Approvals',
+  pendingActionsPanelHint:
+    'Tools marked approval_required pause here. Approve or reject to verify execution and sync the result directly into the live widget.',
+  approveActionBtn: 'Approve & Execute',
+  rejectActionBtn: 'Reject',
+  approvingActionLabel: 'Approving…',
+  rejectingActionLabel: 'Rejecting…',
+  reviewNotePlaceholder: 'Optional review note shown in conversation…',
+  actionApprovedNotice: 'Action approved and synced to widget conversation.',
+  actionRejectedNotice: 'Action rejected and synced to widget conversation.',
   roleOptionLabels: {
     guest: 'guest',
     customer: 'customer',
@@ -170,6 +180,16 @@ const vi: SupportServiceDeskLiveTestStrings = {
   cleanupSandboxBtn: 'Xóa dữ liệu test',
   cleaningSandbox: 'Đang xóa…',
   sandboxClearedNotice: 'Đã dọn sạch dữ liệu test của tenant này.',
+  pendingActionsPanelHeading: 'Phê duyệt hành động chờ (Inline)',
+  pendingActionsPanelHint:
+    'Các công cụ ở chế độ approval_required sẽ tạm dừng tại đây. Phê duyệt hoặc từ chối để chạy thử và đồng bộ kết quả trực tiếp vào khung chat.',
+  approveActionBtn: 'Phê duyệt & Chạy',
+  rejectActionBtn: 'Từ chối',
+  approvingActionLabel: 'Đang duyệt…',
+  rejectingActionLabel: 'Đang từ chối…',
+  reviewNotePlaceholder: 'Ghi chú phê duyệt (tùy chọn, sẽ hiển thị trong hội thoại)…',
+  actionApprovedNotice: 'Đã phê duyệt hành động và đồng bộ vào hội thoại.',
+  actionRejectedNotice: 'Đã từ chối hành động và đồng bộ vào hội thoại.',
   roleOptionLabels: {
     guest: 'guest (Khách)',
     customer: 'customer (Khách hàng)',

@@ -152,3 +152,33 @@ export interface SupportLiveTestSandboxCleanupResponse {
     csatRatings: number;
   };
 }
+
+export interface SupportLiveTestPendingActionItem {
+  id: string;
+  conversationId?: string;
+  userId: string;
+  userName?: string;
+  userRole: string;
+  toolName: string;
+  actionSummary: string;
+  payload: Record<string, unknown>;
+  status: 'pending' | 'approved' | 'rejected' | 'failed';
+  createdAt: string;
+  isLiveTest?: boolean;
+}
+
+export interface SupportLiveTestPendingActionsListResponse {
+  ok: true;
+  actions: SupportLiveTestPendingActionItem[];
+}
+
+export interface SupportLiveTestActionReviewResponse {
+  ok: true;
+  action: SupportLiveTestPendingActionItem & {
+    reviewedBy?: string;
+    reviewNote?: string;
+    reviewedAt?: string;
+    executionStatus?: string;
+    executionResult?: unknown;
+  };
+}

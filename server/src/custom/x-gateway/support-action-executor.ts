@@ -15,6 +15,7 @@ import {
   proposeSupportPendingAction,
   reviewSupportPendingAction,
   listSupportPendingActions,
+  appendSupportActionOutcomeMessage,
   type SupportPendingAction,
 } from './support-workflows.js';
 import {
@@ -463,9 +464,17 @@ export async function reviewAndExecuteSupportAction(options: {
   // If rejected, return immediately
   if (decision === 'rejected') {
     const existing = listSupportPendingActions(String(tenantId)).find((a) => a.id === actionId);
+    if (existing?.conversationId) {
+      const cleanNote = reviewNote?.trim();
+      appendSupportActionOutcomeMessage(String(tenantId), existing.conversationId, {
+        reviewer: reviewedBy,
+        content: `Action "${existing.toolName}" was rejected${cleanNote ? `: ${cleanNote}` : '.'}`,
+      });
+    }
     return {
       id: actionId,
       tenantId: String(tenantId),
+      ...(existing?.conversationId ? { conversationId: existing.conversationId } : {}),
       userId: existing?.userId ?? '',
       userRole: existing?.userRole ?? '',
       toolName: existing?.toolName ?? '',
@@ -545,9 +554,21 @@ export async function reviewAndExecuteSupportAction(options: {
   })();
 
   const existing = listSupportPendingActions(String(tenantId)).find((a) => a.id === actionId);
+  if (existing?.conversationId) {
+    const cleanNote = reviewNote?.trim();
+    const outcomeText =
+      finalStatus === 'succeeded'
+        ? `Action "${toolToExecute!.name}" was approved and executed${cleanNote ? ` (${cleanNote})` : ''}.`
+        : `Action "${toolToExecute!.name}" was approved, but execution finished with status: ${finalStatus}.`;
+    appendSupportActionOutcomeMessage(String(tenantId), existing.conversationId, {
+      reviewer: reviewedBy,
+      content: outcomeText,
+    });
+  }
   return {
     id: actionId,
     tenantId: String(tenantId),
+    ...(existing?.conversationId ? { conversationId: existing.conversationId } : {}),
     userId: requesterContext!.userId,
     userRole: requesterContext!.role,
     toolName: toolToExecute!.name,

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
   ArrowRight,
+  Check,
   CheckCircle2,
   Eye,
   Globe,
@@ -12,11 +13,14 @@ import {
   ShieldCheck,
   Trash2,
   UserCheck,
+  X,
 } from 'lucide-react'
 import type { SupportDeskPublicWidgetConfig } from '@freellmapi/shared/support-service-desk.js'
 import {
   SUPPORT_LIVE_TEST_PERSONA_PRESETS,
+  type SupportLiveTestActionReviewResponse,
   type SupportLiveTestOriginCheckResponse,
+  type SupportLiveTestPendingActionsListResponse,
   type SupportLiveTestPersonaInput,
   type SupportLiveTestPersonaMode,
   type SupportLiveTestPersonaSessionResponse,
@@ -53,6 +57,7 @@ export interface LiveTestTenantInfo {
 interface WidgetRuntimeInstance {
   destroy?: () => void
   refreshProfile?: () => Promise<unknown> | void
+  syncConversation?: () => void
   getConversationId?: () => string | null
   open?: () => void
 }
@@ -218,6 +223,11 @@ export function SupportWidgetLiveTest({
 
   const [cleanupNotice, setCleanupNotice] = useState<string | null>(null)
   const [cleanupError, setCleanupError] = useState<string | null>(null)
+  const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({})
+  const [actionNotice, setActionNotice] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+
+  const resolvedConversationId = activeConversationId
 
   const sandboxQuery = useQuery({
     queryKey: ['x-support-live-test-sandbox', tenant.id],
@@ -225,6 +235,18 @@ export function SupportWidgetLiveTest({
     queryFn: ({ signal }) =>
       apiFetch<SupportLiveTestSandboxStats>(
         `/api/thruline/support/tenants/${tenant.id}/service-desk/live-test/sandbox`,
+        { signal },
+      ),
+  })
+
+  const pendingActionsQuery = useQuery({
+    queryKey: ['x-support-live-test-pending-actions', tenant.id, resolvedConversationId ?? 'all'],
+    enabled: mode === 'live',
+    queryFn: ({ signal }) =>
+      apiFetch<SupportLiveTestPendingActionsListResponse>(
+        `/api/thruline/support/tenants/${tenant.id}/service-desk/live-test/pending-actions${
+          resolvedConversationId ? `?conversationId=${encodeURIComponent(resolvedConversationId)}` : ''
+        }`,
         { signal },
       ),
   })
@@ -251,6 +273,9 @@ export function SupportWidgetLiveTest({
       setCleanupNotice(null)
       setCleanupError(null)
       void queryClient.invalidateQueries({ queryKey: ['x-support-live-test-sandbox', tenant.id] })
+      void queryClient.invalidateQueries({
+        queryKey: ['x-support-live-test-pending-actions', tenant.id],
+      })
     }
   }, [
     enforceSimulatedOrigin,
@@ -495,6 +520,7 @@ export function SupportWidgetLiveTest({
                 requestId?: string
                 replySource?: string
                 citations?: unknown[]
+                pendingActions?: BridgePendingItem[]
                 pendingApprovals?: BridgePendingItem[]
                 output?: { action?: string; reasons?: unknown[] }
                 evidence?: { status?: string; reason?: string; citations?: unknown[] }
@@ -526,13 +552,15 @@ export function SupportWidgetLiveTest({
                   : Array.isArray(runtime.citations)
                     ? runtime.citations
                     : undefined
-                const pendingApprovals = Array.isArray(runtime.pendingApprovals)
-                  ? runtime.pendingApprovals
-                  : Array.isArray(payload.toolTrace)
-                    ? payload.toolTrace.filter(
-                        (t) => t?.status === 'pending_approval' || t?.pendingApproval,
-                      )
-                    : undefined
+                const pendingApprovals = Array.isArray(runtime.pendingActions)
+                  ? runtime.pendingActions
+                  : Array.isArray(runtime.pendingApprovals)
+                    ? runtime.pendingApprovals
+                    : Array.isArray(payload.toolTrace)
+                      ? payload.toolTrace.filter(
+                          (t) => t?.status === 'pending_approval' || t?.pendingApproval,
+                        )
+                      : undefined
 
                 const mappedAllowedTools = Array.isArray(payload.allowedTools)
                   ? payload.allowedTools
@@ -673,6 +701,8 @@ export function SupportWidgetLiveTest({
   }, [mode, savedConfigVersion, savedEnabled])
 
   const handleReset = () => {
+    setActionNotice(null)
+    setActionError(null)
     try {
       for (let i = window.localStorage.length - 1; i >= 0; i--) {
         const k = window.localStorage.key(i)
@@ -695,8 +725,13 @@ export function SupportWidgetLiveTest({
     onSuccess: () => {
       setCleanupError(null)
       setCleanupNotice(s.sandboxClearedNotice)
+      setActionNotice(null)
+      setActionError(null)
       handleReset()
       void queryClient.invalidateQueries({ queryKey: ['x-support-live-test-sandbox', tenant.id] })
+      void queryClient.invalidateQueries({
+        queryKey: ['x-support-live-test-pending-actions', tenant.id],
+      })
       onRefreshTenantQueriesRef.current?.()
     },
     onError: (err) => {
@@ -704,7 +739,55 @@ export function SupportWidgetLiveTest({
     },
   })
 
-  const resolvedConversationId = activeConversationId
+  const reviewActionMutation = useMutation({
+    mutationFn: async (vars: {
+      actionId: string
+      decision: 'approved' | 'rejected'
+      reviewNote?: string
+    }) =>
+      apiFetch<SupportLiveTestActionReviewResponse>(
+        `/api/thruline/support/tenants/${tenant.id}/service-desk/live-test/pending-actions/${encodeURIComponent(vars.actionId)}/${
+          vars.decision === 'approved' ? 'approve' : 'reject'
+        }`,
+        {
+          method: 'POST',
+          body: JSON.stringify(vars.reviewNote ? { reviewNote: vars.reviewNote } : {}),
+        },
+      ),
+    onSuccess: (_data, vars) => {
+      setActionError(null)
+      setActionNotice(
+        vars.decision === 'approved' ? s.actionApprovedNotice : s.actionRejectedNotice,
+      )
+      setReviewNotes((prev) => {
+        const next = { ...prev }
+        delete next[vars.actionId]
+        return next
+      })
+      try {
+        widgetInstanceRef.current?.syncConversation?.()
+      } catch {
+        // Ignore sync failures if widget is unmounting
+      }
+      void queryClient.invalidateQueries({
+        queryKey: ['x-support-live-test-pending-actions', tenant.id],
+      })
+      void queryClient.invalidateQueries({ queryKey: ['x-support-live-test-sandbox', tenant.id] })
+      onRefreshTenantQueriesRef.current?.()
+    },
+    onError: (err) => {
+      setActionNotice(null)
+      setActionError(err instanceof Error ? err.message : 'Action review failed.')
+    },
+  })
+
+  const pendingActions = pendingActionsQuery.data?.actions ?? []
+  const activeReviewActionId = reviewActionMutation.isPending
+    ? reviewActionMutation.variables?.actionId
+    : undefined
+  const activeReviewDecision = reviewActionMutation.isPending
+    ? reviewActionMutation.variables?.decision
+    : undefined
 
   const draftMatchesPreset = (presetId: string) => {
     const preset = SUPPORT_LIVE_TEST_PERSONA_PRESETS.find((p) => p.id === presetId)
@@ -1065,6 +1148,151 @@ export function SupportWidgetLiveTest({
               }}
             />
           </div>
+
+          {/* Inline Pending Action Approvals Panel */}
+          {(pendingActions.length > 0 || Boolean(actionNotice) || Boolean(actionError)) && (
+            <div
+              data-testid="live-test-approvals-panel"
+              className="x-panel"
+              style={{
+                padding: 12,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                borderRadius: 10,
+                borderColor: pendingActions.length > 0 ? 'rgba(245, 158, 11, 0.45)' : undefined,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>{s.pendingActionsPanelHeading}</span>
+                {pendingActions.length > 0 && (
+                  <span className="x-badge" style={{ fontSize: 11 }}>
+                    {pendingActions.length}
+                  </span>
+                )}
+              </div>
+              <p className="x-hint" style={{ margin: 0, fontSize: 11 }}>
+                {s.pendingActionsPanelHint}
+              </p>
+
+              {actionNotice && (
+                <div
+                  data-testid="live-test-action-review-status"
+                  role="status"
+                  style={{ fontSize: 11, color: '#059669' }}
+                >
+                  {actionNotice}
+                </div>
+              )}
+              {actionError && (
+                <div
+                  data-testid="live-test-action-review-error"
+                  role="alert"
+                  style={{ fontSize: 11, color: '#dc2626' }}
+                >
+                  {actionError}
+                </div>
+              )}
+
+              {pendingActions.map((act) => {
+                const noteVal = reviewNotes[act.id] ?? ''
+                const isThisBusy = activeReviewActionId === act.id
+                return (
+                  <div
+                    key={act.id}
+                    data-testid={`live-test-pending-action-${act.id}`}
+                    style={{
+                      padding: 10,
+                      borderRadius: 8,
+                      border: '1px solid var(--border-color, rgba(148,163,184,0.28))',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 6,
+                      fontSize: 12,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
+                      <strong>
+                        <code>{act.toolName}</code>
+                      </strong>
+                      <span className="x-hint" style={{ fontSize: 11 }}>
+                        {act.userRole}:{act.userId}
+                      </span>
+                    </div>
+                    {act.actionSummary && <div style={{ fontSize: 11 }}>{act.actionSummary}</div>}
+                    <pre
+                      style={{
+                        margin: 0,
+                        padding: 6,
+                        borderRadius: 6,
+                        fontSize: 11,
+                        overflowX: 'auto',
+                        backgroundColor: 'var(--bg-subtle, rgba(148,163,184,0.1))',
+                      }}
+                    >
+                      {JSON.stringify(act.payload)}
+                    </pre>
+                    <input
+                      type="text"
+                      data-testid={`live-test-review-note-${act.id}`}
+                      className="x-input"
+                      style={{ fontSize: 11, padding: '4px 8px' }}
+                      placeholder={s.reviewNotePlaceholder}
+                      value={noteVal}
+                      disabled={reviewActionMutation.isPending}
+                      onChange={(e) =>
+                        setReviewNotes((prev) => ({ ...prev, [act.id]: e.target.value }))
+                      }
+                    />
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        type="button"
+                        data-testid={`live-test-approve-btn-${act.id}`}
+                        className="x-button x-button-primary"
+                        style={{ fontSize: 11, padding: '4px 10px' }}
+                        disabled={reviewActionMutation.isPending}
+                        onClick={() =>
+                          reviewActionMutation.mutate({
+                            actionId: act.id,
+                            decision: 'approved',
+                            reviewNote: noteVal.trim() || undefined,
+                          })
+                        }
+                      >
+                        <Check size={12} />
+                        <span>
+                          {isThisBusy && activeReviewDecision === 'approved'
+                            ? s.approvingActionLabel
+                            : s.approveActionBtn}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        data-testid={`live-test-reject-btn-${act.id}`}
+                        className="x-button"
+                        style={{ fontSize: 11, padding: '4px 10px' }}
+                        disabled={reviewActionMutation.isPending}
+                        onClick={() =>
+                          reviewActionMutation.mutate({
+                            actionId: act.id,
+                            decision: 'rejected',
+                            reviewNote: noteVal.trim() || undefined,
+                          })
+                        }
+                      >
+                        <X size={12} />
+                        <span>
+                          {isThisBusy && activeReviewDecision === 'rejected'
+                            ? s.rejectingActionLabel
+                            : s.rejectActionBtn}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
 
           {/* Origin Allowlist Simulator */}
           <div

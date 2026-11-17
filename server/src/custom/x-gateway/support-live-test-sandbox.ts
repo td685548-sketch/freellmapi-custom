@@ -170,6 +170,24 @@ export function purgeLiveTestSandboxData(tenantId: number): SupportLiveTestSandb
       writeSettingsRecord(db, TICKETS_KEY, ticketStore);
     }
 
+    const actionStore = readSettingsRecord<LiveTestTagRecord[]>(db, ACTIONS_KEY);
+    const actionList = Array.isArray(actionStore[tid]) ? actionStore[tid] : [];
+    const deletedActionIds: string[] = [];
+    const keptActions = actionList.filter((item) => {
+      const linked =
+        typeof item.conversationId === 'string' && deletedConvIds.has(item.conversationId);
+      if (item.isLiveTest === true || linked) {
+        if (typeof item.id === 'string' && item.id) deletedActionIds.push(item.id);
+        return false;
+      }
+      return true;
+    });
+    const deletedActions = actionList.length - keptActions.length;
+    if (deletedActions > 0) {
+      actionStore[tid] = keptActions;
+      writeSettingsRecord(db, ACTIONS_KEY, actionStore);
+    }
+
     const filterLinked = (key: string): number => {
       const store = readSettingsRecord<LiveTestTagRecord[]>(db, key);
       const list = Array.isArray(store[tid]) ? store[tid] : [];
@@ -186,7 +204,6 @@ export function purgeLiveTestSandboxData(tenantId: number): SupportLiveTestSandb
       return removed;
     };
 
-    const deletedActions = filterLinked(ACTIONS_KEY);
     const deletedCsat = filterLinked(CSAT_KEY);
 
     const intakeStore = readSettingsRecord<string[]>(db, LIVE_TEST_INTAKES_KEY);
@@ -198,6 +215,8 @@ export function purgeLiveTestSandboxData(tenantId: number): SupportLiveTestSandb
 
     const convIdArr = [...deletedConvIds];
     const ticketIdArr = [...deletedTicketIds];
+
+    deleteByColumnValues(db, 'x_support_action_executions', tenantId, 'action_id', deletedActionIds);
 
     deleteByColumnValues(db, 'x_support_desk_ticket_state', tenantId, 'ticket_id', ticketIdArr);
     deleteByColumnValues(db, 'x_support_desk_ticket_state', tenantId, 'conversation_id', convIdArr);
