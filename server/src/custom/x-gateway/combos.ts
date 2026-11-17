@@ -232,11 +232,14 @@ export function validateCombo(
  */
 const rotationCursors = new Map<string, number>();
 
-export function rotateComboEntries(name: string, entries: ComboEntry[]): ComboEntry[] {
+/** `stickyLimit` = calls each step serves before rotating (1 = every request). */
+export function rotateComboEntries(name: string, entries: ComboEntry[], stickyLimit = 1): ComboEntry[] {
   if (entries.length <= 1) return entries;
   const key = name.toLowerCase();
-  const cursor = (rotationCursors.get(key) ?? 0) % entries.length;
-  rotationCursors.set(key, (cursor + 1) % entries.length);
+  const limit = Number.isFinite(stickyLimit) ? Math.max(1, Math.floor(stickyLimit)) : 1;
+  const calls = (rotationCursors.get(key) ?? 0) % (limit * entries.length);
+  rotationCursors.set(key, (calls + 1) % (limit * entries.length));
+  const cursor = Math.floor(calls / limit) % entries.length;
   if (cursor === 0) return entries;
   return [...entries.slice(cursor), ...entries.slice(0, cursor)];
 }

@@ -54,6 +54,7 @@ import {
   type ComboSmartPolicy,
   type ComboStrategy,
 } from './combos.js';
+import { effectiveProviderPolicy, getRoutingDefaults, shouldRotateCombo } from './routing-defaults.js';
 import { getConfigSnapshot, getRouteHealthTtlMinutes } from './config.js';
 import {
   filterCandidatesByCooldown,
@@ -157,10 +158,7 @@ function rotateProviderAccounts<T extends AccountRow>(accounts: T[]): T[] {
   for (const [provider, group] of groups) {
     const alias = getXGatewayProvider(provider)?.alias ?? provider;
     const modelCfg = getProviderModelConfig(provider);
-    const policy = settings?.[provider] ?? settings?.[alias] ?? {
-      strategy: modelCfg.strategy,
-      stickyLimit: modelCfg.stickyLimit,
-    };
+    const policy = settings?.[provider] ?? settings?.[alias] ?? effectiveProviderPolicy(provider, modelCfg);
     if (policy?.strategy !== 'round-robin' || group.length < 2) { providerCursors.delete(provider); continue; }
     const limit = Number.isFinite(policy.stickyLimit) ? Math.max(1, Math.floor(policy.stickyLimit!)) : 1;
     const signature = `${limit}:${group.map(a => a.id).join(',')}`;
@@ -393,7 +391,10 @@ export function resolveCandidateRoutes(
     const strategy = combo.strategy ?? DEFAULT_COMBO_STRATEGY;
     // Round-robin rotates the starting step; the remaining order is untouched,
     // so a failed step still falls through to the ones behind it.
-    const steps = strategy === 'round-robin' ? rotateComboEntries(combo.name, combo.entries) : combo.entries;
+    const routingDefaults = getRoutingDefaults();
+    const steps = shouldRotateCombo(strategy, routingDefaults)
+      ? rotateComboEntries(combo.name, combo.entries, routingDefaults.comboStickyLimit)
+      : combo.entries;
     const candidates: CandidateRoute[] = [];
     steps.forEach((step, stepIndex) => {
       const targetProvider = normalizeXGatewayProviderId(step.platform) ?? step.platform.toLowerCase();
