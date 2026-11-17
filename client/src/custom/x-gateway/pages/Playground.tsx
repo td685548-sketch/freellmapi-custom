@@ -28,13 +28,16 @@ import { PlaygroundMessageContent } from '../PlaygroundMessage';
 import {
   loadPlaygroundModels,
   streamPlayground,
+  StreamTimeoutError,
   type PlaygroundRequest,
-  type PlaygroundContent,
 } from '../playground-api';
 import {
   newChat,
   loadChats,
   saveChats,
+  createDebouncedChatSaver,
+  buildWindowedPlaygroundMessages,
+  type DebouncedChatSaver,
   type ChatSession,
   type ChatTurn,
   type ChatImage,
@@ -240,6 +243,7 @@ export default function Playground() {
   const handleClearCurrentChat = useCallback(async () => {
     if (activeChat.messages.length === 0) return;
     if (!await askConfirm(s.clearConfirm)) return;
+    setStreamError(null);
     setChats((prev) =>
       prev.map((c) => (c.id === activeChat.id ? { ...c, messages: [] } : c))
     );
@@ -361,10 +365,35 @@ export default function Playground() {
     };
   }, [userId]);
 
-  // Persist chats to localStorage and new image payloads to IndexedDB (7-day TTL)
+  const chatSaverRef = useRef<DebouncedChatSaver | null>(null);
+  if (!chatSaverRef.current) {
+    chatSaverRef.current = createDebouncedChatSaver();
+  }
+
+  // Flush any debounced localStorage chat save before page unload or unmount
+  useEffect(() => {
+    const flushPendingSave = () => {
+      chatSaverRef.current?.flush();
+    };
+    window.addEventListener('beforeunload', flushPendingSave);
+    window.addEventListener('pagehide', flushPendingSave);
+    return () => {
+      window.removeEventListener('beforeunload', flushPendingSave);
+      window.removeEventListener('pagehide', flushPendingSave);
+      flushPendingSave();
+    };
+  }, []);
+
+  // Persist chats to localStorage (debounced while streaming, flushed immediately once settled)
+  // and save new image payloads to IndexedDB (7-day TTL).
   useEffect(() => {
     if (!userId) return;
-    saveChats(userId, chats);
+    if (isStreaming) {
+      chatSaverRef.current?.schedule(userId, chats);
+    } else {
+      chatSaverRef.current?.cancel();
+      saveChats(userId, chats);
+    }
 
     const newImages: ChatImage[] = [];
     for (const chat of chats) {
@@ -381,7 +410,7 @@ export default function Playground() {
     if (newImages.length > 0) {
       void savePlaygroundImages(userId, newImages);
     }
-  }, [chats, userId]);
+  }, [chats, userId, isStreaming]);
 
   // Model selection grouped by provider / combos
   const groupedModels = useMemo(() => {
@@ -427,6 +456,9 @@ export default function Playground() {
     if (isStreaming && activeChatId === id) handleStopStream();
 
     const remaining = chats.filter((c) => c.id !== id);
+    if (activeChatId === id) {
+      setStreamError(null);
+    }
     if (remaining.length === 0) {
       const fresh = newChat();
       setChats([fresh]);
@@ -554,6 +586,136 @@ export default function Playground() {
     setIsStreaming(false);
   };
 
+  const executeStream = async (
+    chatId: string,
+    model: string,
+    turnsToSend: ChatTurn[],
+    assistantTurnId: string,
+  ) => {
+    setIsStreaming(true);
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    const requestMessages = buildWindowedPlaygroundMessages(turnsToSend, systemPrompt);
+    const payload: PlaygroundRequest = {
+      model: model || 'auto',
+      messages: requestMessages,
+      temperature,
+      max_tokens: maxTokens,
+      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+    };
+
+    let accumulatedContent = '';
+    let accumulatedReasoning = '';
+
+    try {
+      const result = await streamPlayground(
+        payload,
+        controller.signal,
+        (delta) => {
+          accumulatedContent += delta;
+          setChats((prev) =>
+            prev.map((c) => {
+              if (c.id !== chatId) return c;
+              return {
+                ...c,
+                messages: c.messages.map((m) =>
+                  m.id === assistantTurnId ? { ...m, content: accumulatedContent } : m
+                ),
+              };
+            })
+          );
+        },
+        (reasoningDelta) => {
+          accumulatedReasoning += reasoningDelta;
+          setChats((prev) =>
+            prev.map((c) => {
+              if (c.id !== chatId) return c;
+              return {
+                ...c,
+                messages: c.messages.map((m) =>
+                  m.id === assistantTurnId ? { ...m, reasoning: accumulatedReasoning } : m
+                ),
+              };
+            })
+          );
+        },
+        { sessionId: chatId },
+      );
+
+      const usageTokens = result.usage
+        ? (result.usage.prompt_tokens ?? 0) + (result.usage.completion_tokens ?? 0)
+        : null;
+      const metaString = `${result.route} · ${result.latencyMs} ms${
+        usageTokens !== null ? ` · ${usageTokens} ${s.tokens}` : ''
+      }`;
+
+      setChats((prev) =>
+        prev.map((c) => {
+          if (c.id !== chatId) return c;
+          return {
+            ...c,
+            messages: c.messages.map((m) =>
+              m.id === assistantTurnId
+                ? { ...m, content: accumulatedContent, meta: metaString }
+                : m
+            ),
+          };
+        })
+      );
+    } catch (err: unknown) {
+      const isAbort =
+        err !== null &&
+        typeof err === 'object' &&
+        'name' in err &&
+        err.name === 'AbortError';
+
+      if (isAbort) {
+        // Stream manually stopped by user
+        setChats((prev) =>
+          prev.map((c) => {
+            if (c.id !== chatId) return c;
+            return {
+              ...c,
+              messages: c.messages.map((m) =>
+                m.id === assistantTurnId ? { ...m, meta: 'Stopped' } : m
+              ),
+            };
+          })
+        );
+      } else {
+        const isTimeout = err instanceof StreamTimeoutError;
+        const errorMsg = isTimeout
+          ? err.kind === 'ttft'
+            ? s.timeoutTtft
+            : s.timeoutStall
+          : err instanceof Error
+            ? err.message
+            : s.failed;
+        setStreamError(errorMsg);
+        setChats((prev) =>
+          prev.map((c) => {
+            if (c.id !== chatId) return c;
+            const hasPartial = Boolean(accumulatedContent || accumulatedReasoning);
+            return {
+              ...c,
+              messages: hasPartial
+                ? c.messages.map((m) =>
+                    m.id === assistantTurnId
+                      ? { ...m, meta: isTimeout ? s.timedOutMeta : s.failed }
+                      : m
+                  )
+                : c.messages.filter((m) => m.id !== assistantTurnId),
+            };
+          })
+        );
+      }
+    } finally {
+      setIsStreaming(false);
+      abortControllerRef.current = null;
+    }
+  };
+
   const handleSend = async () => {
     const text = inputText.trim();
     if ((!text && attachments.length === 0) || isStreaming) return;
@@ -583,12 +745,15 @@ export default function Playground() {
       meta: s.generating,
     };
 
-    const updatedMessages = [...activeChat.messages, userTurn, placeholderAssistant];
+    const turnsToSend = [...activeChat.messages, userTurn];
+    const updatedMessages = [...turnsToSend, placeholderAssistant];
     const newTitle = activeChat.title || text.slice(0, 30) || 'New conversation';
+    const chatId = activeChat.id;
+    const model = activeChat.model || 'auto';
 
     setChats((prev) =>
       prev.map((c) =>
-        c.id === activeChat.id
+        c.id === chatId
           ? {
               ...c,
               title: newTitle,
@@ -602,157 +767,47 @@ export default function Playground() {
     setInputText('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     setAttachments([]);
-    setIsStreaming(true);
 
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+    await executeStream(chatId, model, turnsToSend, assistantTurnId);
+  };
 
-    // Prepare API messages
-    const requestMessages: PlaygroundRequest['messages'] = [];
-    if (systemPrompt.trim()) {
-      requestMessages.push({ role: 'system', content: systemPrompt.trim() });
+  const handleRetry = async () => {
+    if (isStreaming) return;
+    let lastUserIdx = -1;
+    for (let i = activeChat.messages.length - 1; i >= 0; i--) {
+      if (activeChat.messages[i]?.role === 'user') {
+        lastUserIdx = i;
+        break;
+      }
     }
+    if (lastUserIdx === -1) return;
 
-    // Helper to format multimodal content parts safely without empty text blocks
-    const buildParts = (text: string, images?: ChatImage[]): PlaygroundContent => {
-      const parts: PlaygroundContent = [];
-      const trimmed = text.trim();
-      if (trimmed) {
-        parts.push({ type: 'text', text: trimmed });
-      }
-      if (images && images.length > 0) {
-        for (const img of images) {
-          parts.push({
-            type: 'image_url' as const,
-            image_url: { url: img.url },
-          });
-        }
-      }
-      // If user submitted an image without prompt, add a concise default instruction
-      // to avoid 400 errors on upstream vision models requiring non-empty text.
-      if (parts.length > 0 && !parts.some((p) => p.type === 'text')) {
-        parts.unshift({ type: 'text', text: 'Describe or analyze this image.' });
-      }
-      return parts;
+    const baseMessages = activeChat.messages.slice(0, lastUserIdx + 1);
+    const assistantTurnId = crypto.randomUUID();
+    const placeholderAssistant: ChatTurn = {
+      id: assistantTurnId,
+      role: 'assistant',
+      content: '',
+      meta: s.generating,
     };
 
-    const stripInlineImageDataUrls = (text: string): string =>
-      text.replace(/!\[([^\]]*)\]\(data:image\/[^)]+\)/gi, (_match, alt: string) =>
-        alt.trim() ? `[Image: ${alt.trim()}]` : '[Generated image]',
-      );
+    setInputError(null);
+    setStreamError(null);
+    setIsNearBottom(true);
+    isNearBottomRef.current = true;
+    setTimeout(() => scrollToBottom(true), 0);
 
-    for (const msg of activeChat.messages) {
-      const sanitizedContent = stripInlineImageDataUrls(msg.content);
-      if (msg.images && msg.images.length > 0) {
-        requestMessages.push({ role: msg.role, content: buildParts(sanitizedContent, msg.images) });
-      } else {
-        requestMessages.push({ role: msg.role, content: sanitizedContent });
-      }
-    }
+    const chatId = activeChat.id;
+    const model = activeChat.model || 'auto';
+    setChats((prev) =>
+      prev.map((c) =>
+        c.id === chatId
+          ? { ...c, messages: [...baseMessages, placeholderAssistant], updatedAt: Date.now() }
+          : c
+      )
+    );
 
-    // Add current user turn
-    if (userTurn.images && userTurn.images.length > 0) {
-      requestMessages.push({ role: 'user', content: buildParts(userTurn.content, userTurn.images) });
-    } else {
-      requestMessages.push({ role: 'user', content: userTurn.content });
-    }
-
-    const payload: PlaygroundRequest = {
-      model: activeChat.model || 'auto',
-      messages: requestMessages,
-      temperature,
-      max_tokens: maxTokens,
-      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-    };
-
-    let accumulatedContent = '';
-    let accumulatedReasoning = '';
-
-    try {
-      const result = await streamPlayground(
-        payload,
-        controller.signal,
-        (delta) => {
-          accumulatedContent += delta;
-          setChats((prev) =>
-            prev.map((c) => {
-              if (c.id !== activeChat.id) return c;
-              return {
-                ...c,
-                messages: c.messages.map((m) =>
-                  m.id === assistantTurnId ? { ...m, content: accumulatedContent } : m
-                ),
-              };
-            })
-          );
-        },
-        (reasoningDelta) => {
-          accumulatedReasoning += reasoningDelta;
-          setChats((prev) =>
-            prev.map((c) => {
-              if (c.id !== activeChat.id) return c;
-              return {
-                ...c,
-                messages: c.messages.map((m) =>
-                  m.id === assistantTurnId ? { ...m, reasoning: accumulatedReasoning } : m
-                ),
-              };
-            })
-          );
-        }
-      );
-
-      const usageTokens = result.usage
-        ? (result.usage.prompt_tokens ?? 0) + (result.usage.completion_tokens ?? 0)
-        : null;
-      const metaString = `${result.route} · ${result.latencyMs} ms${
-        usageTokens !== null ? ` · ${usageTokens} ${s.tokens}` : ''
-      }`;
-
-      setChats((prev) =>
-        prev.map((c) => {
-          if (c.id !== activeChat.id) return c;
-          return {
-            ...c,
-            messages: c.messages.map((m) =>
-              m.id === assistantTurnId
-                ? { ...m, content: accumulatedContent, meta: metaString }
-                : m
-            ),
-          };
-        })
-      );
-    } catch (err: unknown) {
-      if (err instanceof DOMException && err.name === 'AbortError') {
-        // Stream manually stopped by user
-        setChats((prev) =>
-          prev.map((c) => {
-            if (c.id !== activeChat.id) return c;
-            return {
-              ...c,
-              messages: c.messages.map((m) =>
-                m.id === assistantTurnId ? { ...m, meta: 'Stopped' } : m
-              ),
-            };
-          })
-        );
-      } else {
-        const errorMsg = err instanceof Error ? err.message : s.failed;
-        setStreamError(errorMsg);
-        setChats((prev) =>
-          prev.map((c) => {
-            if (c.id !== activeChat.id) return c;
-            return {
-              ...c,
-              messages: c.messages.filter((m) => m.id !== assistantTurnId),
-            };
-          })
-        );
-      }
-    } finally {
-      setIsStreaming(false);
-      abortControllerRef.current = null;
-    }
+    await executeStream(chatId, model, baseMessages, assistantTurnId);
   };
 
   const handleCopyText = (text: string, turnId: string) => {
@@ -1126,8 +1181,21 @@ export default function Playground() {
 
           {/* Error Banner */}
           {(streamError || inputError) && (
-            <div className="x-error my-2 mx-4 p-2.5 rounded-lg text-xs flex-shrink-0" role="alert">
-              {streamError || inputError}
+            <div
+              className="x-error my-2 mx-4 p-2.5 rounded-lg text-xs flex-shrink-0 flex items-center justify-between gap-3"
+              role="alert"
+            >
+              <span>{streamError || inputError}</span>
+              {streamError && !isStreaming && activeChat.messages.some((m) => m.role === 'user') && (
+                <button
+                  type="button"
+                  onClick={() => void handleRetry()}
+                  className="x-button text-xs py-1 px-2.5 inline-flex items-center gap-1 flex-shrink-0"
+                >
+                  <RefreshCw size={12} />
+                  <span>{s.retry}</span>
+                </button>
+              )}
             </div>
           )}
 

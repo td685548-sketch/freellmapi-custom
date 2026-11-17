@@ -7,6 +7,7 @@ export const DEFAULT_HEADROOM_TIMEOUT_MS = 3000;
 const MIN_TIMEOUT_MS = 200;
 const MAX_TIMEOUT_MS = 30000;
 const SNAPSHOT_TTL_MS = 5000;
+const HEADROOM_UNREACHABLE_COOLDOWN_MS = 60_000;
 const HEADROOM_TOOL_OUTPUT_MAX_DEPTH = 8;
 
 export type HeadroomReadinessState = 'unconfigured' | 'disabled' | 'ready' | 'unreachable' | 'blocked';
@@ -82,6 +83,7 @@ export interface HeadroomProbeResult {
 
 let cachedConfig: { config: HeadroomConfig; loadedAt: number } | null = null;
 let lastProbeCache: HeadroomProbeResult | null = null;
+let unreachableCooldown: { url: string; until: number; reason: string } | null = null;
 let statsLoaded = false;
 
 const statsState: HeadroomStats = {
@@ -134,6 +136,7 @@ function normalizeTimeout(value: unknown): number {
 
 export function invalidateHeadroomCache(): void {
   cachedConfig = null;
+  unreachableCooldown = null;
   statsLoaded = false;
 }
 
@@ -213,6 +216,7 @@ export function setHeadroomConfig(patch: {
   }
 
   cachedConfig = null;
+  unreachableCooldown = null;
   if (patch.url !== undefined && patch.url.trim() !== current.url) {
     lastProbeCache = null;
   }
@@ -728,7 +732,9 @@ async function callCompressEndpoint(opts: {
 }): Promise<{ messages: Array<Record<string, unknown>>; tokens_before?: number; tokens_after?: number; tokens_saved?: number } | null> {
   const guard = await assessProviderUrl(opts.url);
   if (!guard.allowed) {
-    setDiagnostic(opts.diagnostics, `blocked by url-guard: ${guard.reason}`);
+    const reason = `blocked by url-guard: ${guard.reason}`;
+    setDiagnostic(opts.diagnostics, reason);
+    unreachableCooldown = { url: opts.url, until: Date.now() + HEADROOM_UNREACHABLE_COOLDOWN_MS, reason };
     return null;
   }
 
@@ -756,7 +762,11 @@ async function callCompressEndpoint(opts: {
       signal: combinedSignal,
     });
   } catch (error) {
-    setDiagnostic(opts.diagnostics, `request failed: ${describeFetchError(error)}`);
+    const reason = `request failed: ${describeFetchError(error)}`;
+    setDiagnostic(opts.diagnostics, reason);
+    if (!opts.signal?.aborted) {
+      unreachableCooldown = { url: opts.url, until: Date.now() + HEADROOM_UNREACHABLE_COOLDOWN_MS, reason };
+    }
     return null;
   }
 
@@ -778,6 +788,9 @@ async function callCompressEndpoint(opts: {
     return null;
   }
 
+  if (unreachableCooldown?.url === opts.url) {
+    unreachableCooldown = null;
+  }
   return data;
 }
 
@@ -811,6 +824,22 @@ export async function compressWithHeadroom(
 
   if (!url) {
     setDiagnostic(diagnostics, 'missing proxy URL');
+    return null;
+  }
+
+  const now = Date.now();
+  if (unreachableCooldown && unreachableCooldown.url === url && now < unreachableCooldown.until) {
+    setDiagnostic(diagnostics, `cooldown: ${unreachableCooldown.reason}`);
+    return null;
+  }
+  if (
+    options?.url === undefined
+    && lastProbeCache
+    && !lastProbeCache.reachable
+    && lastProbeCache.endpoint === maskHeadroomUrl(url)
+    && now - Date.parse(lastProbeCache.checkedAt) < HEADROOM_UNREACHABLE_COOLDOWN_MS
+  ) {
+    setDiagnostic(diagnostics, `cooldown: ${lastProbeCache.error || 'headroom unreachable'}`);
     return null;
   }
 

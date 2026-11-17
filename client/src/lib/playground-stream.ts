@@ -44,6 +44,33 @@ export interface ChatStreamHandlers {
   onDone?: (result: ChatStreamResult) => void
 }
 
+/** Error raised when a stream exceeds its first-event or mid-stream read deadline. */
+export class StreamTimeoutError extends Error {
+  readonly kind: 'ttft' | 'stall'
+  readonly timeoutMs: number
+
+  constructor(kind: 'ttft' | 'stall', timeoutMs: number) {
+    const seconds = Math.max(1, Math.round(timeoutMs / 1000))
+    super(
+      kind === 'ttft'
+        ? `Response timed out waiting for the first event (${seconds}s).`
+        : `Stream stalled with no new data for ${seconds}s.`,
+    )
+    this.name = 'StreamTimeoutError'
+    this.kind = kind
+    this.timeoutMs = timeoutMs
+  }
+}
+
+export interface ChatStreamOptions {
+  /** External cancellation signal (e.g. Stop button or request AbortController). */
+  signal?: AbortSignal
+  /** Max wait (ms) for the first SSE data frame before aborting. */
+  ttftTimeoutMs?: number
+  /** Max wait (ms) between consecutive stream reads after the first frame. */
+  stallTimeoutMs?: number
+}
+
 interface ChunkChoice {
   delta?: {
     content?: unknown
@@ -82,16 +109,55 @@ export function frameData(frame: string): string | null {
 export async function readChatStream(
   stream: ReadableStream<Uint8Array>,
   handlers: ChatStreamHandlers = {},
+  options: ChatStreamOptions = {},
 ): Promise<ChatStreamResult> {
   const reader = stream.getReader()
   const decoder = new TextDecoder()
   const result: ChatStreamResult = { content: '', reasoning: '', done: false }
   let buffer = ''
+  const { signal, ttftTimeoutMs, stallTimeoutMs } = options
+
+  const toAbortError = (reason: unknown): Error =>
+    reason instanceof Error ? reason : new DOMException('Aborted', 'AbortError')
+
+  let receivedFirstEvent = false
+  let ttftTimer: ReturnType<typeof setTimeout> | null = null
+  let stallTimer: ReturnType<typeof setTimeout> | null = null
+  let abortReject: ((err: Error) => void) | null = null
+  let activeFailure: Error | null = null
+
+  const clearTimers = () => {
+    if (ttftTimer !== null) {
+      clearTimeout(ttftTimer)
+      ttftTimer = null
+    }
+    if (stallTimer !== null) {
+      clearTimeout(stallTimer)
+      stallTimer = null
+    }
+  }
+
+  const failStream = (err: Error) => {
+    if (activeFailure) return
+    activeFailure = err
+    clearTimers()
+    abortReject?.(err)
+    void reader.cancel(err).catch(() => {})
+  }
+
+  const onAbort = () => failStream(toAbortError(signal?.reason))
 
   // Returns true once `[DONE]` says there is nothing left to read.
   const handleFrame = (frame: string): boolean => {
     const data = frameData(frame)
     if (data === null) return false
+    if (!receivedFirstEvent) {
+      receivedFirstEvent = true
+      if (ttftTimer !== null) {
+        clearTimeout(ttftTimer)
+        ttftTimer = null
+      }
+    }
     if (data === '[DONE]') return true
 
     let obj: Record<string, unknown>
@@ -142,9 +208,59 @@ export async function readChatStream(
     return false
   }
 
+  const readWithWatchdog = (): Promise<ReadableStreamReadResult<Uint8Array>> => {
+    if (activeFailure) return Promise.reject(activeFailure)
+    if (!ttftTimeoutMs && !stallTimeoutMs && !signal) {
+      return reader.read()
+    }
+    return new Promise((resolve, reject) => {
+      abortReject = reject
+      if ((receivedFirstEvent || !ttftTimeoutMs) && stallTimeoutMs && stallTimeoutMs > 0) {
+        stallTimer = setTimeout(() => {
+          failStream(new StreamTimeoutError('stall', stallTimeoutMs))
+        }, stallTimeoutMs)
+      }
+      reader.read().then(
+        (chunk) => {
+          if (stallTimer !== null) {
+            clearTimeout(stallTimer)
+            stallTimer = null
+          }
+          abortReject = null
+          if (activeFailure) reject(activeFailure)
+          else resolve(chunk)
+        },
+        (err) => {
+          if (stallTimer !== null) {
+            clearTimeout(stallTimer)
+            stallTimer = null
+          }
+          abortReject = null
+          reject(activeFailure ?? err)
+        },
+      )
+    })
+  }
+
+  if (signal?.aborted) {
+    try {
+      await reader.cancel()
+    } catch {
+      // Ignore cancel errors on already-closed streams.
+    }
+    throw toAbortError(signal.reason)
+  }
+
+  signal?.addEventListener('abort', onAbort, { once: true })
+  if (ttftTimeoutMs && ttftTimeoutMs > 0) {
+    ttftTimer = setTimeout(() => {
+      failStream(new StreamTimeoutError('ttft', ttftTimeoutMs))
+    }, ttftTimeoutMs)
+  }
+
   try {
     reading: for (;;) {
-      const { done, value } = await reader.read()
+      const { done, value } = await readWithWatchdog()
       if (done) break
       // Normalising the whole buffer (not just the new bytes) keeps a CRLF
       // that straddles two reads from looking like a blank-line boundary.
@@ -173,6 +289,8 @@ export async function readChatStream(
       }
     }
   } finally {
+    clearTimers()
+    signal?.removeEventListener('abort', onAbort)
     // Releases the socket when we stopped early at [DONE]; a no-op once the
     // stream is already exhausted or the fetch was aborted.
     try {

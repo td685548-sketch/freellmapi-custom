@@ -5,6 +5,9 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api';
+import { readChatStream, StreamTimeoutError } from '@/lib/playground-stream';
+import { streamPlayground } from './playground-api';
+import { historyKey } from './playground-state';
 import Playground from './pages/Playground';
 import { PlaygroundMessageContent } from './PlaygroundMessage';
 
@@ -58,6 +61,9 @@ afterEach(() => {
     root.unmount();
   });
   container.remove();
+  localStorage.clear();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
   vi.clearAllMocks();
 });
 
@@ -477,5 +483,258 @@ describe('Playground component', () => {
     } finally {
       document.documentElement.classList.remove('dark');
     }
+  });
+
+  it('sends X-Session-Id, debounces localStorage writes during streaming, and flushes on finish', async () => {
+    vi.useFakeTimers();
+    const encoder = new TextEncoder();
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    const sseStream = new ReadableStream<Uint8Array>({
+      start(c) {
+        streamController = c;
+      },
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(sseStream, {
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'x-routed-via': 'openai/gpt-4o',
+        },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    act(() => {
+      root.render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <Playground />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+    });
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('textarea')).not.toBeNull();
+    });
+
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+    act(() => {
+      valueSetter.call(textarea, 'Ping');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const sendBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('Send'),
+    ) as HTMLButtonElement;
+    expect(sendBtn).toBeTruthy();
+
+    await act(async () => {
+      sendBtn.click();
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const fetchOpts = fetchMock.mock.calls[0]![1] as RequestInit;
+    const headers = fetchOpts.headers as Record<string, string>;
+    expect(headers['X-Session-Id']).toMatch(/^[0-9a-f-]+$/i);
+
+    setItemSpy.mockClear();
+
+    // Emit rapid token deltas within the debounce window
+    await act(async () => {
+      streamController.enqueue(
+        encoder.encode('data: {"choices":[{"index":0,"delta":{"content":"Hello"}}]}\n\n'),
+      );
+      await Promise.resolve();
+    });
+    await act(async () => {
+      streamController.enqueue(
+        encoder.encode('data: {"choices":[{"index":0,"delta":{"content":" world"}}]}\n\n'),
+      );
+      await Promise.resolve();
+    });
+
+    // Must not synchronously write localStorage on every delta
+    const chatKey = historyKey(1);
+    const syncHistoryWrites = setItemSpy.mock.calls.filter(([key]) => key === chatKey);
+    expect(syncHistoryWrites).toHaveLength(0);
+
+    // Finish stream -> flushes immediately
+    await act(async () => {
+      streamController.enqueue(encoder.encode('data: [DONE]\n\n'));
+      streamController.close();
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Hello world');
+      expect(localStorage.getItem(chatKey)).toContain('Hello world');
+    });
+  });
+
+  it('aborts hung TTFT, clears loading dots, and retries without duplicating the user turn', async () => {
+    const encoder = new TextEncoder();
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new StreamTimeoutError('ttft', 25_000))
+      .mockImplementationOnce(async () => {
+        const body = new ReadableStream<Uint8Array>({
+          start(c) {
+            c.enqueue(
+              encoder.encode('data: {"choices":[{"index":0,"delta":{"content":"Recovered reply"}}]}\n\n'),
+            );
+            c.enqueue(encoder.encode('data: [DONE]\n\n'));
+            c.close();
+          },
+        });
+        return new Response(body, {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream', 'x-routed-via': 'openai/gpt-4o' },
+        });
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    act(() => {
+      root.render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <Playground />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+    });
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('textarea')).not.toBeNull();
+    });
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+    act(() => {
+      valueSetter.call(textarea, 'Explain closures');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const sendBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('Send'),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      sendBtn.click();
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      const alert = container.querySelector('[role="alert"]');
+      expect(alert?.textContent).toContain('timed out');
+      expect(container.textContent).not.toContain('Generating…');
+      const retryBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+        b.textContent?.includes('Retry'),
+      );
+      expect(retryBtn).toBeTruthy();
+    });
+
+    const retryBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('Retry'),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      retryBtn.click();
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Recovered reply');
+    });
+
+    // User turn was not duplicated across retry
+    const userTurns = container.querySelectorAll('.x-basic-user');
+    expect(userTurns).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('playground stream watchdogs & session stickiness', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('rejects with StreamTimeoutError("ttft") when no SSE data event arrives before deadline', async () => {
+    vi.useFakeTimers();
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        // Only an SSE comment keepalive arrives, never a data frame
+        controller.enqueue(encoder.encode(': keepalive\n\n'));
+      },
+    });
+
+    const promise = readChatStream(stream, {}, { ttftTimeoutMs: 500, stallTimeoutMs: 1000 });
+    const assertion = expect(promise).rejects.toMatchObject({
+      name: 'StreamTimeoutError',
+      kind: 'ttft',
+    });
+
+    await vi.advanceTimersByTimeAsync(500);
+    await assertion;
+  });
+
+  it('rejects with StreamTimeoutError("stall") when mid-stream chunks stall', async () => {
+    vi.useFakeTimers();
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode('data: {"choices":[{"index":0,"delta":{"content":"Hi"}}]}\n\n'),
+        );
+      },
+    });
+
+    const promise = readChatStream(stream, {}, { ttftTimeoutMs: 500, stallTimeoutMs: 800 });
+    const assertion = expect(promise).rejects.toMatchObject({
+      name: 'StreamTimeoutError',
+      kind: 'stall',
+    });
+
+    await vi.advanceTimersByTimeAsync(800);
+    await assertion;
+  });
+
+  it('streamPlayground sends X-Session-Id header and aborts on TTFT timeout', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          reject(new DOMException('Aborted', 'AbortError'));
+        });
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const controller = new AbortController();
+    const promise = streamPlayground(
+      { model: 'auto', messages: [{ role: 'user', content: 'Hi' }] },
+      controller.signal,
+      () => {},
+      undefined,
+      { sessionId: 'conv-123', ttftTimeoutMs: 400, stallTimeoutMs: 800 },
+    );
+    const assertion = expect(promise).rejects.toMatchObject({
+      name: 'StreamTimeoutError',
+      kind: 'ttft',
+    });
+
+    const headers = (fetchMock.mock.calls[0]![1] as RequestInit).headers as Record<string, string>;
+    expect(headers['X-Session-Id']).toBe('conv-123');
+
+    await vi.advanceTimersByTimeAsync(400);
+    await assertion;
   });
 });

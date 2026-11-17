@@ -10,11 +10,15 @@ const pending = new WeakMap<object, Map<number, Promise<XAccountQuota>>>();
 interface SnapshotRow { account_id: number; snapshot_json: string; observed_at: string | null; checked_at: string | null; last_error: string | null }
 const ranks: Record<QuotaTier, number> = { subscription: 0, cheap: 1, free: 2 };
 
+export function isWebCookieProvider(provider: string): boolean {
+  return getXGatewayProvider(provider)?.category === 'webCookie';
+}
+
 export function defaultQuotaTier(provider: string): QuotaTier {
   if (['kiro', 'opencode', 'opencode-free', 'iflow'].includes(provider)) return 'free';
   const category = getXGatewayProvider(provider)?.category;
-  if (category === 'free' || category === 'freeTier') return 'free';
-  if (category === 'oauth' || category === 'webCookie' || provider === 'github-copilot') return 'subscription';
+  if (category === 'free' || category === 'freeTier' || category === 'webCookie') return 'free';
+  if (category === 'oauth' || provider === 'github-copilot') return 'subscription';
   return 'cheap';
 }
 function windows(row: SnapshotRow | undefined): XQuotaWindow[] {
@@ -56,7 +60,14 @@ export function applyQuotaRouting<T extends Pick<AccountRow, 'id' | 'provider'>>
     return !windows(row).some(w => w.blocking && (!w.modelId || w.modelId === modelId)
       && w.remaining != null && w.remaining <= 0 && isQuotaWindowFresh(w, row?.observed_at ?? null, now));
   });
-  if (sort) result.sort((a, b) => ranks[tiers.get(a.id) ?? defaultQuotaTier(a.provider)] - ranks[tiers.get(b.id) ?? defaultQuotaTier(b.provider)]);
+  if (sort) {
+    result.sort((a, b) => {
+      const aWeb = isWebCookieProvider(a.provider) ? 1 : 0;
+      const bWeb = isWebCookieProvider(b.provider) ? 1 : 0;
+      if (aWeb !== bWeb) return aWeb - bWeb;
+      return ranks[tiers.get(a.id) ?? defaultQuotaTier(a.provider)] - ranks[tiers.get(b.id) ?? defaultQuotaTier(b.provider)];
+    });
+  }
   return result;
 }
 export function listAccountQuotas(): XAccountQuota[] {

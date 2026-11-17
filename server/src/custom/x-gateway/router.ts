@@ -9,7 +9,19 @@ import { decrypt } from '../../lib/crypto.js';
 import { estimateInputTokens } from '../../lib/content.js';
 import { assessProviderUrl } from '../../lib/url-guard.js';
 import { withQuotaTracking } from './quota/tracking.js';
-import { applyQuotaRouting } from './quota/store.js';
+import { applyQuotaRouting, isWebCookieProvider } from './quota/store.js';
+import { getAccountCooldown } from '../provider-accounts/auto-ping.js';
+import {
+  clearAutoSessionRoute,
+  getAutoSessionRoute,
+  resetAutoSessionCache,
+  setAutoSessionRoute,
+} from './auto-session-cache.js';
+import {
+  getAutoStreamPeekTimeoutMs,
+  peekStreamForContent,
+  reconstructStream,
+} from './stream-peek.js';
 import { logRequest } from '../../lib/request-log.js';
 import { getClientContext } from '../../lib/client-context.js';
 import { sanitizeProviderErrorMessage } from '../../lib/error-redaction.js';
@@ -88,16 +100,60 @@ export function xGatewayAuth(req: Request, res: Response, next: NextFunction): v
 // ID or alias. Keep cursors scoped to the current database and account set.
 const providerCursors = new Map<string, { signature: string; calls: number }>();
 let providerCursorDb: unknown;
-function rotateProviderAccounts<T extends AccountRow>(accounts: T[]): T[] {
-  const db = getDb();
-  if (providerCursorDb !== db) { providerCursors.clear(); providerCursorDb = db; }
+const PROVIDER_SETTINGS_CACHE_TTL_MS = 5_000;
+let providerSettingsCache: {
+  db: unknown;
+  snapshot: unknown;
+  expiresAt: number;
+  settings: Record<string, { strategy?: string; stickyLimit?: number }>;
+} | null = null;
+
+function readProviderSettings(db: ReturnType<typeof getDb>): Record<string, { strategy?: string; stickyLimit?: number }> {
+  const now = Date.now();
+  const snapshot = getConfigSnapshot();
+  if (
+    providerSettingsCache
+    && providerSettingsCache.db === db
+    && providerSettingsCache.snapshot === snapshot
+    && now < providerSettingsCache.expiresAt
+  ) {
+    return providerSettingsCache.settings;
+  }
   let settings: Record<string, { strategy?: string; stickyLimit?: number }> = {};
   try {
     const row = db.prepare("SELECT value FROM x_gateway_config WHERE key = 'provider_settings'").get() as { value: string } | undefined;
     settings = row ? JSON.parse(row.value) : {};
   } catch { /* An absent or malformed policy retains fallback order. */ }
+  providerSettingsCache = { db, snapshot, expiresAt: now + PROVIDER_SETTINGS_CACHE_TTL_MS, settings };
+  return settings;
+}
+
+function rotateProviderAccounts<T extends AccountRow>(accounts: T[]): T[] {
+  const db = getDb();
+  if (providerCursorDb !== db) {
+    providerCursors.clear();
+    providerCursorDb = db;
+  }
+  if (accounts.length < 2) {
+    for (const account of accounts) providerCursors.delete(account.provider);
+    return accounts;
+  }
   const groups = new Map<string, T[]>();
-  for (const account of accounts) groups.set(account.provider, [...(groups.get(account.provider) ?? []), account]);
+  let hasRotatableGroup = false;
+  for (const account of accounts) {
+    const group = groups.get(account.provider);
+    if (group) {
+      group.push(account);
+      hasRotatableGroup = true;
+    } else {
+      groups.set(account.provider, [account]);
+    }
+  }
+  if (!hasRotatableGroup) {
+    for (const provider of groups.keys()) providerCursors.delete(provider);
+    return accounts;
+  }
+  const settings = readProviderSettings(db);
   for (const [provider, group] of groups) {
     const alias = getXGatewayProvider(provider)?.alias ?? provider;
     const modelCfg = getProviderModelConfig(provider);
@@ -145,12 +201,37 @@ export type CandidateModality = 'chat' | 'image' | 'vision';
 
 const IMAGE_MODEL_RE =
   /(?:^|[^a-z])(image|imagen|dall-?e|flux|diffusion|sdxl|seedream|ideogram|recraft|midjourney|qwen-image|wanx)(?:[^a-z]|$)/i;
+const VIDEO_MODEL_RE =
+  /(?:^|[^a-z])(video|veo|sora|kling|luma|hunyuan-video|seedance)(?:[^a-z]|$)|wan[\d.-]|grok-imagine-video/i;
+const TTS_MODEL_RE =
+  /(?:^|[^a-z])(tts|speech|voice|sonic)(?:[^a-z]|$)|eleven_|aura-/i;
+const STT_MODEL_RE =
+  /(?:^|[^a-z])(stt|whisper|transcription|transcribe)(?:[^a-z]|$)|nova-.*general/i;
+const EMBEDDING_MODEL_RE = /embed/i;
+const NON_CHAT_ONLY_PROVIDERS = new Set([
+  'tavily', 'serper', 'brave-search', 'exa', 'searxng',
+  'edge-tts', 'elevenlabs', 'cartesia', 'fish-audio', 'aws-polly',
+  'deepgram', 'assemblyai',
+  'black-forest-labs', 'fal-ai', 'sdwebui', 'comfyui', 'kling', 'luma',
+]);
+
+function isNonChatModel(model: { id: string; name?: string }): boolean {
+  const target = `${model.id} ${model.name ?? ''}`;
+  return (
+    IMAGE_MODEL_RE.test(target)
+    || VIDEO_MODEL_RE.test(target)
+    || TTS_MODEL_RE.test(target)
+    || STT_MODEL_RE.test(target)
+    || EMBEDDING_MODEL_RE.test(target)
+  );
+}
 
 /**
  * `auto` normally means "first model of the account", which is a chat model.
  * Image routes need the account's image model instead, or the chat model gets
  * forwarded to `/images/generations` and rejected upstream.
- * Vision routes need a model that can process image inputs.
+ * Chat and vision routes filter out image, TTS, STT, embedding, and video
+ * models so `gemini-image` and media-only models are never chosen for text chat.
  */
 function orderModelsForModality<T extends { id: string; name?: string }>(
   models: T[],
@@ -160,28 +241,27 @@ function orderModelsForModality<T extends { id: string; name?: string }>(
   if (modality === 'image') {
     return [...models.filter(isImage), ...models.filter(m => !isImage(m))];
   }
+  const chatModels = models.filter(m => !isNonChatModel(m));
   if (modality === 'vision') {
     return [
-      ...models.filter(m => looksLikeVisionModel(m.id) && !isImage(m)),
-      ...models.filter(m => !looksLikeVisionModel(m.id) && !isImage(m)),
-      ...models.filter(isImage),
+      ...chatModels.filter(m => looksLikeVisionModel(m.id)),
+      ...chatModels.filter(m => !looksLikeVisionModel(m.id)),
     ];
   }
-  return [...models.filter(m => !isImage(m)), ...models.filter(isImage)];
+  return chatModels;
 }
 
-function pickCandidateModel(models: { id: string; name?: string }[], modality: CandidateModality): string {
+function pickCandidateModel(models: { id: string; name?: string }[], modality: CandidateModality): string | null {
   if (modality === 'image') {
     const image = models.find(m => IMAGE_MODEL_RE.test(m.id) || IMAGE_MODEL_RE.test(m.name ?? ''));
     if (image) return image.id;
     const generic = models.find(m => m.id.toLowerCase() === 'default' || m.id.toLowerCase() === 'auto');
     if (generic) return generic.id;
+    return models[0]?.id ?? 'default';
   }
-  if (modality === 'vision') {
-    const vision = models.find(m => looksLikeVisionModel(m.id));
-    if (vision) return vision.id;
-  }
-  return models[0]?.id ?? 'default';
+  const ordered = orderModelsForModality(models, modality);
+  if (ordered.length > 0) return ordered[0].id;
+  return models.length === 0 ? 'default' : null;
 }
 
 export interface ComboRouteInfo {
@@ -228,9 +308,26 @@ function finalizeCandidateRoutes(
   };
 }
 
+function sortAutoCandidates(candidates: CandidateRoute[]): CandidateRoute[] {
+  const healthSorted = sortCandidatesByHealth(candidates);
+  // Keep healthy API-key/OAuth/free providers ahead of slow webCookie scrapers,
+  // while still demoting actively failing routes behind healthy ones.
+  return [...healthSorted].sort((a, b) => {
+    const aHealth = routeHealth.get(healthKey(a));
+    const bHealth = routeHealth.get(healthKey(b));
+    const aFailing = aHealth && isRouteHealthFailing(aHealth) ? 1 : 0;
+    const bFailing = bHealth && isRouteHealthFailing(bHealth) ? 1 : 0;
+    if (aFailing !== bFailing) return aFailing - bFailing;
+    const aWeb = isWebCookieProvider(a.account.provider) ? 1 : 0;
+    const bWeb = isWebCookieProvider(b.account.provider) ? 1 : 0;
+    if (aWeb !== bWeb) return aWeb - bWeb;
+    return 0;
+  });
+}
+
 export function resolveCandidateRoutes(
   requestedModel: string | undefined,
-  modality: CandidateModality = 'chat',
+  modality?: CandidateModality,
 ): {
   candidates: CandidateRoute[];
   notFoundError?: string;
@@ -238,24 +335,53 @@ export function resolveCandidateRoutes(
   allRateLimited?: boolean;
   retryAfterMs?: number;
 } {
+  const effectiveModality: CandidateModality = modality ?? 'chat';
+  const strictChatModality = modality === 'chat' || modality === 'vision';
   const rawModel = resolveXGatewayModelAlias(parseModelThinkingSuffix(requestedModel).cleanModel);
   const lower = rawModel.toLowerCase();
-  const usable = applyQuotaRouting(getUsableXGatewayKeys().filter(isWithinAccountCaps), lower === 'auto' || lower.startsWith('auto:'));
+  const isAuto = lower === 'auto' || lower.startsWith('auto:');
+  const usable = applyQuotaRouting(getUsableXGatewayKeys().filter(isWithinAccountCaps), isAuto);
 
-  if (lower === 'auto' || lower.startsWith('auto:')) {
+  if (isAuto) {
     const candidates: CandidateRoute[] = [];
     for (const account of usable) {
+      if (strictChatModality && NON_CHAT_ONLY_PROVIDERS.has(account.provider)) {
+        continue;
+      }
       const models = accountModels(account);
-      candidates.push({ account, modelId: pickCandidateModel(models, modality) });
+      if (models.length === 0) {
+        candidates.push({ account, modelId: 'default' });
+        continue;
+      }
+      if (effectiveModality === 'image') {
+        const picked = pickCandidateModel(models, effectiveModality);
+        if (picked) {
+          candidates.push({ account, modelId: picked });
+        }
+        continue;
+      }
+      const orderedAll = orderModelsForModality(models, effectiveModality);
+      const eligibleAll = orderedAll.length > 0
+        ? orderedAll
+        : (!strictChatModality ? models : []);
+      if (eligibleAll.length === 0) continue;
+      // Prefer a non-cooled-down chat/vision model for this account, falling back
+      // to the full eligible pool so finalizeCandidateRoutes can report allRateLimited
+      // if every matching model is currently cooling down.
+      const healthyEligible = eligibleAll.filter(m => !getAccountCooldown(account.id, m.id).inCooldown);
+      const pool = healthyEligible.length > 0 ? healthyEligible : eligibleAll;
+      const best = sortCandidatesByHealth(pool.map(m => ({ account, modelId: m.id })))[0];
+      candidates.push(best);
     }
-    if (modality === 'vision') {
-      candidates.sort((a, b) => {
+    const ordered = sortAutoCandidates(rotateCandidateAccounts(candidates));
+    if (effectiveModality === 'vision') {
+      ordered.sort((a, b) => {
         const aVision = looksLikeVisionModel(a.modelId) ? 1 : 0;
         const bVision = looksLikeVisionModel(b.modelId) ? 1 : 0;
         return bVision - aVision;
       });
     }
-    return finalizeCandidateRoutes(rotateCandidateAccounts(candidates));
+    return finalizeCandidateRoutes(ordered);
   }
 
   if (lower.startsWith('combo:')) {
@@ -299,10 +425,15 @@ export function resolveCandidateRoutes(
         const perAccountModels = providerAccounts.map(account => {
           const rawModels = accountModels(account);
           const enabled = rawModels.filter(m => !resolveRouteModel(matchedProvider, m.id).disabled);
-          const ordered = orderModelsForModality(enabled, modality);
+          const ordered = orderModelsForModality(enabled, effectiveModality);
+          const modelsForAccount = ordered.length > 0
+            ? ordered
+            : (!strictChatModality && enabled.length > 0
+              ? enabled
+              : (rawModels.length === 0 ? [{ id: 'default' }] : []));
           return {
             account,
-            models: ordered.length > 0 ? ordered : (rawModels.length === 0 ? [{ id: 'default' }] : []),
+            models: modelsForAccount,
           };
         });
         const maxModels = perAccountModels.reduce((max, entry) => Math.max(max, entry.models.length), 0);
@@ -472,6 +603,7 @@ const sessionPins = new Map<string, SessionPin>();
 
 export function resetSessionPins(): void {
   sessionPins.clear();
+  resetAutoSessionCache();
 }
 
 function messageText(content: unknown): string {
@@ -717,24 +849,122 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
       return false;
     });
     const modality: CandidateModality = hasImage ? 'vision' : 'chat';
-    const { candidates: rawCandidates, notFoundError, combo, allRateLimited, retryAfterMs } = resolveCandidateRoutes(requestedModel, modality);
-    if (notFoundError) {
-      res.status(404).json({
-        error: { message: notFoundError, type: 'invalid_request_error', code: 'model_not_found' },
-      });
-      return;
+    const resolvedAliasLower = resolveXGatewayModelAlias(requestedModel).toLowerCase();
+    const isAutoModel = resolvedAliasLower === 'auto' || resolvedAliasLower.startsWith('auto:');
+    const rawHeaderSession = req.headers['x-session-id'];
+    const headerSession = typeof rawHeaderSession === 'string'
+      ? rawHeaderSession.trim()
+      : Array.isArray(rawHeaderSession) && typeof rawHeaderSession[0] === 'string'
+        ? rawHeaderSession[0].trim()
+        : '';
+    const bodySession = typeof body.sessionId === 'string'
+      ? body.sessionId.trim()
+      : typeof body.session_id === 'string'
+        ? body.session_id.trim()
+        : '';
+    const localsSession = typeof res.locals?.sessionId === 'string' ? res.locals.sessionId.trim() : '';
+    const explicitSessionId = (headerSession || bodySession || localsSession).slice(0, 128);
+    const autoSessionId = isAutoModel
+      ? (explicitSessionId || (fromPlayground ? (() => {
+          const fp = conversationFingerprint(messages);
+          return fp ? `pg:${fp}` : '';
+        })() : ''))
+      : '';
+    const dbRef = getDb();
+
+    let candidates: CandidateRoute[] = [];
+    let combo: ComboRouteInfo | undefined;
+    let allRateLimited: boolean | undefined;
+    let retryAfterMs: number | undefined;
+    let usingAutoSticky = false;
+    let stickyExpanded = false;
+    let stickyAttempted: { accountId: number; modelId: string } | null = null;
+
+    if (autoSessionId) {
+      const pinned = getAutoSessionRoute(autoSessionId, modality, dbRef);
+      if (pinned) {
+        const usableAccount = getUsableXGatewayKeys().find(
+          a => a.id === pinned.accountId && a.provider === pinned.providerId && isWithinAccountCaps(a),
+        );
+        const inCooldown = getAccountCooldown(pinned.accountId, pinned.modelId).inCooldown;
+        const modelDisabled = resolveRouteModel(pinned.providerId, pinned.modelId).disabled;
+        const modalityOk = !isNonChatModel({ id: pinned.modelId });
+        if (usableAccount && !inCooldown && !modelDisabled && modalityOk) {
+          candidates = [{ account: usableAccount, modelId: pinned.modelId }];
+          usingAutoSticky = true;
+          stickyAttempted = { accountId: pinned.accountId, modelId: pinned.modelId };
+        } else {
+          clearAutoSessionRoute(autoSessionId, modality);
+        }
+      }
     }
+
+    const resolveNormalCandidates = (): {
+      resolved: CandidateRoute[];
+      notFoundError?: string;
+      combo?: ComboRouteInfo;
+      allRateLimited?: boolean;
+      retryAfterMs?: number;
+    } => {
+      const {
+        candidates: rawCandidates,
+        notFoundError,
+        combo: resolvedCombo,
+        allRateLimited: resolvedAllRateLimited,
+        retryAfterMs: resolvedRetryAfterMs,
+      } = resolveCandidateRoutes(requestedModel, modality);
+      if (notFoundError) {
+        return { resolved: [], notFoundError, combo: resolvedCombo };
+      }
+      // The adapter only ever returns account/model pairs, so it can keep the
+      // combo step metadata that `resolveCandidateRoutes` attached.
+      const augmented = augmentCandidatesWithCapacityAdapter(rawCandidates, messages) as CandidateRoute[];
+      // Smart combos keep a conversation on the same route to protect the
+      // provider's warm prompt cache; other strategies keep their own ordering.
+      return {
+        resolved: applySessionStickiness(augmented, resolvedCombo, messages),
+        combo: resolvedCombo,
+        allRateLimited: resolvedAllRateLimited,
+        retryAfterMs: resolvedRetryAfterMs,
+      };
+    };
+
+    const expandStickyFallbacks = () => {
+      if (!usingAutoSticky || stickyExpanded) return;
+      stickyExpanded = true;
+      if (autoSessionId) clearAutoSessionRoute(autoSessionId, modality);
+      const { resolved } = resolveNormalCandidates();
+      for (const candidate of resolved) {
+        if (
+          stickyAttempted
+          && candidate.account.id === stickyAttempted.accountId
+          && candidate.modelId === stickyAttempted.modelId
+        ) {
+          continue;
+        }
+        candidates.push(candidate);
+      }
+    };
+
+    if (!usingAutoSticky) {
+      const normal = resolveNormalCandidates();
+      if (normal.notFoundError) {
+        res.status(404).json({
+          error: { message: normal.notFoundError, type: 'invalid_request_error', code: 'model_not_found' },
+        });
+        return;
+      }
+      candidates = normal.resolved;
+      combo = normal.combo;
+      allRateLimited = normal.allRateLimited;
+      retryAfterMs = normal.retryAfterMs;
+    }
+
     const strategy = combo?.strategy ?? DEFAULT_COMBO_STRATEGY;
     if (combo) {
       res.setHeader('X-Combo-Strategy', strategy);
       if (strategy === 'smart') res.setHeader('X-Combo-Policy', combo.smartPolicy);
     }
-    // The adapter only ever returns account/model pairs, so it can keep the
-    // combo step metadata that `resolveCandidateRoutes` attached.
-    const augmented = augmentCandidatesWithCapacityAdapter(rawCandidates, messages) as CandidateRoute[];
-    // Smart combos keep a conversation on the same route to protect the
-    // provider's warm prompt cache; other strategies keep their own ordering.
-    const candidates = applySessionStickiness(augmented, combo, messages);
     if (candidates.length === 0) {
       if (allRateLimited) {
         const retryAfterSeconds = Math.max(1, Math.ceil((retryAfterMs ?? 0) / 1000));
@@ -882,7 +1112,8 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
     }
 
     const skippedProviders = new Set<string>();
-    for (const candidate of candidates) {
+    for (let candidateIdx = 0; candidateIdx < candidates.length; candidateIdx += 1) {
+      const candidate = candidates[candidateIdx];
       if (controller.signal.aborted) return;
       const { account, modelId } = candidate;
       if (skippedProviders.has(account.provider)) continue;
@@ -893,6 +1124,13 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
           const result = await attemptNonStream(candidate, controller.signal);
           recordRouteOutcome(healthKey(candidate), { latencyMs: result.latencyMs });
           recordCandidateSuccess(account.id, modelId);
+          if (isAutoModel && autoSessionId) {
+            setAutoSessionRoute(autoSessionId, modality, {
+              providerId: account.provider,
+              accountId: account.id,
+              modelId,
+            }, dbRef);
+          }
           succeedNonStream(result);
           endUsageRequest(activeToken, { status: 'success', provider: account.provider, model: modelId });
           return;
@@ -907,6 +1145,8 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
           } else {
             recordRouteOutcome(healthKey(candidate), { error: true });
           }
+          if (isAutoModel && autoSessionId) clearAutoSessionRoute(autoSessionId, modality);
+          if (usingAutoSticky && candidateIdx === 0) expandStickyFallbacks();
           const errMsg = sanitizeProviderErrorMessage(err instanceof Error ? err.message : 'Provider error');
           endUsageRequest(activeToken, {
             status: 'error',
@@ -923,6 +1163,8 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
       if (!provider) {
         lastError = new Error(`Provider '${account.provider}' is not available.`);
         recordRouteOutcome(healthKey(candidate), { error: true });
+        if (isAutoModel && autoSessionId) clearAutoSessionRoute(autoSessionId, modality);
+        if (usingAutoSticky && candidateIdx === 0) expandStickyFallbacks();
         continue;
       }
 
@@ -932,12 +1174,26 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
       } catch (err) {
         lastError = err;
         recordRouteOutcome(healthKey(candidate), { error: true });
+        if (isAutoModel && autoSessionId) clearAutoSessionRoute(autoSessionId, modality);
+        if (usingAutoSticky && candidateIdx === 0) expandStickyFallbacks();
         continue;
       }
 
       const effectiveProxy = resolveXGatewayAccountProxy(account);
       const streamStartedAt = Date.now();
       const activeToken = beginUsageRequest(account.provider, modelId, fromPlayground);
+      const hasFallback = candidateIdx < candidates.length - 1 || (
+        usingAutoSticky
+        && candidateIdx === 0
+        && !stickyExpanded
+        && (
+          getUsableXGatewayKeys().some(a => a.id !== account.id && isWithinAccountCaps(a))
+          || orderModelsForModality(accountModels(account), modality).length > 1
+        )
+      );
+      const peekTimeoutMs = (isAutoModel && hasFallback) ? getAutoStreamPeekTimeoutMs() : 0;
+      const attemptController = new AbortController();
+      const attemptSignal = AbortSignal.any([controller.signal, attemptController.signal]);
 
       try {
         await withQuotaTracking(account, modelId, effectiveProxy, async () => {
@@ -945,27 +1201,39 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
             credential,
             messages,
             modelId,
-            options,
+            { ...options, signal: attemptSignal },
             { platform: account.platform, keyId: account.id, modelId },
           );
-          let ttfbMs = 0;
+          const peek = await peekStreamForContent(stream, {
+            signal: controller.signal,
+            timeoutMs: peekTimeoutMs,
+            allowReasoningOnlyOnClose: !hasFallback,
+            onTimeout: () => attemptController.abort(new Error('Stream first-content peek timeout')),
+          });
+          if (controller.signal.aborted) return;
+
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('X-Accel-Buffering', 'no');
+          res.setHeader('X-Routed-Via', `${account.provider}/${modelId}`);
+          const ttfbMs = Date.now() - startMs;
+          if (isAutoModel && autoSessionId) {
+            setAutoSessionRoute(autoSessionId, modality, {
+              providerId: account.provider,
+              accountId: account.id,
+              modelId,
+            }, dbRef);
+          }
+
           let promptTokens = estimatedPromptTokens;
           let completionTokens = 0;
-          for await (const chunk of stream) {
+          for await (const chunk of reconstructStream(peek)) {
             if (controller.signal.aborted) return;
-            if (!res.headersSent) {
-              res.setHeader('Content-Type', 'text/event-stream');
-              res.setHeader('Cache-Control', 'no-cache');
-              res.setHeader('X-Accel-Buffering', 'no');
-              res.setHeader('X-Routed-Via', `${account.provider}/${modelId}`);
-              ttfbMs = Date.now() - startMs;
-            }
             if (chunk.usage?.prompt_tokens != null) promptTokens = chunk.usage.prompt_tokens;
             if (chunk.usage?.completion_tokens != null) completionTokens = chunk.usage.completion_tokens;
             res.write(`data: ${JSON.stringify(chunk)}\n\n`);
           }
           if (controller.signal.aborted) return;
-          if (!res.headersSent) throw new Error('Provider returned an empty stream.');
           res.write('data: [DONE]\n\n');
           res.end();
 
@@ -1005,6 +1273,7 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
         } else {
           recordRouteOutcome(healthKey(candidate), { error: true });
         }
+        if (isAutoModel && autoSessionId) clearAutoSessionRoute(autoSessionId, modality);
         const errMsg = sanitizeProviderErrorMessage(err instanceof Error ? err.message : 'Stream interrupted');
         if (res.headersSent) {
           logRequest(
@@ -1031,6 +1300,7 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
           res.end();
           return;
         }
+        if (usingAutoSticky && candidateIdx === 0) expandStickyFallbacks();
         endUsageRequest(activeToken, {
           status: 'error',
           provider: account.provider,

@@ -18,6 +18,31 @@ import {
   resolveCandidateRoutes,
 } from '../../custom/x-gateway/router.js';
 import {
+  clearAccountCooldown,
+  getAccountCooldown,
+  setAccountCooldown,
+} from '../../custom/provider-accounts/auto-ping.js';
+import {
+  applyQuotaRouting,
+  defaultQuotaTier,
+} from '../../custom/x-gateway/quota/store.js';
+import {
+  getAutoSessionRoute,
+  resetAutoSessionCache,
+} from '../../custom/x-gateway/auto-session-cache.js';
+import {
+  EmptyStreamError,
+  peekStreamForContent,
+  reconstructStream,
+  setAutoStreamPeekTimeoutMs,
+} from '../../custom/x-gateway/stream-peek.js';
+import {
+  compressWithHeadroom,
+  invalidateHeadroomCache,
+  setHeadroomConfig,
+} from '../../custom/x-gateway/headroom.js';
+import { setConfigValue } from '../../custom/x-gateway/config.js';
+import {
   invalidateXGatewayKeyCache,
   setProviderModelConfig,
 } from '../../custom/provider-accounts/store.js';
@@ -460,5 +485,308 @@ describe('web search, fetch and HTML conversion', () => {
       .toContain('[link](/x?a=1&b=2)');
     expect(htmlToText('<p>One<br>Two</p><script>x()</script><p>Three</p>'))
       .toBe('One\nTwo\n\nThree');
+  });
+});
+
+function seedModelsAccount(provider: string, models: string[], baseUrl?: string): number {
+  secret ??= encrypt('sk-routing-test');
+  const info = getDb().prepare(`INSERT INTO x_gateway_keys
+    (provider,label,auth_method,encrypted_key,iv,auth_tag,base_url,models_json,status,enabled)
+    VALUES (?,?,?,?,?,?,?,?,'healthy',1)`)
+    .run(
+      provider,
+      `${provider} account`,
+      provider === 'gemini-web' ? 'cookie' : 'api_key',
+      secret.encrypted,
+      secret.iv,
+      secret.authTag,
+      baseUrl ?? null,
+      JSON.stringify(models.map(id => ({ id, name: id }))),
+    );
+  invalidateXGatewayKeyCache();
+  return Number(info.lastInsertRowid);
+}
+
+describe('auto routing modality, cooldown, health, tier ranking and hot-path caches', () => {
+  beforeEach(() => {
+    resetGatewayState();
+    setHeadroomConfig({ enabled: false, url: '' });
+    invalidateHeadroomCache();
+  });
+
+  it('filters out image, TTS, STT, embedding, and video models for chat auto routing', () => {
+    const geminiWebId = seedModelsAccount('gemini-web', [
+      'gemini-image',
+      'tts-1',
+      'whisper-1',
+      'text-embedding-3-small',
+      'sora-2',
+      'gemini-3.1-flash-lite',
+    ]);
+    const imageOnlyId = seedModelsAccount('openai', ['gemini-image', 'dall-e-3']);
+
+    const chatResolved = resolveCandidateRoutes('auto', 'chat');
+    expect(chatResolved.candidates).toHaveLength(1);
+    expect(chatResolved.candidates[0].account.id).toBe(geminiWebId);
+    expect(chatResolved.candidates[0].modelId).toBe('gemini-3.1-flash-lite');
+
+    // provider/auto for chat also excludes gemini-image
+    const providerAuto = resolveCandidateRoutes('gemini-web/auto', 'chat');
+    expect(providerAuto.candidates.map(c => c.modelId)).toEqual(['gemini-3.1-flash-lite']);
+
+    // Image modality still picks the image model from the image-only account
+    const imageResolved = resolveCandidateRoutes('auto', 'image');
+    expect(imageResolved.candidates.some(c => c.account.id === imageOnlyId && c.modelId === 'gemini-image')).toBe(true);
+  });
+
+  it('filters out cooled-down accounts and models, sorts auto by health, and ranks API/OAuth ahead of webCookie', () => {
+    const webId = seedModelsAccount('gemini-web', ['gemini-3.1-pro']);
+    const groqId = seedModelsAccount('groq', ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant']);
+    const openaiId = seedModelsAccount('openai', ['gpt-5.4-mini']);
+
+    try {
+      // webCookie is classified as free tier and sorts behind fast API/OAuth/free providers
+      expect(defaultQuotaTier('gemini-web')).toBe('free');
+      const quotaSorted = applyQuotaRouting(
+        resolveCandidateRoutes('auto', 'chat').candidates.map(c => c.account),
+        true,
+      );
+      expect(quotaSorted.at(-1)?.id).toBe(webId);
+
+      // Even if groq has measured latency > UNKNOWN_LATENCY_MS (1200), healthy API stays ahead of untried webCookie
+      recordRouteOutcome(`${groqId}:llama-3.3-70b-versatile`, { latencyMs: 1_500 });
+      recordRouteOutcome(`${openaiId}:gpt-5.4-mini`, { latencyMs: 250 });
+      expect(resolveCandidateRoutes('auto', 'chat').candidates.map(c => c.account.id))
+        .toEqual([openaiId, groqId, webId]);
+
+      // Failing openai route gets demoted behind healthy groq and webCookie
+      recordRouteOutcome(`${openaiId}:gpt-5.4-mini`, { error: true });
+      expect(resolveCandidateRoutes('auto', 'chat').candidates.map(c => c.account.id))
+        .toEqual([groqId, webId, openaiId]);
+
+      // Model-scoped cooldown on groq switches groq to its second healthy chat model
+      setAccountCooldown(groqId, 30_000, 'llama-3.3-70b-versatile');
+      const afterModelCooldown = resolveCandidateRoutes('auto', 'chat').candidates;
+      const groqCandidate = afterModelCooldown.find(c => c.account.id === groqId);
+      expect(groqCandidate?.modelId).toBe('llama-3.1-8b-instant');
+
+      // Account-wide cooldown removes openai completely
+      setAccountCooldown(openaiId, 30_000);
+      expect(resolveCandidateRoutes('auto', 'chat').candidates.some(c => c.account.id === openaiId)).toBe(false);
+    } finally {
+      clearAccountCooldown(webId);
+      clearAccountCooldown(groqId);
+      clearAccountCooldown(openaiId);
+    }
+  });
+
+  it('caches provider_settings in rotateProviderAccounts and invalidates immediately on config change', () => {
+    const a = seedAccount('openai', 'gpt-5.4-mini');
+    const b = seedAccount('openai', 'gpt-5.4-mini');
+    const db = getDb();
+    const prepareSpy = vi.spyOn(db, 'prepare');
+
+    resolveCandidateRoutes('openai/gpt-5.4-mini');
+    const firstQueryCount = prepareSpy.mock.calls.filter(([sql]) => String(sql).includes('provider_settings')).length;
+    expect(firstQueryCount).toBe(1);
+
+    // Second call hits the 5s provider_settings cache (0 additional DB queries)
+    resolveCandidateRoutes('openai/gpt-5.4-mini');
+    const secondQueryCount = prepareSpy.mock.calls.filter(([sql]) => String(sql).includes('provider_settings')).length;
+    expect(secondQueryCount).toBe(1);
+
+    // Updating config invalidates immediately and activates round-robin
+    setConfigValue('provider_settings', JSON.stringify({ openai: { strategy: 'round-robin', stickyLimit: 1 } }));
+    expect(resolveCandidateRoutes('openai/gpt-5.4-mini').candidates[0].account.id).toBe(a);
+    expect(resolveCandidateRoutes('openai/gpt-5.4-mini').candidates[0].account.id).toBe(b);
+    prepareSpy.mockRestore();
+  });
+
+  it('bypasses blocking headroom calls via unreachable cooldown after first failure', async () => {
+    setHeadroomConfig({ enabled: true, url: 'http://127.0.0.1:9999', timeoutMs: 300 });
+    const fetchSpy = vi.spyOn(global, 'fetch').mockRejectedValue(new Error('ECONNREFUSED'));
+    try {
+      const first = await compressWithHeadroom({ messages: [{ role: 'user', content: 'hello '.repeat(50) }] });
+      expect(first).toBeNull();
+      const callsAfterFirst = fetchSpy.mock.calls.length;
+
+      const diagnostics: { reason?: string } = {};
+      const second = await compressWithHeadroom(
+        { messages: [{ role: 'user', content: 'hello '.repeat(50) }] },
+        { diagnostics },
+      );
+      expect(second).toBeNull();
+      expect(diagnostics.reason).toContain('cooldown:');
+      expect(fetchSpy.mock.calls.length).toBe(callsAfterFirst);
+    } finally {
+      fetchSpy.mockRestore();
+      setHeadroomConfig({ enabled: false, url: '' });
+    }
+  });
+});
+
+describe('auto stream peek, fast failover, and session stickiness', () => {
+  let server: Server;
+  let base: string;
+  let playgroundSession: string;
+  let apiKey: string;
+  const realFetch = global.fetch;
+  const upstream = vi.fn();
+
+  beforeAll(async () => {
+    resetGatewayState();
+    const owner = createUser('stream-peek-admin@example.test', 'AdminPass123!');
+    playgroundSession = createSession(owner.userId);
+    apiKey = mintUserApiKey(owner.userId, 'stream-peek-key').key;
+
+    server = createApp().listen(0, '127.0.0.1');
+    await new Promise<void>(resolve => server.once('listening', resolve));
+    base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    vi.spyOn(global, 'fetch').mockImplementation((url, init) =>
+      String(url).startsWith(base) ? realFetch(url, init) : upstream(url, init));
+  });
+
+  afterAll(() => {
+    setAutoStreamPeekTimeoutMs(null);
+    server?.close();
+    vi.restoreAllMocks();
+  });
+
+  beforeEach(() => {
+    initDb(':memory:');
+    invalidateConfigCache();
+    invalidateXGatewayKeyCache();
+    resetRouteHealth();
+    resetSessionPins();
+    resetAutoSessionCache();
+    setAutoStreamPeekTimeoutMs(null);
+    const owner = createUser('stream-peek-admin@example.test', 'AdminPass123!');
+    playgroundSession = createSession(owner.userId);
+    apiKey = mintUserApiKey(owner.userId, 'stream-peek-key').key;
+    setEnabled(true);
+    upstream.mockReset();
+  });
+
+  it('peekStreamForContent buffers head chunks until first non-empty content and reconstructs intact', async () => {
+    async function* source() {
+      yield { id: '1', object: 'chat.completion.chunk' as const, created: 1, model: 'm', choices: [{ index: 0, delta: { role: 'assistant' as const }, finish_reason: null }] };
+      yield { id: '1', object: 'chat.completion.chunk' as const, created: 1, model: 'm', choices: [{ index: 0, delta: { content: '' }, finish_reason: null }] };
+      yield { id: '1', object: 'chat.completion.chunk' as const, created: 1, model: 'm', choices: [{ index: 0, delta: { content: 'Hello' }, finish_reason: null }] };
+      yield { id: '1', object: 'chat.completion.chunk' as const, created: 1, model: 'm', choices: [{ index: 0, delta: { content: ' world' }, finish_reason: 'stop' }] };
+    }
+    const peek = await peekStreamForContent(source(), { timeoutMs: 500 });
+    expect(peek.headChunks).toHaveLength(3);
+    const replayed: string[] = [];
+    for await (const chunk of reconstructStream(peek)) {
+      if (chunk.choices[0]?.delta?.content) replayed.push(chunk.choices[0].delta.content);
+    }
+    expect(replayed).toEqual(['Hello', ' world']);
+
+    async function* emptySource() {
+      yield { id: '1', object: 'chat.completion.chunk' as const, created: 1, model: 'm', choices: [{ index: 0, delta: { role: 'assistant' as const, content: '' }, finish_reason: 'stop' }] };
+    }
+    await expect(peekStreamForContent(emptySource(), { timeoutMs: 500 })).rejects.toBeInstanceOf(EmptyStreamError);
+  });
+
+  it('pins winning auto route per playground session and evicts immediately on failure', async () => {
+    const groqId = seedAccount('groq', 'llama-3.3-70b-versatile');
+    const openaiId = seedAccount('openai', 'gpt-5.4-mini');
+
+    upstream.mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.includes('groq.com')) {
+        return new Response(
+          'data: {"id":"1","object":"chat.completion.chunk","created":1,"model":"llama-3.3-70b-versatile","choices":[{"index":0,"delta":{"content":"From groq"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+          { headers: { 'content-type': 'text/event-stream' } },
+        );
+      }
+      return new Response(
+        'data: {"id":"2","object":"chat.completion.chunk","created":1,"model":"gpt-5.4-mini","choices":[{"index":0,"delta":{"content":"From openai"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+        { headers: { 'content-type': 'text/event-stream' } },
+      );
+    });
+
+    const playCall = (sessionId: string, text: string) => fetch(`${base}/api/thruline/playground/chat`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${playgroundSession}`,
+        'Content-Type': 'application/json',
+        'X-Session-Id': sessionId,
+      },
+      body: JSON.stringify({ model: 'auto', messages: [{ role: 'user', content: text }], sessionId }),
+    });
+
+    // Turn 1 pins groq
+    const turn1 = await playCall('chat-sess-1', 'Hi');
+    expect(turn1.status).toBe(200);
+    expect(turn1.headers.get('x-routed-via')).toBe('groq/llama-3.3-70b-versatile');
+    expect(await turn1.text()).toContain('From groq');
+    expect(getAutoSessionRoute('chat-sess-1', 'chat', getDb())?.accountId).toBe(groqId);
+
+    // Even if openai looks faster in routeHealth, Turn 2 with the same sessionId stays pinned to groq
+    recordRouteOutcome(`${groqId}:llama-3.3-70b-versatile`, { latencyMs: 900 });
+    recordRouteOutcome(`${openaiId}:gpt-5.4-mini`, { latencyMs: 50 });
+    const turn2 = await playCall('chat-sess-1', 'Follow up');
+    expect(turn2.status).toBe(200);
+    expect(turn2.headers.get('x-routed-via')).toBe('groq/llama-3.3-70b-versatile');
+
+    // If groq returns an empty stream on Turn 3, the pin is evicted and Turn 3 fails over to openai
+    upstream.mockImplementation(async (url) => {
+      if (String(url).includes('groq.com')) {
+        return new Response(
+          'data: {"id":"1","object":"chat.completion.chunk","created":1,"model":"llama-3.3-70b-versatile","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+          { headers: { 'content-type': 'text/event-stream' } },
+        );
+      }
+      return new Response(
+        'data: {"id":"2","object":"chat.completion.chunk","created":1,"model":"gpt-5.4-mini","choices":[{"index":0,"delta":{"content":"Recovered openai"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+        { headers: { 'content-type': 'text/event-stream' } },
+      );
+    });
+
+    const turn3 = await playCall('chat-sess-1', 'Third turn');
+    expect(turn3.status).toBe(200);
+    expect(turn3.headers.get('x-routed-via')).toBe('openai/gpt-5.4-mini');
+    expect(await turn3.text()).toContain('Recovered openai');
+    expect(getAutoSessionRoute('chat-sess-1', 'chat', getDb())?.accountId).toBe(openaiId);
+  });
+
+  it('fails over fast when an auto stream candidate times out before emitting first content', async () => {
+    const groqId = seedAccount('groq', 'llama-3.3-70b-versatile');
+    const openaiId = seedAccount('openai', 'gpt-5.4-mini');
+    setAutoStreamPeekTimeoutMs(60);
+
+    upstream.mockImplementation(async (url, init) => {
+      if (String(url).includes('groq.com')) {
+        // Never emits content before the 60ms peek timeout aborts it
+        await new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('Aborted')), { once: true });
+        });
+        throw new Error('Aborted');
+      }
+      return new Response(
+        'data: {"id":"2","object":"chat.completion.chunk","created":1,"model":"gpt-5.4-mini","choices":[{"index":0,"delta":{"content":"Fast fallback"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+        { headers: { 'content-type': 'text/event-stream' } },
+      );
+    });
+
+    const res = await fetch(`${base}/thruline/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'X-Session-Id': 'timeout-sess',
+      },
+      body: JSON.stringify({ model: 'auto', stream: true, messages: [{ role: 'user', content: 'Hello' }] }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-routed-via')).toBe('openai/gpt-5.4-mini');
+    expect(await res.text()).toContain('Fast fallback');
+    // Timed-out candidate enters transient cooldown and is demoted in routeHealth once cooldown clears
+    expect(getAccountCooldown(groqId, 'llama-3.3-70b-versatile').inCooldown).toBe(true);
+    expect(resolveCandidateRoutes('auto', 'chat').candidates.map(c => c.account.id)).toEqual([openaiId]);
+    clearAccountCooldown(groqId);
+    expect(resolveCandidateRoutes('auto', 'chat').candidates.map(c => c.account.id)).toEqual([openaiId, groqId]);
   });
 });
