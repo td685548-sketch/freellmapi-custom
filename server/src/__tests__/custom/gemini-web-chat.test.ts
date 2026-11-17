@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { looksLikeCookieHeader } from '../../custom/provider-accounts/cookie-format.js';
 import {
   clearGeminiWebCaches,
   extractGeminiImages,
   extractGeminiSessionTokens,
   extractGeminiStreamText,
+  mergeResponseCookies,
   normalizeGeminiWebCookie,
+  rotateGeminiCookies,
   streamGeminiWebChat,
   stripGeminiPlaceholders,
+  validateGeminiWebSession,
 } from '../../custom/provider-accounts/gemini-web-chat.js';
 import { rotateGeminiWebAccountsOnce } from '../../custom/provider-accounts/gemini-web-keepalive.js';
 import { resolveAccountProvider } from '../../custom/provider-accounts/execution.js';
@@ -875,5 +879,314 @@ describe('gemini-web executor', () => {
 
     expect(deltas[0]).toBe('Here is your answer:');
     expect(deltas[1]).toContain('[Chart](https://lh3.googleusercontent.com/slow-img)');
+  });
+
+  it('rejects bare tokens with dots and trailing = in looksLikeCookieHeader and wraps them cleanly', () => {
+    expect(looksLikeCookieHeader('g.a000qAg-xyz.123=')).toBe(false);
+    expect(looksLikeCookieHeader('eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ==')).toBe(false);
+    expect(looksLikeCookieHeader('__Secure-1PSID=g.a000qAg-xyz.123=')).toBe(true);
+    expect(normalizeGeminiWebCookie('g.a000qAg-xyz.123=')).toBe('__Secure-1PSID=g.a000qAg-xyz.123=');
+  });
+
+  it('parses key-value JSON maps, filters Google domains/expiry, deduplicates, and strips newlines', () => {
+    expect(
+      normalizeGeminiWebCookie(
+        JSON.stringify({
+          __Secure_1PSID: 'ignore_wrong_name',
+          '__Secure-1PSID': 'map_psid',
+          '__Secure-1PSIDTS': 'map_ts',
+        }),
+      ),
+    ).toBe('__Secure_1PSID=ignore_wrong_name; __Secure-1PSID=map_psid; __Secure-1PSIDTS=map_ts');
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    const filtered = normalizeGeminiWebCookie(
+      JSON.stringify([
+        { name: '__Secure-1PSID', value: 'expired_but_kept\r\n', domain: '.google.com', expirationDate: 1_000 },
+        { name: '__Secure-1PSIDTS', value: 'expired_ts', domain: '.google.com', expirationDate: 1_000 },
+        { name: 'session', value: 'third_party', domain: '.chatgpt.com', expirationDate: nowSec + 3600 },
+        { name: 'SIDCC', value: 'broad_sidcc', domain: '.google.com', expirationDate: nowSec + 3600 },
+        { name: 'SIDCC', value: 'specific_sidcc', domain: 'gemini.google.com', expirationDate: nowSec + 3600 },
+        { name: 'NID', value: 'first_nid', domain: '.google.com' },
+        { name: 'NID', value: 'last_nid', domain: '.google.com' },
+        { name: 'HSID', value: 'session_hsid', domain: 'accounts.google.com', expires: -1 },
+      ]),
+    );
+
+    expect(filtered).toBe('__Secure-1PSID=expired_but_kept; SIDCC=specific_sidcc; NID=last_nid; HSID=session_hsid');
+    expect(() => new Headers({ Cookie: filtered })).not.toThrow();
+
+    expect(normalizeGeminiWebCookie('Cookie: __Secure-1PSID=old\r\n; __Secure-1PSID=new; SIDCC=s1')).toBe(
+      '__Secure-1PSID=new; SIDCC=s1',
+    );
+  });
+
+  it('extracts SNlM0e across whitespace, single-quoted, and escaped HTML variants', () => {
+    expect(extractGeminiSessionTokens(`{"SNlM0e" : "tok_ws", "cfb2h" : "bl_ws"}`)).toEqual({
+      snlm0e: 'tok_ws',
+      cfb2h: 'bl_ws',
+      fdrfje: undefined,
+    });
+    expect(extractGeminiSessionTokens(`{'SNlM0e': 'tok_sq', 'FdrFJe': 'sid_sq'}`)).toEqual({
+      snlm0e: 'tok_sq',
+      cfb2h: undefined,
+      fdrfje: 'sid_sq',
+    });
+    expect(extractGeminiSessionTokens(`\\"SNlM0e\\":\\"tok_esc\\"`)).toEqual({
+      snlm0e: 'tok_esc',
+      cfb2h: undefined,
+      fdrfje: undefined,
+    });
+  });
+
+  it('parses comma-joined Set-Cookie with Expires commas and captures per-hop redirect cookies', async () => {
+    const merged = mergeResponseCookies(
+      '__Secure-1PSID=p1; __Secure-1PSIDTS=old_ts',
+      new Response(null, {
+        headers: {
+          'Set-Cookie': '__Secure-1PSIDTS=new_ts; Expires=Wed, 21 Oct 2030 07:28:00 GMT; Path=/; Secure, SIDCC=new_sidcc; Path=/',
+        },
+      }),
+    );
+    expect(merged).toEqual({
+      nextHeader: '__Secure-1PSID=p1; __Secure-1PSIDTS=new_ts; SIDCC=new_sidcc',
+      changed: true,
+    });
+
+    const updates: string[] = [];
+    let streamCookieHeader = '';
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url === 'https://accounts.google.com/RotateCookies') {
+        return new Response('[]', {
+          status: 200,
+          headers: {
+            'Set-Cookie': '__Secure-1PSIDTS=rotated_ts_1; Expires=Wed, 21 Oct 2030 07:28:00 GMT; Path=/; Secure, SIDCC=rot_sidcc; Path=/',
+          },
+        });
+      }
+      if (url === 'https://gemini.google.com/app') {
+        return new Response(null, {
+          status: 302,
+          headers: {
+            Location: '/u/0/app',
+            'Set-Cookie': '__Secure-1PSIDCC=hop_cc_1; Path=/; Secure',
+          },
+        });
+      }
+      if (url === 'https://gemini.google.com/u/0/app') {
+        expect(new Headers(init?.headers).get('cookie')).toContain('__Secure-1PSIDCC=hop_cc_1');
+        return new Response('<script>{"SNlM0e":"snl_redir_ok","cfb2h":"bl_r","FdrFJe":"sid_r"}</script>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html' },
+        });
+      }
+      if (url.includes('StreamGenerate')) {
+        streamCookieHeader = new Headers(init?.headers).get('cookie') ?? '';
+        const inner = JSON.stringify([null, null, null, null, [['rc_1', ['Hello rotated!']]]]);
+        const headers = new Headers({ 'Content-Type': 'application/json; charset=utf-8' });
+        headers.append('Set-Cookie', '__Secure-1PSIDTS=stream_ts_2; Path=/; Secure');
+        return new Response(
+          streamFromLines([")]}'", '80', JSON.stringify([['wrb.fr', null, inner]])]),
+          { status: 200, headers },
+        );
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const deltas: string[] = [];
+    for await (const delta of streamGeminiWebChat({
+      credential: '__Secure-1PSID=psid_rot_flow',
+      messages: [{ role: 'user', content: 'Hi' }],
+      modelId: 'gemini-3.1-pro',
+      options: { onCredentialUpdate: (next) => updates.push(next) },
+    })) {
+      if (delta.content) deltas.push(delta.content);
+    }
+
+    expect(deltas).toEqual(['Hello rotated!']);
+    expect(streamCookieHeader).toContain('__Secure-1PSIDTS=rotated_ts_1');
+    expect(streamCookieHeader).toContain('__Secure-1PSIDCC=hop_cc_1');
+    expect(updates).toHaveLength(3);
+    expect(updates[0]).toContain('__Secure-1PSIDTS=rotated_ts_1');
+    expect(updates[0]).toContain('SIDCC=rot_sidcc');
+    expect(updates[1]).toContain('__Secure-1PSIDCC=hop_cc_1');
+    expect(updates[2]).toContain('__Secure-1PSIDTS=stream_ts_2');
+  });
+
+  it('proactively rotates cookies after 9-minute cooldown and coalesces concurrent RotateCookies calls', async () => {
+    let rotateCalls = 0;
+    let fakeNow = 1_700_000_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => fakeNow);
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url === 'https://accounts.google.com/RotateCookies') {
+        rotateCalls += 1;
+        await new Promise(resolve => setTimeout(resolve, 15));
+        const headers = new Headers();
+        headers.append('Set-Cookie', `__Secure-1PSIDTS=ts_round_${rotateCalls}; Path=/; Secure`);
+        return new Response('[]', { status: 200, headers });
+      }
+      if (url === 'https://gemini.google.com/app') {
+        return new Response('<script>{"SNlM0e":"snl_proactive"}</script>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html' },
+        });
+      }
+      if (url.includes('StreamGenerate')) {
+        const inner = JSON.stringify([null, null, null, null, [['rc_1', ['ok']]]]);
+        return new Response(
+          streamFromLines([")]}'", '80', JSON.stringify([['wrb.fr', null, inner]])]),
+          { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } },
+        );
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const [r1, r2] = await Promise.all([
+      rotateGeminiCookies('__Secure-1PSID=psid_proactive; __Secure-1PSIDTS=initial_ts'),
+      rotateGeminiCookies('__Secure-1PSID=psid_proactive; __Secure-1PSIDTS=initial_ts'),
+    ]);
+    expect(rotateCalls).toBe(1);
+    expect(r1.cookieHeader).toBe('__Secure-1PSID=psid_proactive; __Secure-1PSIDTS=ts_round_1');
+    expect(r2.cookieHeader).toBe('__Secure-1PSID=psid_proactive; __Secure-1PSIDTS=ts_round_1');
+
+    fakeNow += 5 * 60_000;
+    const updates: string[] = [];
+    for await (const _delta of streamGeminiWebChat({
+      credential: r1.cookieHeader,
+      messages: [{ role: 'user', content: 'Turn 1' }],
+      options: { onCredentialUpdate: (next) => updates.push(next) },
+    })) {
+      // drain
+    }
+    expect(rotateCalls).toBe(1);
+    expect(updates).toHaveLength(0);
+
+    fakeNow += 5 * 60_000;
+    for await (const _delta of streamGeminiWebChat({
+      credential: r1.cookieHeader,
+      messages: [{ role: 'user', content: 'Turn 2' }],
+      options: { onCredentialUpdate: (next) => updates.push(next) },
+    })) {
+      // drain
+    }
+    expect(rotateCalls).toBe(2);
+    expect(updates).toEqual(['__Secure-1PSID=psid_proactive; __Secure-1PSIDTS=ts_round_2']);
+  });
+
+  it('rejects untrusted/SSRF/excessive redirects and treats 302 to accounts.google.com as 401', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url === 'https://gemini.google.com/app') {
+        return new Response(null, {
+          status: 302,
+          headers: { Location: 'https://accounts.google.com/v3/signin?continue=https://gemini.google.com/app' },
+        });
+      }
+      if (url === 'https://accounts.google.com/RotateCookies') {
+        return new Response('Unauthorized', { status: 401 });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    await expect(
+      streamGeminiWebChat({
+        credential: '__Secure-1PSID=psid_302_auth; __Secure-1PSIDTS=ts_302',
+        messages: [{ role: 'user', content: 'Hi' }],
+      }).next(),
+    ).rejects.toMatchObject({ status: 401 });
+
+    // Non-Google /app redirect rejected before requesting target and Set-Cookie ignored
+    clearGeminiWebCaches();
+    let fetchedUntrusted = false;
+    const updates: string[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url === 'https://gemini.google.com/app') {
+        const headers = new Headers({ Location: 'https://evil.example/steal' });
+        headers.append('Set-Cookie', '__Secure-1PSID=from_app; Path=/');
+        return new Response(null, { status: 302, headers });
+      }
+      fetchedUntrusted = true;
+      return new Response('nope', { status: 200 });
+    });
+
+    await expect(
+      streamGeminiWebChat({
+        credential: '__Secure-1PSID=secret_psid; __Secure-1PSIDTS=secret_ts',
+        messages: [{ role: 'user', content: 'Hi' }],
+        options: { onCredentialUpdate: (next) => updates.push(next) },
+      }).next(),
+    ).rejects.toMatchObject({ status: 502 });
+    expect(fetchedUntrusted).toBe(false);
+
+    // Metadata IP redirect blocked before requesting target
+    clearGeminiWebCaches();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(null, { status: 302, headers: { Location: 'http://169.254.169.254/latest/meta-data' } }),
+    );
+    await expect(
+      validateGeminiWebSession('__Secure-1PSID=psid_ssrf; __Secure-1PSIDTS=ts_ssrf'),
+    ).resolves.toMatchObject({ valid: false, error: expect.stringMatching(/untrusted|blocked|metadata/i) });
+
+    // Excessive redirects (>5 hops) fail with 502
+    clearGeminiWebCaches();
+    let hop = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      hop += 1;
+      return new Response(null, { status: 302, headers: { Location: `https://gemini.google.com/u/${hop}/app` } });
+    });
+    await expect(
+      streamGeminiWebChat({
+        credential: '__Secure-1PSID=psid_loop; __Secure-1PSIDTS=ts_loop',
+        messages: [{ role: 'user', content: 'Hi' }],
+      }).next(),
+    ).rejects.toMatchObject({ status: 502 });
+  });
+
+  it('never sends cookies to non-Google webImages URLs', async () => {
+    let fetchedEvilImage = false;
+    const webImagesField = [
+      [[['https://evil.example/direct.png'], null, null, null, 'Third party']],
+    ];
+    const candidate = [
+      'rc_1',
+      ['Ảnh đây'],
+      null, null, null, null, null, null, null, null, null, null,
+      [null, webImagesField],
+    ];
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url === 'https://gemini.google.com/app') {
+        return new Response('<script>{"SNlM0e":"snl_img_safe"}</script>', { status: 200 });
+      }
+      if (url.includes('StreamGenerate')) {
+        const inner = JSON.stringify([null, null, null, null, [candidate]]);
+        return new Response(
+          streamFromLines([")]}'", '90', JSON.stringify([['wrb.fr', null, inner]])]),
+          { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } },
+        );
+      }
+      if (url.includes('evil.example')) {
+        fetchedEvilImage = true;
+        return new Response(IMAGE_BYTES, { status: 200, headers: { 'Content-Type': 'image/png' } });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const deltas: string[] = [];
+    for await (const delta of streamGeminiWebChat({
+      credential: '__Secure-1PSID=secret_psid; __Secure-1PSIDTS=secret_ts',
+      messages: [{ role: 'user', content: 'Images' }],
+      modelId: 'gemini-3.1-pro',
+    })) {
+      if (delta.content) deltas.push(delta.content);
+    }
+
+    expect(fetchedEvilImage).toBe(false);
+    expect(deltas.join('')).toContain('[Third party](https://evil.example/direct.png)');
   });
 });

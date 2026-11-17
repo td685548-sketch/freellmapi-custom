@@ -8,7 +8,7 @@
  */
 
 const COOKIE_NAME_CHARS = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
-const BASE64_BLOB = /^[A-Za-z0-9+/\-_]+={0,2}$/;
+const BASE64_BLOB = /^[A-Za-z0-9+/\-_.]+={0,2}$/;
 
 /** True when `value` is one or more `name=value` pairs rather than a token. */
 export function looksLikeCookieHeader(value: string): boolean {
@@ -23,9 +23,9 @@ export function looksLikeCookieHeader(value: string): boolean {
 
   if (!COOKIE_NAME_CHARS.test(trimmed.slice(0, eq))) return false;
 
-  // `QUJDRA==`-style blobs are padded tokens, not `name=value` pairs: the only
-  // `=` in a real pair is the separator, so padding at the tail gives it away.
-  if (BASE64_BLOB.test(trimmed)) return false;
+  // `QUJDRA==` and `g.a000...=` blobs are padded tokens, not `name=value`
+  // pairs: a real pair has a non-empty value after the separator `=`.
+  if (BASE64_BLOB.test(trimmed) || /^=*$/.test(trimmed.slice(eq + 1))) return false;
 
   return true;
 }

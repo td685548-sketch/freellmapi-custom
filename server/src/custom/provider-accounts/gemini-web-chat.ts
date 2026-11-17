@@ -11,7 +11,8 @@
 import type { ChatMessage, Platform } from '@freellmapi/shared/types.js';
 import { contentToString } from '../../lib/content.js';
 import { proxyFetch } from '../../lib/proxy.js';
-import type { CompletionOptions } from '../../providers/base.js';
+import { assertProviderUrlAllowed } from '../../lib/url-guard.js';
+import type { CompletionOptions, KeyValidationResult } from '../../providers/base.js';
 import { looksLikeCookieHeader, looksLikeHtmlDocument } from './cookie-format.js';
 import {
   downloadProviderImage,
@@ -20,6 +21,7 @@ import {
 } from '../x-gateway/playground-media.js';
 
 const DEFAULT_BASE_URL = 'https://gemini.google.com';
+const GEMINI_PLATFORM = 'gemini-web' as Platform;
 const GEMINI_ROTATE_COOKIES_URL = 'https://accounts.google.com/RotateCookies';
 const ROTATE_COOKIES_BODY = '[000,"-0000000000000000000"]';
 const GEMINI_UPLOAD_URL = 'https://push.clients6.google.com/upload/';
@@ -35,7 +37,21 @@ const IMAGE_FETCH_TIMEOUT_PRIMARY_MS = 6_000;
 const MAX_INLINE_TEXT_IMAGES = 4;
 const SESSION_CACHE_TTL_MS = 15 * 60_000;
 const ROTATE_COOLDOWN_MS = 60_000;
+const PROACTIVE_ROTATE_INTERVAL_MS = 9 * 60_000;
+const MAX_REDIRECTS = 5;
 const CACHE_MAX_SIZE = 100;
+
+const AUTH_REDIRECT_HOSTS = new Set([
+  'accounts.google.com',
+  'consent.google.com',
+]);
+
+const TRUSTED_GOOGLE_DOMAINS = [
+  'google.com',
+  'googleusercontent.com',
+  'gstatic.com',
+  'ggpht.com',
+] as const;
 
 const BROWSER_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -53,11 +69,24 @@ export interface RotateGeminiCookiesResult {
   status?: number;
 }
 
+interface PendingSessionFetch {
+  promise: Promise<{ session: GeminiWebSession; cookieHeader: string }>;
+  waiters: number;
+  abort: () => void;
+}
+
+interface RotateCookiesRawResult {
+  ok: boolean;
+  status?: number;
+  setCookies: string[];
+}
+
 const sessionCache = new Map<string, GeminiWebSession>();
-const pendingSessionFetches = new Map<string, Promise<{ session: GeminiWebSession; cookieHeader: string }>>();
+const pendingSessionFetches = new Map<string, PendingSessionFetch>();
 const rotatedCookieMap = new Map<string, string>();
-const rotateInFlight = new Map<string, Promise<RotateGeminiCookiesResult>>();
+const rotateInFlight = new Map<string, Promise<RotateCookiesRawResult>>();
 const rotateCooldownUntil = new Map<string, number>();
+const lastSuccessRotateByPsid = new Map<string, number>();
 
 /** Clear in-memory Gemini Web session and cookie-rotation caches (used by tests). */
 export function clearGeminiWebCaches(): void {
@@ -66,6 +95,7 @@ export function clearGeminiWebCaches(): void {
   rotatedCookieMap.clear();
   rotateInFlight.clear();
   rotateCooldownUntil.clear();
+  lastSuccessRotateByPsid.clear();
 }
 
 let reqCounter = Math.floor(100_000 + Math.random() * 800_000);
@@ -91,9 +121,70 @@ export function geminiWebChatErrorStatus(error: unknown): number | undefined {
     : undefined;
 }
 
-/** Normalize raw `__Secure-1PSID` token, Cookie header, Cookie-Editor JSON, or storage state into a Cookie header. */
+function sanitizeCookiePart(raw: string): string {
+  return raw.replace(/[\r\n\0]+/g, '');
+}
+
+function isGoogleCookieDomain(domain: unknown): boolean {
+  if (domain === undefined || domain === null) return true;
+  if (typeof domain !== 'string') return false;
+  const host = domain.trim().toLowerCase().replace(/^\.+/, '').replace(/\.+$/, '');
+  if (!host) return true;
+  return host === 'google.com' || host.endsWith('.google.com');
+}
+
+function isExpiredCookie(cookie: Record<string, unknown>, nowMs: number): boolean {
+  const rawExpiry = cookie.expirationDate ?? cookie.expires;
+  if (rawExpiry === undefined || rawExpiry === null || rawExpiry === '') return false;
+  let expiryMs: number | undefined;
+  if (typeof rawExpiry === 'number') {
+    if (!Number.isFinite(rawExpiry) || rawExpiry <= 0) return false;
+    expiryMs = rawExpiry > 1e12 ? rawExpiry : rawExpiry * 1000;
+  } else if (typeof rawExpiry === 'string') {
+    const s = rawExpiry.trim();
+    if (!s) return false;
+    if (/^-?\d+(?:\.\d+)?$/.test(s)) {
+      const num = Number(s);
+      if (!Number.isFinite(num) || num <= 0) return false;
+      expiryMs = num > 1e12 ? num : num * 1000;
+    } else {
+      const parsedMs = Date.parse(s);
+      if (Number.isFinite(parsedMs)) expiryMs = parsedMs;
+    }
+  }
+  return expiryMs !== undefined && expiryMs <= nowMs;
+}
+
+function cookieSpecificity(cookie: Record<string, unknown>): number {
+  const domainStr = typeof cookie.domain === 'string' ? cookie.domain.trim().toLowerCase() : '';
+  const hostPart = domainStr.replace(/^\.+/, '').replace(/\.+$/, '');
+  const domainScore = !hostPart ? 0 : hostPart.length * 2 + (domainStr.startsWith('.') ? 0 : 1);
+  const pathScore = typeof cookie.path === 'string' ? cookie.path.length : 0;
+  return domainScore * 1000 + pathScore;
+}
+
+function parseCookieHeader(header: string): Map<string, string> {
+  const cookies = new Map<string, string>();
+  for (const part of header.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq <= 0) continue;
+    const name = sanitizeCookiePart(part.slice(0, eq)).trim();
+    const value = sanitizeCookiePart(part.slice(eq + 1));
+    if (!name || /[=;]/.test(name)) continue;
+    cookies.set(name, value);
+  }
+  return cookies;
+}
+
+function formatCookieHeader(cookies: Map<string, string>): string {
+  return Array.from(cookies.entries())
+    .map(([name, value]) => `${name}=${value}`)
+    .join('; ');
+}
+
+/** Normalize raw `__Secure-1PSID` token, Cookie header, Cookie-Editor JSON, key-value map, or storage state into a Cookie header. */
 export function normalizeGeminiWebCookie(rawCredential: string): string {
-  const trimmed = rawCredential
+  const trimmed = sanitizeCookiePart(rawCredential)
     .trim()
     .replace(/^(?:Cookie|Authorization):\s*/i, '')
     .replace(/^Bearer\s+/i, '')
@@ -109,22 +200,44 @@ export function normalizeGeminiWebCookie(rawCredential: string): string {
     } catch {
       throw new GeminiWebChatError('Gemini Web storage state JSON is invalid.', 400);
     }
-    const cookies = Array.isArray(parsed)
-      ? parsed
-      : (parsed && typeof parsed === 'object' && Array.isArray((parsed as { cookies?: unknown }).cookies)
-        ? (parsed as { cookies: unknown[] }).cookies
-        : null);
-    if (!cookies) {
+
+    let rawCookies: Array<Record<string, unknown>> | null = null;
+    if (Array.isArray(parsed)) {
+      rawCookies = parsed.filter((c): c is Record<string, unknown> => Boolean(c) && typeof c === 'object' && !Array.isArray(c));
+    } else if (parsed && typeof parsed === 'object') {
+      const obj = parsed as Record<string, unknown>;
+      if (Array.isArray(obj.cookies)) {
+        rawCookies = obj.cookies.filter((c): c is Record<string, unknown> => Boolean(c) && typeof c === 'object' && !Array.isArray(c));
+      } else {
+        const kvEntries = Object.entries(obj).filter(([, val]) => typeof val === 'string');
+        if (kvEntries.length > 0 && kvEntries.length === Object.keys(obj).length) {
+          rawCookies = kvEntries.map(([name, value]) => ({ name, value }));
+        }
+      }
+    }
+
+    if (!rawCookies) {
       throw new GeminiWebChatError('Gemini Web storage state JSON contains no cookies.', 400);
     }
-    const header = cookies
-      .filter((cookie): cookie is { name: string; value: string } =>
-        Boolean(cookie) && typeof cookie === 'object'
-        && typeof (cookie as { name?: unknown }).name === 'string'
-        && Boolean((cookie as { name: string }).name)
-        && typeof (cookie as { value?: unknown }).value === 'string')
-      .map(cookie => `${cookie.name}=${cookie.value}`)
-      .join('; ');
+
+    const nowMs = Date.now();
+    const deduped = new Map<string, { value: string; specificity: number }>();
+    for (const c of rawCookies) {
+      if (typeof c.name !== 'string' || typeof c.value !== 'string') continue;
+      const name = sanitizeCookiePart(c.name).trim();
+      const value = sanitizeCookiePart(c.value);
+      if (!name || /[=;]/.test(name)) continue;
+      if (!isGoogleCookieDomain(c.domain)) continue;
+      if (name !== '__Secure-1PSID' && isExpiredCookie(c, nowMs)) continue;
+
+      const specificity = cookieSpecificity(c);
+      const existing = deduped.get(name);
+      if (!existing || specificity >= existing.specificity) {
+        deduped.set(name, { value, specificity });
+      }
+    }
+
+    const header = Array.from(deduped.entries(), ([name, entry]) => `${name}=${entry.value}`).join('; ');
     if (!header) {
       throw new GeminiWebChatError('Gemini Web credential contains no cookies.', 401);
     }
@@ -135,7 +248,12 @@ export function normalizeGeminiWebCookie(rawCredential: string): string {
     return `__Secure-1PSID=${trimmed}`;
   }
 
-  return trimmed;
+  const parsedJar = parseCookieHeader(trimmed);
+  const header = formatCookieHeader(parsedJar);
+  if (!header) {
+    throw new GeminiWebChatError('Gemini Web credential contains no cookies.', 401);
+  }
+  return header;
 }
 
 function resolveOrigin(baseUrl?: string): string {
@@ -194,48 +312,98 @@ function setBoundedMap<K, V>(map: Map<K, V>, key: K, value: V): void {
   map.set(key, value);
 }
 
+function pruneExpiredSessions(now = Date.now()): void {
+  for (const [key, session] of sessionCache) {
+    if (session.expiresAt <= now) {
+      sessionCache.delete(key);
+    }
+  }
+}
+
 function setCachedSession(key: string, session: GeminiWebSession): void {
+  pruneExpiredSessions();
   setBoundedMap(sessionCache, key, session);
 }
 
-function parseCookieHeader(header: string): Map<string, string> {
-  const cookies = new Map<string, string>();
-  for (const part of header.split(';')) {
-    const eq = part.indexOf('=');
-    if (eq <= 0) continue;
-    const name = part.slice(0, eq).trim();
-    const value = part.slice(eq + 1).trim();
-    if (name) cookies.set(name, value);
+function splitCombinedSetCookie(headerValue: string): string[] {
+  const cookies: string[] = [];
+  let start = 0;
+  let inExpires = false;
+  for (let i = 0; i < headerValue.length; i++) {
+    const ch = headerValue[i];
+    if (ch === ',') {
+      if (inExpires) {
+        inExpires = false;
+        continue;
+      }
+      const rest = headerValue.slice(i + 1);
+      if (/^\s*[!#$%&'*+\-.^_`|~0-9A-Za-z]+=/.test(rest)) {
+        const piece = headerValue.slice(start, i).trim();
+        if (piece) cookies.push(piece);
+        start = i + 1;
+      }
+    } else if (ch === ';') {
+      inExpires = false;
+    } else if (headerValue.slice(i, i + 8).toLowerCase() === 'expires=') {
+      inExpires = true;
+    }
   }
+  const tail = headerValue.slice(start).trim();
+  if (tail) cookies.push(tail);
   return cookies;
-}
-
-function formatCookieHeader(cookies: Map<string, string>): string {
-  return Array.from(cookies.entries())
-    .map(([name, value]) => `${name}=${value}`)
-    .join('; ');
 }
 
 function getSetCookieValues(headers: Headers): string[] {
   const withGetSetCookie = headers as Headers & { getSetCookie?: () => string[] };
   if (typeof withGetSetCookie.getSetCookie === 'function') {
-    return withGetSetCookie.getSetCookie();
+    const list = withGetSetCookie.getSetCookie();
+    if (Array.isArray(list) && list.length > 0) {
+      return list.flatMap(splitCombinedSetCookie);
+    }
   }
   const single = headers.get('set-cookie');
-  return single ? [single] : [];
+  return single ? splitCombinedSetCookie(single) : [];
 }
 
-/** Merge any non-empty `Set-Cookie` values from `res` into `cookieHeader`. */
-export function mergeResponseCookies(
+function isSetCookieDeletion(attrs: string[], value: string, nowMs: number): boolean {
+  if (value.toLowerCase() === 'deleted') return true;
+  for (const rawAttr of attrs) {
+    const eq = rawAttr.indexOf('=');
+    if (eq <= 0) continue;
+    const attrName = rawAttr.slice(0, eq).trim().toLowerCase();
+    const attrVal = rawAttr.slice(eq + 1).trim();
+    if (attrName === 'max-age') {
+      const num = Number(attrVal);
+      if (Number.isFinite(num) && num <= 0) return true;
+    } else if (attrName === 'expires') {
+      const parsed = Date.parse(attrVal);
+      if (Number.isFinite(parsed) && parsed <= nowMs) return true;
+    }
+  }
+  return false;
+}
+
+function getSetCookieDomain(attrs: string[]): string | undefined {
+  for (const rawAttr of attrs) {
+    const eq = rawAttr.indexOf('=');
+    if (eq <= 0) continue;
+    if (rawAttr.slice(0, eq).trim().toLowerCase() === 'domain') {
+      return rawAttr.slice(eq + 1).trim();
+    }
+  }
+  return undefined;
+}
+
+function applySetCookieLinesToHeader(
   cookieHeader: string,
-  res: Response,
+  setCookies: string[],
 ): { nextHeader: string; changed: boolean } {
-  const setCookies = getSetCookieValues(res.headers);
   if (setCookies.length === 0) {
     return { nextHeader: cookieHeader, changed: false };
   }
 
   const cookies = parseCookieHeader(cookieHeader);
+  const nowMs = Date.now();
   let changed = false;
 
   for (const raw of setCookies) {
@@ -243,12 +411,22 @@ export function mergeResponseCookies(
     const pair = segments[0] ?? '';
     const eq = pair.indexOf('=');
     if (eq <= 0) continue;
-    const name = pair.slice(0, eq).trim();
-    const value = pair.slice(eq + 1).trim();
-    if (!name || !value || value.toLowerCase() === 'deleted') continue;
+    const name = sanitizeCookiePart(pair.slice(0, eq)).trim();
+    const value = sanitizeCookiePart(pair.slice(eq + 1));
+    if (!name || /[=;]/.test(name)) continue;
 
-    const isExpired = segments.slice(1).some(attr => /^max-age\s*=\s*0$/i.test(attr.trim()));
-    if (isExpired) continue;
+    const attrs = segments.slice(1);
+    const domain = getSetCookieDomain(attrs);
+    if (domain !== undefined && !isGoogleCookieDomain(domain)) continue;
+
+    if (isSetCookieDeletion(attrs, value, nowMs)) {
+      if (name !== '__Secure-1PSID' && cookies.delete(name)) {
+        changed = true;
+      }
+      continue;
+    }
+
+    if (!value) continue;
 
     if (cookies.get(name) !== value) {
       cookies.set(name, value);
@@ -260,6 +438,14 @@ export function mergeResponseCookies(
     nextHeader: changed ? formatCookieHeader(cookies) : cookieHeader,
     changed,
   };
+}
+
+/** Merge any non-empty `Set-Cookie` values from `res` into `cookieHeader`. */
+export function mergeResponseCookies(
+  cookieHeader: string,
+  res: Response,
+): { nextHeader: string; changed: boolean } {
+  return applySetCookieLinesToHeader(cookieHeader, getSetCookieValues(res.headers));
 }
 
 function resolveLiveCookieHeader(cookieHeader: string): string {
@@ -299,77 +485,110 @@ function recordRotatedCookie(
   }
 }
 
+function extractPsid(cookieHeader: string): string | undefined {
+  return parseCookieHeader(cookieHeader).get('__Secure-1PSID');
+}
+
 /**
  * Call Google's `RotateCookies` endpoint to mint a fresh `__Secure-1PSIDTS`
- * cookie from an active `__Secure-1PSID` session. Single-flighted per cookie.
+ * cookie from an active `__Secure-1PSID` session. Single-flighted per account.
  */
 export async function rotateGeminiCookies(
   rawCookieHeader: string,
-  platform: Platform = 'custom',
+  platform: Platform = GEMINI_PLATFORM,
   externalSignal?: AbortSignal,
   opts?: { force?: boolean },
 ): Promise<RotateGeminiCookiesResult> {
   const cookieHeader = resolveLiveCookieHeader(rawCookieHeader);
-  const existing = rotateInFlight.get(cookieHeader);
-  if (existing) return existing;
+  const effectivePlatform: Platform = platform && platform !== 'custom' ? platform : GEMINI_PLATFORM;
+  const psid = extractPsid(cookieHeader);
+  const rotationKey = psid || cookieHeader;
 
-  const cooldown = rotateCooldownUntil.get(cookieHeader) ?? 0;
+  const cooldown = rotateCooldownUntil.get(rotationKey) ?? 0;
   if (!opts?.force && cooldown > Date.now()) {
     return { cookieHeader, rotated: false };
   }
 
-  const task = (async (): Promise<RotateGeminiCookiesResult> => {
-    const { signal, cleanup } = createRequestSignal(REQUEST_TIMEOUT_MS, externalSignal);
-    try {
-      const res = await proxyFetch(
-        GEMINI_ROTATE_COOKIES_URL,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Cookie: cookieHeader,
-            Origin: 'https://accounts.google.com',
-            Referer: 'https://accounts.google.com/',
-            'User-Agent': BROWSER_USER_AGENT,
+  let inflight = rotateInFlight.get(rotationKey);
+  if (!inflight) {
+    const task = (async (): Promise<RotateCookiesRawResult> => {
+      const { signal, cleanup } = createRequestSignal(REQUEST_TIMEOUT_MS, externalSignal);
+      try {
+        await assertProviderUrlAllowed(GEMINI_ROTATE_COOKIES_URL);
+        const res = await proxyFetch(
+          GEMINI_ROTATE_COOKIES_URL,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json;charset=UTF-8',
+              Cookie: cookieHeader,
+              Origin: 'https://accounts.google.com',
+              Referer: 'https://accounts.google.com/',
+              'User-Agent': BROWSER_USER_AGENT,
+            },
+            body: ROTATE_COOKIES_BODY,
+            redirect: 'manual',
+            signal,
           },
-          body: ROTATE_COOKIES_BODY,
-          signal,
-        },
-        platform,
-        'chat',
-      );
-      await res.body?.cancel().catch(() => {});
+          effectivePlatform,
+          'chat',
+        );
+        const setCookies = getSetCookieValues(res.headers);
+        await res.body?.cancel().catch(() => {});
 
-      const { nextHeader, changed } = mergeResponseCookies(cookieHeader, res);
-      if (res.ok && changed) {
-        rotateCooldownUntil.delete(cookieHeader);
-        recordRotatedCookie(cookieHeader, nextHeader);
-        return { cookieHeader: nextHeader, rotated: true, status: res.status };
+        if (res.ok) {
+          rotateCooldownUntil.delete(rotationKey);
+          if (psid) setBoundedMap(lastSuccessRotateByPsid, psid, Date.now());
+        } else {
+          setBoundedMap(rotateCooldownUntil, rotationKey, Date.now() + ROTATE_COOLDOWN_MS);
+        }
+        return { ok: res.ok, status: res.status, setCookies };
+      } catch {
+        setBoundedMap(rotateCooldownUntil, rotationKey, Date.now() + ROTATE_COOLDOWN_MS);
+        return { ok: false, setCookies: [] };
+      } finally {
+        cleanup();
       }
-
-      if (!res.ok) {
-        setBoundedMap(rotateCooldownUntil, cookieHeader, Date.now() + ROTATE_COOLDOWN_MS);
+    })().finally(() => {
+      if (rotateInFlight.get(rotationKey) === task) {
+        rotateInFlight.delete(rotationKey);
       }
-      return { cookieHeader, rotated: false, status: res.status };
-    } catch {
-      setBoundedMap(rotateCooldownUntil, cookieHeader, Date.now() + ROTATE_COOLDOWN_MS);
-      return { cookieHeader, rotated: false };
-    } finally {
-      cleanup();
-      rotateInFlight.delete(cookieHeader);
-    }
-  })();
+    });
 
-  rotateInFlight.set(cookieHeader, task);
-  return task;
+    rotateInFlight.set(rotationKey, task);
+    inflight = task;
+  }
+
+  const rawResult = await raceWithSignal(inflight, externalSignal);
+  const { nextHeader, changed } = applySetCookieLinesToHeader(cookieHeader, rawResult.setCookies);
+  if (rawResult.ok && changed) {
+    recordRotatedCookie(cookieHeader, nextHeader);
+    return { cookieHeader: nextHeader, rotated: true, status: rawResult.status };
+  }
+
+  return { cookieHeader, rotated: false, status: rawResult.status };
+}
+
+function extractWizToken(html: string, key: string): string | undefined {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const patterns = [
+    new RegExp(`"${escaped}"\\s*:\\s*"([^"]+)"`),
+    new RegExp(`'${escaped}'\\s*:\\s*'([^']+)'`),
+    new RegExp(`\\\\"${escaped}\\\\"\\s*:\\s*\\\\"([^"\\\\]+)\\\\"`),
+  ];
+  for (const pattern of patterns) {
+    const match = html.match(pattern)?.[1];
+    if (match) return match;
+  }
+  return undefined;
 }
 
 /** Extract `SNlM0e`, `cfb2h`, and `FdrFJe` tokens from Gemini's `/app` HTML. */
 export function extractGeminiSessionTokens(html: string): Omit<GeminiWebSession, 'expiresAt'> | null {
-  const snlm0e = html.match(/"SNlM0e":"([^"]+)"/)?.[1];
+  const snlm0e = extractWizToken(html, 'SNlM0e');
   if (!snlm0e) return null;
-  const cfb2h = html.match(/"cfb2h":"([^"]+)"/)?.[1];
-  const fdrfje = html.match(/"FdrFJe":"([^"]+)"/)?.[1];
+  const cfb2h = extractWizToken(html, 'cfb2h');
+  const fdrfje = extractWizToken(html, 'FdrFJe');
   return { snlm0e, cfb2h, fdrfje };
 }
 
@@ -401,6 +620,145 @@ function raceWithSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T
   });
 }
 
+function normalizeHostname(hostname: string): string {
+  return hostname.trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+}
+
+function isTrustedGoogleHost(hostname: string, origin?: string): boolean {
+  const host = normalizeHostname(hostname);
+  if (!host) return false;
+  if (origin) {
+    try {
+      const originHost = normalizeHostname(new URL(origin).hostname);
+      if (originHost && host === originHost) return true;
+    } catch {
+      // Ignore invalid origin
+    }
+  }
+  return TRUSTED_GOOGLE_DOMAINS.some(domain => host === domain || host.endsWith(`.${domain}`));
+}
+
+function isTrustedGoogleUrl(rawUrl: string, origin?: string): boolean {
+  try {
+    return isTrustedGoogleHost(new URL(rawUrl).hostname, origin);
+  } catch {
+    return false;
+  }
+}
+
+function isGoogleCookieUrl(rawUrl: string, origin?: string): boolean {
+  try {
+    const host = normalizeHostname(new URL(rawUrl).hostname);
+    if (!host) return false;
+    if (origin) {
+      try {
+        const originHost = normalizeHostname(new URL(origin).hostname);
+        if (originHost && host === originHost) return true;
+      } catch {
+        // Ignore invalid origin
+      }
+    }
+    return host === 'google.com' || host.endsWith('.google.com');
+  } catch {
+    return false;
+  }
+}
+
+function isGoogleAuthRedirectHost(hostname: string): boolean {
+  const host = normalizeHostname(hostname);
+  return AUTH_REDIRECT_HOSTS.has(host)
+    || host.endsWith('.accounts.google.com')
+    || host.endsWith('.consent.google.com');
+}
+
+function isGoogleAuthRedirectUrl(rawUrl: string): boolean {
+  try {
+    return isGoogleAuthRedirectHost(new URL(rawUrl).hostname);
+  } catch {
+    return false;
+  }
+}
+
+async function fetchWithGoogleRedirects(
+  initialUrl: string,
+  makeInit: (targetUrl: string) => RequestInit,
+  state: { cookieHeader: string },
+  origin: string,
+  platform: Platform,
+  onCredentialUpdate?: (next: string) => void,
+  options?: { requireTrustedRedirectHost?: boolean },
+): Promise<Response> {
+  let currentUrl = initialUrl;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    await assertProviderUrlAllowed(currentUrl);
+    const res = await proxyFetch(
+      currentUrl,
+      { ...makeInit(currentUrl), redirect: 'manual' },
+      platform,
+      'chat',
+    );
+    const canAcceptCookies = isGoogleCookieUrl(currentUrl, origin)
+      && (!res.url || isGoogleCookieUrl(res.url, origin));
+    if (canAcceptCookies) {
+      const { nextHeader, changed } = mergeResponseCookies(state.cookieHeader, res);
+      if (changed) {
+        recordRotatedCookie(state.cookieHeader, nextHeader, origin, onCredentialUpdate);
+        state.cookieHeader = nextHeader;
+      }
+    }
+
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get('location');
+      await res.body?.cancel().catch(() => {});
+      if (!location) {
+        throw new GeminiWebChatError(`Gemini Web redirect (${res.status}) missing Location header.`, 502);
+      }
+      let nextUrl: string;
+      try {
+        nextUrl = new URL(location, currentUrl).toString();
+      } catch {
+        throw new GeminiWebChatError(`Gemini Web redirect (${res.status}) has invalid Location header.`, 502);
+      }
+      if (isGoogleAuthRedirectUrl(nextUrl)) {
+        throw new GeminiWebChatError(
+          'Gemini Web session is not signed in; refresh your __Secure-1PSID / __Secure-1PSIDTS cookies.',
+          401,
+        );
+      }
+      if (options?.requireTrustedRedirectHost && !isTrustedGoogleUrl(nextUrl, origin)) {
+        throw new GeminiWebChatError('Gemini Web redirected to an untrusted host.', 502);
+      }
+      await assertProviderUrlAllowed(nextUrl);
+      if (hop === MAX_REDIRECTS) {
+        throw new GeminiWebChatError(`Gemini Web exceeded maximum redirects (${MAX_REDIRECTS}).`, 502);
+      }
+      currentUrl = nextUrl;
+      continue;
+    }
+
+    if (res.url && isGoogleAuthRedirectUrl(res.url)) {
+      await res.body?.cancel().catch(() => {});
+      throw new GeminiWebChatError(
+        'Gemini Web session is not signed in; refresh your __Secure-1PSID / __Secure-1PSIDTS cookies.',
+        401,
+      );
+    }
+
+    return res;
+  }
+
+  throw new GeminiWebChatError(`Gemini Web exceeded maximum redirects (${MAX_REDIRECTS}).`, 502);
+}
+
+function shouldProactivelyRotate(cookieHeader: string): boolean {
+  const jar = parseCookieHeader(cookieHeader);
+  const psid = jar.get('__Secure-1PSID');
+  if (!psid) return false;
+  if (!jar.has('__Secure-1PSIDTS')) return true;
+  const lastRotatedAt = lastSuccessRotateByPsid.get(psid);
+  return lastRotatedAt !== undefined && Date.now() - lastRotatedAt >= PROACTIVE_ROTATE_INTERVAL_MS;
+}
+
 async function fetchGeminiSession(
   cookieHeader: string,
   origin: string,
@@ -408,60 +766,81 @@ async function fetchGeminiSession(
   externalSignal?: AbortSignal,
   opts?: { forceRefresh?: boolean; timeoutMs?: number; onCredentialUpdate?: (next: string) => void },
 ): Promise<{ session: GeminiWebSession; cookieHeader: string; fromCache: boolean }> {
-  const initialCookie = resolveLiveCookieHeader(cookieHeader);
-  const cacheKey = `${origin}::${initialCookie}`;
+  pruneExpiredSessions();
+  let initialCookie = resolveLiveCookieHeader(cookieHeader);
   const forceRefresh = opts?.forceRefresh === true;
 
   if (!forceRefresh) {
+    const cacheKey = `${origin}::${initialCookie}`;
     const cached = sessionCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
-      return { session: cached, cookieHeader: initialCookie, fromCache: true };
+      if (!shouldProactivelyRotate(initialCookie)) {
+        return { session: cached, cookieHeader: initialCookie, fromCache: true };
+      }
+      const rotated = await rotateGeminiCookies(initialCookie, platform, externalSignal);
+      if (rotated.rotated) {
+        recordRotatedCookie(initialCookie, rotated.cookieHeader, origin, opts?.onCredentialUpdate);
+        initialCookie = rotated.cookieHeader;
+      } else {
+        return { session: cached, cookieHeader: initialCookie, fromCache: true };
+      }
     }
   } else {
-    sessionCache.delete(cacheKey);
+    sessionCache.delete(`${origin}::${initialCookie}`);
   }
 
+  const cacheKey = `${origin}::${initialCookie}`;
   const timeoutBudgetMs = opts?.timeoutMs && opts.timeoutMs > 0
     ? Math.min(BOOTSTRAP_TIMEOUT_MS, opts.timeoutMs)
     : BOOTSTRAP_TIMEOUT_MS;
   const { signal: waiterSignal, cleanup: cleanupWaiter } = createRequestSignal(timeoutBudgetMs, externalSignal);
 
-  try {
-    let inflight = forceRefresh ? undefined : pendingSessionFetches.get(cacheKey);
-    if (!inflight) {
-      const fetchPromise = (async (): Promise<{ session: GeminiWebSession; cookieHeader: string }> => {
-        let activeCookie = initialCookie;
+  let entry = forceRefresh ? undefined : pendingSessionFetches.get(cacheKey);
+  if (!entry) {
+    const controller = new AbortController();
+    const { signal: internalSignal, cleanup } = createRequestSignal(BOOTSTRAP_TIMEOUT_MS, controller.signal);
+    const fetchPromise = (async (): Promise<{ session: GeminiWebSession; cookieHeader: string }> => {
+      try {
+        const state = { cookieHeader: initialCookie };
+        let attemptedProactive = false;
+        if (shouldProactivelyRotate(state.cookieHeader)) {
+          const rotated = await rotateGeminiCookies(state.cookieHeader, platform, internalSignal);
+          if (rotated.rotated) {
+            recordRotatedCookie(state.cookieHeader, rotated.cookieHeader, origin, opts?.onCredentialUpdate);
+            state.cookieHeader = rotated.cookieHeader;
+            attemptedProactive = true;
+          } else if (rotated.status !== undefined) {
+            attemptedProactive = true;
+          }
+        }
+
         for (let attempt = 0; attempt < 2; attempt++) {
-          const { signal, cleanup } = createRequestSignal(BOOTSTRAP_TIMEOUT_MS);
           let shouldRotateAndRetry = false;
           let pendingError: GeminiWebChatError | null = null;
 
           try {
-            const res = await proxyFetch(
+            const res = await fetchWithGoogleRedirects(
               `${origin}/app`,
-              {
+              (targetUrl) => ({
                 method: 'GET',
                 headers: {
-                  Cookie: activeCookie,
+                  ...(isTrustedGoogleUrl(targetUrl, origin) ? { Cookie: state.cookieHeader } : {}),
                   'User-Agent': BROWSER_USER_AGENT,
                   Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                   'Accept-Language': 'en-US,en;q=0.9',
                 },
-                signal,
-              },
+                signal: internalSignal,
+              }),
+              state,
+              origin,
               platform,
-              'chat',
+              opts?.onCredentialUpdate,
+              { requireTrustedRedirectHost: true },
             );
 
-            const { nextHeader, changed } = mergeResponseCookies(activeCookie, res);
-            if (changed) {
-              recordRotatedCookie(activeCookie, nextHeader, origin, opts?.onCredentialUpdate);
-              activeCookie = nextHeader;
-            }
-
-            if (res.status === 401 || res.status === 403 || res.url.includes('accounts.google.com')) {
+            if (res.status === 401 || res.status === 403) {
               await res.body?.cancel().catch(() => {});
-              shouldRotateAndRetry = attempt === 0;
+              shouldRotateAndRetry = attempt === 0 && !attemptedProactive;
               pendingError = new GeminiWebChatError(
                 'Gemini Web session is not signed in; refresh your __Secure-1PSID / __Secure-1PSIDTS cookies.',
                 401,
@@ -476,30 +855,41 @@ async function fetchGeminiSession(
               const html = await res.text();
               const tokens = extractGeminiSessionTokens(html);
               if (!tokens) {
-                shouldRotateAndRetry = attempt === 0;
+                shouldRotateAndRetry = attempt === 0 && !attemptedProactive;
                 pendingError = new GeminiWebChatError(
                   'Gemini Web session token (SNlM0e) not found; ensure your __Secure-1PSID / __Secure-1PSIDTS cookies are valid and signed in.',
                   401,
                 );
               } else {
+                const jar = parseCookieHeader(state.cookieHeader);
+                const psid = jar.get('__Secure-1PSID');
+                if (psid && jar.has('__Secure-1PSIDTS') && lastSuccessRotateByPsid.get(psid) === undefined) {
+                  setBoundedMap(lastSuccessRotateByPsid, psid, Date.now());
+                }
                 const session: GeminiWebSession = {
                   ...tokens,
                   expiresAt: Date.now() + SESSION_CACHE_TTL_MS,
                 };
-                setCachedSession(`${origin}::${activeCookie}`, session);
-                return { session, cookieHeader: activeCookie };
+                setCachedSession(`${origin}::${state.cookieHeader}`, session);
+                return { session, cookieHeader: state.cookieHeader };
               }
             }
-          } finally {
-            cleanup();
+          } catch (err) {
+            const authStatus = geminiWebChatErrorStatus(err);
+            if (err instanceof GeminiWebChatError && (authStatus === 401 || authStatus === 403)) {
+              shouldRotateAndRetry = attempt === 0 && !attemptedProactive;
+              pendingError = err;
+            } else {
+              throw err;
+            }
           }
 
-          if (shouldRotateAndRetry) {
-            sessionCache.delete(`${origin}::${activeCookie}`);
-            const rotated = await rotateGeminiCookies(activeCookie, platform, undefined, { force: true });
+          if (shouldRotateAndRetry && !internalSignal.aborted) {
+            sessionCache.delete(`${origin}::${state.cookieHeader}`);
+            const rotated = await rotateGeminiCookies(state.cookieHeader, platform, internalSignal, { force: true });
             if (rotated.rotated) {
-              recordRotatedCookie(activeCookie, rotated.cookieHeader, origin, opts?.onCredentialUpdate);
-              activeCookie = rotated.cookieHeader;
+              recordRotatedCookie(state.cookieHeader, rotated.cookieHeader, origin, opts?.onCredentialUpdate);
+              state.cookieHeader = rotated.cookieHeader;
               continue;
             }
           }
@@ -511,19 +901,39 @@ async function fetchGeminiSession(
           'Gemini Web session token (SNlM0e) not found; ensure your __Secure-1PSID / __Secure-1PSIDTS cookies are valid and signed in.',
           401,
         );
-      })();
-      fetchPromise.finally(() => {
-        if (pendingSessionFetches.get(cacheKey) === fetchPromise) {
+      } finally {
+        cleanup();
+        if (pendingSessionFetches.get(cacheKey) === entry) {
           pendingSessionFetches.delete(cacheKey);
         }
-      }).catch(() => {});
-      if (!forceRefresh) {
-        pendingSessionFetches.set(cacheKey, fetchPromise);
       }
-      inflight = fetchPromise;
+    })();
+    fetchPromise.catch(() => {});
+    entry = {
+      promise: fetchPromise,
+      waiters: 0,
+      abort: () => controller.abort(new DOMException('All callers aborted.', 'AbortError')),
+    };
+    if (!forceRefresh) {
+      pendingSessionFetches.set(cacheKey, entry);
     }
+  }
 
-    const result = await raceWithSignal(inflight, waiterSignal);
+  entry.waiters += 1;
+  let released = false;
+  const releaseWaiter = () => {
+    if (released) return;
+    released = true;
+    waiterSignal.removeEventListener('abort', releaseWaiter);
+    entry!.waiters = Math.max(0, entry!.waiters - 1);
+    if (entry!.waiters === 0) {
+      entry!.abort();
+    }
+  };
+  waiterSignal.addEventListener('abort', releaseWaiter, { once: true });
+
+  try {
+    const result = await raceWithSignal(entry.promise, waiterSignal);
     return { ...result, fromCache: false };
   } catch (err) {
     if (!externalSignal?.aborted && waiterSignal.aborted) {
@@ -531,6 +941,7 @@ async function fetchGeminiSession(
     }
     throw err;
   } finally {
+    releaseWaiter();
     cleanupWaiter();
   }
 }
@@ -744,6 +1155,7 @@ async function uploadGeminiWebImages(
 
     const { signal, cleanup } = createRequestSignal(REQUEST_TIMEOUT_MS, externalSignal);
     try {
+      await assertProviderUrlAllowed(GEMINI_UPLOAD_URL);
       const res = await proxyFetch(
         GEMINI_UPLOAD_URL,
         {
@@ -754,6 +1166,7 @@ async function uploadGeminiWebImages(
             'User-Agent': BROWSER_USER_AGENT,
           },
           body,
+          redirect: 'manual',
           signal,
         },
         platform,
@@ -838,7 +1251,7 @@ export async function* streamGeminiWebChat(
 ): AsyncGenerator<{ content?: string }> {
   let activeCookie = resolveLiveCookieHeader(normalizeGeminiWebCookie(opts.credential));
   const origin = resolveOrigin(opts.baseUrl);
-  const platform: Platform = opts.platform && opts.platform !== 'custom' ? opts.platform : 'custom';
+  const platform: Platform = opts.platform && opts.platform !== 'custom' ? opts.platform : GEMINI_PLATFORM;
   const onCredentialUpdate = opts.options?.onCredentialUpdate;
   const externalSignal = opts.options?.signal;
   const images = extractGeminiWebImages(opts.messages);
@@ -921,6 +1334,7 @@ export async function* streamGeminiWebChat(
     try {
       let res: Response;
       try {
+        await assertProviderUrlAllowed(streamUrl);
         res = await proxyFetch(
           streamUrl,
           {
@@ -934,6 +1348,7 @@ export async function* streamGeminiWebChat(
               'X-Same-Domain': '1',
             },
             body: formBody,
+            redirect: 'manual',
             signal: streamController.signal,
           },
           platform,
@@ -948,13 +1363,27 @@ export async function* streamGeminiWebChat(
         clearTimeout(connectTimer);
       }
 
-      const { nextHeader, changed } = mergeResponseCookies(activeCookie, res);
-      if (changed) {
-        recordRotatedCookie(activeCookie, nextHeader, origin, onCredentialUpdate);
-        activeCookie = nextHeader;
+      if (isGoogleCookieUrl(streamUrl, origin) && (!res.url || isGoogleCookieUrl(res.url, origin))) {
+        const { nextHeader, changed } = mergeResponseCookies(activeCookie, res);
+        if (changed) {
+          recordRotatedCookie(activeCookie, nextHeader, origin, onCredentialUpdate);
+          activeCookie = nextHeader;
+        }
       }
 
-      if (!res.ok) {
+      if ((res.status >= 300 && res.status < 400) || (res.url && isGoogleAuthRedirectUrl(res.url))) {
+        await res.body?.cancel().catch(() => {});
+        sessionCache.delete(`${origin}::${activeCookie}`);
+        if (attempt === 0 && !externalSignal?.aborted) {
+          shouldRetryWithFreshSession = true;
+          shouldRotateBeforeRetry = true;
+        } else {
+          throw new GeminiWebChatError(
+            'Gemini Web session is not signed in; refresh your __Secure-1PSID / __Secure-1PSIDTS cookies.',
+            401,
+          );
+        }
+      } else if (!res.ok) {
         const errText = await res.text().catch(() => '');
         const isAuthStatus = res.status === 401 || res.status === 403;
         const isBootstrapStatus = isAuthStatus || res.status === 400;
@@ -1187,13 +1616,55 @@ export async function probeGeminiWebSession(opts: {
 }): Promise<void> {
   const cookieHeader = normalizeGeminiWebCookie(opts.credential);
   const origin = resolveOrigin(opts.baseUrl);
+  const platform: Platform = opts.platform && opts.platform !== 'custom' ? opts.platform : GEMINI_PLATFORM;
   await fetchGeminiSession(
     cookieHeader,
     origin,
-    opts.platform ?? 'custom',
+    platform,
     opts.signal,
     { forceRefresh: true, onCredentialUpdate: opts.onCredentialUpdate },
   );
+}
+
+/** Validate a Gemini Web cookie credential by normalizing, rotating if needed, and probing `/app` for `SNlM0e`. */
+export async function validateGeminiWebSession(
+  rawCookie: string,
+  options?: {
+    baseUrl?: string;
+    timeoutMs?: number;
+    signal?: AbortSignal;
+    onCredentialUpdate?: (credential: string) => void;
+  },
+): Promise<KeyValidationResult> {
+  let cookieHeader: string;
+  try {
+    cookieHeader = normalizeGeminiWebCookie(rawCookie);
+  } catch (err) {
+    return {
+      valid: false,
+      error: err instanceof Error ? err.message : 'Invalid Gemini Web credential.',
+    };
+  }
+  const origin = resolveOrigin(options?.baseUrl);
+  try {
+    await fetchGeminiSession(
+      cookieHeader,
+      origin,
+      GEMINI_PLATFORM,
+      options?.signal,
+      {
+        forceRefresh: true,
+        timeoutMs: options?.timeoutMs,
+        onCredentialUpdate: options?.onCredentialUpdate,
+      },
+    );
+    return true;
+  } catch (err) {
+    return {
+      valid: false,
+      error: err instanceof Error ? err.message : 'Gemini Web session validation failed.',
+    };
+  }
 }
 
 export async function runGeminiWebChat(opts: GeminiWebChatOptions): Promise<string> {

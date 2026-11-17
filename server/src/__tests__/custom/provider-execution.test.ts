@@ -10,11 +10,13 @@ import { mintUserApiKey } from '../../services/user-keys.js';
 import { decrypt } from '../../lib/crypto.js';
 import { proxyFetch } from '../../lib/proxy.js';
 import { providerAccountsRouter } from '../../custom/provider-accounts/router.js';
-import { accountRow, createApiKeyAccount, invalidateXGatewayKeyCache, updateAccountCredential } from '../../custom/provider-accounts/store.js';
+import { accountRow, createApiKeyAccount, invalidateXGatewayKeyCache, setAccountStatus, updateAccountCredential } from '../../custom/provider-accounts/store.js';
 import { clearOAuthRefreshState, resolveAccountCredential } from '../../custom/provider-accounts/oauth-lifecycle.js';
 import { parseOAuthCredential, type OAuthCredential } from '../../custom/provider-accounts/oauth-credentials.js';
 import { normalizeImportedCredential } from '../../custom/provider-accounts/oauth-providers.js';
 import { resolveAccountProvider } from '../../custom/provider-accounts/execution.js';
+import { clearGeminiWebCaches } from '../../custom/provider-accounts/gemini-web-chat.js';
+import { getAutoPingSchedule, hydrateAutoPingSchedules, pingAccount, setAutoPingSchedule } from '../../custom/provider-accounts/auto-ping.js';
 import { crc32, decodeKiroFrame } from '../../custom/provider-accounts/kiro-wire.js';
 import { xGatewayRouter, resetRouteHealth } from '../../custom/x-gateway/router.js';
 import { createCombo, invalidateConfigCache, setEnabled } from '../../custom/x-gateway/config.js';
@@ -27,6 +29,7 @@ let upstream: Server; let gateway: Server; let upstreamUrl: string; let base: st
 let session: string; let otherSession: string; let apiKey: string; let userId: number;
 let requests: Array<{ path: string; target: string; headers: Record<string, any>; body: any }>;
 let behavior: 'ok' | '401' | 'refresh-error' | '429' | 'hold' | 'truncated' | 'kiro-empty-profiles' = 'ok';
+let geminiWebHandler: ((req: express.Request, res: express.Response) => boolean) | null = null;
 let refreshes = 0; let upstreamClosed = false;
 const fixture = mkdtempSync(join(tmpdir(), 'x-subscriptions-'));
 let database: string;
@@ -49,10 +52,16 @@ function sse(res: express.Response, events: unknown[]) {
 }
 beforeAll(async () => {
   process.env.ENCRYPTION_KEY = '0'.repeat(64);
-  const app = express(); app.use(express.json()); app.use(express.urlencoded({ extended: false }));
+  const app = express();
+  app.use((req, res, next) => {
+    if (req.path === '/RotateCookies' && geminiWebHandler?.(req, res)) return;
+    next();
+  });
+  app.use(express.json()); app.use(express.urlencoded({ extended: false }));
   app.use((req, res) => {
     const target = String(req.headers['x-fixture-target'] ?? '');
     requests.push({ path: req.path, target, headers: req.headers, body: req.body });
+    if (geminiWebHandler?.(req, res)) return;
     if (req.path.endsWith('/client/register')) return json(res, { clientId: 'private-client', clientSecret: 'private-client-secret' });
     if (req.path.endsWith('/device_authorization')) return json(res, { deviceCode: 'private-device', userCode: 'ABCD-1234', verificationUri: 'https://view.awsapps.com/start', interval: 5, expiresIn: 600 });
     if (req.path.endsWith('/token')) {
@@ -96,14 +105,18 @@ beforeEach(() => {
   vi.stubEnv('GEMINI_CLIENT_ID', 'fixture-client'); vi.stubEnv('GEMINI_CLIENT_SECRET', 'fixture-secret');
   try { getDb().close(); } catch {}
   try { getDb().close(); } catch {}
-  database = join(fixture, Math.random().toString(36).slice(2) + '.db'); initDb(database); clearOAuthRefreshState(); invalidateConfigCache(); invalidateXGatewayKeyCache(); resetRouteHealth(); setEnabled(true);
+  database = join(fixture, Math.random().toString(36).slice(2) + '.db'); initDb(database); clearOAuthRefreshState(); clearGeminiWebCaches(); invalidateConfigCache(); invalidateXGatewayKeyCache(); resetRouteHealth(); setEnabled(true);
   createUser('primary-fixture@test.dev', 'password123');
   userId = createUser('provider-owner@test.dev', 'password123', 'admin').userId; session = createSession(userId); otherSession = createSession(userId);
   apiKey = mintUserApiKey(userId, 'fixture').key;
-  requests = []; refreshes = 0; upstreamClosed = false; behavior = 'ok';
-  vi.mocked(proxyFetch).mockImplementation((url, init) => {
+  requests = []; refreshes = 0; upstreamClosed = false; behavior = 'ok'; geminiWebHandler = null;
+  vi.mocked(proxyFetch).mockImplementation(async (url, init) => {
     const target = new URL(String(url));
-    return fetchHttp(upstreamUrl + target.pathname + target.search, { ...init, headers: { ...Object.fromEntries(new Headers(init?.headers)), 'x-fixture-target': target.origin } });
+    const res = await fetchHttp(upstreamUrl + target.pathname + target.search, { ...init, headers: { ...Object.fromEntries(new Headers(init?.headers)), 'x-fixture-target': target.origin } });
+    if (target.hostname.endsWith('google.com')) {
+      Object.defineProperty(res, 'url', { value: target.toString(), configurable: true });
+    }
+    return res;
   });
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
@@ -277,5 +290,282 @@ describe('browser imports, headless OAuth and capability honesty', () => {
   it('rejects corrupt or truncated AWS EventStream frames', () => {
     expect(crc32(Buffer.from('123456789'))).toBe(0xcbf43926);
     const valid = frame('assistantResponseEvent', { content: 'Hi' }); expect(decodeKiroFrame(valid).payload.content).toBe('Hi'); valid[valid.length - 5] ^= 1; expect(() => decodeKiroFrame(valid)).toThrow('integrity'); expect(() => decodeKiroFrame(valid.subarray(0, 10))).toThrow('length');
+  });
+});
+
+function geminiStreamPayload(text: string): string {
+  const inner = JSON.stringify([null, null, null, null, [['rc_1', [text]]]]);
+  const frameStr = JSON.stringify([['wrb.fr', null, inner]]);
+  return [")]}'", String(frameStr.length), frameStr].join('\n');
+}
+
+describe('gemini-web credential persistence, CAS serialization, and validation', () => {
+  it('persists rotated cookies across multiple consecutive rotations and stale cached rows without clobbering reconnects', async () => {
+    const id = createApiKeyAccount({
+      provider: 'gemini-web',
+      key: '__Secure-1PSID=psid_init; __Secure-1PSIDTS=ts_0',
+      models: [{ id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' }],
+    });
+    const staleRow = accountRow(id);
+
+    let streamTurn = 0;
+    geminiWebHandler = (req, res) => {
+      if (req.path === '/app') {
+        const cookie = String(req.headers.cookie ?? '');
+        if (cookie.includes('ts_0')) {
+          res.setHeader('Set-Cookie', '__Secure-1PSIDTS=ts_1; Path=/; HttpOnly; Secure');
+        }
+        res.type('text/html').send('<script>{"SNlM0e":"snl_tok_1","cfb2h":"boq_bl_1","FdrFJe":"112233"}</script>');
+        return true;
+      }
+      if (req.path.endsWith('/StreamGenerate')) {
+        streamTurn++;
+        const nextTs = streamTurn === 1 ? 'ts_2' : 'ts_3';
+        res.setHeader('Set-Cookie', `__Secure-1PSIDTS=${nextTs}; Path=/; HttpOnly; Secure`);
+        res.type('application/json; charset=utf-8').send(geminiStreamPayload(`Turn ${streamTurn}`));
+        return true;
+      }
+      return false;
+    };
+
+    // Turn 1: /app rotates ts_0 -> ts_1, then StreamGenerate rotates ts_1 -> ts_2
+    // inside the same AccountProvider execution (would fail CAS on ts_2 if expectedCipher stayed stale).
+    const first = await resolveAccountProvider(staleRow)!.chatCompletion('', [{ role: 'user', content: 'Hi' }], 'gemini-2.5-flash');
+    expect(first.choices[0]?.message.content).toBe('Turn 1');
+    const afterTurn1 = accountRow(id);
+    expect(decrypt(afterTurn1.encrypted_key, afterTurn1.iv, afterTurn1.auth_tag)).toContain('__Secure-1PSIDTS=ts_2');
+
+    // Turn 2: Passing the original staleRow (still holding ts_0's encrypted_key) must still persist ts_3.
+    const second = await resolveAccountProvider(staleRow)!.chatCompletion('', [{ role: 'user', content: 'Hi again' }], 'gemini-2.5-flash');
+    expect(second.choices[0]?.message.content).toBe('Turn 2');
+    const afterTurn2 = accountRow(id);
+    expect(decrypt(afterTurn2.encrypted_key, afterTurn2.iv, afterTurn2.auth_tag)).toContain('__Secure-1PSIDTS=ts_3');
+
+    // Reconnect protection: if an admin updates the credential mid-flight, the older request's Set-Cookie must not overwrite it.
+    clearGeminiWebCaches();
+    geminiWebHandler = (req, res) => {
+      if (req.path === '/app') {
+        res.type('text/html').send('<script>{"SNlM0e":"snl_tok_mid","cfb2h":"boq_bl_1","FdrFJe":"112233"}</script>');
+        return true;
+      }
+      if (req.path.endsWith('/StreamGenerate')) {
+        updateAccountCredential(id, '__Secure-1PSID=psid_admin; __Secure-1PSIDTS=ts_admin');
+        res.setHeader('Set-Cookie', '__Secure-1PSIDTS=ts_stale_rotation; Path=/; HttpOnly; Secure');
+        res.type('application/json; charset=utf-8').send(geminiStreamPayload('Turn 3'));
+        return true;
+      }
+      return false;
+    };
+    const third = await resolveAccountProvider(accountRow(id))!.chatCompletion('', [{ role: 'user', content: 'Mid-flight' }], 'gemini-2.5-flash');
+    expect(third.choices[0]?.message.content).toBe('Turn 3');
+    const afterReconnect = accountRow(id);
+    expect(decrypt(afterReconnect.encrypted_key, afterReconnect.iv, afterReconnect.auth_tag)).toBe('__Secure-1PSID=psid_admin; __Secure-1PSIDTS=ts_admin');
+  });
+
+  it('AccountProvider.validateKey probes upstream for gemini-web, returns error on missing SNlM0e, and persists rotated cookies when RotateCookies recovers', async () => {
+    const id = createApiKeyAccount({
+      provider: 'gemini-web',
+      key: '__Secure-1PSID=psid_val; __Secure-1PSIDTS=ts_expired',
+      models: [{ id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' }],
+    });
+
+    // 1. Both /app (no SNlM0e) and RotateCookies (401) fail -> validateKey returns { valid: false, error } and /:id/test sets error status.
+    geminiWebHandler = (req, res) => {
+      if (req.path === '/RotateCookies') {
+        res.status(401).json({ error: 'expired' });
+        return true;
+      }
+      if (req.path === '/app') {
+        res.type('text/html').send('<html><body>Sign in to continue</body></html>');
+        return true;
+      }
+      return false;
+    };
+
+    const validationFail = await resolveAccountProvider(accountRow(id))!.validateKey('');
+    expect(validationFail).toMatchObject({ valid: false, error: expect.stringContaining('SNlM0e') });
+
+    const testFailRes = await call(`/api/thruline-accounts/${id}/test`, {});
+    const testFailBody = await testFailRes.json();
+    expect(testFailRes.status).toBe(200);
+    expect(testFailBody.ok).toBe(false);
+    expect(testFailBody.message).toContain('SNlM0e');
+    expect(accountRow(id).status).toBe('error');
+
+    // 2. /app initially lacks SNlM0e with ts_expired, RotateCookies mints ts_recovered, retry /app returns SNlM0e -> healthy & persisted.
+    clearGeminiWebCaches();
+    geminiWebHandler = (req, res) => {
+      const cookie = String(req.headers.cookie ?? '');
+      if (req.path === '/RotateCookies') {
+        res.setHeader('Set-Cookie', '__Secure-1PSIDTS=ts_recovered; Path=/; HttpOnly; Secure');
+        res.status(200).send('["",null]');
+        return true;
+      }
+      if (req.path === '/app') {
+        if (cookie.includes('ts_recovered')) {
+          res.type('text/html').send('<script>{"SNlM0e":"snl_recovered","cfb2h":"boq_bl_1","FdrFJe":"445566"}</script>');
+        } else {
+          res.type('text/html').send('<html><body>Sign in</body></html>');
+        }
+        return true;
+      }
+      return false;
+    };
+
+    const pingRes = await pingAccount(id);
+    expect(pingRes.ok).toBe(true);
+    expect(accountRow(id).status).toBe('healthy');
+    const persisted = accountRow(id);
+    expect(decrypt(persisted.encrypted_key, persisted.iv, persisted.auth_tag)).toContain('__Secure-1PSIDTS=ts_recovered');
+
+    // 3. Recovered POST /:id/test also clears status='error' back to 'healthy'.
+    setAccountStatus(id, 'error');
+    expect(accountRow(id).status).toBe('error');
+    const testRecoverRes = await call(`/api/thruline-accounts/${id}/test`, {});
+    const testRecoverBody = await testRecoverRes.json();
+    expect(testRecoverRes.status).toBe(200);
+    expect(testRecoverBody.ok).toBe(true);
+    expect(accountRow(id).status).toBe('healthy');
+  });
+
+  it('streamChatCompletion persists consecutive onCredentialUpdate rotations via CAS and marks status error on confirmed 401', async () => {
+    const id = createApiKeyAccount({
+      provider: 'gemini-web',
+      key: '__Secure-1PSID=psid_stream; __Secure-1PSIDTS=ts_s0',
+      models: [{ id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' }],
+    });
+
+    geminiWebHandler = (req, res) => {
+      if (req.path === '/app') {
+        res.setHeader('Set-Cookie', '__Secure-1PSIDTS=ts_s1; Path=/; HttpOnly; Secure');
+        res.type('text/html').send('<script>{"SNlM0e":"snl_stream","cfb2h":"boq_bl_1","FdrFJe":"778899"}</script>');
+        return true;
+      }
+      if (req.path.endsWith('/StreamGenerate')) {
+        res.setHeader('Set-Cookie', '__Secure-1PSIDTS=ts_s2; Path=/; HttpOnly; Secure');
+        res.type('application/json; charset=utf-8').send(geminiStreamPayload('Stream OK'));
+        return true;
+      }
+      return false;
+    };
+
+    const chunks: string[] = [];
+    for await (const chunk of resolveAccountProvider(accountRow(id))!.streamChatCompletion('', [{ role: 'user', content: 'Hi' }], 'gemini-2.5-flash')) {
+      const content = chunk.choices[0]?.delta?.content;
+      if (content) chunks.push(content);
+    }
+    expect(chunks.join('')).toBe('Stream OK');
+    const afterStream = accountRow(id);
+    expect(decrypt(afterStream.encrypted_key, afterStream.iv, afterStream.auth_tag)).toContain('__Secure-1PSIDTS=ts_s2');
+
+    // Confirmed 401 during streamChatCompletion marks status = 'error'.
+    clearGeminiWebCaches();
+    geminiWebHandler = (req, res) => {
+      if (req.path === '/RotateCookies') {
+        res.status(401).json({ error: 'revoked' });
+        return true;
+      }
+      if (req.path === '/app') {
+        res.type('text/html').send('<html><body>Sign in</body></html>');
+        return true;
+      }
+      return false;
+    };
+
+    await expect((async () => {
+      for await (const _chunk of resolveAccountProvider(accountRow(id))!.streamChatCompletion('', [{ role: 'user', content: 'Hi' }], 'gemini-2.5-flash')) {
+        // drain
+      }
+    })()).rejects.toThrow(/SNlM0e/);
+    expect(accountRow(id).status).toBe('error');
+  });
+
+  it('does not mark gemini-web account status error on transient 5xx, 429, or network errors during live inference', async () => {
+    const id = createApiKeyAccount({
+      provider: 'gemini-web',
+      key: '__Secure-1PSID=psid_transient; __Secure-1PSIDTS=ts_t0',
+      models: [{ id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' }],
+    });
+    setAccountStatus(id, 'healthy');
+
+    let streamStatus = 500;
+    geminiWebHandler = (req, res) => {
+      if (req.path === '/app') {
+        res.type('text/html').send('<script>{"SNlM0e":"snl_transient","cfb2h":"boq_bl_1","FdrFJe":"334455"}</script>');
+        return true;
+      }
+      if (req.path.endsWith('/StreamGenerate')) {
+        res.status(streamStatus).json({ error: 'transient' });
+        return true;
+      }
+      return false;
+    };
+
+    // 5xx on chatCompletion
+    await expect(
+      resolveAccountProvider(accountRow(id))!.chatCompletion('', [{ role: 'user', content: 'Hi' }], 'gemini-2.5-flash'),
+    ).rejects.toThrow();
+    expect(accountRow(id).status).toBe('healthy');
+
+    // 429 on streamChatCompletion
+    streamStatus = 429;
+    await expect((async () => {
+      for await (const _chunk of resolveAccountProvider(accountRow(id))!.streamChatCompletion('', [{ role: 'user', content: 'Hi' }], 'gemini-2.5-flash')) {
+        // drain
+      }
+    })()).rejects.toThrow();
+    expect(accountRow(id).status).toBe('healthy');
+
+    // Network error on chatCompletion & streamChatCompletion
+    clearGeminiWebCaches();
+    const defaultImpl = vi.mocked(proxyFetch).getMockImplementation()!;
+    vi.mocked(proxyFetch).mockRejectedValue(new Error('ECONNRESET'));
+    try {
+      await expect(
+        resolveAccountProvider(accountRow(id))!.chatCompletion('', [{ role: 'user', content: 'Hi' }], 'gemini-2.5-flash'),
+      ).rejects.toThrow('ECONNRESET');
+      expect(accountRow(id).status).toBe('healthy');
+
+      await expect((async () => {
+        for await (const _chunk of resolveAccountProvider(accountRow(id))!.streamChatCompletion('', [{ role: 'user', content: 'Hi' }], 'gemini-2.5-flash')) {
+          // drain
+        }
+      })()).rejects.toThrow('ECONNRESET');
+      expect(accountRow(id).status).toBe('healthy');
+    } finally {
+      vi.mocked(proxyFetch).mockImplementation(defaultImpl);
+    }
+  });
+
+  it('marks gemini-web account status error on confirmed 401 during live inference and hydrates persisted auto-ping schedules', async () => {
+    const id = createApiKeyAccount({
+      provider: 'gemini-web',
+      key: '__Secure-1PSID=psid_dead; __Secure-1PSIDTS=ts_dead',
+      models: [{ id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' }],
+    });
+
+    setAutoPingSchedule(id, { mode: 'reset', anchor: '09:30' });
+    // Re-open the same SQLite DB file to verify hydrateAutoPingSchedules restores DB-backed schedules.
+    getDb().close();
+    initDb(database);
+    hydrateAutoPingSchedules();
+    expect(getAutoPingSchedule(id)).toMatchObject({ enabled: true, mode: 'reset', anchor: '09:30' });
+
+    geminiWebHandler = (req, res) => {
+      if (req.path === '/RotateCookies') {
+        res.status(401).json({ error: 'revoked' });
+        return true;
+      }
+      if (req.path === '/app') {
+        res.type('text/html').send('<html><body>Sign in</body></html>');
+        return true;
+      }
+      return false;
+    };
+
+    await expect(
+      resolveAccountProvider(accountRow(id))!.chatCompletion('', [{ role: 'user', content: 'Hi' }], 'gemini-2.5-flash'),
+    ).rejects.toThrow(/SNlM0e/);
+    expect(accountRow(id).status).toBe('error');
   });
 });
