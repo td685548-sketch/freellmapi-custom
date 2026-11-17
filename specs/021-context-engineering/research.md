@@ -11,6 +11,10 @@ Mỗi mục gồm: quyết định, lý do, các phương án đã cân nhắc. 
 1. **Thu thập (gate)**: chạy trong `server/src/middleware/profile-gate.ts`, nơi đã chèn hội thoại (`custom/conversation-inject.ts`) và tri thức (`custom/knowledge-inject.ts`, slot 6 của `custom/ai-platform/pipeline.ts`). Khi chính sách bật, các bước này chèn **ứng viên** rộng hơn (lịch sử tới trần ứng viên, tri thức tới phần ngân sách tri thức, tóm tắt) và ghi từng đơn vị vào một **sổ đăng ký phân đoạn** (segment registry) gắn với request.
 2. **Khớp ngân sách (dispatch)**: chạy trong closure `dispatch` của từng surface, ngay trước khi gửi tới nhà cung cấp. Lúc này đã biết model được chọn (`route.contextWindow`) và danh sách `ChatMessage[]` cuối cùng (sau nén, sau prompt ép của key, sau context handoff). Hàm `fitContextForRoute()` bỏ dần các đơn vị ưu tiên thấp cho tới khi vừa ngân sách hiệu lực.
 
+**Ngoài phạm vi**: MCP takeover, Flow, câu trả lời nhanh và giả lập Ollama (`/api`) không đi qua `dispatch` của surface (hoặc không qua gate client key). Registry vẫn có thể được tạo ở gate nhưng cờ `fitted` không bao giờ bật, nên không có header, không có báo cáo và không lưu ranh giới tóm tắt (spec Assumptions).
+
+**Thứ tự với bộ nén**: thu thập ở gate xảy ra trước bộ nén của surface; khớp ở dispatch xảy ra sau. Ngân sách được tính trên nội dung đã nén (spec edge case về bộ nén).
+
 **Rationale**:
 - Ngân sách phụ thuộc model, mà model chỉ biết sau `routeRequest()` và có thể đổi qua từng lượt fallback (FR-006, FR-010). Gate không biết model.
 - Việc chèn ứng viên vẫn nằm ở gate, trong file custom, giữ nguyên cách mỗi giao thức đặt tóm tắt và tri thức (FR-016).
@@ -39,7 +43,7 @@ Mỗi mục gồm: quyết định, lý do, các phương án đã cân nhắc. 
 
 ## R3. Khi phần bắt buộc vẫn không vừa model được chọn
 
-**Decision**: Móc R chỉ hạ số token định tuyến xuống **phần bắt buộc + phần dành cho câu trả lời**, nên router chỉ chọn model mà phần bắt buộc vừa. Nếu do sai lệch ước lượng mà phần bắt buộc vẫn không vừa ở giai đoạn 2, `fitContextForRoute()` ném lỗi với `providerRejection: 'request'` và thông điệp chứa "exceeds this model's context window". `recordRetryableFailure()` sẽ bỏ model đó cho request này, không cooldown và không "học" sai cửa sổ ngữ cảnh. Khi mọi model đều không vừa, vòng lặp trả lỗi `context_too_large` hiện có. Gate trả trước mã riêng `context_budget_exceeded` (HTTP 400) nếu phần bắt buộc đã vượt **ngân sách của key** (không phụ thuộc model).
+**Decision**: Móc R chỉ hạ số token định tuyến xuống **phần bắt buộc + phần dành cho câu trả lời**, nên router chỉ chọn model mà phần bắt buộc vừa. Nếu do sai lệch ước lượng mà phần bắt buộc vẫn không vừa ở giai đoạn 2, `fitContextForRoute()` ném lỗi với `providerRejection: 'request'` và thông điệp chứa "exceeds this model's context window". `recordRetryableFailure()` sẽ bỏ model đó cho request này, không cooldown và không "học" sai cửa sổ ngữ cảnh. Khi mọi model đều không vừa, vòng lặp trả lỗi `context_too_large` hiện có. Gate trả trước mã riêng `context_budget_exceeded` (HTTP 400) nếu phần bắt buộc đã vượt **ngân sách tạm ở gate** (R7): ngân sách của key, hoặc ngân sách theo cửa sổ lớn nhất key dùng được nếu nhỏ hơn.
 
 **Rationale**: Tận dụng nhánh xử lý có sẵn trong `lib/fallback-loop.ts` (dòng 480 và nhánh `providerRejection`), không thêm loại lỗi mới vào upstream.
 
@@ -85,9 +89,11 @@ Lời gọi công cụ và các kết quả `tool` theo sau nó luôn là một 
 
 ## R7. Chia ngân sách giữa các phần
 
-**Decision**: `available = effectiveBudget − mandatory`. Trần tóm tắt = `summarySharePct × available`, trần tri thức = `knowledgeSharePct × available`, lịch sử nhận phần còn lại **cộng phần dư** chưa dùng của tóm tắt và tri thức (FR-013). Ngân sách hiệu lực = `min(maxInputTokens, contextWindow − outputReserve)` × (1 − safetyMarginPct). `maxInputTokens = null` nghĩa là chỉ theo cửa sổ model. Cửa sổ chưa biết (`null`) thì dùng `maxInputTokens`; nếu cả hai đều null thì dùng `fallbackWindowTokens` của mặc định hệ thống (mặc định 8.192).
+**Decision**: `available = effectiveBudget − mandatory`. Trần tóm tắt = `summarySharePct × available`, trần tri thức = `knowledgeSharePct × available`, lịch sử nhận phần còn lại **cộng phần dư** chưa dùng của tóm tắt và tri thức (FR-013). Ngân sách hiệu lực = `min(maxInputTokens ?? ∞, floor((contextWindow − outputReserve) × (1 − safetyMarginPct/100)))`. Biên an toàn chỉ trừ ở phía cửa sổ model; `maxInputTokens` là trần tuyệt đối do quản trị viên đặt (khớp spec US1 kịch bản 2). `maxInputTokens = null` nghĩa là chỉ theo cửa sổ model. Cửa sổ chưa biết (`null`) thì dùng `maxInputTokens`; nếu cả hai đều null thì dùng `fallbackWindowTokens` của mặc định hệ thống (mặc định 8.192).
 
-Phần dành cho câu trả lời: `max_tokens` (hoặc tương đương) của client nếu có, không thì `outputReserveTokens` của chính sách, lấy theo `outputReserve` mà surface đã tính.
+Phần dành cho câu trả lời (FR-007): `prepareContextBudget()` ghi vào registry `clientMaxTokens` = giá trị client gửi trong body lúc qua gate (`max_tokens`, `max_completion_tokens`, `max_output_tokens` hoặc `generationConfig.maxOutputTokens`), hoặc null nếu không có. Ở dispatch: nếu `clientMaxTokens` khác null thì dùng `outputReserve` mà surface đã tính (đã phản ánh giá trị client và mọi trần output của key); nếu null thì dùng `policy.outputReserveTokens`, vì `outputReserve` của surface khi đó chỉ là mặc định chung.
+
+**Ngân sách tạm ở gate** (dùng cho trần tri thức và kiểm tra `context_budget_exceeded`, khi chưa biết model): `provisionalBudget = min(maxInputTokens ?? ∞, floor((W_max − reserve) × (1 − safetyMarginPct/100)))`, với `W_max` = cửa sổ lớn nhất trong các model đang khả dụng mà key được phép dùng (`servableContextWindow` của `services/model-listing.ts`, tôn trọng allowlist của key), null thì dùng `fallbackWindowTokens`; `reserve` theo quy tắc ở đoạn trên. Trần tri thức ở gate = `knowledgeSharePct% × (provisionalBudget − mandatory)`. Kiểm tra `context_budget_exceeded` so phần bắt buộc với `provisionalBudget`.
 
 **Rationale**: Công thức đơn giản, kiểm thử được, khớp kịch bản 2 của US1.
 
@@ -110,7 +116,7 @@ Giới hạn khi tùy chỉnh: ngân sách 2.000–1.000.000 token; phần câu 
 ## R9. Tóm tắt kích hoạt theo áp lực ngân sách
 
 **Decision**:
-- Giai đoạn 2 ghi vào sổ đăng ký id của tin lịch sử cũ nhất **thực sự được gửi** (`windowStartMessageId`) ở lượt dispatch thành công.
+- Giai đoạn 2 ghi vào sổ đăng ký id của tin lịch sử cũ nhất **thực sự được gửi** (`windowStartMessageId`) và bật cờ `fitted` ở lượt dispatch thành công. Nếu `fitted` chưa bật (request đi đường ngoài phạm vi như MCP, Flow, câu trả lời nhanh), `conversation-inject.ts` không ghi ranh giới và tóm tắt dùng cách tính cũ.
 - Khi lượt hoàn tất, `conversation-inject.ts` lưu giá trị này vào cột mới `custom_conversations.context_window_start_id` rồi gọi `scheduleSummary()`.
 - Với hội thoại có chính sách bật, `foldableTurns()` dùng ranh giới này thay vì tính lại theo `maxMessages`/`maxChars`: các lượt có id nằm giữa `summarized_through` và `context_window_start_id` sẽ được gộp. Giữ giới hạn 16.000 ký tự mỗi lần gộp và cơ chế một-lần-một-hội-thoại (`inFlight`).
 - Lời nhắc tóm tắt nhận độ dài mục tiêu theo trần tóm tắt (≈ 0,6 từ/token, tối thiểu 80 từ, tối đa 400 từ) thay cho "200 words" cố định. `max_tokens` của lời gọi tóm tắt = trần tóm tắt.
@@ -123,7 +129,7 @@ Giới hạn khi tùy chỉnh: ngân sách 2.000–1.000.000 token; phần câu 
 ## R10. Tri thức trong ngân sách
 
 **Decision**:
-- Ở gate, khi chính sách bật, `injectKnowledge()` (BM25) và `injectRetrievedKnowledgeForSlot6()` (truy hồi lai) nhận `maxChars` = trần tri thức quy ra ký tự (theo hệ số ký tự/token của chính câu hỏi, lấy từ R4). Đoạn được chọn theo điểm giảm dần và giữ nguyên vẹn (hai hàm vốn đã làm vậy). Mỗi đoạn được ghi vào sổ đăng ký.
+- Ở gate, khi chính sách bật, trần tri thức tính bằng **token** theo ngân sách tạm ở gate (R7). `injectKnowledge()` (BM25) và `injectRetrievedKnowledgeForSlot6()` (truy hồi lai) lấy ứng viên với `maxChars` rộng = trần × 4 (tỷ lệ ký tự/token lớn nhất của R4, nên không bao giờ lấy thiếu), rồi giữ lại từng đoạn theo điểm giảm dần khi tổng `estimateTextTokens` của các đoạn đã giữ còn ≤ trần. Đoạn nào làm vượt trần thì bỏ hẳn, không cắt giữa đoạn. Cách này đúng cả khi đoạn tri thức khác ngôn ngữ với câu hỏi. Mỗi đoạn được giữ lại được ghi vào sổ đăng ký.
 - Ngưỡng liên quan: giữ ngưỡng tương đối hiện có (25% so với đoạn tốt nhất) và thêm `knowledgeMinScore` tùy chọn cho chế độ ngữ nghĩa (cosine, mặc định null = tắt).
 - Chống trùng (FR-025): bỏ đoạn có ≥ 80% shingle 5 từ đã xuất hiện trong lịch sử ứng viên hoặc tóm tắt. Kiểm tra ở gate vì lúc đó lịch sử ứng viên đã được nạp (hội thoại được áp dụng trước tri thức).
 - Ở giai đoạn 2, khối tri thức chỉ bị bỏ **cả khối**, sau khi lịch sử đã hết đơn vị có thể bỏ.

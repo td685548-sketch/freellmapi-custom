@@ -11,7 +11,7 @@ Gateway đã có kho hội thoại, cửa sổ trượt, tóm tắt cuốn chi�
 1. **Thu thập ở gate** (code custom hiện có): khi chính sách của key bật, chèn ứng viên lịch sử, tóm tắt, tri thức như hôm nay nhưng với trần rộng hơn, và ghi từng đơn vị vào sổ đăng ký phân đoạn gắn với request.
 2. **Khớp ngân sách ở dispatch**: ngay trước khi gửi tới model đã chọn, bỏ dần lịch sử (theo khối neo cố định để giữ cache prompt), rồi tri thức, rồi tóm tắt, cho tới khi vừa `min(ngân sách key, cửa sổ model − phần câu trả lời) × (1 − biên an toàn)`. Mỗi lượt fallback khớp lại từ bản gốc.
 
-Đi kèm: bộ ước lượng token theo nhóm chữ viết có hiệu chỉnh từ usage thật, tóm tắt kích hoạt theo ranh giới cửa sổ thực tế, chế độ tùy chọn cho lịch sử do client gửi, header `X-FreeLLM-Context`, bảng báo cáo theo request, API chính sách/xem trước/thống kê và thẻ dashboard. Mọi thứ mặc định tắt. File upstream chỉ nhận 8 dòng móc (2 dòng × 4 surface). Chi tiết quyết định: [research.md](research.md).
+Đi kèm: bộ ước lượng token theo nhóm chữ viết có hiệu chỉnh từ usage thật, tóm tắt kích hoạt theo ranh giới cửa sổ thực tế, chế độ tùy chọn cho lịch sử do client gửi, header `X-FreeLLM-Context`, bảng báo cáo theo request, API chính sách/xem trước/thống kê và thẻ dashboard. Mọi thứ mặc định tắt. File upstream chỉ nhận 8 dòng móc (2 dòng × 4 surface) cộng 4 dòng import. Chi tiết quyết định: [research.md](research.md).
 
 ## Technical Context
 
@@ -44,7 +44,7 @@ Gateway đã có kho hội thoại, cửa sổ trượt, tóm tắt cuốn chi�
 | III. Bền vững trước upstream | Lỗi khớp ngân sách dùng nhánh `providerRejection` sẵn có của fallback loop, không cooldown, không "học" sai cửa sổ (R3); migration idempotent, đảo ngược được | ĐẠT |
 | IV. Test-first | Mỗi user story có test đơn vị/tích hợp viết trước; roundtrip migration; hồi quy byte-for-byte khi tắt | ĐẠT |
 | V. Tương thích ngược | Mặc định tắt; lịch sử do client gửi mặc định chuyển nguyên văn; `/v1/*`, `/livez`, `/readyz`, `/api/ping` không đổi | ĐẠT |
-| VI. Zero-conflict | File mới cho service/route/component/migration. Điểm móc vào file upstream: 8 dòng (xem Complexity Tracking). File custom được sửa: `profile-gate.ts`, `conversation-inject.ts`, `conversation-summary.ts`, `knowledge-inject.ts`, `ai-platform/pipeline.ts`, `profile-conversations.ts`, `permission-actions.ts`, `register.ts`, `ProfileUsagePage.tsx`, `ConversationsCard.tsx`, `i18n/vi.ts`, `migrate/defaults.ts` | ĐẠT (có ghi chú) |
+| VI. Zero-conflict | File mới cho service/route/component/migration. Điểm móc vào file upstream: 8 dòng móc + 4 dòng import (xem Complexity Tracking). File custom được sửa: `profile-gate.ts`, `conversation-inject.ts`, `conversation-summary.ts`, `knowledge-inject.ts`, `ai-platform/pipeline.ts`, `profile-conversations.ts`, `permission-actions.ts`, `register.ts`, `ProfileUsagePage.tsx`, `ConversationsCard.tsx`, `i18n/vi.ts`, `migrate/defaults.ts` | ĐẠT (có ghi chú) |
 | VII. Nhánh & PR | Làm trên nhánh riêng, qua PR, chờ CI xanh | ĐẠT |
 
 **Đánh giá lại sau Phase 1**: thiết kế trong data-model và contracts không thêm vi phạm nào. Bảng mới thay vì thêm cột vào `client_profiles`/`requests`; không trigger mới (tránh khai báo thêm cho bộ đệm đọc Turso). ĐẠT.
@@ -135,6 +135,7 @@ surface (proxy | anthropic | responses | inbound-chat)
        ├─ route():    routeRequest(contextRoutingTokens(req, routingTotal, messages), …)   ← MÓC R
        └─ dispatch(): messages = fitContextForRoute(req, res, messages, route, outputReserve) ← MÓC B
                         → phân loại segment, khớp ngân sách, đặt header, giữ trace để ghi báo cáo
+(ngoài phạm vi: MCP takeover, Flow, câu trả lời nhanh, Ollama `/api` — không qua dispatch của surface, registry không bao giờ `fitted`)
 response finish
   ├─ conversation-inject: lưu lượt + context_window_start_id → scheduleSummary()
   └─ report: ghi custom_context_reports theo trace.lastRequestRowId; cập nhật hệ số hiệu chỉnh
@@ -143,7 +144,7 @@ response finish
 ## Thứ tự triển khai đề xuất (chi tiết trong tasks.md)
 
 1. **Nền tảng**: kiểu dùng chung, migration, `policy.ts`, `estimate.ts`, `registry.ts`, `segments.ts`, `fit.ts` (thuần, test kỹ).
-2. **US1** (MVP): `hooks.ts` + 8 dòng móc + nhánh gate cho hội thoại phía server + lỗi `context_budget_exceeded` + test hồi quy khi tắt.
+2. **US1** (MVP): `hooks.ts` + 8 dòng móc (và 4 import) + nhánh gate cho hội thoại phía server + lỗi `context_budget_exceeded` + test hồi quy khi tắt.
 3. **US2**: header, báo cáo, API chính sách/thống kê/xem trước, thẻ dashboard.
 4. **US3**: ranh giới cửa sổ → gộp tóm tắt, độ dài theo trần.
 5. **US4**: trần tri thức, chống trùng, bỏ cả khối, trích dẫn.
@@ -166,4 +167,4 @@ US1 và US2 đều là P1; US2 phụ thuộc US1 (cần kết quả khớp để
 
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 |---|---|---|
-| 8 dòng móc vào 4 file upstream (`routes/proxy.ts`, `routes/anthropic.ts`, `routes/responses.ts`, `lib/inbound-chat.ts`) | Ngân sách phụ thuộc model chỉ biết sau `routeRequest()`; FR-010 yêu cầu khớp lại ở từng lượt fallback | Lắp ở gate theo cửa sổ lớn nhất: model dự phòng nhỏ bị loại. Sửa `router.ts`/`fallback-loop.ts`: thay đổi lớn hơn ở file lõi upstream (research R1, R2) |
+| 8 dòng móc + 4 dòng import vào 4 file upstream (`routes/proxy.ts`, `routes/anthropic.ts`, `routes/responses.ts`, `lib/inbound-chat.ts`) | Ngân sách phụ thuộc model chỉ biết sau `routeRequest()`; FR-010 yêu cầu khớp lại ở từng lượt fallback | Lắp ở gate theo cửa sổ lớn nhất: model dự phòng nhỏ bị loại. Sửa `router.ts`/`fallback-loop.ts`: thay đổi lớn hơn ở file lõi upstream (research R1, R2) |

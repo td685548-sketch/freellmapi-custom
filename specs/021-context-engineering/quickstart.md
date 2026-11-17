@@ -49,7 +49,8 @@ node scripts/context-budget-replay.mjs --key "$KEY" --turns 300 --conversation q
    - mọi phản hồi 200, không lỗi `context_too_large`;
    - trong header `X-FreeLLM-Context`, `mandatory+summary+knowledge+history ≤ budget` ở mọi lượt;
    - từ lượt 50, tổng token mỗi lượt dao động trong ±10% (script in bảng tóm tắt);
-   - `hist_dropped` tăng theo bước bằng `dropBlockTurns × 2` tin (bỏ theo khối).
+   - `hist_dropped` tăng theo bước bằng `dropBlockTurns × 2` tin (bỏ theo khối);
+   - script in tỷ lệ tiết kiệm = 1 − (tổng token đã gửi từ lượt 51) / (tổng token nếu gửi toàn bộ lịch sử từ lượt 51); kỳ vọng ≥ 60% (SC-003).
 
 ## 4. Khớp lại khi đổi sang model nhỏ hơn (US1 kịch bản 3)
 

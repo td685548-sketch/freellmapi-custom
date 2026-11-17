@@ -39,7 +39,7 @@ Quản trị viên bật "chính sách ngữ cảnh" cho một client key mà �
 **Acceptance Scenarios**:
 
 1. **Given** một key bật chính sách với ngân sách đầu vào 4.000 token, **When** hội thoại vượt quá ngân sách, **Then** các lượt cũ nhất bị bỏ trước, tin nhắn mới và chỉ dẫn hệ thống không bị cắt, và tổng đầu vào ước lượng ≤ 4.000 token.
-2. **Given** model được chọn có cửa sổ 8.000 token và key dành 1.000 token cho câu trả lời, **When** ngân sách của key là 32.000 token, **Then** ngân sách hiệu lực của yêu cầu là phần nhỏ hơn giữa ngân sách key và (cửa sổ model − phần dành cho câu trả lời − biên an toàn).
+2. **Given** model được chọn có cửa sổ 8.000 token và key dành 1.000 token cho câu trả lời, **When** ngân sách của key là 32.000 token, **Then** ngân sách hiệu lực của yêu cầu là phần nhỏ hơn giữa ngân sách key và (cửa sổ model − phần dành cho câu trả lời) đã trừ biên an toàn: với biên 10% là min(32.000; (8.000 − 1.000) × 0,9) = 6.300 token. Ngân sách của key là trần tuyệt đối, không bị trừ biên an toàn.
 3. **Given** model chính lỗi và chuỗi dự phòng chuyển sang một model có cửa sổ nhỏ hơn, **When** ngữ cảnh đã lắp vượt cửa sổ của model dự phòng, **Then** ngữ cảnh được thu gọn lại cho model dự phòng theo cùng thứ tự ưu tiên thay vì loại model đó hoặc gửi đi một yêu cầu quá dài.
 4. **Given** riêng chỉ dẫn hệ thống cộng tin nhắn mới đã vượt ngân sách hiệu lực, **When** yêu cầu đến, **Then** gateway từ chối với mã lỗi rõ ràng nêu số token ước lượng và ngân sách, không âm thầm cắt tin nhắn của người dùng.
 5. **Given** một key **không** bật chính sách, **When** nâng cấp lên bản mới, **Then** yêu cầu gửi tới nhà cung cấp giống hệt trước nâng cấp.
@@ -121,7 +121,7 @@ Một số ứng dụng gửi cả lịch sử trong mỗi yêu cầu (giao th�
 - Ngôn ngữ có tỷ lệ token/ký tự cao (tiếng Việt, tiếng Trung, tiếng Nhật): ước lượng phải không đánh giá thấp quá biên an toàn với các ngôn ngữ này.
 - Chỉ dẫn hệ thống bắt buộc của key (prompt ép phía server, spec 018) và đoạn chuyển giao khi đổi model (context handoff) được tính vào ngân sách, thuộc nhóm không được cắt.
 - Lượt đầu tiên rơi vào ranh giới cắt là lượt trả lời của trợ lý: lịch sử gửi đi vẫn phải bắt đầu bằng một lượt của người dùng (giữ quy tắc hiện có).
-- Bộ nén (compression) đang bật cho key: thu gọn theo ngân sách chạy trước, bộ nén chạy sau trên ngữ cảnh đã thu gọn; ngân sách không tính lại theo kết quả nén.
+- Bộ nén (compression) đang bật cho key: các phần do gateway thêm (lịch sử, tóm tắt, tri thức) được chọn **trước** khi nén; bước khớp ngân sách cuối cùng chạy **sau** khi nén, trên nội dung đã nén, nên phần tiết kiệm nhờ nén được dùng để giữ thêm lịch sử. Tin nhắn mà bộ nén đã viết lại không còn nhận diện được là phần do gateway thêm và được xử lý như lịch sử do client gửi.
 - Cache prompt của nhà cung cấp: việc bỏ lượt cũ không được làm đổi phần đầu ngữ cảnh ở **mỗi** lượt; lịch sử được bỏ theo khối để phần đầu ổn định qua nhiều lượt liên tiếp.
 - Hai yêu cầu đồng thời cùng một hội thoại: mỗi yêu cầu lắp theo dữ liệu đã lưu tại thời điểm nó đến; không yêu cầu nào thấy tóm tắt viết dở.
 - Hội thoại bị xóa hoặc hết hạn giữa chừng: yêu cầu được phục vụ như hội thoại mới, không lỗi.
@@ -141,7 +141,7 @@ Một số ứng dụng gửi cả lịch sử trong mỗi yêu cầu (giao th�
 
 #### B. Bộ quản lý ngân sách token (Token Budget Manager)
 
-- **FR-006**: Với mỗi yêu cầu thuộc key bật chính sách, hệ thống MUST tính ngân sách hiệu lực = nhỏ nhất giữa (ngân sách đầu vào của key) và (cửa sổ ngữ cảnh của model đích − phần dành cho câu trả lời − biên an toàn).
+- **FR-006**: Với mỗi yêu cầu thuộc key bật chính sách, hệ thống MUST tính ngân sách hiệu lực = nhỏ nhất giữa (ngân sách đầu vào của key) và ((cửa sổ ngữ cảnh của model đích − phần dành cho câu trả lời) × (1 − biên an toàn)).
 - **FR-007**: Phần dành cho câu trả lời MUST lấy theo số token đầu ra mà client yêu cầu nếu có, nếu không thì theo cấu hình của key.
 - **FR-008**: Hệ thống MUST ước lượng token cho từng phần ngữ cảnh theo cùng một phương pháp ở mọi giao thức chat (OpenAI, Anthropic, Responses, Gemini) và MUST đối chiếu với số token đầu vào nhà cung cấp báo về để theo dõi sai số.
 - **FR-009**: Tổng token ước lượng của ngữ cảnh đã lắp MUST không vượt ngân sách hiệu lực. Ngoại lệ duy nhất: lịch sử do client gửi ở chế độ **Giữ nguyên** không bị cắt, nên chỉ bị giới hạn bởi cửa sổ model (như hiện nay); khi đó gateway vẫn bỏ hết phần do chính nó thêm vào (lịch sử phía server, tri thức, tóm tắt) trước khi vượt trần của key.
@@ -216,3 +216,4 @@ Một số ứng dụng gửi cả lịch sử trong mỗi yêu cầu (giao th�
 - Hội thoại Playground của dashboard (lưu toàn bộ transcript phía trình duyệt quản trị) nằm ngoài phạm vi; có thể áp dụng sau qua chế độ lịch sử do client gửi.
 - Truy hồi trí nhớ dài hạn xuyên hội thoại (ghi nhớ người dùng qua nhiều phiên) nằm ngoài phạm vi spec này.
 - Hệ thống phân quyền, audit log và nhật ký yêu cầu hiện có được dùng lại cho quyền và dấu vết mới.
+- Các đường xử lý sau nằm ngoài phạm vi đợt này và giữ nguyên hành vi hiện có kể cả khi chính sách bật: MCP takeover phía server và Flow của orchestrator (tự quản lý vòng gọi model nội bộ), câu trả lời nhanh (không gọi model), và giả lập Ollama dưới `/api` (không đi qua bước nhận diện client key). Với các request này, gateway không khớp ngân sách, không đặt header phân bổ và không thay đổi ranh giới tóm tắt.

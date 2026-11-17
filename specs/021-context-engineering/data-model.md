@@ -103,6 +103,9 @@ Index: `(profile_id, created_at)` cho thống kê theo key.
 | `base`, `lastOutput` | Mảng gốc và mảng đã khớp gần nhất ([research.md R2](research.md#r2-điểm-móc-vào-file-upstream)) |
 | `windowStartMessageId` | Id tin lịch sử cũ nhất đã gửi ở lượt gần nhất |
 | `report` | ContextAssemblyReport đang dựng |
+| `fitted` | `true` khi đã có ít nhất một lần khớp ở dispatch; chỉ khi đó mới đặt header, ghi báo cáo, lưu ranh giới tóm tắt |
+| `clientMaxTokens` | Số token đầu ra client gửi lúc qua gate, null nếu không gửi ([research.md R7](research.md#r7-chia-ngân-sách-giữa-các-phần)) |
+| `provisionalBudget`, `mandatoryTokens` | Ngân sách tạm và phần bắt buộc tính ở gate |
 
 ### ContextSegment (kết quả phân loại ở giai đoạn 2)
 

@@ -1,6 +1,6 @@
 # Contract: Siêu dữ liệu và lỗi trên các endpoint `/v1`
 
-Áp dụng cho request dùng client key (`sk-cp-…`) có chính sách ngữ cảnh **bật**, trên bốn surface: `POST /v1/chat/completions`, `POST /v1/messages`, `POST /v1/responses`, và các wire Gemini/Ollama đi qua `lib/inbound-chat.ts`. Khi chính sách tắt, không header nào dưới đây xuất hiện và thân phản hồi không đổi (FR-002).
+Áp dụng cho request dùng client key (`sk-cp-…`) có chính sách ngữ cảnh **bật**, trên bốn surface: `POST /v1/chat/completions`, `POST /v1/messages`, `POST /v1/responses`, và Gemini `/v1beta/models/*:generateContent` / `:streamGenerateContent` (đi qua `lib/inbound-chat.ts`). Giả lập Ollama dưới `/api` cũng đi qua `lib/inbound-chat.ts` nhưng không qua bước nhận diện client key, nên nằm ngoài phạm vi (móc là no-op). MCP takeover, Flow và câu trả lời nhanh cũng nằm ngoài phạm vi (spec Assumptions). Khi chính sách tắt, không header nào dưới đây xuất hiện và thân phản hồi không đổi (FR-002).
 
 ## 1. Header phản hồi `X-FreeLLM-Context` (FR-029)
 
@@ -29,12 +29,12 @@ Header hiện có vẫn giữ nguyên: `X-Conversation-Id`, `X-Conversation-Hist
 
 ## 2. Lỗi `context_budget_exceeded` (FR-011)
 
-Trả ở gate, trước khi định tuyến, khi phần bắt buộc vượt ngân sách của key (không phụ thuộc model).
+Trả ở gate, trước khi định tuyến, khi phần bắt buộc vượt **ngân sách tạm ở gate**: ngân sách của key, hoặc ngân sách theo cửa sổ lớn nhất mà key dùng được nếu nhỏ hơn ([research.md R7](../research.md#r7-chia-ngân-sách-giữa-các-phần)). Tức là không model khả dụng nào chứa nổi phần bắt buộc trong giới hạn của key.
 
 - HTTP **400**.
 - Thân theo định dạng lỗi của từng giao thức:
 
-Chat completions / Responses / Gemini / Ollama:
+Chat completions / Responses:
 
 ```json
 {
@@ -56,7 +56,15 @@ Messages (Anthropic):
 }
 ```
 
-Header kèm theo: `X-FreeLLM-Context: budget=16000;mandatory=21000`.
+Gemini (theo dạng lỗi Google API mà `routes/gemini.ts` đang dùng):
+
+```json
+{
+  "error": { "code": 400, "message": "The required context … over this key's context budget of 16000 tokens.", "status": "INVALID_ARGUMENT" }
+}
+```
+
+Header kèm theo: `X-FreeLLM-Context: budget=16000;mandatory=21000`. `budget` ở đây là ngân sách tạm ở gate ([research.md R7](../research.md#r7-chia-ngân-sách-giữa-các-phần)).
 
 Khi phần bắt buộc vừa ngân sách của key nhưng không vừa **mọi** model khả dụng, vòng fallback trả lỗi `context_too_large` hiện có (không đổi định dạng).
 
