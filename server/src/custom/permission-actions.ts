@@ -119,13 +119,13 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
     if (path === '/api/settings/api-key/regenerate' && method === 'POST') return 'rotate_gateway_key';
     if (/^\/api\/settings\/url-tokens(?:\/[^/]+)?$/.test(path)) return read ? 'reveal_gateway_key' : 'rotate_gateway_key';
     // What end users wrote is more than a usage number: reading stored messages takes the edit permission.
-    if (read && /^\/api\/client-profiles\/\d+\/(?:conversations\/[^/]+|content-filter\/events|feedback\/comments)$/.test(path)) return 'edit_client_profiles';
+    if (read && /^\/api\/client-profiles\/\d+\/(?:conversations\/[^/]+(?:\/context-preview)?|content-filter\/events|feedback\/comments)$/.test(path)) return 'edit_client_profiles';
     if (path.startsWith('/api/client-profiles')) return read ? 'view_client_profiles' : 'edit_client_profiles';
     if (path.startsWith('/api/update')) return 'manage_updates';
     if (path.startsWith('/api/compression') || path === '/api/settings/compression') return read ? 'view_settings' : 'manage_compression';
     if (path.startsWith('/api/savers')) return read ? 'view_settings' : 'manage_compression';
     if (/^\/api\/(models|profiles|fallback|premium)(\/|$)/.test(path)) return 'manage_routing';
-    if (['version', 'update-check', 'unify', 'fusion', 'enable-mcp', 'anthropic-map', 'gemini-map', 'agent-compatibility', 'output-limit', 'min-context-window', 'guardrails', 'headroom', 'task-weight-share', 'min-reliability-floor', 'provider-moment-attribution', 'proxy', 'proxy/test', 'usage-alerts', 'usage-alerts/test', 'usage-report', 'usage-report/preview', 'usage-report/send'].some(name => path === `/api/settings/${name}`)) return read ? 'view_settings' : 'edit_settings';
+    if (['version', 'update-check', 'unify', 'fusion', 'enable-mcp', 'anthropic-map', 'gemini-map', 'agent-compatibility', 'output-limit', 'min-context-window', 'guardrails', 'headroom', 'task-weight-share', 'min-reliability-floor', 'provider-moment-attribution', 'proxy', 'proxy/test', 'usage-alerts', 'usage-alerts/test', 'usage-report', 'usage-report/preview', 'usage-report/send', 'context-policy'].some(name => path === `/api/settings/${name}`)) return read ? 'view_settings' : 'edit_settings';
   }
   if (parent === 'manage_ai_platform') {
     return aiPlatformPermission(method, path);

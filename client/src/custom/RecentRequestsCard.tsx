@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import { apiFetch } from '@/lib/api'
+import { apiFetch, type ApiError } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { SegmentedControl } from '@/components/ui/segmented-control'
+import type { ContextAssemblySummary } from '@freellmapi/shared/context-budget.js'
 import type { RecentRequest, RecentRequestsPage, RequestAttempt } from '../../../shared/recent-requests'
 import { useCustomT } from './i18n/use-custom-t'
 
@@ -36,9 +37,77 @@ function Attempts({ url }: { url: string }) {
   )
 }
 
+function ContextReport({ url }: { url: string }) {
+  const tc = useCustomT()
+  const { data } = useQuery<ContextAssemblySummary | null>({
+    queryKey: [url],
+    queryFn: async (): Promise<ContextAssemblySummary | null> => {
+      try {
+        const res = await apiFetch<ContextAssemblySummary | { report?: ContextAssemblySummary }>(url)
+        const report =
+          res && typeof res === 'object' && 'report' in res
+            ? res.report
+            : (res as ContextAssemblySummary)
+        return report && typeof report.budget === 'number' ? report : null
+      } catch (err) {
+        if ((err as ApiError)?.status === 404) return null
+        return null
+      }
+    },
+    retry: false,
+  })
+  if (!data) return null
+
+  return (
+    <div className="space-y-1 border-t pt-2 text-xs" aria-label="Context assembly report">
+      <p className="font-medium text-muted-foreground">{tc('Context assembly')}</p>
+      <div className="flex flex-wrap gap-x-3 gap-y-1 tabular-nums text-muted-foreground">
+        <span>
+          {tc('Budget')}: <strong className="text-foreground">{data.budget.toLocaleString()}</strong>
+        </span>
+        <span>
+          {tc('Context window')}: {data.window !== null ? data.window.toLocaleString() : tc('unknown')}
+        </span>
+        <span>
+          {tc('Estimated')}: {data.estimatedTokens.toLocaleString()}
+        </span>
+        <span>
+          {tc('Mandatory')}: {data.mandatory.toLocaleString()}
+        </span>
+        <span>
+          {tc('Summary')}: {data.summary.toLocaleString()}
+        </span>
+        <span>
+          {tc('Knowledge')}: {data.knowledge.toLocaleString()}
+        </span>
+        <span>
+          {tc('History')}: {data.history.toLocaleString()}
+        </span>
+        <span>
+          {tc('History sent / dropped')}: {data.histSent}/{data.histDropped}
+        </span>
+        <span>
+          {tc('Knowledge sent / dropped')}: {data.kbSent}/{data.kbDropped}
+        </span>
+        {data.clientDropped > 0 && (
+          <span>
+            {tc('Client dropped')}: {data.clientDropped}
+          </span>
+        )}
+        {data.refits > 0 && (
+          <span>
+            {tc('Refits')}: {data.refits}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function Row({ r, base }: { r: RecentRequest; base: string }) {
   const tc = useCustomT()
   const [open, setOpen] = useState(false)
+  const supportsContextReport = /^\/api\/client-profiles\/\d+\/requests$/.test(base)
   return (
     <li className="py-2">
       <button type="button" onClick={() => setOpen(o => !o)} className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 text-left text-xs" aria-expanded={open}>
@@ -57,6 +126,7 @@ function Row({ r, base }: { r: RecentRequest; base: string }) {
           {r.error && <p className="text-xs break-words"><strong>{tc('Error:')}</strong> {r.error}</p>}
           {r.requestedModel && <p className="text-xs text-muted-foreground">{tc('Asked for')}{' '}{r.requestedModel}{r.ttfbMs !== null ? tc(' · first token after {ttfbMs} ms', { ttfbMs: r.ttfbMs }) : ''}</p>}
           <Attempts url={`${base}/${r.id}/attempts`} />
+          {supportsContextReport && <ContextReport url={`${base}/${r.id}/context`} />}
         </div>
       )}
     </li>
