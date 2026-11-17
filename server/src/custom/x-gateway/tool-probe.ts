@@ -5,6 +5,13 @@ export const TOOL_PROTOCOLS: Record<string, ToolProtocol> = {
   cursor: 'openai-chat', copilot: 'openai-chat', cline: 'anthropic-messages',
   openclaw: 'openai-chat', continue: 'openai-chat', opencode: 'openai-chat',
   antigravity: 'openai-chat', zed: 'openai-chat',
+  hermes: 'openai-chat', kiro: 'anthropic-messages', cowork: 'anthropic-messages',
+  droid: 'openai-chat', kilo: 'openai-chat', roo: 'openai-chat',
+  amp: 'openai-chat', qwen: 'openai-chat', 'deepseek-tui': 'openai-chat',
+  jcode: 'openai-chat', 'grok-build': 'openai-chat', devin: 'openai-chat',
+  opendesign: 'openai-chat', pi: 'openai-chat', omp: 'openai-chat',
+  crush: 'openai-chat', forge: 'openai-chat', smelt: 'openai-chat',
+  codewhale: 'openai-chat',
 };
 export const PROBE_TIMEOUT_MS = 20_000;
 const MAX_RESPONSE_BYTES = 64 * 1024;

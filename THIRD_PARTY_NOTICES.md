@@ -8,9 +8,9 @@ All original custom extensions in this repository are licensed under the **MIT L
 
 ## 1. 9Router
 
-- **Repository**: https://github.com/decolua/9router
+- **Repository**: https://github.com/decolua/9router (synced up to `v0.5.119`, commit `1855aa44`)
 - **License**: MIT License
-- **Used / Ported Scope**: Provider catalog definitions, OAuth/Web-Cookie executors (including `chatgpt-web`, `deepseek-web`, `codex`, `gemini-cli`, `kiro`, `qoder`, `copilot`), pricing tables, and gateway routing adaptations under `server/src/custom/provider-accounts/` and `server/src/custom/x-gateway/`.
+- **Used / Ported Scope**: Provider catalog definitions, OAuth/API/session provider executors (`codex`, `claude`, `gemini-cli`, `kiro`, `qoder`, `copilot`, `antigravity`, `opencode`, `vertex`, `bedrock`, `commandcode`, `cline`, `codebuddy`, `zed`, `cursor`, `grok-cli`, `synthetic`), smart routing (`SystemOne`), judge-synthesized panel combos (`Fusion`), multimodal media adapters (image, video, TTS, STT, embeddings, web search), quota/proxy-pool management helpers, enterprise SSO design patterns, CLI tool templates, and protocol inspector logic under `server/src/custom/` and `client/src/custom/`.
 
 ```text
 MIT License

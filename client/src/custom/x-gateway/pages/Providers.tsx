@@ -20,6 +20,7 @@ import {
 import { Dialog, DialogDescription, DialogPopup, DialogTitle } from '@/components/ui/dialog'
 import { apiFetch } from '@/lib/api'
 import { accountsApi, refreshAccounts, useAccounts, type BatchTestResponse, type ValidateNodeResponse, type CustomProviderNode } from '../api'
+import { subscriptionApi } from '../subscription-api'
 import { useXStrings } from '../strings'
 import { AccountLoadState } from '../components/AccountLoadState'
 import { useXGatewayCopy } from '../copy'
@@ -797,6 +798,12 @@ export default function Providers() {
   const [hideMainDb, setHideMainDb] = useState(true)
   const [batchSummary, setBatchSummary] = useState<BatchTestResponse['summary'] | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
+  const [showBulkImportModal, setShowBulkImportModal] = useState(false)
+  const [bulkJson, setBulkJson] = useState('')
+  const [bulkDefaultProvider, setBulkDefaultProvider] = useState('')
+  const [bulkStatus, setBulkStatus] = useState<{ imported: number; failed: number; errors: Array<{ index: number; error: string }> } | null>(null)
+  const [bulkError, setBulkError] = useState('')
+  const [bulkBusy, setBulkBusy] = useState(false)
   const [nodeToDelete, setNodeToDelete] = useState<AccountProvider | null>(null)
   const [nodeToEdit, setNodeToEdit] = useState<(AccountProvider & { isCustomNode?: boolean; customNodeType?: string; customNodeApiType?: string }) | null>(null)
 
@@ -852,6 +859,16 @@ export default function Providers() {
           >
             <Plus size={16} />
             Add Compatible Provider
+          </button>
+        )}
+        {permissions?.add && (
+          <button
+            type="button"
+            className="x-button"
+            onClick={() => { setBulkStatus(null); setBulkError(''); setShowBulkImportModal(true) }}
+          >
+            <KeyRound size={16} />
+            Bulk JSON Import
           </button>
         )}
         {permissions?.test && accounts.length > 0 && (
@@ -944,5 +961,88 @@ export default function Providers() {
         await refreshAccounts(client)
       }}
     />
+
+    {showBulkImportModal && (
+      <Dialog open onOpenChange={open => { if (!open && !bulkBusy) setShowBulkImportModal(false) }}>
+        <DialogPopup className="x-console x-dialog" style={{ maxWidth: '580px' }}>
+          <DialogTitle>Bulk JSON Credential Import</DialogTitle>
+          <DialogDescription>
+            Paste a JSON array or upload an exported connections file (up to 200 entries).
+          </DialogDescription>
+          <form
+            className="x-form"
+            style={{ marginTop: '1rem' }}
+            onSubmit={async e => {
+              e.preventDefault()
+              if (bulkBusy || !bulkJson.trim()) return
+              setBulkBusy(true)
+              setBulkError('')
+              setBulkStatus(null)
+              try {
+                const res = await subscriptionApi.bulkImport({
+                  ...(bulkDefaultProvider.trim() ? { provider: bulkDefaultProvider.trim() } : {}),
+                  credentials: bulkJson,
+                })
+                setBulkStatus(res)
+                if (res.imported > 0) await refreshAccounts(client)
+              } catch (err) {
+                setBulkError(err instanceof Error ? err.message : 'Bulk import failed.')
+              } finally {
+                setBulkBusy(false)
+              }
+            }}
+          >
+            {bulkError && <div className="x-error" role="alert">{bulkError}</div>}
+            {bulkStatus && (
+              <div className="x-notice" role="status">
+                Imported {bulkStatus.imported} account(s){bulkStatus.failed > 0 ? `, ${bulkStatus.failed} failed` : ''}.
+                {bulkStatus.errors.slice(0, 3).map(err => (
+                  <div key={err.index} className="x-caption">Row {err.index + 1}: {err.error}</div>
+                ))}
+              </div>
+            )}
+            <label>
+              Default provider ID (optional, if JSON items omit provider/kind)
+              <input value={bulkDefaultProvider} onChange={e => setBulkDefaultProvider(e.target.value)} placeholder="e.g. groq, codex, antigravity" disabled={bulkBusy} />
+            </label>
+            <label>
+              Upload JSON file
+              <input
+                type="file"
+                accept=".json,application/json,.jsonl"
+                disabled={bulkBusy}
+                onChange={e => {
+                  const file = e.target.files?.[0]
+                  if (!file) return
+                  if (file.size > 1_048_576) { setBulkError('File exceeds 1 MiB limit.'); return }
+                  void file.text().then(text => setBulkJson(text)).catch(() => setBulkError('Failed to read file.'))
+                  e.target.value = ''
+                }}
+              />
+            </label>
+            <label>
+              Credentials JSON / NDJSON
+              <textarea
+                rows={7}
+                required
+                value={bulkJson}
+                onChange={e => setBulkJson(e.target.value)}
+                placeholder={'[\n  {"provider":"groq","label":"Account 1","key":"gsk_..."},\n  {"provider":"claude","label":"Claude Sub","accessToken":"...","refreshToken":"...","expiresAt":1800000000000}\n]'}
+                disabled={bulkBusy}
+                style={{ fontFamily: 'var(--x-mono)', fontSize: '0.82rem' }}
+              />
+            </label>
+            <div className="x-dialog-actions">
+              <button type="button" className="x-button" onClick={() => setShowBulkImportModal(false)} disabled={bulkBusy}>
+                Close
+              </button>
+              <button type="submit" className="x-button x-primary" disabled={bulkBusy || !bulkJson.trim()}>
+                {bulkBusy ? 'Importing...' : 'Import Credentials'}
+              </button>
+            </div>
+          </form>
+        </DialogPopup>
+      </Dialog>
+    )}
   </>
 }

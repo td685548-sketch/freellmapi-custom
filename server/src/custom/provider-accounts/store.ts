@@ -12,7 +12,16 @@ import { decryptProxyUrl, encryptProxyUrl, isValidKeyProxyUrl, KEY_PROXY_URL_ERR
 import { parseModelScope } from '../../lib/model-scope.js';
 import { clearCooldownsForKey } from '../../services/ratelimit.js';
 import { getOutboundProxyUrl } from '../x-gateway/config.js';
-import { listProxyPool, pickAutoProxyPoolId, proxyPoolExists, resolvePoolProxyUrl } from '../x-gateway/proxy-pool.js';
+import {
+  getProxyPoolConfig,
+  isAccountAutoRotatePool,
+  listProxyPool,
+  pickAutoProxyPoolId,
+  pickNextRotatingPoolProxyUrl,
+  proxyPoolExists,
+  resolvePoolProxyUrl,
+  setAccountAutoRotatePool,
+} from '../x-gateway/proxy-pool.js';
 import { AccountError, COPILOT_BASE_URL } from './http.js';
 import { clearCopilotToken, type CopilotModel } from './copilot.js';
 import { normalizeImportedCredential } from './oauth-providers.js';
@@ -191,12 +200,19 @@ function hydrateAccountRow(raw: RawXGatewayKeyRow): AccountRow {
 }
 
 export function resolveXGatewayAccountProxy(
-  row?: Pick<AccountRow, 'proxy_encrypted' | 'proxy_iv' | 'proxy_auth_tag' | 'proxy_pool_id'> | null,
+  row?: (Pick<AccountRow, 'proxy_encrypted' | 'proxy_iv' | 'proxy_auth_tag' | 'proxy_pool_id'> & { id?: number }) | null,
 ): string | undefined {
   const perAccount = decryptProxyUrl(row);
   if (perAccount) return perAccount;
   const pooled = resolvePoolProxyUrl(row?.proxy_pool_id);
   if (pooled) return pooled;
+  if (
+    (row?.id != null && isAccountAutoRotatePool(row.id))
+    || (row?.proxy_pool_id == null && getProxyPoolConfig().autoRotateUnbound)
+  ) {
+    const rotating = pickNextRotatingPoolProxyUrl();
+    if (rotating) return rotating;
+  }
   const gatewayWide = getOutboundProxyUrl();
   return gatewayWide || undefined;
 }
@@ -561,6 +577,7 @@ export function listAccounts(): ProviderAccountsResponse['providers'] {
     const provider = providers.find(p => p.id === row.provider || p.alias === row.provider);
     if (!provider) continue;
     const maskedProxy = maskProxyUrl(decryptProxyUrl(row));
+    const isAutoRotate = row.proxy_pool_id == null && isAccountAutoRotatePool(row.id);
     provider.accounts.push({
       id: row.id,
       provider: provider.id,
@@ -570,7 +587,11 @@ export function listAccounts(): ProviderAccountsResponse['providers'] {
       enabled: row.enabled === 1,
       status: row.status,
       ...(maskedProxy ? { proxyUrl: maskedProxy } : {}),
-      ...(row.proxy_pool_id != null ? { proxyPoolId: row.proxy_pool_id, proxyPoolName: raw.proxy_pool_name ?? `#${row.proxy_pool_id}` } : {}),
+      ...(row.proxy_pool_id != null
+        ? { proxyPoolId: row.proxy_pool_id, proxyPoolName: raw.proxy_pool_name ?? `#${row.proxy_pool_id}` }
+        : isAutoRotate
+          ? { proxyPoolId: -1, proxyPoolName: 'Auto-Rotate Pool' }
+          : {}),
       monthlyUsage: { requests: Number(raw.requests), tokens: Number(raw.tokens) },
       monthlyRequestCap: row.monthly_request_cap,
       monthlyTokenCap: row.monthly_token_cap,
@@ -798,8 +819,9 @@ export function createApiKeyAccount(input: {
   }
   const proxyEncrypted = encryptProxyUrl(rawProxyUrl);
 
+  const wantsAutoRotate = input.proxyPoolId === -1;
   let proxyPoolId: number | null = null;
-  if (input.proxyPoolId != null) {
+  if (input.proxyPoolId != null && input.proxyPoolId !== -1) {
     if (!proxyPoolExists(input.proxyPoolId)) {
       throw new AccountError(400, 'Proxy pool entry not found.');
     }
@@ -845,6 +867,9 @@ export function createApiKeyAccount(input: {
     ).lastInsertRowid,
   );
 
+  if (wantsAutoRotate) {
+    setAccountAutoRotatePool(id, true);
+  }
   invalidateXGatewayKeyCache();
   return id;
 }
@@ -881,10 +906,16 @@ export function updateAccount(
 
   let nextPoolId = existing.proxy_pool_id;
   if (patch.proxyPoolId !== undefined) {
-    if (patch.proxyPoolId !== null && !proxyPoolExists(patch.proxyPoolId)) {
-      throw new AccountError(400, 'Proxy pool entry not found.');
+    if (patch.proxyPoolId === -1) {
+      nextPoolId = null;
+      setAccountAutoRotatePool(id, true);
+    } else {
+      if (patch.proxyPoolId !== null && !proxyPoolExists(patch.proxyPoolId)) {
+        throw new AccountError(400, 'Proxy pool entry not found.');
+      }
+      nextPoolId = patch.proxyPoolId;
+      setAccountAutoRotatePool(id, false);
     }
-    nextPoolId = patch.proxyPoolId;
   }
 
   getDb().prepare(`
@@ -979,7 +1010,7 @@ export function bulkDeleteAccounts(accountIds: number[]): number {
 
 export function bulkAssignAccountProxy(input: {
   accountIds: number[];
-  mode: 'none' | 'one-to-one' | 'pool';
+  mode: 'none' | 'one-to-one' | 'pool' | 'auto-rotate';
   proxyPoolId?: number | null;
 }): { updated: number } {
   const { accountIds, mode, proxyPoolId } = input;
@@ -1000,9 +1031,11 @@ export function bulkAssignAccountProxy(input: {
       const targetPoolId =
         mode === 'none'
           ? null
-          : mode === 'pool'
-            ? (proxyPoolId ?? null)
-            : activePools[index % activePools.length]!.id;
+          : mode === 'auto-rotate'
+            ? -1
+            : mode === 'pool'
+              ? (proxyPoolId ?? null)
+              : activePools[index % activePools.length]!.id;
       updateAccount(accId, { proxyPoolId: targetPoolId, proxyUrl: '' });
       updated += 1;
     } catch {

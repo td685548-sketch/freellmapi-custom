@@ -27,9 +27,11 @@ import {
   updateXGatewayClientKeyAccess,
 } from './client-keys.js';
 import {
+  DEFAULT_CAPACITY_ADAPTER,
   getCapacityAdapterSettings,
   setCapacityAdapterSettings,
   type CapacityAdapterSettings,
+  type CapacityPool,
 } from './capacity-adapter.js';
 import {
   getDefaultPricing,
@@ -56,6 +58,7 @@ import { xGatewayMediaRouter } from './media-router.js';
 import { xOperationsRouter as xCliToolsRouter } from './operations-router.js';
 import { xTranslatorRouter } from './translator-router.js';
 import { xSkillsRouter } from './skills-router.js';
+import { ssoAdminRouter } from '../sso/router.js';
 import { xSupportConsoleRouter } from './support-router.js';
 import { xSupportEnterpriseConsoleRouter } from './support-enterprise-router.js';
 import { xSupportGovernanceConsoleRouter } from './support-governance-router.js';
@@ -207,25 +210,26 @@ xGatewayConsoleRouter.get('/capacity-adapter', (_req, res) => {
   res.json(getCapacityAdapterSettings());
 });
 
+function mergeCapacityPool(incoming: Partial<CapacityPool> | undefined, existing: CapacityPool): CapacityPool {
+  return {
+    enabled: incoming?.enabled !== undefined ? Boolean(incoming.enabled) : existing.enabled,
+    roundRobin: incoming?.roundRobin !== undefined ? Boolean(incoming.roundRobin) : existing.roundRobin,
+    models: Array.isArray(incoming?.models)
+      ? incoming.models.filter((m): m is string => typeof m === 'string' && Boolean(m.trim()))
+      : existing.models,
+  };
+}
+
 xGatewayConsoleRouter.put('/capacity-adapter', (req, res) => {
   const uid = requireUserId(req);
   const body = req.body && typeof req.body === 'object' ? req.body as Partial<CapacityAdapterSettings> : {};
   const current = getCapacityAdapterSettings();
   const next: CapacityAdapterSettings = {
-    vision: {
-      enabled: body.vision?.enabled !== undefined ? Boolean(body.vision.enabled) : current.vision.enabled,
-      roundRobin: body.vision?.roundRobin !== undefined ? Boolean(body.vision.roundRobin) : current.vision.roundRobin,
-      models: Array.isArray(body.vision?.models)
-        ? body.vision.models.filter((m): m is string => typeof m === 'string' && Boolean(m.trim()))
-        : current.vision.models,
-    },
-    audioInput: {
-      enabled: body.audioInput?.enabled !== undefined ? Boolean(body.audioInput.enabled) : current.audioInput.enabled,
-      roundRobin: body.audioInput?.roundRobin !== undefined ? Boolean(body.audioInput.roundRobin) : current.audioInput.roundRobin,
-      models: Array.isArray(body.audioInput?.models)
-        ? body.audioInput.models.filter((m): m is string => typeof m === 'string' && Boolean(m.trim()))
-        : current.audioInput.models,
-    },
+    vision: mergeCapacityPool(body.vision, current.vision),
+    audioInput: mergeCapacityPool(body.audioInput, current.audioInput),
+    pdf: mergeCapacityPool(body.pdf, current.pdf ?? DEFAULT_CAPACITY_ADAPTER.pdf!),
+    videoInput: mergeCapacityPool(body.videoInput, current.videoInput ?? DEFAULT_CAPACITY_ADAPTER.videoInput!),
+    search: mergeCapacityPool(body.search, current.search ?? DEFAULT_CAPACITY_ADAPTER.search!),
   };
   setCapacityAdapterSettings(next, uid);
   res.json(next);
@@ -480,6 +484,7 @@ xGatewayConsoleRouter.use('/proxy-pool', xProxyPoolRouter);
 xGatewayConsoleRouter.use('/tools', xCliToolsRouter);
 xGatewayConsoleRouter.use('/translator', xTranslatorRouter);
 xGatewayConsoleRouter.use('/skills', xSkillsRouter);
+xGatewayConsoleRouter.use('/sso', ssoAdminRouter);
 xGatewayConsoleRouter.use('/support', xSupportConsoleRouter);
 xGatewayConsoleRouter.use('/support', xSupportEnterpriseConsoleRouter);
 xGatewayConsoleRouter.use('/support', xSupportGovernanceConsoleRouter);

@@ -39,8 +39,17 @@ export interface TranslatorStrings {
   protocolAnthropic: string;
   protocolOpenAIResponses: string;
   protocolGemini: string;
+  protocolKiro: string;
+  protocolAntigravity: string;
+  protocolVertex: string;
+  protocolOllama: string;
+  protocolCursor: string;
   protocolSseOpenAI: string;
   protocolSseAnthropic: string;
+  savedCases: string;
+  saveCase: string;
+  caseNamePlaceholder: string;
+  deleteCase: string;
   step1: string;
   step2: string;
   step3: string;
@@ -91,8 +100,17 @@ const STRINGS: Record<'en' | 'vi', TranslatorStrings> = {
     protocolAnthropic: 'Anthropic Claude (/v1/messages)',
     protocolOpenAIResponses: 'OpenAI Responses (/v1/responses)',
     protocolGemini: 'Google Gemini (generateContent)',
+    protocolKiro: 'AWS Kiro (conversationState)',
+    protocolAntigravity: 'Antigravity (v1internal)',
+    protocolVertex: 'Google Vertex AI',
+    protocolOllama: 'Ollama (/api/chat)',
+    protocolCursor: 'Cursor IDE Chat',
     protocolSseOpenAI: 'OpenAI SSE Stream Chunk',
     protocolSseAnthropic: 'Anthropic SSE Stream Event',
+    savedCases: 'Saved cases',
+    saveCase: 'Save case',
+    caseNamePlaceholder: 'Case name (e.g. Kiro tools)',
+    deleteCase: 'Delete saved case',
     step1: '1. Ingestion & Schema Validation',
     step2: '2. System Message Extraction',
     step3: '3. Turn & Role Normalization',
@@ -141,8 +159,17 @@ const STRINGS: Record<'en' | 'vi', TranslatorStrings> = {
     protocolAnthropic: 'Anthropic Claude (/v1/messages)',
     protocolOpenAIResponses: 'OpenAI Responses (/v1/responses)',
     protocolGemini: 'Google Gemini (generateContent)',
+    protocolKiro: 'AWS Kiro (conversationState)',
+    protocolAntigravity: 'Antigravity (v1internal)',
+    protocolVertex: 'Google Vertex AI',
+    protocolOllama: 'Ollama (/api/chat)',
+    protocolCursor: 'Cursor IDE Chat',
     protocolSseOpenAI: 'OpenAI SSE Stream Chunk',
     protocolSseAnthropic: 'Anthropic SSE Stream Event',
+    savedCases: 'Test case đã lưu',
+    saveCase: 'Lưu case',
+    caseNamePlaceholder: 'Tên case (vd: Kiro tools)',
+    deleteCase: 'Xóa case đã lưu',
     step1: '1. Nhận dạng & Kiểm tra Schema',
     step2: '2. Trích xuất chỉ dẫn hệ thống',
     step3: '3. Chuẩn hóa lượt hội thoại & Vai trò',

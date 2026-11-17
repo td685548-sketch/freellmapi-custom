@@ -120,6 +120,17 @@ export const accountsApi = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  connectFree: (body: {
+    provider: string
+    label?: string
+    baseUrl?: string
+    proxyUrl?: string
+    proxyPoolId?: number | null
+  }) =>
+    apiFetch<{ id: number; provider: string; modelsCount: number }>(`${base}/connect-free`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   getCustomNodes: (signal?: AbortSignal) =>
     apiFetch<{ ok: boolean; nodes: CustomProviderNode[] }>(`${base}/nodes`, { signal }),
   saveCustomNode: (node: CustomProviderNode) =>

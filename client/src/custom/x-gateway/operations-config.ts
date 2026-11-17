@@ -1,3 +1,5 @@
+import { EXTENDED_CLI_TOOLS } from './extended-cli-tools';
+
 export interface ModelAlias {
   alias: string;
   targetModel: string;
@@ -393,6 +395,7 @@ export const CLI_TOOLS_CATALOG: CliTool[] = [
       },
     ],
   },
+  ...EXTENDED_CLI_TOOLS,
 ];
 
 const shellQuote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";

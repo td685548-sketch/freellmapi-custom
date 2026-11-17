@@ -119,7 +119,74 @@ export function listProxyPool(): ProxyPoolEntry[] {
   return rows.map(toEntry);
 }
 
+const AUTO_ROTATE_UNBOUND_KEY = 'x_gateway_proxy_pool_auto_rotate_unbound';
+const AUTO_ROTATE_ACCOUNT_IDS_KEY = 'x_gateway_proxy_pool_auto_rotate_ids';
+
+let cachedPoolDb: unknown = null;
+let cachedPoolConfig: ProxyPoolConfig | null = null;
+let cachedAutoRotateIds: Set<number> | null = null;
+let cachedEnabledProxyUrls: string[] | null = null;
+let autoRotateCursor = 0;
+
+function ensurePoolCacheScope(): void {
+  const db = getDb();
+  if (cachedPoolDb !== db) {
+    cachedPoolDb = db;
+    cachedPoolConfig = null;
+    cachedAutoRotateIds = null;
+    cachedEnabledProxyUrls = null;
+  }
+}
+
+export function invalidateProxyPoolCache(): void {
+  cachedPoolConfig = null;
+  cachedAutoRotateIds = null;
+  cachedEnabledProxyUrls = null;
+}
+
+export function getAutoRotateAccountIds(): Set<number> {
+  ensurePoolCacheScope();
+  if (cachedAutoRotateIds) return cachedAutoRotateIds;
+  try {
+    const raw = getSetting(AUTO_ROTATE_ACCOUNT_IDS_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    cachedAutoRotateIds = new Set(Array.isArray(arr) ? arr.filter((n): n is number => Number.isSafeInteger(n) && n > 0) : []);
+  } catch {
+    cachedAutoRotateIds = new Set();
+  }
+  return cachedAutoRotateIds;
+}
+
+export function isAccountAutoRotatePool(accountId: number | null | undefined): boolean {
+  if (!accountId || accountId <= 0) return false;
+  return getAutoRotateAccountIds().has(accountId);
+}
+
+export function setAccountAutoRotatePool(accountId: number, enabled: boolean): void {
+  if (!accountId || accountId <= 0) return;
+  const set = new Set(getAutoRotateAccountIds());
+  if (enabled) set.add(accountId);
+  else set.delete(accountId);
+  setSetting(AUTO_ROTATE_ACCOUNT_IDS_KEY, JSON.stringify([...set]));
+  cachedAutoRotateIds = set;
+}
+
+export function pickNextRotatingPoolProxyUrl(): string {
+  ensurePoolCacheScope();
+  if (!cachedEnabledProxyUrls) {
+    const rows = getDb()
+      .prepare('SELECT proxy_encrypted, proxy_iv, proxy_auth_tag FROM x_gateway_proxy_pool WHERE enabled = 1 ORDER BY id')
+      .all() as PoolRow[];
+    cachedEnabledProxyUrls = rows.map(r => decryptProxyUrl(r)).filter(Boolean);
+  }
+  if (cachedEnabledProxyUrls.length === 0) return '';
+  const url = cachedEnabledProxyUrls[autoRotateCursor % cachedEnabledProxyUrls.length]!;
+  autoRotateCursor = (autoRotateCursor + 1) % 1_000_000;
+  return url;
+}
+
 export function proxyPoolExists(id: number): boolean {
+  if (id === -1) return true;
   return Boolean(getDb().prepare('SELECT 1 FROM x_gateway_proxy_pool WHERE id = ?').get(id));
 }
 
@@ -185,6 +252,7 @@ export function createProxyPoolEntry(
       )
       VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
     `).run(cleanName, enc.encrypted, enc.iv, enc.authTag, createdBy ?? null, now, now, token, webhookEnabled ? 1 : 0);
+    invalidateProxyPoolCache();
     return entryWithCount(Number(result.lastInsertRowid));
   } catch (err) {
     if (isUniqueViolation(err)) throw new ProxyPoolError(409, 'An entry with this name already exists.');
@@ -245,6 +313,7 @@ export function updateProxyPoolEntry(
     if (isUniqueViolation(err)) throw new ProxyPoolError(409, 'An entry with this name already exists.');
     throw err;
   }
+  invalidateProxyPoolCache();
   return entryWithCount(id);
 }
 
@@ -289,12 +358,14 @@ export function updateProxyWebhookUrl(
     SET proxy_encrypted = ?, proxy_iv = ?, proxy_auth_tag = ?, last_webhook_at = ?, updated_at = ?
     WHERE id = ?
   `).run(enc.encrypted, enc.iv, enc.authTag, timestamp, now, id);
+  invalidateProxyPoolCache();
   return entryWithCount(id);
 }
 
 export function deleteProxyPoolEntry(id: number): boolean {
   // FK ON DELETE SET NULL unbinds accounts; they fall back to the gateway proxy.
   const result = getDb().prepare('DELETE FROM x_gateway_proxy_pool WHERE id = ?').run(id);
+  if (result.changes > 0) invalidateProxyPoolCache();
   return result.changes > 0;
 }
 
@@ -433,7 +504,7 @@ export function batchImportProxies(
       failed.push({ line: rawLine, error: err?.message ?? String(err) });
     }
   }
-
+  invalidateProxyPoolCache();
   return { imported, failed };
 }
 
@@ -468,26 +539,37 @@ export function bulkActionProxies(
     affected = res.changes;
   }
 
+  invalidateProxyPoolCache();
   return { affected, ids };
 }
 
 export interface ProxyPoolConfig {
   noProxy: string[];
   strictProxy: boolean;
+  autoRotateUnbound: boolean;
 }
 
 export function getProxyPoolConfig(): ProxyPoolConfig {
+  ensurePoolCacheScope();
+  if (cachedPoolConfig) return cachedPoolConfig;
   const rawNoProxy = getSetting('x_gateway_proxy_pool_no_proxy') ?? '';
   const rawStrict = getSetting('x_gateway_proxy_pool_strict_proxy') ?? '0';
+  const rawRotate = getSetting(AUTO_ROTATE_UNBOUND_KEY) ?? '0';
   const noProxy = rawNoProxy
     .split(/[,\n]/)
     .map(s => s.trim())
     .filter(Boolean);
   const strictProxy = rawStrict === '1' || rawStrict === 'true';
-  return { noProxy, strictProxy };
+  const autoRotateUnbound = rawRotate === '1' || rawRotate === 'true';
+  cachedPoolConfig = { noProxy, strictProxy, autoRotateUnbound };
+  return cachedPoolConfig;
 }
 
-export function updateProxyPoolConfig(patch: { noProxy?: string[] | string; strictProxy?: boolean }): ProxyPoolConfig {
+export function updateProxyPoolConfig(patch: {
+  noProxy?: string[] | string;
+  strictProxy?: boolean;
+  autoRotateUnbound?: boolean;
+}): ProxyPoolConfig {
   if (patch.noProxy !== undefined) {
     const list = Array.isArray(patch.noProxy)
       ? patch.noProxy.map(s => s.trim()).filter(Boolean)
@@ -497,6 +579,10 @@ export function updateProxyPoolConfig(patch: { noProxy?: string[] | string; stri
   if (patch.strictProxy !== undefined) {
     setSetting('x_gateway_proxy_pool_strict_proxy', patch.strictProxy ? '1' : '0');
   }
+  if (patch.autoRotateUnbound !== undefined) {
+    setSetting(AUTO_ROTATE_UNBOUND_KEY, patch.autoRotateUnbound ? '1' : '0');
+  }
+  invalidateProxyPoolCache();
   return getProxyPoolConfig();
 }
 

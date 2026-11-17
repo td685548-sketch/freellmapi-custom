@@ -20,6 +20,12 @@ const en = {
   resetSuccess: 'Codex quota window reset.', resetError: 'Could not use Codex reset credit.',
   viewResetDetails: 'Credit expiry', loadingDetails: 'Loading…', noCreditDetails: 'No reset credits found.',
   creditStatus: 'Status', creditExpires: 'Expires',
+  claudeResetTitle: 'Claude Free Limit Reset',
+  claudeResetAction: 'Reset Usage (Claude Free)',
+  claudeResetCheck: 'Check grants',
+  claudeResetConfirm: 'Use 1 free Claude reset grant now? This cannot be undone.',
+  claudeResetSuccess: 'Claude quota limits reset.',
+  claudeResetNone: 'No eligible reset grants available.',
 };
 const vi: Record<keyof typeof en, string> = {
   title: 'Quota', help: 'Hạn mức và thời điểm reset do provider báo, tách biệt với mức sử dụng nội bộ.',
@@ -42,5 +48,11 @@ const vi: Record<keyof typeof en, string> = {
   resetSuccess: 'Đã reset cửa sổ quota Codex.', resetError: 'Không thể dùng lượt reset Codex.',
   viewResetDetails: 'Xem hạn dùng', loadingDetails: 'Đang tải…', noCreditDetails: 'Không có lượt reset nào.',
   creditStatus: 'Trạng thái', creditExpires: 'Hết hạn',
+  claudeResetTitle: 'Reset giới hạn Claude Free',
+  claudeResetAction: 'Reset Usage (Claude Free)',
+  claudeResetCheck: 'Kiểm tra lượt',
+  claudeResetConfirm: 'Dùng 1 lượt reset miễn phí của Claude ngay? Thao tác này không thể hoàn tác.',
+  claudeResetSuccess: 'Đã reset hạn mức Claude.',
+  claudeResetNone: 'Chưa có lượt reset miễn phí khả dụng.',
 };
 export const useQuotaStrings = () => useI18n().locale === 'vi' ? vi : en;

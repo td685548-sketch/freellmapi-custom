@@ -244,7 +244,10 @@ geminiRouter.post(/^\/models\/(.+)$/, async (req: Request, res: Response, next: 
         return;
       }
 
-      const candidates = augmentCandidatesWithCapacityAdapter(rawCandidates, messages);
+      const tools = Array.isArray((req.body as Record<string, unknown> | undefined)?.tools)
+        ? ((req.body as Record<string, unknown>).tools as Array<Record<string, any>>)
+        : undefined;
+      const candidates = augmentCandidatesWithCapacityAdapter(rawCandidates, messages, tools);
       if (candidates.length === 0) {
         res.status(503).json({
           error: { message: 'No enabled Thruline provider accounts available.', code: 503, status: 'UNAVAILABLE' },

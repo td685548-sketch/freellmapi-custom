@@ -487,7 +487,7 @@ xGatewayMediaRouter.post(
           new Blob([new Uint8Array(file.buffer)], { type: file.mimetype || 'audio/mpeg' }),
           file.originalname || 'audio.mp3',
         );
-        form.append('model', requestedModel === 'auto' ? modelId : requestedModel);
+        form.append('model', modelId);
         if (typeof req.body?.language === 'string' && req.body.language) {
           form.append('language', req.body.language);
         }
@@ -585,7 +585,7 @@ xGatewayMediaRouter.post('/media/test/embedding', async (req: Request, res: Resp
     try {
       const payload: Record<string, unknown> = {
         input: parsed.data.input,
-        model: requestedModel === 'auto' ? modelId : requestedModel,
+        model: modelId,
       };
       if (parsed.data.dimensions) payload.dimensions = parsed.data.dimensions;
 

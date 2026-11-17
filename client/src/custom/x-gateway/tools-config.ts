@@ -1,3 +1,5 @@
+import { EXTENDED_CLI_TOOLS } from './extended-cli-tools';
+
 export interface ModelAlias {
   alias: string;
   targetModel: string;
@@ -383,6 +385,7 @@ export const CLI_TOOLS_CATALOG: CliTool[] = [
       },
     ],
   },
+  ...EXTENDED_CLI_TOOLS,
 ];
 
 export function formatBashExport(tool: CliTool, baseUrl: string, apiKey: string): string {

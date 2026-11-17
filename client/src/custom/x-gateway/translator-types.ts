@@ -3,8 +3,22 @@ export type ProtocolType =
   | 'anthropic'
   | 'openai_responses'
   | 'gemini'
+  | 'kiro'
+  | 'antigravity'
+  | 'vertex'
+  | 'ollama'
+  | 'cursor'
   | 'sse_openai'
   | 'sse_anthropic';
+
+export interface SavedTranslatorCase {
+  id: string;
+  name: string;
+  sourceProtocol: ProtocolType;
+  targetProtocol: ProtocolType;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
 
 export type PipelineStepStatus = 'ok' | 'warn' | 'info' | 'error';
 

@@ -1,5 +1,7 @@
+import crypto from 'node:crypto';
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
+import { getSetting, setSetting } from '../../db/index.js';
 import {
   inspectTranslation,
   type ProtocolType,
@@ -8,14 +10,38 @@ import { getUsableXGatewayKeys } from '../provider-accounts/store.js';
 
 export const xTranslatorRouter = Router();
 
+const CASES_SETTING_KEY = 'thruline_translator_cases';
+const MAX_SAVED_CASES = 50;
+
+export interface SavedTranslatorCase {
+  id: string;
+  name: string;
+  sourceProtocol: ProtocolType;
+  targetProtocol: ProtocolType;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
 const protocolEnum = z.enum([
   'openai_chat',
   'anthropic',
   'openai_responses',
   'gemini',
+  'kiro',
+  'antigravity',
+  'vertex',
+  'ollama',
+  'cursor',
   'sse_openai',
   'sse_anthropic',
 ]);
+
+const saveCaseSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  sourceProtocol: protocolEnum,
+  targetProtocol: protocolEnum,
+  payload: z.record(z.string(), z.unknown()),
+}).strict();
 
 const inspectSchema = z.object({
   sourceProtocol: protocolEnum,
@@ -163,7 +189,129 @@ export const TRANSLATOR_TEMPLATES: Array<{
       ],
     },
   },
+  {
+    id: 'kiro-agent-turn',
+    name: 'AWS Kiro (conversationState)',
+    protocol: 'kiro',
+    description: 'Kiro / CodeWhisperer conversationState wire payload',
+    payload: {
+      conversationState: {
+        chatTriggerType: 'MANUAL',
+        currentMessage: {
+          userInputMessage: {
+            content: 'Summarize the gateway architecture.',
+            modelId: 'claude-sonnet-4.5',
+            origin: 'AI_EDITOR',
+          },
+        },
+        history: [],
+      },
+    },
+  },
+  {
+    id: 'antigravity-v1internal',
+    name: 'Google Antigravity (v1internal)',
+    protocol: 'antigravity',
+    description: 'Cloud Code Assist v1internal wrapped Gemini request',
+    payload: {
+      project: 'demo-project',
+      model: 'gemini-2.5-flash',
+      requestType: 'agent',
+      request: {
+        contents: [{ role: 'user', parts: [{ text: 'Check service health.' }] }],
+      },
+    },
+  },
+  {
+    id: 'vertex-publisher-turn',
+    name: 'Google Vertex AI (Publisher)',
+    protocol: 'vertex',
+    description: 'Vertex AI publisher Gemini or partner Claude payload',
+    payload: {
+      contents: [{ role: 'user', parts: [{ text: 'Describe cloud IAM least privilege.' }] }],
+      generationConfig: { temperature: 0.2, maxOutputTokens: 512 },
+    },
+  },
+  {
+    id: 'ollama-chat-local',
+    name: 'Ollama (/api/chat)',
+    protocol: 'ollama',
+    description: 'Native Ollama chat format with options block',
+    payload: {
+      model: 'llama3.3',
+      messages: [
+        { role: 'system', content: 'Be concise.' },
+        { role: 'user', content: 'Explain SQLite WAL mode.' },
+      ],
+      stream: false,
+      options: { temperature: 0.3, num_predict: 256 },
+    },
+  },
+  {
+    id: 'cursor-chat-turn',
+    name: 'Cursor IDE Chat',
+    protocol: 'cursor',
+    description: 'Cursor IDE conversation array with modelDetails',
+    payload: {
+      modelDetails: { modelName: 'claude-sonnet-4.5' },
+      conversation: [
+        { type: 0, role: 'system', text: 'You are a TypeScript reviewer.' },
+        { type: 1, role: 'user', text: 'Inspect this route handler for SSRF.' },
+      ],
+    },
+  },
 ];
+
+function loadSavedCases(): SavedTranslatorCase[] {
+  const raw = getSetting(CASES_SETTING_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeSavedCases(cases: SavedTranslatorCase[]): void {
+  setSetting(CASES_SETTING_KEY, JSON.stringify(cases.slice(0, MAX_SAVED_CASES)));
+}
+
+xTranslatorRouter.get('/cases', (_req: Request, res: Response) => {
+  res.json({ cases: loadSavedCases() });
+});
+
+xTranslatorRouter.post('/cases', (req: Request, res: Response) => {
+  const parsed = saveCaseSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: { message: 'Invalid saved test case payload.', issues: parsed.error.issues } });
+    return;
+  }
+  const cases = loadSavedCases();
+  const entry: SavedTranslatorCase = {
+    id: `case_${crypto.randomBytes(6).toString('hex')}`,
+    name: parsed.data.name,
+    sourceProtocol: parsed.data.sourceProtocol,
+    targetProtocol: parsed.data.targetProtocol,
+    payload: parsed.data.payload,
+    createdAt: new Date().toISOString(),
+  };
+  const next = [entry, ...cases].slice(0, MAX_SAVED_CASES);
+  writeSavedCases(next);
+  res.status(201).json({ case: entry, cases: next });
+});
+
+xTranslatorRouter.delete('/cases/:id', (req: Request, res: Response) => {
+  const id = String(req.params.id ?? '');
+  const cases = loadSavedCases();
+  const next = cases.filter(c => c.id !== id);
+  if (next.length === cases.length) {
+    res.status(404).json({ error: { message: 'Saved case not found.' } });
+    return;
+  }
+  writeSavedCases(next);
+  res.json({ deleted: true, cases: next });
+});
 
 xTranslatorRouter.get('/templates', (_req: Request, res: Response) => {
   res.json({ templates: TRANSLATOR_TEMPLATES });

@@ -46,6 +46,21 @@ const en = {
   bulkDeleteConfirm: 'Delete the selected combos?',
   moveUp: 'Move up',
   moveDown: 'Move down',
+  comboKind: 'Combo kind',
+  kindChat: 'Chat / Text',
+  kindImage: 'Image generation',
+  kindAudio: 'Audio (TTS / STT)',
+  kindEmbedding: 'Embeddings',
+  kindVideo: 'Video',
+  systemOneModel: 'SystemOne Router Model (optional)',
+  systemOnePlaceholder: 'e.g. groq/llama-3.1-8b-instant',
+  systemOneHelp: 'Optional classifier LLM that picks the best model in this Smart combo per prompt.',
+  judgeModel: 'Fusion Judge Model (optional)',
+  judgePlaceholder: 'e.g. openai/gpt-4o (blank = race top 2)',
+  judgeHelp: 'Optional judge LLM that synthesizes answers from up to 4 panel models in Fusion mode.',
+  pdfPool: 'PDF / Document Pool',
+  videoPool: 'Video Input Pool',
+  searchPool: 'Web Search Pool',
 } as const
 
 const vi: Record<keyof typeof en, string> = {
@@ -94,6 +109,21 @@ const vi: Record<keyof typeof en, string> = {
   bulkDeleteConfirm: 'Xóa các combo đã chọn?',
   moveUp: 'Di chuyển lên',
   moveDown: 'Di chuyển xuống',
+  comboKind: 'Loại combo',
+  kindChat: 'Chat / Văn bản',
+  kindImage: 'Tạo hình ảnh',
+  kindAudio: 'Âm thanh (TTS / STT)',
+  kindEmbedding: 'Nhúng vector (Embeddings)',
+  kindVideo: 'Video',
+  systemOneModel: 'Model định tuyến SystemOne (tùy chọn)',
+  systemOnePlaceholder: 'vd: groq/llama-3.1-8b-instant',
+  systemOneHelp: 'LLM phân loại tùy chọn để chọn model tốt nhất trong combo Smart theo từng prompt.',
+  judgeModel: 'Model giám khảo Fusion (tùy chọn)',
+  judgePlaceholder: 'vd: openai/gpt-4o (trống = đua 2 model đầu)',
+  judgeHelp: 'LLM giám khảo tùy chọn tổng hợp câu trả lời từ tối đa 4 model ở chế độ Fusion.',
+  pdfPool: 'Nhóm dự phòng PDF / Tài liệu',
+  videoPool: 'Nhóm dự phòng Video',
+  searchPool: 'Nhóm dự phòng Tìm kiếm Web',
 }
 
 export function useMgmtStrings() {

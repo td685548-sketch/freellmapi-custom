@@ -28,7 +28,13 @@ import {
   resolveXGatewayAccountProxy,
 } from '../provider-accounts/store.js';
 import { chatGptWebImageErrorStatus } from '../provider-accounts/chatgpt-web-image.js';
+import { VertexProvider } from '../provider-accounts/vertex.js';
 import { executeImageGeneration, isUnsupportedWebImageProvider } from './image-generation.js';
+import {
+  executeProviderEmbedding,
+  executeProviderSpeech,
+  executeProviderTranscription,
+} from './media-adapters.js';
 import { getConfigSnapshot, getMediaDefaults } from './config.js';
 import { runInGatewayScope } from './context.js';
 import {
@@ -47,6 +53,10 @@ const MAX_AUDIO_UPLOAD_BYTES = 25 * 1024 * 1024;
 const audioUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_AUDIO_UPLOAD_BYTES, files: 1 },
+});
+const imageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_AUDIO_UPLOAD_BYTES, files: 5 },
 });
 
 function resolveAnthropicCandidates(requestedModel: string | undefined): {
@@ -1112,11 +1122,13 @@ export function accountBaseUrl(account: { provider: string; base_url: string | n
   return entry?.baseUrl ? entry.baseUrl.trim().replace(/\/+$/, '') : null;
 }
 
-const TTS_PROVIDERS = ['openai', 'elevenlabs', 'deepgram', 'edge-tts', 'gemini', 'cartesia', 'fish-audio'];
+const TTS_PROVIDERS = ['openai', 'elevenlabs', 'deepgram', 'edge-tts', 'gemini', 'cartesia', 'fish-audio', 'xiaomi-mimo', 'selfhosted-tts'];
 const BUILTIN_VOICES: Record<string, Array<[string, string, string, string]>> = {
   openai: ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'].map(id => [id, id, 'en', '']),
   gemini: [['Kore', 'Kore', 'multilingual', 'female'], ['Puck', 'Puck', 'multilingual', 'male'], ['Aoede', 'Aoede', 'multilingual', 'female']],
   deepgram: [['aura-2-thalia-en', 'Thalia', 'en', 'female'], ['aura-2-orion-en', 'Orion', 'en', 'male']],
+  'xiaomi-mimo': [['mimo_default', 'MiMo Default', 'multilingual', 'female']],
+  'selfhosted-tts': [['af_heart', 'Heart', 'en', 'female'], ['af_bella', 'Bella', 'en', 'female']],
 };
 
 // A few catalog entries still use a chat compatibility URL. Native media must
@@ -1176,15 +1188,67 @@ export async function handleAudioVoices(req: Request, res: Response): Promise<vo
 
 xGatewayProtocolsRouter.get('/audio/voices', xGatewayAuth, handleAudioVoices);
 
-export const VIDEO_PROVIDERS = ['xai', 'openai', 'gemini', 'replicate', 'fal-ai', 'together', 'siliconflow', 'minimax', 'kling', 'luma'];
+export const VIDEO_PROVIDERS = ['xai', 'openai', 'gemini', 'replicate', 'fal-ai', 'together', 'siliconflow', 'minimax', 'kling', 'luma', 'vertex', 'openrouter'];
 const VIDEO_MODEL_RE = /video|veo|sora|kling|wan[\d.-]|luma|hunyuan|seedance/i;
+const VERTEX_OPERATION_RE = /^projects\/[^/]+\/locations\/[^/]+\/publishers\/[^/]+\/models\/[^/]+\/operations\/[^/]+$/;
+
+function encodeVertexJobId(name: string): string {
+  return Buffer.from(name, 'utf8').toString('base64url');
+}
+
+function decodeVertexJobId(id: string): string | null {
+  if (!id || id.length > 1024 || !/^[A-Za-z0-9_-]+$/.test(id)) return null;
+  const decoded = Buffer.from(id, 'base64url').toString('utf8');
+  if (Buffer.from(decoded, 'utf8').toString('base64url') !== id) return null;
+  return VERTEX_OPERATION_RE.test(decoded) ? decoded : null;
+}
+
+function toVertexVideoBody(body: Record<string, any>): Record<string, unknown> {
+  const instance: Record<string, unknown> = {};
+  if (typeof body.prompt === 'string' && body.prompt) instance.prompt = body.prompt;
+  const image = body.image ?? body.image_url;
+  if (image && typeof image === 'object') {
+    instance.image = image;
+  } else if (typeof image === 'string' && image.trim()) {
+    const match = /^data:([^;]+);base64,(.*)$/s.exec(image.trim());
+    instance.image = match ? { bytesBase64Encoded: match[2], mimeType: match[1] } : { gcsUri: image.trim() };
+  }
+  if (body.video && typeof body.video === 'object') instance.video = body.video;
+  const parameters: Record<string, unknown> = {};
+  if (body.n != null) parameters.sampleCount = Number(body.n);
+  if (body.duration != null) parameters.durationSeconds = Number(body.duration);
+  if (body.aspect_ratio) parameters.aspectRatio = body.aspect_ratio;
+  if (body.resolution) parameters.resolution = body.resolution;
+  if (body.seed != null) parameters.seed = body.seed;
+  if (body.negative_prompt) parameters.negativePrompt = body.negative_prompt;
+  if (body.storage_uri) parameters.storageUri = body.storage_uri;
+  if (body.generate_audio != null) parameters.generateAudio = Boolean(body.generate_audio);
+  return { instances: [instance], ...(Object.keys(parameters).length ? { parameters } : {}) };
+}
+
+function fromVertexVideoOperation(json: Record<string, any>): Record<string, unknown> {
+  if (!json?.name) return json;
+  const id = encodeVertexJobId(String(json.name));
+  if (json.error) return { id, request_id: id, status: 'failed', error: json.error };
+  if (!json.done) return { id, request_id: id, status: 'pending' };
+  const samples = json.response?.videos || json.response?.generateVideoResponse?.generatedSamples || [];
+  const videos = (Array.isArray(samples) ? samples : []).map((s: any) => ({
+    url: s.gcsUri || s.video?.uri || s.uri || null,
+    b64_json: s.bytesBase64Encoded || s.video?.bytesBase64Encoded || null,
+    mime_type: s.mimeType || s.video?.mimeType || 'video/mp4',
+  }));
+  return { id, request_id: id, status: 'completed', video: videos[0] || null, videos };
+}
 
 /** A job must always be polled on its creating account. Never retry an ambiguous
  * create failure: an upstream 5xx or disconnect may already have created a job. */
 export async function handleVideoRequest(req: Request, res: Response): Promise<void> {
   const polling = req.method === 'GET';
+  const action = req.path.endsWith('/edits') ? 'edits' : req.path.endsWith('/extensions') ? 'extensions' : 'generations';
   const body = req.body ?? {};
-  if (!polling && (typeof body.prompt !== 'string' || !body.prompt.trim() || (body.model !== undefined && typeof body.model !== 'string'))) {
+  const hasPrompt = typeof body.prompt === 'string' && Boolean(body.prompt.trim());
+  const hasMediaRef = Boolean(body.image || body.image_url || body.video);
+  if (!polling && ((!hasPrompt && !hasMediaRef) || (body.model !== undefined && typeof body.model !== 'string'))) {
     res.status(400).json({ error: { message: 'A prompt and valid model are required', type: 'invalid_request_error' } }); return;
   }
   const preferred = req.get('x-9router-connection-id') ?? req.get('x-connection-id');
@@ -1207,22 +1271,31 @@ export async function handleVideoRequest(req: Request, res: Response): Promise<v
   if (preferred) candidates = candidates.filter(c => String(c.account.id) === preferred);
   // Without a pin, use the requested provider's first account; never rotate on poll.
   if (polling && !preferred) {
-    candidates = candidates.filter(c => c.account.provider === (provider ?? 'xai')).sort((a, b) => a.account.id - b.account.id).slice(0, 1);
+    const inferredProvider = provider ?? (requested !== 'auto' ? candidates[0]?.account.provider : undefined) ?? 'xai';
+    candidates = candidates.filter(c => c.account.provider === inferredProvider).sort((a, b) => a.account.id - b.account.id).slice(0, 1);
   }
   if (!candidates.length) { res.status(503).json({ error: { message: 'No enabled video provider account available.', type: 'service_unavailable' } }); return; }
   let lastStatus = 502;
   for (const { account, modelId } of candidates) {
-    const base = nativeMediaBase(account, { 'fal-ai': 'https://queue.fal.run', replicate: 'https://api.replicate.com/v1', together: 'https://api.together.xyz/v2', gemini: 'https://generativelanguage.googleapis.com/v1beta' });
+    const base = nativeMediaBase(account, {
+      'fal-ai': 'https://queue.fal.run',
+      replicate: 'https://api.replicate.com/v1',
+      together: 'https://api.together.xyz/v2',
+      gemini: 'https://generativelanguage.googleapis.com/v1beta',
+      vertex: 'https://aiplatform.googleapis.com',
+      openrouter: 'https://openrouter.ai/api/v1/videos',
+    });
     if (!base) continue;
     try {
       const credential = decrypt(account.encrypted_key, account.iv, account.auth_tag);
       const headers: Record<string, string> = { Authorization: `Bearer ${credential}`, 'Content-Type': 'application/json', 'x-9router-connection-id': String(account.id) };
       if (req.get('idempotency-key')) headers['Idempotency-Key'] = req.get('idempotency-key')!;
       const videoId = encodeURIComponent(String(req.params.videoId ?? ''));
-      let path = polling ? `/videos/${videoId}` : '/videos/generations';
+      let path = polling ? `/videos/${videoId}` : `/videos/${action}`;
       let payload: unknown = { ...body, model: modelId };
+      let method: 'GET' | 'POST' = polling ? 'GET' : 'POST';
       if (account.provider === 'openai') {
-        path = polling ? `/videos/${videoId}` : '/videos';
+        path = polling ? `/videos/${videoId}` : action === 'generations' ? '/videos' : `/videos/${action}`;
         if (!polling) {
           const form = new FormData();
           for (const [key, value] of Object.entries(body)) if (value != null && key !== 'model' && key !== 'aspect_ratio') form.append(key, String(value));
@@ -1236,7 +1309,7 @@ export async function handleVideoRequest(req: Request, res: Response): Promise<v
         payload = { input: { ...body, model: undefined } };
         headers.Authorization = `Token ${credential}`;
       } else if (account.provider === 'together') {
-        path = polling ? `/videos/${videoId}` : '/videos';
+        path = polling ? `/videos/${videoId}` : action === 'generations' ? '/videos' : `/videos/${action}`;
       } else if (account.provider === 'gemini') {
         path = polling ? `/${String(req.params.videoId).split('/').map(encodeURIComponent).join('/')}` : `/models/${encodeURIComponent(modelId)}:predictLongRunning`;
         delete headers.Authorization;
@@ -1250,12 +1323,45 @@ export async function handleVideoRequest(req: Request, res: Response): Promise<v
         path = polling ? `/${falModel.split('/').slice(0, 2).join('/')}/requests/${videoId}/status` : `/${falModel}`;
         headers.Authorization = `Key ${credential}`;
         payload = { ...body, model: undefined };
+      } else if (account.provider === 'openrouter') {
+        if (!polling && action !== 'generations') {
+          res.status(400).json({ error: { message: `OpenRouter video supports 'generations' only (got '${action}')`, type: 'invalid_request_error' } });
+          return;
+        }
+        path = polling ? `/${videoId}` : '';
+        payload = { ...body, model: modelId };
+      } else if (account.provider === 'vertex') {
+        const cleanModel = modelId.replace(/^google\//, '');
+        const auth = await new VertexProvider({ providerId: 'vertex' }).resolveAuth(credential, cleanModel);
+        if (!auth.bearerToken || !auth.projectId) {
+          res.status(400).json({ error: { message: 'Vertex video requires Service Account JSON or an OAuth access token with project_id', type: 'invalid_request_error' } });
+          return;
+        }
+        headers.Authorization = `Bearer ${auth.bearerToken}`;
+        method = 'POST';
+        if (polling) {
+          const operationName = decodeVertexJobId(String(req.params.videoId ?? ''));
+          if (!operationName) {
+            res.status(400).json({ error: { message: 'Invalid Vertex video job id', type: 'invalid_request_error' } });
+            return;
+          }
+          const modelPath = operationName.slice(0, operationName.indexOf('/operations/'));
+          path = `/v1/${modelPath}:fetchPredictOperation`;
+          payload = { operationName };
+        } else {
+          if (!/^[A-Za-z0-9._-]+$/.test(cleanModel)) {
+            res.status(400).json({ error: { message: 'Invalid Vertex video model id', type: 'invalid_request_error' } });
+            return;
+          }
+          path = `/v1/projects/${auth.projectId}/locations/${auth.location}/publishers/google/models/${cleanModel}:predictLongRunning`;
+          payload = toVertexVideoBody(body);
+        }
       }
       // Fal's async queue is separate from its synchronous inference origin.
       const targetBase = account.provider === 'fal-ai' && base === 'https://fal.run' ? 'https://queue.fal.run' : base;
       const upstream = await withQuotaTracking(account, modelId, resolveXGatewayAccountProxy(account), () => proxyFetch(
-        `${targetBase}${path}`, { method: polling ? 'GET' : 'POST', headers, signal: requestSignal(req, res),
-          ...(!polling ? { body: payload instanceof FormData ? payload : JSON.stringify(payload) } : {}) }, account.platform, 'video', 120_000));
+        `${targetBase}${path}`, { method, headers, signal: requestSignal(req, res),
+          ...(method === 'POST' ? { body: payload instanceof FormData ? payload : JSON.stringify(payload) } : {}) }, account.platform, 'video', 120_000));
       lastStatus = upstream.status;
       if (!polling && !preferred && [401, 403, 429].includes(upstream.status)) { await upstream.text(); continue; }
       const data = await upstream.text();
@@ -1264,6 +1370,13 @@ export async function handleVideoRequest(req: Request, res: Response): Promise<v
       res.setHeader('Access-Control-Expose-Headers', 'x-9router-connection-id');
       if (upstream.ok && !polling) recordXGatewayKeyUsage(account.id, 1);
       if (upstream.ok) {
+        if (account.provider === 'vertex') {
+          try {
+            const parsedVertex = JSON.parse(data) as Record<string, any>;
+            res.status(upstream.status).json(fromVertexVideoOperation(parsedVertex));
+            return;
+          } catch { /* fall through to raw send */ }
+        }
         res.type(upstream.headers.get('content-type') ?? 'application/json').status(upstream.status).send(data);
       } else {
         res.status(upstream.status).json({ error: { message: sanitizeProviderErrorMessage(data.split(credential).join('[redacted]')), type: 'upstream_error' } });
@@ -1277,7 +1390,22 @@ export async function handleVideoRequest(req: Request, res: Response): Promise<v
 }
 
 xGatewayProtocolsRouter.post('/videos/generations', xGatewayAuth, handleVideoRequest);
+xGatewayProtocolsRouter.post('/videos/edits', xGatewayAuth, handleVideoRequest);
+xGatewayProtocolsRouter.post('/videos/extensions', xGatewayAuth, handleVideoRequest);
 xGatewayProtocolsRouter.get('/videos/:videoId', xGatewayAuth, handleVideoRequest);
+
+const BLOCKED_MEDIA_SUBSCRIPTIONS = new Set(['codex', 'claude', 'gemini-cli', 'kiro']);
+const IMAGE_DEFAULT_BASE_URLS: Record<string, string> = {
+  codex: 'https://chatgpt.com/backend-api/codex',
+  antigravity: 'https://cloudcode-pa.googleapis.com',
+  'fal-ai': 'https://queue.fal.run',
+  'black-forest-labs': 'https://api.bfl.ai/v1',
+  'stability-ai': 'https://api.stability.ai/v2beta/stable-image/generate',
+  runwayml: 'https://api.dev.runwayml.com/v1',
+  huggingface: 'https://router.huggingface.co/hf-inference/models',
+};
+const CUSTOM_TTS_PROVIDERS = new Set(['elevenlabs', 'gemini', 'xiaomi-mimo', 'deepgram', 'fish-audio', 'cartesia', 'selfhosted-tts']);
+const CUSTOM_STT_PROVIDERS = new Set(['codex', 'deepgram', 'assemblyai', 'elevenlabs', 'gemini']);
 
 xGatewayProtocolsRouter.post('/embeddings', xGatewayAuth, async (req: Request, res: Response) => {
   res.setHeader('X-Gateway', 'x');
@@ -1300,9 +1428,9 @@ xGatewayProtocolsRouter.post('/embeddings', xGatewayAuth, async (req: Request, r
   }
 
   let lastError: unknown = null;
+  let lastStatus = 502;
   for (const { account, modelId } of candidates) {
-    const baseUrl = accountBaseUrl(account);
-    if (!baseUrl) continue;
+    if (BLOCKED_MEDIA_SUBSCRIPTIONS.has(account.provider)) continue;
     let credential: string;
     try {
       credential = decrypt(account.encrypted_key, account.iv, account.auth_tag);
@@ -1313,6 +1441,21 @@ xGatewayProtocolsRouter.post('/embeddings', xGatewayAuth, async (req: Request, r
 
     const effectiveProxy = resolveXGatewayAccountProxy(account);
     try {
+      const customResult = await withQuotaTracking(account, modelId, effectiveProxy, () =>
+        executeProviderEmbedding({ account, credential, modelId, body }),
+      );
+      if (customResult) {
+        const usage = customResult.usage as Record<string, unknown> | undefined;
+        const tokens = Number(usage?.total_tokens ?? usage?.prompt_tokens ?? 10);
+        recordXGatewayKeyUsage(account.id, tokens);
+        res.setHeader('X-Routed-Via', `${account.provider}/${modelId}`);
+        res.status(200).json(customResult);
+        return;
+      }
+
+      const baseUrl = accountBaseUrl(account);
+      if (!baseUrl) continue;
+
       const upstreamRes = await withQuotaTracking(account, modelId, effectiveProxy, () =>
         proxyFetch(
           `${baseUrl}/embeddings`,
@@ -1324,7 +1467,7 @@ xGatewayProtocolsRouter.post('/embeddings', xGatewayAuth, async (req: Request, r
             },
             body: JSON.stringify({
               ...body,
-              model: requestedModel === 'auto' ? modelId : requestedModel,
+              model: modelId,
             }),
           },
           account.platform,
@@ -1344,19 +1487,41 @@ xGatewayProtocolsRouter.post('/embeddings', xGatewayAuth, async (req: Request, r
       return;
     } catch (err) {
       lastError = err;
+      const errStatus = (err as { status?: number } | null)?.status;
+      if (typeof errStatus === 'number' && errStatus >= 400 && errStatus < 500) {
+        lastStatus = errStatus;
+      }
       continue;
     }
   }
 
   const message = lastError instanceof Error ? lastError.message : 'All Thruline embedding accounts failed.';
-  res.status(502).json({ error: { message, type: 'upstream_error' } });
+  res.status(lastStatus).json({ error: { message, type: lastStatus === 400 ? 'invalid_request_error' : 'upstream_error' } });
 });
 
-xGatewayProtocolsRouter.post('/images/generations', xGatewayAuth, async (req: Request, res: Response) => {
+async function handleImageEndpoint(req: Request, res: Response, isEdit: boolean): Promise<void> {
   res.setHeader('X-Gateway', 'x');
   const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, any>) : {};
   if (typeof body.prompt !== 'string' || !body.prompt.trim()) {
     res.status(400).json({ error: { message: 'prompt is required', type: 'invalid_request_error' } });
+    return;
+  }
+
+  const files = req.files as Record<string, Express.Multer.File[]> | undefined;
+  const uploadedImages = (files?.image ?? []).map(
+    f => `data:${f.mimetype || 'image/png'};base64,${f.buffer.toString('base64')}`,
+  );
+  const uploadedMask = files?.mask?.[0]
+    ? `data:${files.mask[0].mimetype || 'image/png'};base64,${files.mask[0].buffer.toString('base64')}`
+    : undefined;
+  const jsonImages = Array.isArray(body.images)
+    ? body.images.filter((v: unknown): v is string => typeof v === 'string' && Boolean(v.trim()))
+    : [];
+  const mergedImages = [...uploadedImages, ...jsonImages];
+  const primaryImage = typeof body.image === 'string' && body.image.trim() ? body.image.trim() : mergedImages[0];
+
+  if (isEdit && !primaryImage && mergedImages.length === 0) {
+    res.status(400).json({ error: { message: 'image is required for edits', type: 'invalid_request_error' } });
     return;
   }
 
@@ -1374,7 +1539,7 @@ xGatewayProtocolsRouter.post('/images/generations', xGatewayAuth, async (req: Re
 
   let lastError: unknown = null;
   for (const { account, modelId } of candidates) {
-    const baseUrl = accountBaseUrl(account);
+    const baseUrl = accountBaseUrl(account) ?? IMAGE_DEFAULT_BASE_URLS[account.provider] ?? null;
     if (!baseUrl) continue;
     let credential: string;
     try {
@@ -1402,6 +1567,10 @@ xGatewayProtocolsRouter.post('/images/generations', xGatewayAuth, async (req: Re
           n: Number(body.n) || 1,
           size: typeof body.size === 'string' ? body.size : undefined,
           extraBody: body,
+          image: primaryImage,
+          images: mergedImages.length > 0 ? mergedImages : undefined,
+          mask: uploadedMask ?? (typeof body.mask === 'string' ? body.mask : undefined),
+          isEdit,
         }),
       );
       recordXGatewayKeyUsage(account.id, usageUnits);
@@ -1416,7 +1585,30 @@ xGatewayProtocolsRouter.post('/images/generations', xGatewayAuth, async (req: Re
 
   const message = lastError instanceof Error ? lastError.message : 'All Thruline image generation accounts failed.';
   res.status(chatGptWebImageErrorStatus(lastError) ?? 502).json({ error: { message, type: 'upstream_error' } });
-});
+}
+
+xGatewayProtocolsRouter.post('/images/generations', xGatewayAuth, (req: Request, res: Response) =>
+  handleImageEndpoint(req, res, false),
+);
+
+xGatewayProtocolsRouter.post(
+  '/images/edits',
+  xGatewayAuth,
+  (req: Request, res: Response, next) => {
+    if (!req.is('multipart/form-data')) {
+      next();
+      return;
+    }
+    imageUpload.fields([{ name: 'image', maxCount: 4 }, { name: 'mask', maxCount: 1 }])(req, res, (err: unknown) => {
+      if (err) {
+        res.status(400).json({ error: { message: 'Invalid multipart image upload', type: 'invalid_request_error' } });
+        return;
+      }
+      next();
+    });
+  },
+  (req: Request, res: Response) => handleImageEndpoint(req, res, true),
+);
 
 xGatewayProtocolsRouter.post('/audio/speech', xGatewayAuth, async (req: Request, res: Response) => {
   res.setHeader('X-Gateway', 'x');
@@ -1441,7 +1633,7 @@ xGatewayProtocolsRouter.post('/audio/speech', xGatewayAuth, async (req: Request,
   let lastError: unknown = null;
   for (const { account, modelId } of candidates) {
     const baseUrl = accountBaseUrl(account);
-    if (!baseUrl) continue;
+    if (!baseUrl && !CUSTOM_TTS_PROVIDERS.has(account.provider)) continue;
     let credential: string;
     try {
       credential = decrypt(account.encrypted_key, account.iv, account.auth_tag);
@@ -1452,6 +1644,26 @@ xGatewayProtocolsRouter.post('/audio/speech', xGatewayAuth, async (req: Request,
 
     const effectiveProxy = resolveXGatewayAccountProxy(account);
     try {
+      const customAudio = await withQuotaTracking(account, modelId, effectiveProxy, () =>
+        executeProviderSpeech({
+          account,
+          credential,
+          modelId,
+          input: body.input,
+          voice: typeof body.voice === 'string' ? body.voice : undefined,
+          responseFormat: typeof body.response_format === 'string' ? body.response_format : undefined,
+          extraBody: body,
+        }),
+      );
+      if (customAudio) {
+        recordXGatewayKeyUsage(account.id, Math.max(1, Math.ceil(body.input.length / 4)));
+        res.setHeader('Content-Type', customAudio.contentType);
+        res.setHeader('X-Routed-Via', `${account.provider}/${modelId}`);
+        res.status(200).send(customAudio.buffer);
+        return;
+      }
+      if (!baseUrl) continue;
+
       const upstreamRes = await withQuotaTracking(account, modelId, effectiveProxy, () =>
         proxyFetch(
           `${baseUrl}/audio/speech`,
@@ -1527,7 +1739,7 @@ xGatewayProtocolsRouter.post(
     let lastError: unknown = null;
     for (const { account, modelId } of candidates) {
       const baseUrl = accountBaseUrl(account);
-      if (!baseUrl) continue;
+      if (!baseUrl && !CUSTOM_STT_PROVIDERS.has(account.provider)) continue;
       let credential: string;
       try {
         credential = decrypt(account.encrypted_key, account.iv, account.auth_tag);
@@ -1537,19 +1749,33 @@ xGatewayProtocolsRouter.post(
       }
 
       const effectiveProxy = resolveXGatewayAccountProxy(account);
+      const language = typeof req.body?.language === 'string' ? req.body.language : undefined;
+      const responseFormat = typeof req.body?.response_format === 'string' ? req.body.response_format : undefined;
       try {
+        const customStt = await withQuotaTracking(account, modelId, effectiveProxy, () =>
+          executeProviderTranscription({ account, credential, modelId, file, language, responseFormat }),
+        );
+        if (customStt) {
+          recordXGatewayKeyUsage(account.id, 1);
+          res.setHeader('X-Routed-Via', `${account.provider}/${modelId}`);
+          res.setHeader('Content-Type', customStt.contentType);
+          res.status(200).send(customStt.rawBody);
+          return;
+        }
+        if (!baseUrl) continue;
+
         const form = new FormData();
         form.append(
           'file',
           new Blob([new Uint8Array(file.buffer)], { type: file.mimetype || 'audio/mpeg' }),
           file.originalname || 'audio.mp3',
         );
-        form.append('model', requestedModel === 'auto' ? modelId : requestedModel);
-        if (typeof req.body?.language === 'string' && req.body.language) {
-          form.append('language', req.body.language);
+        form.append('model', modelId);
+        if (language) {
+          form.append('language', language);
         }
-        if (typeof req.body?.response_format === 'string' && req.body.response_format) {
-          form.append('response_format', req.body.response_format);
+        if (responseFormat) {
+          form.append('response_format', responseFormat);
         }
 
         const upstreamRes = await withQuotaTracking(account, modelId, effectiveProxy, () =>

@@ -13,7 +13,7 @@ export function useExternalAuthMethods() {
   })
 }
 
-type Landing = ({ kind: 'google' } | { kind: 'reset'; token: string }) & {
+type Landing = ({ kind: 'google' } | { kind: 'sso' } | { kind: 'reset'; token: string }) & {
   revision: number
 }
 function readLanding(revision: number): Landing | null {
@@ -23,6 +23,8 @@ function readLanding(revision: number): Landing | null {
     return { kind: 'reset', token: fragment.get('reset_token')!, revision }
   if (url.searchParams.get('auth') === 'google')
     return { kind: 'google', revision }
+  if (url.searchParams.get('auth') === 'sso')
+    return { kind: 'sso', revision }
   return null
 }
 

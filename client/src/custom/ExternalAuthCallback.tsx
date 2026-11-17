@@ -8,8 +8,10 @@ import { RegistrationKeyNotice } from './RegistrationKeyNotice'
 
 export function ExternalAuthCallback({
   onComplete,
+  endpoint = '/api/auth/google/complete',
 }: {
   onComplete: () => void
+  endpoint?: string
 }) {
   const { t } = useI18n()
   const [initialRevision] = useState(getSessionRevision)
@@ -20,7 +22,7 @@ export function ExternalAuthCallback({
     let active = true
     // Reuse the promise under React StrictMode: the handoff can only be redeemed once.
     request.current ??= apiFetch<ExternalAuthResult>(
-      '/api/auth/google/complete',
+      endpoint,
       { method: 'POST' },
     )
     request.current

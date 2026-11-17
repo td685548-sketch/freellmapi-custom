@@ -30,9 +30,12 @@ const comboSchema = z.object({
   name: z.string().trim().min(1).max(48),
   entries: z.array(z.object({ platform: z.string(), modelId: z.string() })).min(1).max(20),
   strategy: z.enum(['fallback', 'round-robin', 'smart', 'fusion']).optional(),
+  kind: z.enum(['chat', 'image', 'audio', 'embedding', 'video']).optional(),
   smartPolicy: z.enum(['smart', 'strict', 'per-turn', 'custom']).optional(),
   sessionSticky: z.boolean().optional(),
   confidenceThreshold: z.number().min(0).max(1).optional(),
+  systemOneModel: z.string().trim().max(120).optional(),
+  judgeModel: z.string().trim().max(120).optional(),
   description: z.string().trim().max(MAX_COMBO_DESCRIPTION).optional(),
 }).strict();
 
@@ -76,9 +79,12 @@ xGatewayManagementRouter.post('/combos', (req, res) => {
   const check = validateCombo(parsed.data.name, parsed.data.entries, {
     totalCombos: listCombos().length,
     strategy: parsed.data.strategy,
+    kind: parsed.data.kind,
     smartPolicy: parsed.data.smartPolicy,
     sessionSticky: parsed.data.sessionSticky,
     confidenceThreshold: parsed.data.confidenceThreshold,
+    systemOneModel: parsed.data.systemOneModel,
+    judgeModel: parsed.data.judgeModel,
     description: parsed.data.description,
   });
   if (!check.valid) return fail(res, 400, check.error);
@@ -89,10 +95,13 @@ xGatewayManagementRouter.post('/combos', (req, res) => {
       userId(req),
       {
         strategy: parsed.data.strategy,
+        kind: parsed.data.kind,
         description: parsed.data.description,
         smartPolicy: parsed.data.smartPolicy,
         sessionSticky: parsed.data.sessionSticky,
         confidenceThreshold: parsed.data.confidenceThreshold,
+        systemOneModel: parsed.data.systemOneModel,
+        judgeModel: parsed.data.judgeModel,
       },
     ));
   } catch (err) {
@@ -154,9 +163,12 @@ xGatewayManagementRouter.put('/combos/:id', (req, res) => {
   if (!getComboById(id)) return fail(res, 404, 'Combo not found.');
   const check = validateCombo(parsed.data.name, parsed.data.entries, {
     strategy: parsed.data.strategy,
+    kind: parsed.data.kind,
     smartPolicy: parsed.data.smartPolicy,
     sessionSticky: parsed.data.sessionSticky,
     confidenceThreshold: parsed.data.confidenceThreshold,
+    systemOneModel: parsed.data.systemOneModel,
+    judgeModel: parsed.data.judgeModel,
     description: parsed.data.description,
   });
   if (!check.valid) return fail(res, 400, check.error);
@@ -167,10 +179,13 @@ xGatewayManagementRouter.put('/combos/:id', (req, res) => {
       parsed.data.entries as ComboEntry[],
       {
         strategy: parsed.data.strategy,
+        kind: parsed.data.kind,
         description: parsed.data.description,
         smartPolicy: parsed.data.smartPolicy,
         sessionSticky: parsed.data.sessionSticky,
         confidenceThreshold: parsed.data.confidenceThreshold,
+        systemOneModel: parsed.data.systemOneModel,
+        judgeModel: parsed.data.judgeModel,
       },
     );
     if (!updated) return fail(res, 404, 'Combo not found.');

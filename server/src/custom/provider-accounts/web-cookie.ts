@@ -21,7 +21,7 @@ import {
   fetchChatGptWebAccessToken,
   normalizeChatGptWebCookie,
 } from './chatgpt-web-image.js';
-import { looksLikeCookieHeader, looksLikeHtmlDocument } from './cookie-format.js';
+import { isMetaLlamaKey, looksLikeCookieHeader, looksLikeHtmlDocument, normalizeCookieInput } from './cookie-format.js';
 
 const BROWSER_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -84,25 +84,32 @@ export function buildWebSessionHeaders(
     return headers;
   }
 
-  if (/^Bearer\s+/i.test(trimmed)) {
-    headers['Authorization'] = trimmed;
+  if (isMetaLlamaKey(trimmed)) {
+    headers['Authorization'] = `Bearer ${trimmed}`;
+    return headers;
+  }
+
+  const normalized = normalizeCookieInput(rawCredential);
+
+  if (/^Bearer\s+/i.test(normalized)) {
+    headers['Authorization'] = normalized;
     return headers;
   }
 
   // If the credential contains key=value pairs (e.g. `sso=xyz; sso-rw=abc`), send as Cookie header
-  if (looksLikeCookieHeader(trimmed)) {
-    headers['Cookie'] = trimmed;
+  if (looksLikeCookieHeader(normalized)) {
+    headers['Cookie'] = normalized;
     return headers;
   }
 
   const cookieName = DEFAULT_COOKIE_NAMES[providerId] ?? 'session';
   if (providerId === 'deepseek-web') {
-    headers['Authorization'] = `Bearer ${trimmed}`;
-    headers['Cookie'] = `${cookieName}=${trimmed}`;
+    headers['Authorization'] = `Bearer ${normalized}`;
+    headers['Cookie'] = `${cookieName}=${normalized}`;
     return headers;
   }
 
-  headers['Cookie'] = `${cookieName}=${trimmed}`;
+  headers['Cookie'] = `${cookieName}=${normalized}`;
   return headers;
 }
 
@@ -1181,12 +1188,31 @@ export class AnthropicWireProvider extends BaseProvider {
   }
 
   private buildHeaders(apiKey: string): Record<string, string> {
+    const isAnthropicOfficial = this.baseUrl === 'https://api.anthropic.com/v1';
     const credential = parseOAuthCredential(apiKey);
     if (credential) {
-      if (credential.kind !== 'claude') throw new Error('Claude requires a matching OAuth credential.');
-      return { ...this.extraHeaders, 'Content-Type': 'application/json', Authorization: `Bearer ${credential.accessToken}`, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14', 'User-Agent': 'claude-cli/2.1.280 (external, sdk-cli)', 'x-app': 'cli' };
+      if (isAnthropicOfficial && credential.kind !== 'claude') {
+        throw new Error('Claude requires a matching OAuth credential.');
+      }
+      return {
+        ...this.extraHeaders,
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${credential.accessToken}`,
+        'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14',
+        'User-Agent': 'claude-cli/2.1.280 (external, sdk-cli)',
+        'x-app': 'cli',
+      };
     }
-    const token = apiKey.trim().replace(/^Bearer\s+/i, '');
+    let rawToken = apiKey.trim();
+    if (!isAnthropicOfficial && rawToken.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(rawToken) as Record<string, unknown>;
+        const candidate = parsed.accessToken ?? parsed.access_token ?? parsed.apiKey ?? parsed.api_key ?? parsed.token;
+        if (typeof candidate === 'string' && candidate.trim()) rawToken = candidate.trim();
+      } catch { /* fall back to raw string */ }
+    }
+    const token = rawToken.replace(/^Bearer\s+/i, '');
     return {
       ...this.extraHeaders,
       'Content-Type': 'application/json',
