@@ -98,6 +98,7 @@ import * as profileRoutingStrategy from '../migrations/20261111_000002_profile_r
 import * as playgroundMedia from '../migrations/20261114_090000_custom_playground_media.js';
 import * as supportOutputControls from '../migrations/20261115_120001_support_output_controls.js';
 import * as customAiMcpProfileCleanup from '../migrations/20261116_100000_custom_ai_mcp_profile_cleanup.js';
+import * as customContextBudget from '../migrations/20261117_100000_custom_context_budget.js';
 
 export interface MigrationModule {
   up(db: Db): void;
@@ -287,4 +288,5 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: '20261114_200000_custom_ai_mcp_approval_safety.ts', module: customAiMcpApprovalSafety },
   { filename: '20261115_120001_support_output_controls.ts', module: supportOutputControls },
   { filename: '20261116_100000_custom_ai_mcp_profile_cleanup.ts', module: customAiMcpProfileCleanup },
+  { filename: '20261117_100000_custom_context_budget.ts', module: customContextBudget },
 ];

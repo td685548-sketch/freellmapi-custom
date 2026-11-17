@@ -230,6 +230,7 @@ describe('migration round trip', () => {
         '20261114_200000_custom_ai_mcp_approval_safety.ts',
         '20261115_120001_support_output_controls.ts',
         '20261116_100000_custom_ai_mcp_profile_cleanup.ts',
+        '20261117_100000_custom_context_budget.ts',
       ]);
     } finally {
       db.close();
