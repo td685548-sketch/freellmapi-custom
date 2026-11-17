@@ -59,7 +59,7 @@ Nhà phát triển ứng dụng và quản trị viên cần biết vì sao mode
 1. **Given** key bật chính sách, **When** một yêu cầu hoàn tất, **Then** phản hồi kèm thông tin phân bổ (ngân sách hiệu lực, token theo từng phần, số lượt lịch sử và số đoạn tri thức đã dùng/bị bỏ) mà không làm thay đổi thân phản hồi theo giao thức chuẩn.
 2. **Given** quản trị viên có quyền xem hội thoại của key, **When** mở xem trước một hội thoại, **Then** thấy danh sách các phần sẽ được gửi, thứ tự, số token từng phần và những gì bị bỏ, mà không phát sinh lời gọi tới nhà cung cấp.
 3. **Given** nhật ký yêu cầu, **When** xem chi tiết một yêu cầu, **Then** thấy số liệu phân bổ nhưng không thấy nội dung tin nhắn trừ khi chế độ lưu nội dung hiện có đã được bật.
-4. **Given** một quản trị viên không có quyền xem hội thoại của key, **When** gọi xem trước, **Then** bị từ chối.
+4. **Given** một thành viên chỉ có quyền xem client key (không có quyền sửa), **When** gọi xem trước, **Then** bị từ chối vì xem trước làm lộ nội dung hội thoại.
 
 ---
 
@@ -183,7 +183,7 @@ Một số ứng dụng gửi cả lịch sử trong mỗi yêu cầu (giao th�
 - **FR-030**: Nhật ký yêu cầu MUST lưu số liệu phân bổ, không lưu nội dung ngoài phạm vi chế độ lưu nội dung hiện có.
 - **FR-031**: Dashboard MUST cho phép xem trước ngữ cảnh lượt kế tiếp của một hội thoại đã lưu mà không gọi nhà cung cấp.
 - **FR-032**: Dashboard MUST hiển thị thống kê theo key: token đầu vào trung bình mỗi yêu cầu, tỷ lệ yêu cầu bị thu gọn, token tiết kiệm so với gửi toàn bộ lịch sử, sai số ước lượng so với số nhà cung cấp báo về.
-- **FR-033**: Thay đổi chính sách ngữ cảnh và thao tác xem trước MUST yêu cầu quyền riêng trong hệ thống phân quyền hiện có và MUST được ghi vào audit log (thay đổi cấu hình).
+- **FR-033**: Chính sách ngữ cảnh và xem trước MUST dùng nhóm quyền client key hiện có: xem chính sách và thống kê cần quyền xem client key; sửa chính sách và xem trước (vì lộ nội dung hội thoại) cần quyền sửa client key, giống quy tắc đọc tin nhắn đã lưu hiện nay; mặc định cấp hệ thống cần quyền sửa cài đặt. Mọi thay đổi cấu hình MUST được ghi vào audit log.
 
 ### Key Entities
 
