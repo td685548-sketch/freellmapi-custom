@@ -1,7 +1,9 @@
 import type { Request, Response } from 'express';
 import type { ConversationSettings } from '@freellmapi/shared/conversations.js';
-import { appendTurn, loadHistory, normalizeConversationId } from '../services/profile-conversations.js';
+import { appendTurn, loadHistory, loadHistoryCandidates, normalizeConversationId } from '../services/profile-conversations.js';
 import { scheduleSummary } from './conversation-summary.js';
+import { historyCandidateLimits, registerHistory, registerSummary } from './context-budget/gate.js';
+import { getRegistry } from './context-budget/registry.js';
 
 // Server-side conversations for client keys. The web app sends `X-Conversation-Id` with only the new
 // message(s); the stored earlier turns are put in front of them, and once the reply has completed the
@@ -75,7 +77,10 @@ export function applyConversation(req: Request, res: Response, profileId: number
   }
   if (turn.length === 0 || turn[turn.length - 1]!.role !== 'user') return fail(res, 400, 'conversation_unsupported_message', 'With X-Conversation-Id, the last message must be the new user message.');
 
-  const loaded = loadHistory(profileId, key, endUser, settings);
+  const registry = getRegistry(req);
+  const loaded = registry
+    ? loadHistoryCandidates(profileId, key, endUser, settings, historyCandidateLimits(registry.policy, settings))
+    : loadHistory(profileId, key, endUser, settings);
   if (!loaded.ok) return fail(res, 403, 'conversation_end_user_mismatch', 'This conversation belongs to another end user.');
 
   // The running summary of turns that no longer fit goes after the web app's own instructions.
@@ -85,7 +90,19 @@ export function applyConversation(req: Request, res: Response, profileId: number
     if (Array.isArray(body!.system)) (body!.system as unknown[]).push({ type: 'text', text: summaryText });
     else body!.system = typeof body!.system === 'string' && body!.system ? `${body!.system}\n\n${summaryText}` : summaryText;
   }
-  body!.messages = [...messages.slice(0, lead), ...summaryMessages, ...loaded.history, ...fresh];
+
+  let historyMessages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  if (registry) {
+    const candidates = loaded.history as Array<{ id: number; role: 'user' | 'assistant'; content: string }>;
+    if (summaryText) registerSummary(req, summaryText);
+    registerHistory(req, candidates);
+    registry.conversation = { id: loaded.conversationId ?? 0, key, endUser };
+    historyMessages = candidates.map(({ role, content }) => ({ role, content }));
+  } else {
+    historyMessages = loaded.history;
+  }
+
+  body!.messages = [...messages.slice(0, lead), ...summaryMessages, ...historyMessages, ...fresh];
   res.setHeader('X-Conversation-Id', key);
   res.setHeader('X-Conversation-History', String(loaded.history.length));
   if (loaded.summary) res.setHeader('X-Conversation-Summary', '1');
