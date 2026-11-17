@@ -4,6 +4,7 @@ import type {
   SupportLiveTestOriginCheckResponse,
   SupportLiveTestPendingActionsListResponse,
   SupportLiveTestPersonaSessionResponse,
+  SupportLiveTestPlaybookResponse,
 } from '@freellmapi/shared/support-service-desk-live-test.js';
 import { requireAuth } from '../../middleware/requireAuth.js';
 import type { SessionUser } from '../../services/auth.js';
@@ -22,6 +23,12 @@ import { xSupportEnterprisePublicRouter } from './support-enterprise-router.js';
 import { xSupportGovernancePublicRouter } from './support-governance-router.js';
 import { dispatchActionReview } from './support-runtime-router.js';
 import { listSupportPendingActions } from './support-workflows.js';
+import {
+  getSupportLiveTestPlaybook,
+  runSupportLiveTestPlaybook,
+  saveSupportLiveTestPlaybook,
+  SupportLiveTestPlaybookError,
+} from './support-live-test-playbook.js';
 import {
   getLiveTestSandboxStats,
   isLiveTestConversation,
@@ -467,6 +474,90 @@ xSupportServiceDeskLiveTestRouter.post(
   '/tenants/:id/service-desk/live-test/pending-actions/:actionId/reject',
   async (req: Request, res: Response): Promise<void> => {
     await handleLiveTestActionReview(req, res, 'rejected');
+  },
+);
+
+xSupportServiceDeskLiveTestRouter.get(
+  '/tenants/:id/service-desk/live-test/playbook',
+  (req: Request, res: Response): void => {
+    const tenant = resolveNumericConsoleTenant(req, res);
+    if (!tenant) return;
+    const response: SupportLiveTestPlaybookResponse = {
+      ok: true,
+      playbook: getSupportLiveTestPlaybook(tenant.id),
+    };
+    res.json(response);
+  },
+);
+
+xSupportServiceDeskLiveTestRouter.put(
+  '/tenants/:id/service-desk/live-test/playbook',
+  (req: Request, res: Response): void => {
+    const tenant = resolveNumericConsoleTenant(req, res);
+    if (!tenant) return;
+    if (!isPlainObject(req.body)) {
+      res.status(400).json({ error: { code: 'invalid_input', message: 'Request body must be a JSON object.' } });
+      return;
+    }
+    const unknownKey = assertAllowedKeys(req.body, ['cases']);
+    if (unknownKey) {
+      res.status(400).json({ error: { code: 'invalid_input', message: `Unsupported field "${unknownKey}".` } });
+      return;
+    }
+    try {
+      const playbook = saveSupportLiveTestPlaybook(tenant.id, req.body.cases);
+      const response: SupportLiveTestPlaybookResponse = { ok: true, playbook };
+      res.json(response);
+    } catch (err) {
+      if (err instanceof SupportLiveTestPlaybookError) {
+        res.status(err.status).json({ error: { code: err.code, message: err.message } });
+        return;
+      }
+      res.status(500).json({
+        error: {
+          code: 'playbook_save_failed',
+          message: err instanceof Error ? err.message : 'Failed to save playbook.',
+        },
+      });
+    }
+  },
+);
+
+xSupportServiceDeskLiveTestRouter.post(
+  '/tenants/:id/service-desk/live-test/playbook/run',
+  async (req: Request, res: Response): Promise<void> => {
+    const tenant = resolveNumericConsoleTenant(req, res);
+    if (!tenant) return;
+
+    let overrideCases: unknown;
+    if (req.body !== undefined) {
+      if (!isPlainObject(req.body)) {
+        res.status(400).json({ error: { code: 'invalid_input', message: 'Request body must be a JSON object.' } });
+        return;
+      }
+      const unknownKey = assertAllowedKeys(req.body, ['cases']);
+      if (unknownKey) {
+        res.status(400).json({ error: { code: 'invalid_input', message: `Unsupported field "${unknownKey}".` } });
+        return;
+      }
+      overrideCases = req.body.cases;
+    }
+
+    try {
+      const result = await runSupportLiveTestPlaybook(tenant, overrideCases);
+      res.json(result);
+    } catch (err) {
+      if (err instanceof SupportLiveTestPlaybookError) {
+        res.status(err.status).json({ error: { code: err.code, message: err.message } });
+        return;
+      }
+      res.status(500).json({
+        error: {
+          code: 'playbook_run_failed',
+          message: err instanceof Error ? err.message : 'Failed to run regression playbook.',
+        },
+      });
+    }
   },
 );
 

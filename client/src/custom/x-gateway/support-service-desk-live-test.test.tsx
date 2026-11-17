@@ -10,6 +10,8 @@ import type {
   SupportLiveTestOriginCheckResponse,
   SupportLiveTestPendingActionItem,
   SupportLiveTestPersonaSessionResponse,
+  SupportLiveTestPlaybook,
+  SupportLiveTestPlaybookCase,
 } from '@freellmapi/shared/support-service-desk-live-test.js'
 import { getSupportRuntimeWidgetScript } from '../../../../server/src/custom/x-gateway/support-runtime-widget.ts'
 
@@ -75,6 +77,7 @@ let tenants: Array<{
 let widgetConfigs: Record<number, SupportDeskWidgetConfig>
 let conversationsByTenant: Record<number, MockConversation[]>
 let pendingActionsByTenant: Record<number, SupportLiveTestPendingActionItem[]>
+let playbooksByTenant: Record<number, SupportLiveTestPlaybook>
 let recordedReplyBodies: Array<{ tenantId: number; convId: string; body: Record<string, unknown> }>
 let recordedCsatSubmissions: Array<Record<string, unknown>>
 let recordedLiveHeaders: Array<{ url: string; auth: string | null; simOrigin: string | null }>
@@ -190,6 +193,10 @@ beforeEach(() => {
 
   conversationsByTenant = { 1: [], 2: [] }
   pendingActionsByTenant = { 1: [], 2: [] }
+  playbooksByTenant = {
+    1: { version: 1, updatedAt: '2026-11-18T00:00:00.000Z', cases: [] },
+    2: { version: 1, updatedAt: '2026-11-18T00:00:00.000Z', cases: [] },
+  }
   recordedReplyBodies = []
   recordedCsatSubmissions = []
   recordedLiveHeaders = []
@@ -373,6 +380,60 @@ beforeEach(() => {
         (a) => a.status === 'pending' && (!filterConvId || a.conversationId === filterConvId),
       )
       return { ok: true, actions }
+    }
+
+    if (path.includes('/service-desk/live-test/playbook/run') && method === 'POST') {
+      const inputCases = Array.isArray(body.cases)
+        ? (body.cases as SupportLiveTestPlaybookCase[])
+        : playbooksByTenant[tenantId].cases
+      const results = inputCases.map((c) => {
+        if (c.expectation === 'guest_denied') {
+          return {
+            caseId: c.id,
+            title: c.title,
+            passed: !tenant.allowGuest,
+            status: 403,
+            durationMs: 5,
+            actualOutcome: 'guest_denied' as const,
+            citationsCount: 0,
+            toolsCalled: [],
+            errorCode: 'guest_not_allowed',
+          }
+        }
+        return {
+          caseId: c.id,
+          title: c.title,
+          passed: c.expectation !== 'guardrail_blocked',
+          status: 200,
+          durationMs: 12,
+          actualOutcome: c.expectation === 'cited' ? ('cited' as const) : ('any_reply' as const),
+          replyPreview: 'Mock runtime playbook reply.',
+          citationsCount: c.expectation === 'cited' ? 1 : 0,
+          toolsCalled: c.expectation === 'tool_called' ? ['lookup_order'] : [],
+        }
+      })
+      const passedCount = results.filter((r) => r.passed).length
+      return {
+        ok: true,
+        tenantId,
+        ranAt: '2026-11-18T00:20:00.000Z',
+        passedCount,
+        failedCount: results.length - passedCount,
+        results,
+      }
+    }
+
+    if (path.includes('/service-desk/live-test/playbook')) {
+      if (method === 'PUT') {
+        const next: SupportLiveTestPlaybook = {
+          version: playbooksByTenant[tenantId].version + 1,
+          updatedAt: '2026-11-18T00:18:00.000Z',
+          cases: Array.isArray(body.cases) ? (body.cases as SupportLiveTestPlaybookCase[]) : [],
+        }
+        playbooksByTenant[tenantId] = next
+        return { ok: true, playbook: next }
+      }
+      return { ok: true, playbook: playbooksByTenant[tenantId] }
     }
 
     if (path.endsWith('/conversations')) {
@@ -881,6 +942,7 @@ describe('Service Desk Studio Live End-User Widget Testing UI (Spec 023)', () =>
     expect(byId('live-test-diagnostics-panel').textContent).toContain('Chẩn đoán vận hành')
     expect(byId('live-test-sandbox-panel').textContent).toContain('Dữ liệu thử nghiệm')
     expect(byId('live-test-cleanup-btn').textContent).toContain('Xóa dữ liệu test')
+    expect(byId('live-test-playbook-panel').textContent).toContain('Bộ kiểm thử hồi quy')
   })
 
   it('tracks live-test sandbox counts and cleans up tenant sandbox data cleanly', async () => {
@@ -936,5 +998,28 @@ describe('Service Desk Studio Live End-User Widget Testing UI (Spec 023)', () =>
       )
     })
     expect(container.querySelector('[data-testid="live-test-pending-action-act_live_1_1"]')).toBeNull()
+  })
+
+  it('configures, saves, and runs per-tenant regression playbooks with pass/fail summary', async () => {
+    await mountStudio()
+    await click(byId('widget-mode-live'))
+    await waitFor(() => expect(byId('live-test-playbook-panel')).toBeTruthy())
+    expect(byId<HTMLButtonElement>('live-test-playbook-run-btn').disabled).toBe(true)
+
+    await click(byId('live-test-playbook-toggle'))
+    await waitFor(() => expect(byId('live-test-playbook-starter-btn')).toBeTruthy())
+
+    await click(byId('live-test-playbook-starter-btn'))
+    await waitFor(() => expect(byId('live-test-playbook-case-0')).toBeTruthy())
+    expect(byId<HTMLButtonElement>('live-test-playbook-run-btn').disabled).toBe(false)
+
+    await click(byId('live-test-playbook-save-btn'))
+    await waitFor(() => expect(byId('live-test-playbook-saved')).toBeTruthy())
+
+    await click(byId('live-test-playbook-run-btn'))
+    await waitFor(() => expect(byId('live-test-playbook-results')).toBeTruthy())
+    expect(byId('live-test-playbook-results').textContent).toContain('Passed: 3')
+    expect(byId('live-test-playbook-results').textContent).toContain('Failed: 0')
+    expect(byId('live-test-playbook-result-pbk_guest_access').textContent).toContain('PASS')
   })
 })
