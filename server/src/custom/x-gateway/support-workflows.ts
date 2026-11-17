@@ -685,6 +685,84 @@ export function reviewSupportPendingAction(
   return updated;
 }
 
+export function linkPendingActionsToConversation(
+  tenantId: string,
+  actionIds: readonly string[],
+  conversationId: string,
+): void {
+  const cleanConvId = conversationId.trim();
+  if (!cleanConvId || actionIds.length === 0) return;
+
+  const tid = String(tenantId);
+  const idSet = new Set(actionIds);
+  const convList = readStore<SupportConversation[]>(CONVERSATIONS_KEY)[tid];
+  const convIsLiveTest =
+    isInLiveTestContext() ||
+    (Array.isArray(convList) && convList.some((c) => c.id === cleanConvId && c.isLiveTest === true));
+
+  const store = readStore<SupportPendingAction[]>(ACTIONS_KEY);
+  const list = Array.isArray(store[tid]) ? store[tid] : [];
+  let changed = false;
+
+  const updated = list.map((act) => {
+    if (!idSet.has(act.id)) return act;
+    const nextConvId = act.conversationId || cleanConvId;
+    const nextLiveTest = act.isLiveTest === true || convIsLiveTest ? true : undefined;
+    if (nextConvId === act.conversationId && nextLiveTest === act.isLiveTest) {
+      return act;
+    }
+    changed = true;
+    return {
+      ...act,
+      conversationId: nextConvId,
+      ...(nextLiveTest ? { isLiveTest: true } : {}),
+    };
+  });
+
+  if (changed) {
+    store[tid] = updated;
+    writeStore(ACTIONS_KEY, store);
+  }
+}
+
+export function appendSupportActionOutcomeMessage(
+  tenantId: string,
+  conversationId: string,
+  input: { reviewer: string; content: string },
+): boolean {
+  const cleanConvId = conversationId.trim();
+  const cleanContent = input.content.trim();
+  if (!cleanConvId || !cleanContent) return false;
+
+  const tid = String(tenantId);
+  const store = readStore<SupportConversation[]>(CONVERSATIONS_KEY);
+  const list = Array.isArray(store[tid]) ? store[tid] : [];
+  const idx = list.findIndex((c) => c.id === cleanConvId);
+  if (idx < 0) return false;
+
+  const now = new Date().toISOString();
+  const reviewer = input.reviewer.trim() || 'Support Reviewer';
+  const existing = list[idx];
+  const msg: SupportConversationMessage = {
+    id: `msg_${randomUUID()}`,
+    senderType: 'human_agent',
+    senderId: reviewer,
+    senderName: reviewer,
+    senderRole: 'staff',
+    content: cleanContent,
+    createdAt: now,
+  };
+
+  list[idx] = {
+    ...existing,
+    messages: [...existing.messages, msg],
+    updatedAt: now,
+  };
+  store[tid] = list;
+  writeStore(CONVERSATIONS_KEY, store);
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // Analytics Summary
 // ---------------------------------------------------------------------------

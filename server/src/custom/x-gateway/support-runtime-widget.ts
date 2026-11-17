@@ -2000,6 +2000,11 @@ export function getSupportRuntimeWidgetScript(): string {
         refreshProfile: function() {
           return fetchTenantProfile();
         },
+        syncConversation: function() {
+          if (conversationId && !destroyed && isOpen) {
+            doPoll();
+          }
+        },
         getConversationId: function() {
           return conversationId;
         },
