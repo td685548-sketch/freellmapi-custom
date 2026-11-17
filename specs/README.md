@@ -37,6 +37,7 @@ Cách xác định trạng thái: đếm checkbox trong `tasks.md`, rồi đối
 | 025-live-test-cleanup | Tách số liệu Sandbox & dọn dữ liệu thử nghiệm trực tiếp theo Tenant | 6/6 | `support-live-test-sandbox.ts`, `x-support-live-test-sandbox.test.ts`, `SupportWidgetLiveTest.tsx` | |
 | 026-rag-office-markdown | Tự động chuyển đổi tài liệu Word & Excel sang Markdown (.md) khi tải lên RAG | 5/5 | `document-markdown.ts`, `knowledge-document-upload.ts`, `KnowledgeCard.tsx`, `SupportKnowledgeStudio.tsx`, `SupportEnterprise.tsx` | |
 | 027-live-test-inline-approvals | Duyệt hành động chờ trực tiếp trong Live Test & đồng bộ Widget | 6/6 | `support-service-desk-live-test-router.ts`, `SupportWidgetLiveTest.tsx`, `x-support-live-test-approvals.test.ts` | |
+| 028-tenant-regression-playbooks | Bộ kiểm thử hồi quy theo Tenant trong Service Desk Studio | 6/6 | `support-live-test-playbook.ts`, `x-support-live-test-playbook.test.ts`, `SupportWidgetLiveTest.tsx` | |
 
 ## 2. Việc vận hành (không cần spec)
 
