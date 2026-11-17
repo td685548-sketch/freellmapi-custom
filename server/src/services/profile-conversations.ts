@@ -61,16 +61,29 @@ function deleteConversationRows(ids: number[]): void {
   ]);
 }
 
+export interface HistoryCandidateMessage {
+  id: number;
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 export type HistoryResult =
   | { ok: true; conversationId: number | null; history: Array<{ role: 'user' | 'assistant'; content: string }>; summary: string | null }
   | { ok: false; reason: 'end_user_mismatch' };
 
-/**
- * The earlier turns to put in front of the new messages: the newest ones within `maxMessages` and
- * `maxChars`, starting with a user turn. A conversation started for an end user can only be continued
- * for that same end user; one started without an end user can be continued by any request of the key.
- */
-export function loadHistory(profileId: number, key: string, endUser: string | null, s: ConversationSettings, now = Date.now()): HistoryResult {
+export type HistoryCandidatesResult =
+  | { ok: true; conversationId: number | null; history: HistoryCandidateMessage[]; summary: string | null }
+  | { ok: false; reason: 'end_user_mismatch' };
+
+function loadHistoryRows(
+  profileId: number,
+  key: string,
+  endUser: string | null,
+  s: ConversationSettings,
+  maxMessages: number,
+  maxChars: number,
+  now: number,
+): HistoryCandidatesResult {
   const db = getDb();
   const row = db.prepare('SELECT id, end_user AS endUser, updated_at AS updatedAt, summary FROM custom_conversations WHERE profile_id = ? AND conv_key = ?')
     .get(profileId, key) as (ConvRow & { summary: string | null }) | undefined;
@@ -81,18 +94,49 @@ export function loadHistory(profileId: number, key: string, endUser: string | nu
   }
   if (row.endUser !== null && row.endUser !== endUser) return { ok: false, reason: 'end_user_mismatch' };
 
-  const newest = db.prepare('SELECT role, content FROM custom_conversation_messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?')
-    .all(row.id, s.maxMessages) as Array<{ role: 'user' | 'assistant'; content: string }>;
-  const kept: typeof newest = [];
+  const newest = db.prepare('SELECT id, role, content FROM custom_conversation_messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?')
+    .all(row.id, maxMessages) as HistoryCandidateMessage[];
+  const kept: HistoryCandidateMessage[] = [];
   let chars = 0;
   for (const m of newest) {
-    if (chars + m.content.length > s.maxChars) break;
+    if (chars + m.content.length > maxChars) break;
     chars += m.content.length;
     kept.push(m);
   }
   kept.reverse();
   while (kept.length > 0 && kept[0]!.role !== 'user') kept.shift();
   return { ok: true, conversationId: row.id, history: kept, summary: s.summarize && row.summary ? row.summary : null };
+}
+
+/**
+ * The earlier turns to put in front of the new messages: the newest ones within `maxMessages` and
+ * `maxChars`, starting with a user turn. A conversation started for an end user can only be continued
+ * for that same end user; one started without an end user can be continued by any request of the key.
+ */
+export function loadHistory(profileId: number, key: string, endUser: string | null, s: ConversationSettings, now = Date.now()): HistoryResult {
+  const res = loadHistoryRows(profileId, key, endUser, s, s.maxMessages, s.maxChars, now);
+  if (!res.ok) return res;
+  return {
+    ok: true,
+    conversationId: res.conversationId,
+    history: res.history.map(({ role, content }) => ({ role, content })),
+    summary: res.summary,
+  };
+}
+
+/**
+ * Loads candidate history messages (each carrying its DB `id`) up to caller-supplied
+ * message/character ceilings so token-budgeted context assembly can fit them at dispatch.
+ */
+export function loadHistoryCandidates(
+  profileId: number,
+  key: string,
+  endUser: string | null,
+  s: ConversationSettings,
+  limits: { maxMessages: number; maxChars: number },
+  now = Date.now(),
+): HistoryCandidatesResult {
+  return loadHistoryRows(profileId, key, endUser, s, limits.maxMessages, limits.maxChars, now);
 }
 
 /** Most characters of earlier turns folded into the summary in one call. */
