@@ -429,97 +429,94 @@ async function fetchGeminiSession(
   try {
     let inflight = forceRefresh ? undefined : pendingSessionFetches.get(cacheKey);
     if (!inflight) {
-      let fetchPromise!: Promise<{ session: GeminiWebSession; cookieHeader: string }>;
-      fetchPromise = (async (): Promise<{ session: GeminiWebSession; cookieHeader: string }> => {
+      const fetchPromise = (async (): Promise<{ session: GeminiWebSession; cookieHeader: string }> => {
         let activeCookie = initialCookie;
-        try {
-          for (let attempt = 0; attempt < 2; attempt++) {
-            const { signal, cleanup } = createRequestSignal(BOOTSTRAP_TIMEOUT_MS);
-            let shouldRotateAndRetry = false;
-            let pendingError: GeminiWebChatError | null = null;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const { signal, cleanup } = createRequestSignal(BOOTSTRAP_TIMEOUT_MS);
+          let shouldRotateAndRetry = false;
+          let pendingError: GeminiWebChatError | null = null;
 
-            try {
-              const res = await proxyFetch(
-                `${origin}/app`,
-                {
-                  method: 'GET',
-                  headers: {
-                    Cookie: activeCookie,
-                    'User-Agent': BROWSER_USER_AGENT,
-                    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                  },
-                  signal,
+          try {
+            const res = await proxyFetch(
+              `${origin}/app`,
+              {
+                method: 'GET',
+                headers: {
+                  Cookie: activeCookie,
+                  'User-Agent': BROWSER_USER_AGENT,
+                  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                  'Accept-Language': 'en-US,en;q=0.9',
                 },
-                platform,
-                'chat',
+                signal,
+              },
+              platform,
+              'chat',
+            );
+
+            const { nextHeader, changed } = mergeResponseCookies(activeCookie, res);
+            if (changed) {
+              recordRotatedCookie(activeCookie, nextHeader, origin, opts?.onCredentialUpdate);
+              activeCookie = nextHeader;
+            }
+
+            if (res.status === 401 || res.status === 403 || res.url.includes('accounts.google.com')) {
+              await res.body?.cancel().catch(() => {});
+              shouldRotateAndRetry = attempt === 0;
+              pendingError = new GeminiWebChatError(
+                'Gemini Web session is not signed in; refresh your __Secure-1PSID / __Secure-1PSIDTS cookies.',
+                401,
               );
-
-              const { nextHeader, changed } = mergeResponseCookies(activeCookie, res);
-              if (changed) {
-                recordRotatedCookie(activeCookie, nextHeader, origin, opts?.onCredentialUpdate);
-                activeCookie = nextHeader;
-              }
-
-              if (res.status === 401 || res.status === 403 || res.url.includes('accounts.google.com')) {
-                await res.body?.cancel().catch(() => {});
+            } else if (!res.ok) {
+              const errText = await res.text().catch(() => '');
+              throw new GeminiWebChatError(
+                `Gemini Web session bootstrap failed (HTTP ${res.status}): ${errText.slice(0, 200) || res.statusText}`,
+                res.status,
+              );
+            } else {
+              const html = await res.text();
+              const tokens = extractGeminiSessionTokens(html);
+              if (!tokens) {
                 shouldRotateAndRetry = attempt === 0;
                 pendingError = new GeminiWebChatError(
-                  'Gemini Web session is not signed in; refresh your __Secure-1PSID / __Secure-1PSIDTS cookies.',
+                  'Gemini Web session token (SNlM0e) not found; ensure your __Secure-1PSID / __Secure-1PSIDTS cookies are valid and signed in.',
                   401,
                 );
-              } else if (!res.ok) {
-                const errText = await res.text().catch(() => '');
-                throw new GeminiWebChatError(
-                  `Gemini Web session bootstrap failed (HTTP ${res.status}): ${errText.slice(0, 200) || res.statusText}`,
-                  res.status,
-                );
               } else {
-                const html = await res.text();
-                const tokens = extractGeminiSessionTokens(html);
-                if (!tokens) {
-                  shouldRotateAndRetry = attempt === 0;
-                  pendingError = new GeminiWebChatError(
-                    'Gemini Web session token (SNlM0e) not found; ensure your __Secure-1PSID / __Secure-1PSIDTS cookies are valid and signed in.',
-                    401,
-                  );
-                } else {
-                  const session: GeminiWebSession = {
-                    ...tokens,
-                    expiresAt: Date.now() + SESSION_CACHE_TTL_MS,
-                  };
-                  setCachedSession(`${origin}::${activeCookie}`, session);
-                  return { session, cookieHeader: activeCookie };
-                }
-              }
-            } finally {
-              cleanup();
-            }
-
-            if (shouldRotateAndRetry) {
-              sessionCache.delete(`${origin}::${activeCookie}`);
-              const rotated = await rotateGeminiCookies(activeCookie, platform, undefined, { force: true });
-              if (rotated.rotated) {
-                recordRotatedCookie(activeCookie, rotated.cookieHeader, origin, opts?.onCredentialUpdate);
-                activeCookie = rotated.cookieHeader;
-                continue;
+                const session: GeminiWebSession = {
+                  ...tokens,
+                  expiresAt: Date.now() + SESSION_CACHE_TTL_MS,
+                };
+                setCachedSession(`${origin}::${activeCookie}`, session);
+                return { session, cookieHeader: activeCookie };
               }
             }
-
-            throw pendingError!;
+          } finally {
+            cleanup();
           }
 
-          throw new GeminiWebChatError(
-            'Gemini Web session token (SNlM0e) not found; ensure your __Secure-1PSID / __Secure-1PSIDTS cookies are valid and signed in.',
-            401,
-          );
-        } finally {
-          if (pendingSessionFetches.get(cacheKey) === fetchPromise) {
-            pendingSessionFetches.delete(cacheKey);
+          if (shouldRotateAndRetry) {
+            sessionCache.delete(`${origin}::${activeCookie}`);
+            const rotated = await rotateGeminiCookies(activeCookie, platform, undefined, { force: true });
+            if (rotated.rotated) {
+              recordRotatedCookie(activeCookie, rotated.cookieHeader, origin, opts?.onCredentialUpdate);
+              activeCookie = rotated.cookieHeader;
+              continue;
+            }
           }
+
+          throw pendingError!;
         }
+
+        throw new GeminiWebChatError(
+          'Gemini Web session token (SNlM0e) not found; ensure your __Secure-1PSID / __Secure-1PSIDTS cookies are valid and signed in.',
+          401,
+        );
       })();
-      fetchPromise.catch(() => {});
+      fetchPromise.finally(() => {
+        if (pendingSessionFetches.get(cacheKey) === fetchPromise) {
+          pendingSessionFetches.delete(cacheKey);
+        }
+      }).catch(() => {});
       if (!forceRefresh) {
         pendingSessionFetches.set(cacheKey, fetchPromise);
       }
