@@ -10,6 +10,8 @@ export interface ClientContext {
   /** The preset a decision model picked for this request (#1354), read by the
    *  router while the 'decision' strategy is active. Unset = Balanced. */
   routingStrategy?: PresetStrategy;
+  /** Per-key smart routing mode (`eco`/`balanced`/`max`), when set on a personal key or AI Hub chat. */
+  keyRoutingPreset?: PresetStrategy;
   /** The account behind a personal `sk-flm-…` key, set by the per-user gate;
    *  unset for the unified key, client profiles and dashboard sessions. */
   userId?: number;
@@ -70,6 +72,12 @@ export function getClientContext(): ClientContext {
 export function setRequestRoutingStrategy(strategy: PresetStrategy | undefined): void {
   const store = storage.getStore();
   if (store) store.routingStrategy = strategy;
+}
+
+/** Record a personal key's or Customer AI Hub session's routing preset (`eco` -> `fastest`, `balanced`, `max` -> `smartest`). */
+export function setRequestKeyRoutingPreset(preset: PresetStrategy | undefined): void {
+  const store = storage.getStore();
+  if (store) store.keyRoutingPreset = preset;
 }
 
 /** Attribute this request to a personal-key account (per-user analytics). Returns

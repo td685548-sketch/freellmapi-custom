@@ -124,5 +124,17 @@ export function aiPlatformPermission(method: string, path: string): Permission {
   if (sub === '/approvals' && read) return 'approve_ai_actions';
   if (/^\/approvals\/\d+\/(?:approve|reject)$/.test(sub) && upper === 'POST') return 'approve_ai_actions';
 
+  // Customer AI Hub (Admin Assistants Studio & Fleet Anomaly Radar)
+  if (sub === '/customer-assistants') {
+    if (read) return 'view_prompts';
+    if (upper === 'POST') return 'edit_prompts';
+    return 'manage_ai_platform';
+  }
+  if (/^\/customer-assistants\/\d+$/.test(sub) && (upper === 'PATCH' || upper === 'DELETE')) {
+    return 'edit_prompts';
+  }
+  if (sub === '/anomaly-radar' && read) return 'view_ai_platform';
+  if (/^\/anomaly-radar\/users\/\d+\/apply-eco$/.test(sub) && upper === 'POST') return 'edit_ai_flags';
+
   return 'manage_ai_platform';
 }

@@ -18,6 +18,7 @@ import { outputGuardAdminRouter } from './output-guard/router.js';
 import { promptCacheAdminRouter } from './prompt-cache/router.js';
 import { promptsAdminRouter } from './prompts/router.js';
 import { retrievalAdminRouter } from './retrieval/router.js';
+import { customerAiAdminRouter } from '../customer-ai/router.js';
 
 const RETENTION_KEY = 'ai_platform_retention_v1';
 
@@ -197,3 +198,4 @@ aiPlatformRouter.use(retrievalAdminRouter);
 aiPlatformRouter.use(promptCacheAdminRouter);
 aiPlatformRouter.use(promptsAdminRouter);
 aiPlatformRouter.use(orchestratorAdminRouter);
+aiPlatformRouter.use(customerAiAdminRouter);

@@ -21,6 +21,10 @@ export interface UserApiKey {
   revoked: boolean
   createdAt: string
   lastUsedAt: string | null
+  routingMode?: 'default' | 'eco' | 'balanced' | 'max'
+  assistantId?: number | null
+  assistantSlug?: string | null
+  assistantName?: string | null
 }
 
 export interface AdminUser {

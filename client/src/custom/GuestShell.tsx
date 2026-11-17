@@ -6,6 +6,7 @@ import type { GuestPermission, GuestTrialInfo } from '../../../shared/guest-acce
 import { GuestModelsPage } from './GuestModelsPage'
 import { UsageRankingPage } from './UsageRankingPage'
 import { GuestTrialPage } from './GuestTrialPage'
+import { CustomerAiHubPage } from './customer-ai/CustomerAiHubPage'
 import { GUEST_PROMPT_DELAY_MS, GUEST_PROMPT_EVENT, GUEST_PROMPT_SEEN_KEY } from './guest-prompt'
 import { useCustomT } from './i18n/use-custom-t'
 
@@ -64,6 +65,7 @@ export function GuestShell({ permissions, trial, onSignIn, onRequest }: { permis
   const pages = [
     ...(permissions.includes('view_models') ? [{ to: '/models/chat', label: 'Models' }] : []),
     ...(permissions.includes('view_usage_profiles') || permissions.includes('view_usage_accounts') ? [{ to: '/usage', label: 'Usage' }] : []),
+    ...(permissions.includes('view_assistants') ? [{ to: '/assistants', label: 'AI Hub' }] : []),
     ...(trial ? [{ to: '/try', label: 'Try the chat' }] : []),
   ]
   const home = pages[0]?.to ?? '/models/chat'
@@ -90,6 +92,7 @@ export function GuestShell({ permissions, trial, onSignIn, onRequest }: { permis
           {permissions.includes('view_models') && <Route path="/models/chat" element={<GuestModelsPage />} />}
           {permissions.includes('view_models') && <Route path="/models/*" element={<AskAndReturn to="/models/chat" />} />}
           {pages.some(p => p.to === '/usage') && <Route path="/usage" element={<UsageRankingPage />} />}
+          {permissions.includes('view_assistants') && <Route path="/assistants" element={<CustomerAiHubPage guestMode />} />}
           {trial && <Route path="/try" element={<GuestTrialPage trial={trial} />} />}
           <Route path="*" element={<Navigate to={home} replace />} />
         </Routes>

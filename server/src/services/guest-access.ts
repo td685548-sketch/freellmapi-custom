@@ -23,6 +23,7 @@ const GUEST_ROUTES: Array<[RegExp, GuestPermission]> = [
   [/^\/api\/usage\/(?:daily\/(?:profiles|end-users)|export\/(?:profiles|end-users)\.csv)$/, 'view_usage_profiles'],
   [/^\/api\/usage\/accounts$/, 'view_usage_accounts'],
   [/^\/api\/usage\/(?:daily\/accounts|export\/accounts\.csv)$/, 'view_usage_accounts'],
+  [/^\/api\/user\/ai-hub\/catalog$/, 'view_assistants'],
 ];
 
 /** Fields a guest never receives: which stored key or custom endpoint serves a model. */
