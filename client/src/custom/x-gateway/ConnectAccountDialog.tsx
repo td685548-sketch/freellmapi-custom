@@ -224,7 +224,49 @@ export function extractOAuthCredential(raw: string): string {
   return trimmed
 }
 
-export function extractCookieCredential(raw: string): string {
+function sanitizeCookiePart(raw: string): string {
+  return raw.replace(/[\r\n\0]+/g, '')
+}
+
+function isGoogleCookieDomain(domain: unknown): boolean {
+  if (domain === undefined || domain === null) return true
+  if (typeof domain !== 'string') return false
+  const host = domain.trim().toLowerCase().replace(/^\.+/, '').replace(/\.+$/, '')
+  if (!host) return true
+  return host === 'google.com' || host.endsWith('.google.com')
+}
+
+function isExpiredCookie(cookie: Record<string, unknown>, nowMs: number): boolean {
+  const rawExpiry = cookie.expirationDate ?? cookie.expires
+  if (rawExpiry === undefined || rawExpiry === null || rawExpiry === '') return false
+  let expiryMs: number | undefined
+  if (typeof rawExpiry === 'number') {
+    if (!Number.isFinite(rawExpiry) || rawExpiry <= 0) return false
+    expiryMs = rawExpiry > 1e12 ? rawExpiry : rawExpiry * 1000
+  } else if (typeof rawExpiry === 'string') {
+    const s = rawExpiry.trim()
+    if (!s) return false
+    if (/^-?\d+(?:\.\d+)?$/.test(s)) {
+      const num = Number(s)
+      if (!Number.isFinite(num) || num <= 0) return false
+      expiryMs = num > 1e12 ? num : num * 1000
+    } else {
+      const parsedMs = Date.parse(s)
+      if (Number.isFinite(parsedMs)) expiryMs = parsedMs
+    }
+  }
+  return expiryMs !== undefined && expiryMs <= nowMs
+}
+
+function cookieSpecificity(cookie: Record<string, unknown>): number {
+  const domainStr = typeof cookie.domain === 'string' ? cookie.domain.trim().toLowerCase() : ''
+  const hostPart = domainStr.replace(/^\.+/, '').replace(/\.+$/, '')
+  const domainScore = !hostPart ? 0 : hostPart.length * 2 + (domainStr.startsWith('.') ? 0 : 1)
+  const pathScore = typeof cookie.path === 'string' ? cookie.path.length : 0
+  return domainScore * 1000 + pathScore
+}
+
+export function extractCookieCredential(raw: string, providerId?: string): string {
   let trimmed = raw.trim()
   if (/^(?:Cookie|Authorization):\s*/i.test(trimmed)) {
     trimmed = trimmed.replace(/^(?:Cookie|Authorization):\s*/i, '').replace(/^Bearer\s+/i, '').trim()
@@ -232,30 +274,53 @@ export function extractCookieCredential(raw: string): string {
   if ((trimmed.startsWith('[') && trimmed.endsWith(']')) || (trimmed.startsWith('{') && trimmed.endsWith('}'))) {
     try {
       const parsed = JSON.parse(trimmed) as unknown
-      const cookies = Array.isArray(parsed)
-        ? parsed
-        : (parsed && typeof parsed === 'object' && Array.isArray((parsed as { cookies?: unknown }).cookies)
-          ? (parsed as { cookies: unknown[] }).cookies
-          : null)
-      if (cookies && cookies.length > 0) {
-        const header = cookies
-          .filter((c): c is { name: string; value: string } =>
-            Boolean(c) && typeof c === 'object' && typeof (c as { name?: unknown }).name === 'string' && typeof (c as { value?: unknown }).value === 'string')
-          .map(c => `${c.name}=${c.value}`)
-          .join('; ')
-        if (header) return header
+      let rawCookies: Array<Record<string, unknown>> | null = null
+      if (Array.isArray(parsed)) {
+        rawCookies = parsed.filter((c): c is Record<string, unknown> => Boolean(c) && typeof c === 'object' && !Array.isArray(c))
+      } else if (parsed && typeof parsed === 'object') {
+        const obj = parsed as Record<string, unknown>
+        if (Array.isArray(obj.cookies)) {
+          rawCookies = obj.cookies.filter((c): c is Record<string, unknown> => Boolean(c) && typeof c === 'object' && !Array.isArray(c))
+        } else {
+          const kvEntries = Object.entries(obj).filter(([, val]) => typeof val === 'string')
+          if (kvEntries.length > 0 && kvEntries.length === Object.keys(obj).length) {
+            rawCookies = kvEntries.map(([name, value]) => ({ name, value }))
+          }
+        }
+      }
+
+      if (rawCookies && rawCookies.length > 0) {
+        const nowMs = Date.now()
+        const deduped = new Map<string, { value: string; specificity: number }>()
+        for (const c of rawCookies) {
+          if (typeof c.name !== 'string' || typeof c.value !== 'string') continue
+          const name = sanitizeCookiePart(c.name).trim()
+          const value = sanitizeCookiePart(c.value)
+          if (!name || /[=;]/.test(name)) continue
+          if (providerId === 'gemini-web' && !isGoogleCookieDomain(c.domain)) continue
+          if (name !== '__Secure-1PSID' && isExpiredCookie(c, nowMs)) continue
+
+          const specificity = cookieSpecificity(c)
+          const existing = deduped.get(name)
+          if (!existing || specificity >= existing.specificity) {
+            deduped.set(name, { value, specificity })
+          }
+        }
+        if (deduped.size > 0) {
+          return Array.from(deduped.entries(), ([name, entry]) => `${name}=${entry.value}`).join('; ')
+        }
       }
     } catch {
       // Fall through and return raw trimmed string
     }
   }
-  return trimmed
+  return sanitizeCookiePart(trimmed)
 }
 
 export function parseBulkCredentialLines(
   raw: string,
   baseLabel: string,
-  options?: { isCookie?: boolean; isOauthCli?: boolean },
+  options?: { isCookie?: boolean; isOauthCli?: boolean; providerId?: string },
 ): Array<{ key: string; label: string }> {
   const lines = raw
     .split(/\r?\n/)
@@ -273,7 +338,7 @@ export function parseBulkCredentialLines(
       const normalizedKey = options?.isOauthCli
         ? extractOAuthCredential(rawKey)
         : options?.isCookie
-          ? extractCookieCredential(rawKey)
+          ? extractCookieCredential(rawKey, options?.providerId)
           : rawKey.trim()
       const finalLabel = entryLabel || (lines.length === 1 ? baseLabel.trim() : `${baseLabel.trim()} #${index + 1}`)
       return { key: normalizedKey, label: finalLabel }
@@ -380,6 +445,7 @@ function LegacyConnectAccountDialog({ provider, account, onClose }: {
           const entries = parseBulkCredentialLines(key, label.trim() || provider.name, {
             isCookie: isCookieMethod,
             isOauthCli: Boolean(oauthCliGuide),
+            providerId: provider.id,
           })
           if (entries.length === 0) {
             setError(s.required)
@@ -397,7 +463,7 @@ function LegacyConnectAccountDialog({ provider, account, onClose }: {
           const finalKey = oauthCliGuide
             ? extractOAuthCredential(key)
             : isCookieMethod
-              ? extractCookieCredential(key)
+              ? extractCookieCredential(key, provider.id)
               : key.trim()
           await accountsApi.addKey(
             provider.id,

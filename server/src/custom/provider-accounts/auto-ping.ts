@@ -6,7 +6,7 @@ import { requirePermission } from '../../middleware/requirePermission.js';
 import { clearCooldownsForKey } from '../../services/ratelimit.js';
 import { isQuotaWindowFresh } from '../x-gateway/quota/store.js';
 import type { XQuotaWindow } from '@freellmapi/shared/x-quota.js';
-import { accountRow, resolveXGatewayAccountProxy } from './store.js';
+import { accountRow, resolveXGatewayAccountProxy, setAccountStatus } from './store.js';
 import { resolveAccountProvider } from './execution.js';
 import { resolveAccountCredential } from './oauth-lifecycle.js';
 import { withKeyProxy } from '../../lib/proxy.js';
@@ -155,11 +155,63 @@ export function getAllCooldowns(): Record<number, string> {
 // Auto-Ping Schedule Storage
 // ---------------------------------------------------------------------
 
+const SCHEDULE_KEY_PREFIX = 'x_account_ping_schedule_';
+
 function scheduleSettingKey(accountId: number): string {
-  return `x_account_ping_schedule_${accountId}`;
+  return `${SCHEDULE_KEY_PREFIX}${accountId}`;
+}
+
+function normalizeSchedule(parsed: Record<string, unknown>): AutoPingSchedule {
+  return {
+    enabled: parsed.enabled === true,
+    mode: (parsed.mode as AutoPingSchedule['mode']) || (parsed.enabled ? 'schedule' : 'off'),
+    anchor: (typeof parsed.anchor === 'string' && parsed.anchor) || PING_SCHEDULE_DEFAULTS.anchor,
+    windowHours: Number(parsed.windowHours) || PING_SCHEDULE_DEFAULTS.windowHours,
+    slotsPerDay: Number(parsed.slotsPerDay) || PING_SCHEDULE_DEFAULTS.slotsPerDay,
+    timezone: (typeof parsed.timezone === 'string' && parsed.timezone) || PING_SCHEDULE_DEFAULTS.timezone,
+    lastPingAt: typeof parsed.lastPingAt === 'string' ? parsed.lastPingAt : null,
+    lastPingStatus: parsed.lastPingStatus === 'ok' || parsed.lastPingStatus === 'error' ? parsed.lastPingStatus : null,
+  };
+}
+
+let hydratedDb: unknown = null;
+
+/** Hydrate in-memory auto-ping schedules from the active DB once per DB instance. */
+export function hydrateAutoPingSchedules(): void {
+  let db: ReturnType<typeof getDb>;
+  try {
+    db = getDb();
+  } catch {
+    return;
+  }
+  if (hydratedDb === db) return;
+  try {
+    const rows = db
+      .prepare('SELECT key, value FROM settings WHERE key LIKE ?')
+      .all(`${SCHEDULE_KEY_PREFIX}%`) as Array<{ key: string; value: string }>;
+    if (hydratedDb !== null) {
+      scheduleCache.clear();
+    }
+    for (const row of rows) {
+      const accountId = Number(row.key.slice(SCHEDULE_KEY_PREFIX.length));
+      if (!Number.isSafeInteger(accountId) || accountId <= 0) continue;
+      try {
+        const parsed = JSON.parse(row.value);
+        if (parsed && typeof parsed === 'object') {
+          scheduleCache.set(accountId, normalizeSchedule(parsed as Record<string, unknown>));
+        }
+      } catch {
+        // Ignore malformed schedule JSON
+      }
+    }
+    hydratedDb = db;
+  } catch {
+    // settings table unavailable
+  }
 }
 
 export function getAutoPingSchedule(accountId: number): AutoPingSchedule {
+  hydrateAutoPingSchedules();
   if (scheduleCache.has(accountId)) {
     return { ...scheduleCache.get(accountId)! };
   }
@@ -168,18 +220,11 @@ export function getAutoPingSchedule(accountId: number): AutoPingSchedule {
     const raw = getSetting(scheduleSettingKey(accountId));
     if (raw) {
       const parsed = JSON.parse(raw);
-      const schedule: AutoPingSchedule = {
-        enabled: parsed.enabled === true,
-        mode: parsed.mode || (parsed.enabled ? 'schedule' : 'off'),
-        anchor: parsed.anchor || PING_SCHEDULE_DEFAULTS.anchor,
-        windowHours: Number(parsed.windowHours) || PING_SCHEDULE_DEFAULTS.windowHours,
-        slotsPerDay: Number(parsed.slotsPerDay) || PING_SCHEDULE_DEFAULTS.slotsPerDay,
-        timezone: parsed.timezone || PING_SCHEDULE_DEFAULTS.timezone,
-        lastPingAt: parsed.lastPingAt ?? null,
-        lastPingStatus: parsed.lastPingStatus ?? null,
-      };
-      scheduleCache.set(accountId, schedule);
-      return schedule;
+      if (parsed && typeof parsed === 'object') {
+        const schedule = normalizeSchedule(parsed as Record<string, unknown>);
+        scheduleCache.set(accountId, schedule);
+        return schedule;
+      }
     }
   } catch {
     // Fall back to defaults
@@ -191,6 +236,7 @@ export function getAutoPingSchedule(accountId: number): AutoPingSchedule {
 }
 
 export function setAutoPingSchedule(accountId: number, patch: Partial<AutoPingSchedule>): AutoPingSchedule {
+  hydrateAutoPingSchedules();
   const current = getAutoPingSchedule(accountId);
   const updated: AutoPingSchedule = {
     ...current,
@@ -235,23 +281,36 @@ export async function pingAccount(accountId: number): Promise<{
     const credential = await resolveAccountCredential(row);
     const proxyUrl = resolveXGatewayAccountProxy(row);
 
-    const ok = await withKeyProxy(proxyUrl, async () => {
-      if (provider.supportsKeyValidation) {
-        return (await provider.validateKey(credential, { platform: row.platform, keyId: row.id })) === true;
+    const check = await withKeyProxy(proxyUrl, async () => {
+      if (!provider.supportsKeyValidation) {
+        return { ok: true as const };
       }
-      return true;
+      const val = await provider.validateKey(credential, { platform: row.platform, keyId: row.id });
+      if (typeof val === 'boolean') return { ok: val };
+      return {
+        ok: Boolean(val && (val as { valid?: boolean }).valid),
+        message: (val as { error?: string })?.error,
+      };
     });
 
     const latencyMs = Date.now() - start;
+    if (provider.supportsKeyValidation) {
+      try { setAccountStatus(accountId, check.ok ? 'healthy' : 'error'); } catch { /* best effort */ }
+    }
     setAutoPingSchedule(accountId, {
       lastPingAt: new Date().toISOString(),
-      lastPingStatus: ok ? 'ok' : 'error',
+      lastPingStatus: check.ok ? 'ok' : 'error',
     });
 
-    return { ok, latencyMs };
+    return {
+      ok: check.ok,
+      latencyMs,
+      ...(check.message ? { message: check.message } : {}),
+    };
   } catch (err: unknown) {
     const latencyMs = Date.now() - start;
     const msg = err instanceof Error ? err.message : String(err);
+    try { setAccountStatus(accountId, 'error'); } catch { /* best effort */ }
     setAutoPingSchedule(accountId, {
       lastPingAt: new Date().toISOString(),
       lastPingStatus: 'error',
@@ -307,8 +366,10 @@ export function shouldPingNow(schedule: AutoPingSchedule): boolean {
 export function startAutoPingWorker(): void {
   if (workerInterval) return;
 
+  hydrateAutoPingSchedules();
   workerInterval = setInterval(async () => {
     try {
+      hydrateAutoPingSchedules();
       for (const [accountId, schedule] of scheduleCache.entries()) {
         if (shouldPingNow(schedule)) {
           await pingAccount(accountId);
@@ -342,7 +403,6 @@ autoPingRouter.use(requireAuth, requirePermission('use_x_gateway'));
 // Availability (cooldown + quota exhaustion) and bulk auto-ping
 // ---------------------------------------------------------------------
 
-const SCHEDULE_KEY_PREFIX = 'x_account_ping_schedule_';
 const RATE_LIMIT_WINDOW_ID = 'rate-limit-cooldown';
 
 export interface AvailabilityEntry {
@@ -454,6 +514,7 @@ export function clearCooldowns(filter: ClearCooldownFilter = {}): { accounts: nu
 }
 
 export function listAutoPingSchedules(): Array<{ accountId: number; schedule: AutoPingSchedule }> {
+  hydrateAutoPingSchedules();
   const ids = new Set<number>(scheduleCache.keys());
   try {
     const rows = getDb().prepare('SELECT key FROM settings WHERE key LIKE ?').all(`${SCHEDULE_KEY_PREFIX}%`) as { key: string }[];
