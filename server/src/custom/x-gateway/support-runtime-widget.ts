@@ -128,7 +128,13 @@ export function getSupportRuntimeWidgetScript(): string {
     return fallback || '#2563eb';
   }
 
-  function applyPosition(rootEl, boxEl, pos, offsetPx) {
+  function applyPosition(rootEl, boxEl, pos, offsetPx, launcherRowEl, isEmbedded) {
+    if (isEmbedded) {
+      if (launcherRowEl) {
+        launcherRowEl.style.justifyContent = (pos === 'bottom-left') ? 'flex-start' : 'flex-end';
+      }
+      return;
+    }
     var offset = (typeof offsetPx === 'number' && offsetPx >= 8 && offsetPx <= 64) ? offsetPx : 24;
     rootEl.style.bottom = offset + 'px';
     if (pos === 'bottom-left') {
@@ -210,16 +216,20 @@ export function getSupportRuntimeWidgetScript(): string {
     if (view.root) view.root.style.fontFamily = fontStack;
 
     // Widget size
-    var sizeMap = view.preview
+    var isBoxFluid = !!(view.preview || view.embedded);
+    var sizeMap = isBoxFluid
       ? { compact: ['340px', '440px'], standard: ['380px', '500px'], large: ['420px', '540px'] }
       : { compact: ['340px', '460px'], standard: ['380px', '540px'], large: ['420px', '600px'] };
     var dims = sizeMap[app.widgetSize] || sizeMap.standard;
-    if (view.preview) {
+    if (isBoxFluid) {
       view.box.style.maxWidth = dims[0];
       view.box.style.height = dims[1];
     } else {
       view.box.style.width = dims[0];
       view.box.style.height = dims[1];
+    }
+    if (view.launcherRowEl && dims) {
+      view.launcherRowEl.style.maxWidth = dims[0];
     }
 
     // Theme surface colors
@@ -277,11 +287,12 @@ export function getSupportRuntimeWidgetScript(): string {
       }
     }
 
-    if (view.root && app.position) applyPosition(view.root, view.box, app.position, app.edgeOffsetPx);
+    if (view.root && app.position) applyPosition(view.root, view.box, app.position, app.edgeOffsetPx, view.launcherRowEl, view.embedded);
 
     var oldWelcome = view.body.querySelector('[data-appearance-welcome]');
+    var hadWelcome = !!oldWelcome;
     if (oldWelcome) oldWelcome.remove();
-    if (app.welcomeMessage && (view.preview || view.body.children.length === 0)) {
+    if (app.welcomeMessage && (view.preview || hadWelcome || view.body.children.length === 0)) {
       var welcome = document.createElement('div');
       welcome.setAttribute('data-appearance-welcome', 'true');
       welcome.setAttribute('data-testid', view.preview ? prefix + 'welcome' : 'widget-welcome-message');
@@ -536,13 +547,20 @@ export function getSupportRuntimeWidgetScript(): string {
         return null;
       }
 
-      if (document.getElementById('freellmapi-support-widget-root')) {
+      var mountContainer = (config.container && typeof config.container.appendChild === 'function') ? config.container : null;
+      var isEmbedded = !!mountContainer;
+
+      if (!isEmbedded && document.getElementById('freellmapi-support-widget-root')) {
         return window.FreeLLMAPISupport._instance || null;
       }
 
       var tenantKey = String(config.tenantKey);
       var locale = config.locale === 'vi' ? 'vi' : 'en';
       var strings = i18n[locale] || i18n.en;
+      var customTransport = typeof config.transport === 'function' ? config.transport : null;
+      function doFetch(url, options) {
+        return customTransport ? customTransport(url, options) : fetch(url, options);
+      }
 
       // Determine serverBase: explicit serverBase > evaluatedScriptBase > endpoint origin
       var serverBase = config.serverBase || evaluatedScriptBase || '';
@@ -578,7 +596,8 @@ export function getSupportRuntimeWidgetScript(): string {
       // Ephemeral state
       var identityEpoch = 0;
       var destroyed = false;
-      var guestCredentialKey = 'flm_guest_' + hashString(serverBase + ':' + tenantKey);
+      var scopeSuffix = config.storageScope ? (':' + String(config.storageScope)) : '';
+      var guestCredentialKey = 'flm_guest_' + hashString(serverBase + ':' + tenantKey + scopeSuffix);
       var storedGuest = null;
       if (!config.contextToken && sessionStorageRef) {
         try { var savedGuest = JSON.parse(sessionStorageRef.getItem(guestCredentialKey) || 'null'); if (savedGuest && savedGuest.expiresAt > Date.now()) storedGuest = savedGuest.token; } catch (e) {}
@@ -590,7 +609,7 @@ export function getSupportRuntimeWidgetScript(): string {
       var currentConfigVersion = 1;
       var profileLoadFailed = false;
       var conversationId = null;
-      var isOpen = false;
+      var isOpen = !!config.startOpen;
       var autoOpenScheduled = false;
       var autoOpenTimer = null;
       var isEscalated = false;
@@ -606,7 +625,7 @@ export function getSupportRuntimeWidgetScript(): string {
 
       function getStoragePrefix() {
         var idKey = activeToken ? 'tok_' + hashString(activeToken) : 'guest';
-        return 'flm_sup_' + hashString(serverBase + ':' + tenantKey + ':' + idKey) + '_';
+        return 'flm_sup_' + hashString(serverBase + ':' + tenantKey + scopeSuffix + ':' + idKey) + '_';
       }
 
       function readStored(key) {
@@ -665,8 +684,13 @@ export function getSupportRuntimeWidgetScript(): string {
 
       // DOM Creation
       var root = document.createElement('div');
-      root.id = 'freellmapi-support-widget-root';
-      root.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:999999;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px;';
+      if (isEmbedded) {
+        root.setAttribute('data-embedded', 'true');
+        root.style.cssText = 'position:relative;width:100%;display:flex;flex-direction:column;align-items:center;gap:12px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px;';
+      } else {
+        root.id = 'freellmapi-support-widget-root';
+        root.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:999999;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px;';
+      }
 
       var toggleBtn = document.createElement('button');
       toggleBtn.id = 'freellmapi-support-toggle';
@@ -678,7 +702,12 @@ export function getSupportRuntimeWidgetScript(): string {
       var box = document.createElement('div');
       box.id = 'freellmapi-support-box';
       box.setAttribute('data-testid', 'widget-box');
-      box.style.cssText = 'display:none;position:absolute;bottom:70px;right:0;width:380px;height:540px;max-width:calc(100vw - 32px);max-height:calc(100vh - 100px);background:#fff;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,0.2);flex-direction:column;overflow:hidden;border:1px solid #e5e7eb;';
+      if (isEmbedded) {
+        box.style.cssText = 'position:relative;width:100%;max-width:380px;height:500px;background-color:#fff;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,0.15);flex-direction:column;overflow:hidden;border:1px solid #e5e7eb;';
+      } else {
+        box.style.cssText = 'position:absolute;bottom:70px;right:0;width:380px;height:540px;max-width:calc(100vw - 32px);max-height:calc(100vh - 100px);background-color:#fff;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,0.2);flex-direction:column;overflow:hidden;border:1px solid #e5e7eb;';
+      }
+      box.style.display = isOpen ? 'flex' : 'none';
 
       // Header
       var header = document.createElement('div');
@@ -751,9 +780,21 @@ export function getSupportRuntimeWidgetScript(): string {
       box.appendChild(msgList);
       box.appendChild(form);
       box.appendChild(livePoweredBy);
-      root.appendChild(box);
-      root.appendChild(toggleBtn);
-      document.body.appendChild(root);
+      var launcherRow = null;
+      if (isEmbedded) {
+        launcherRow = document.createElement('div');
+        launcherRow.setAttribute('data-testid', 'widget-embedded-launcher-row');
+        launcherRow.style.cssText = 'display:flex;width:100%;max-width:380px;justify-content:flex-end;';
+        launcherRow.appendChild(toggleBtn);
+        root.appendChild(box);
+        root.appendChild(launcherRow);
+        mountContainer.innerHTML = '';
+        mountContainer.appendChild(root);
+      } else {
+        root.appendChild(box);
+        root.appendChild(toggleBtn);
+        document.body.appendChild(root);
+      }
 
       function showLiveIntakeForm(intakeCfg, cfgVer) {
         renderLiveIntakeForm(intakeCfg, cfgVer);
@@ -849,6 +890,7 @@ export function getSupportRuntimeWidgetScript(): string {
           skipBtn.textContent = strings.intakeSkip;
           skipBtn.style.cssText = 'padding:8px 16px;background:#e5e7eb;color:#374151;border:none;border-radius:8px;font-weight:500;cursor:pointer;';
           skipBtn.addEventListener('click', function() {
+            writeStored('intake_skipped', intakeCfg.schemaHash || '1');
             hideLiveIntakeForm();
           });
           btnRow.appendChild(skipBtn);
@@ -925,7 +967,7 @@ export function getSupportRuntimeWidgetScript(): string {
               pendingIntake = {values: serializedValues, requestId: 'req_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 9)};
             }
             var intakeReqId = pendingIntake.requestId;
-            return fetch(resolveUrl('/thruline/v1/support/widget/intake'), {
+            return doFetch(resolveUrl('/thruline/v1/support/widget/intake'), {
               method: 'POST',
               headers: headers,
               body: JSON.stringify({
@@ -966,6 +1008,10 @@ export function getSupportRuntimeWidgetScript(): string {
             if (destroyed || epoch !== identityEpoch) return;
             submitBtn.disabled = false;
             submitBtn.textContent = strings.intakeSubmit;
+            if (err && (err.message === 'guests_not_allowed' || (err.data && err.data.error && err.data.error.code === 'guest_not_allowed'))) {
+              handleAuthRequired('guests_not_allowed');
+              return;
+            }
             if (err && err.status === 409 && err.data && err.data.error &&
                 (err.data.error.code === 'widget_config_changed' || err.data.error.code === 'intake_schema_changed')) {
               activeReceiptId = null;
@@ -1016,7 +1062,7 @@ export function getSupportRuntimeWidgetScript(): string {
         };
         if (activeToken) pHeaders['X-Support-Context-Token'] = activeToken;
 
-        return fetch(resolveUrl('/thruline/v1/support/widget/config'), {
+        return doFetch(resolveUrl('/thruline/v1/support/widget/config'), {
           method: 'GET',
           headers: pHeaders,
           signal: ctrl.signal
@@ -1074,6 +1120,8 @@ export function getSupportRuntimeWidgetScript(): string {
             body: msgList,
             footer: form,
             poweredByEl: livePoweredBy,
+            launcherRowEl: launcherRow,
+            embedded: isEmbedded,
             preview: false
           },
           pubConfig.appearance, function(text) {
@@ -1101,8 +1149,14 @@ export function getSupportRuntimeWidgetScript(): string {
           currentConfigVersion = pubConfig.version || 1;
           var storedReceipt = readStored('intake_receipt');
           var storedSchema = readStored('intake_schema_hash');
-          if (storedReceipt && storedSchema === pubConfig.intake.schemaHash) {
+          var skippedSchema = readStored('intake_skipped');
+          if (!activeToken && !allowGuestSession) {
+            activeReceiptId = null;
+          } else if (storedReceipt && storedSchema === pubConfig.intake.schemaHash) {
             activeReceiptId = storedReceipt;
+          } else if (!pubConfig.intake.required && (skippedSchema === pubConfig.intake.schemaHash || conversationId || readStored('conv_id'))) {
+            activeReceiptId = null;
+            hideLiveIntakeForm();
           } else {
             activeReceiptId = null;
             showLiveIntakeForm(pubConfig.intake, pubConfig.version);
@@ -1289,7 +1343,7 @@ export function getSupportRuntimeWidgetScript(): string {
         };
         if (activeToken) headers['X-Support-Context-Token'] = activeToken;
 
-        fetch(resolveUrl('/thruline/v1/support/csat'), {
+        doFetch(resolveUrl('/thruline/v1/support/csat'), {
           method: 'POST',
           headers: headers,
           body: JSON.stringify({ conversationId: conversationId, score: score }),
@@ -1325,7 +1379,7 @@ export function getSupportRuntimeWidgetScript(): string {
         var epoch = identityEpoch;
         if (!allowGuestSession) return Promise.reject(new Error('guests_not_allowed'));
         var ctrl = trackAbortController();
-        return fetch(resolveUrl('/thruline/v1/support/guest-session'), {
+        return doFetch(resolveUrl('/thruline/v1/support/guest-session'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tenantKey: tenantKey }),
@@ -1443,7 +1497,7 @@ export function getSupportRuntimeWidgetScript(): string {
         };
         if (activeToken) headers['X-Support-Context-Token'] = activeToken;
 
-        var p = fetch(resolveUrl('/thruline/v1/support/conversations/' + encodeURIComponent(convId)), {
+        var p = doFetch(resolveUrl('/thruline/v1/support/conversations/' + encodeURIComponent(convId)), {
           method: 'GET',
           headers: headers,
           signal: ctrl.signal
@@ -1477,16 +1531,19 @@ export function getSupportRuntimeWidgetScript(): string {
           var conv = data.conversation || data;
           conversationId = conv.id || convId;
           writeStored('conv_id', conversationId);
-          if (conv.status === 'escalated') {
-            isEscalated = true;
-            setBanner(strings.escalatedBanner, 'info');
-          }
           isEscalated = conv.status === 'escalated';
+          if (isEscalated) {
+            setBanner(strings.escalatedBanner, 'info');
+            escalateBtn.style.display = 'none';
+          }
           input.disabled = isEscalated;
           sendBtn.disabled = isEscalated;
           var msgs = conv.messages || [];
           for (var i = 0; i < msgs.length; i++) {
             processMessageItem(msgs[i]);
+          }
+          if (conv.status === 'resolved' || conv.status === 'closed') {
+            showCsatPrompt();
           }
           if (isOpen) startPolling();
         })
@@ -1528,7 +1585,7 @@ export function getSupportRuntimeWidgetScript(): string {
         var headers = { 'X-Support-Tenant-Key': tenantKey };
         if (activeToken) headers['X-Support-Context-Token'] = activeToken;
 
-        var fetchPromise = fetch(resolveUrl('/thruline/v1/support/conversations/' + encodeURIComponent(conversationId)), {
+        var fetchPromise = doFetch(resolveUrl('/thruline/v1/support/conversations/' + encodeURIComponent(conversationId)), {
           method: 'GET',
           headers: headers,
           signal: ctrl.signal
@@ -1610,7 +1667,7 @@ export function getSupportRuntimeWidgetScript(): string {
             chatBody.intakeReceiptId = activeReceiptId;
           }
 
-          return fetch(endpoint, {
+          return doFetch(endpoint, {
             method: 'POST',
             headers: headers,
             body: JSON.stringify(chatBody),
@@ -1767,6 +1824,11 @@ export function getSupportRuntimeWidgetScript(): string {
           sendBtn.disabled = false;
           input.disabled = false;
 
+          if (err && (err.message === 'guests_not_allowed' || (err.data && err.data.error && err.data.error.code === 'guest_not_allowed'))) {
+            handleAuthRequired('guests_not_allowed');
+            return;
+          }
+
           if (err && err.isContextChanged) {
             var ctxBox = document.createElement('div');
             ctxBox.setAttribute('data-testid', 'widget-context-changed-box');
@@ -1798,7 +1860,10 @@ export function getSupportRuntimeWidgetScript(): string {
           errBox.style.cssText = 'align-self:flex-start;padding:8px 12px;background:#fee2e2;color:#991b1b;border-radius:8px;font-size:12px;display:flex;align-items:center;gap:8px;';
 
           var errText = document.createElement('span');
-          errText.textContent = strings.networkError;
+          var serverErrMsg = err && err.data && err.data.error && typeof err.data.error.message === 'string' && err.data.error.message.trim()
+            ? err.data.error.message.trim()
+            : '';
+          errText.textContent = serverErrMsg || strings.networkError;
           errBox.appendChild(errText);
 
           var retryBtn = document.createElement('button');
@@ -1845,27 +1910,42 @@ export function getSupportRuntimeWidgetScript(): string {
       escalateBtn.addEventListener('click', function() {
         if (isEscalated || destroyed) return;
         var epoch = identityEpoch;
-        var ctrl = trackAbortController();
-        var headers = {
-          'Content-Type': 'application/json',
-          'X-Support-Tenant-Key': tenantKey
-        };
-        if (activeToken) headers['X-Support-Context-Token'] = activeToken;
+        var tokenPromise = (!activeToken && allowGuestSession) ? renewGuestSession() : Promise.resolve(activeToken);
 
-        fetch(resolveUrl('/thruline/v1/support/escalate'), {
-          method: 'POST',
-          headers: headers,
-          body: JSON.stringify({ conversationId: conversationId || undefined, reason: 'user_requested' }),
-          signal: ctrl.signal
-        })
-        .then(function(res) {
-          untrackAbortController(ctrl);
-          if (res.status === 401 && !isGuest) {
-            handleAuthRequired('token_expired');
-            return null;
-          }
-          if (!res.ok) throw new Error('escalate_failed_' + res.status);
-          return res.json();
+        tokenPromise
+        .then(function(tok) {
+          if (destroyed || epoch !== identityEpoch) return null;
+          var ctrl = trackAbortController();
+          var headers = {
+            'Content-Type': 'application/json',
+            'X-Support-Tenant-Key': tenantKey
+          };
+          if (tok) headers['X-Support-Context-Token'] = tok;
+
+          return doFetch(resolveUrl('/thruline/v1/support/escalate'), {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({ conversationId: conversationId || undefined, reason: 'user_requested' }),
+            signal: ctrl.signal
+          })
+          .then(function(res) {
+            untrackAbortController(ctrl);
+            if (destroyed || epoch !== identityEpoch) return null;
+            if (res.status === 401 && !isGuest) {
+              handleAuthRequired('token_expired');
+              return null;
+            }
+            if (!res.ok) {
+              return res.json().catch(function() { return {}; }).then(function(errData) {
+                var code = (errData && errData.error && errData.error.code) || ('escalate_failed_' + res.status);
+                var err = new Error(code);
+                err.status = res.status;
+                err.data = errData;
+                throw err;
+              });
+            }
+            return res.json();
+          });
         })
         .then(function(data) {
           if (!data || destroyed || epoch !== identityEpoch) return;
@@ -1874,15 +1954,20 @@ export function getSupportRuntimeWidgetScript(): string {
           sendBtn.disabled = true;
           setBanner(strings.escalatedBanner, 'info');
           escalateBtn.style.display = 'none';
-          if (data.conversationId) {
-            conversationId = data.conversationId;
+          var escConvId = data.conversationId || (data.ticket && data.ticket.conversationId);
+          if (escConvId) {
+            conversationId = escConvId;
             writeStored('conv_id', conversationId);
           }
           startPolling();
         })
         .catch(function(err) {
-          untrackAbortController(ctrl);
+          if (destroyed || epoch !== identityEpoch) return;
           if (err && err.name === 'AbortError') return;
+          if (err && (err.message === 'guests_not_allowed' || (err.data && err.data.error && err.data.error.code === 'guest_not_allowed'))) {
+            handleAuthRequired('guests_not_allowed');
+            return;
+          }
           setBanner(strings.networkError, 'error');
         });
       });
@@ -1897,6 +1982,10 @@ export function getSupportRuntimeWidgetScript(): string {
         fetchTenantProfile();
       }
 
+      if (!activeToken && !allowGuestSession) {
+        handleAuthRequired('guests_not_allowed');
+      }
+
       var instance = {
         open: function() {
           box.style.display = 'flex';
@@ -1907,6 +1996,12 @@ export function getSupportRuntimeWidgetScript(): string {
           box.style.display = 'none';
           isOpen = false;
           stopPolling();
+        },
+        refreshProfile: function() {
+          return fetchTenantProfile();
+        },
+        getConversationId: function() {
+          return conversationId;
         },
         updateContextToken: function(newToken) {
           identityEpoch++;
@@ -1961,6 +2056,9 @@ export function getSupportRuntimeWidgetScript(): string {
           if (newStored) {
             resumeConversation(newStored);
           }
+          if (!activeToken && !allowGuestSession) {
+            handleAuthRequired('guests_not_allowed');
+          }
         },
         setToken: function(tok) {
           this.updateContextToken(tok);
@@ -1986,13 +2084,15 @@ export function getSupportRuntimeWidgetScript(): string {
           if (root && root.parentNode) {
             root.parentNode.removeChild(root);
           }
-          if (window.FreeLLMAPISupport._instance === instance) {
+          if (!isEmbedded && window.FreeLLMAPISupport._instance === instance) {
             window.FreeLLMAPISupport._instance = null;
           }
         }
       };
 
-      window.FreeLLMAPISupport._instance = instance;
+      if (!isEmbedded) {
+        window.FreeLLMAPISupport._instance = instance;
+      }
       return instance;
     }
   };

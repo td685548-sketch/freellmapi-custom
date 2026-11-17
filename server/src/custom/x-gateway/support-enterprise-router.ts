@@ -605,22 +605,47 @@ xSupportEnterprisePublicRouter.post(
   partnerAuthMiddleware,
   (req: Request, res: Response): void => {
     const { tenant, userContext } = req as AuthenticatedPartnerRequest;
-    const subject = req.body?.subject ? String(req.body.subject).trim() : '';
+    const rawSubject = req.body?.subject ? String(req.body.subject).trim() : '';
     const reason = req.body?.reason ? String(req.body.reason).trim() : '';
-    if (!subject || !reason) {
+    if (!reason) {
       res.status(400).json({ error: { message: 'Subject and reason are required.', status: 400 } });
       return;
     }
 
-    if (req.body?.conversationId) {
-      getSupportConversationForUser(String(tenant.id), String(req.body.conversationId), {
+    let conversationId = req.body?.conversationId ? String(req.body.conversationId).trim() : undefined;
+    let subject = rawSubject;
+
+    if (conversationId) {
+      const conv = getSupportConversationForUser(String(tenant.id), conversationId, {
         userId: userContext.userId,
         role: userContext.role,
       });
+      if (!subject) {
+        subject = conv.subject || 'Human agent escalation request';
+      }
+    } else {
+      if (!subject) {
+        subject = 'Human agent escalation request';
+      }
+      const createdConv = createOrAppendSupportConversation(String(tenant.id), {
+        userId: userContext.userId,
+        userName: userContext.name,
+        userEmail: userContext.email,
+        userRole: userContext.role,
+        subject,
+        message: {
+          senderType: 'customer',
+          senderId: userContext.userId,
+          senderName: userContext.name,
+          senderRole: userContext.role,
+          content: reason,
+        },
+      });
+      conversationId = createdConv.id;
     }
 
     const ticket = createSupportEscalationTicket(String(tenant.id), {
-      conversationId: req.body?.conversationId ? String(req.body.conversationId) : undefined,
+      conversationId,
       userId: userContext.userId,
       userName: userContext.name,
       userRole: userContext.role,
@@ -636,7 +661,7 @@ xSupportEnterprisePublicRouter.post(
       dedupKey: `ticket_${ticket.id}`,
     });
 
-    res.status(201).json({ ok: true, ticket });
+    res.status(201).json({ ok: true, ticket, conversationId: ticket.conversationId });
   },
 );
 

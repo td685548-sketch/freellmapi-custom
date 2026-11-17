@@ -62,6 +62,7 @@ import { xSupportGovernanceConsoleRouter } from './support-governance-router.js'
 import { xSupportRuntimeConsoleRouter } from './support-runtime-router.js';
 import { xSupportEvidenceConsoleRouter } from './support-evidence-router.js';
 import { xSupportServiceDeskConsoleRouter } from './support-service-desk-router.js';
+import { xSupportServiceDeskLiveTestRouter } from './support-service-desk-live-test-router.js';
 import { xSupportOutputConsoleRouter } from './support-output-router.js';
 
 /** Console API for the gateway switch, outbound proxy, dedicated API keys, and default savers.
@@ -486,6 +487,7 @@ xGatewayConsoleRouter.use('/support', xSupportGovernanceConsoleRouter);
 xGatewayConsoleRouter.use('/support', xSupportRuntimeConsoleRouter);
 xGatewayConsoleRouter.use('/support', xSupportEvidenceConsoleRouter);
 xGatewayConsoleRouter.use('/support', xSupportServiceDeskConsoleRouter);
+xGatewayConsoleRouter.use('/support', xSupportServiceDeskLiveTestRouter);
 xGatewayConsoleRouter.use('/support', xSupportOutputConsoleRouter);
 
 xGatewayConsoleRouter.use((_req, res) => {
