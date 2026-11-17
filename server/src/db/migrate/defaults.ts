@@ -100,6 +100,7 @@ import * as supportOutputControls from '../migrations/20261115_120001_support_ou
 import * as customAiMcpProfileCleanup from '../migrations/20261116_100000_custom_ai_mcp_profile_cleanup.js';
 import * as customContextBudget from '../migrations/20261117_100000_custom_context_budget.js';
 import * as customCustomerAiHub from '../migrations/20261118_030000_custom_customer_ai_hub.js';
+import * as customTenantRbac from '../migrations/20261118_043000_custom_tenant_rbac.js';
 
 export interface MigrationModule {
   up(db: Db): void;
@@ -292,4 +293,5 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: '20261116_100000_custom_ai_mcp_profile_cleanup.ts', module: customAiMcpProfileCleanup },
   { filename: '20261117_100000_custom_context_budget.ts', module: customContextBudget },
   { filename: CUSTOM_CUSTOMER_AI_HUB_FILENAME, module: customCustomerAiHub },
+  { filename: '20261118_043000_custom_tenant_rbac.ts', module: customTenantRbac },
 ];

@@ -36,6 +36,7 @@ Cách xác định trạng thái: đếm checkbox trong `tasks.md`, rồi đối
 | 023-service-desk-live-test | Thử nghiệm trực tiếp Widget người dùng cuối theo Tenant trong Service Desk Studio | 7/7 | `support-service-desk-live-test-router.ts`, `SupportWidgetLiveTest.tsx`, `x-support-service-desk-live-test.test.ts`, `support-service-desk-live-test.test.tsx` | |
 | 025-live-test-cleanup | Tách số liệu Sandbox & dọn dữ liệu thử nghiệm trực tiếp theo Tenant | 6/6 | `support-live-test-sandbox.ts`, `x-support-live-test-sandbox.test.ts`, `SupportWidgetLiveTest.tsx` | |
 | 026-rag-office-markdown | Tự động chuyển đổi tài liệu Word & Excel sang Markdown (.md) khi tải lên RAG | 5/5 | `document-markdown.ts`, `knowledge-document-upload.ts`, `KnowledgeCard.tsx`, `SupportKnowledgeStudio.tsx`, `SupportEnterprise.tsx` | |
+| 027-tenant-admin-portal | Cổng quản trị Tenant AI (`/tenant-portal`) & phân quyền RBAC chi tiết theo từng Support Tenant | 18/18 | `shared/tenant-rbac.ts`, `server/src/custom/tenant-portal/`, `client/src/custom/tenant-portal/`, `TenantAccessDialog.tsx`, `tenant-rbac.test.ts` | |
 
 ## 2. Việc vận hành (không cần spec)
 

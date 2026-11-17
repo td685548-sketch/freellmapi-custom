@@ -54,6 +54,8 @@ import { geminiRouter } from './x-gateway/gemini-router.js';
 import { xGatewayOllamaRouter } from './x-gateway/ollama-router.js';
 import { proxyWebhookRouter } from './proxy-webhook/router.js';
 import { aiPlatformRouter } from './ai-platform/router.js';
+import { adminTenantMembershipsRouter } from './tenant-portal/admin-router.js';
+import { tenantPortalRouter } from './tenant-portal/router.js';
 import { startIndexWorker } from './ai-platform/retrieval/indexer.js';
 import { isPillarEnabled } from './ai-platform/flags.js';
 import { extractRequestedModel, markInterruptedRuns, recordServerLocalAddress } from './ai-platform/orchestrator/engine.js';
@@ -304,6 +306,8 @@ export function registerCustomRoutes(app: Express): void {
   app.use('/api/admin/guest-access', requireAuth, requireActionPermission('manage_users'), guestAccessAdminRouter);
   app.use('/api/admin/users', requireAuth, requireActionPermission('manage_users'), adminUsersRouter, adminUserAnalyticsRouter, adminUserQuotaRouter, adminUserRequestsRouter);
   app.use('/api/admin/registration-requests', requireAuth, requireActionPermission('manage_requests'), adminRegistrationRequestsRouter);
+  app.use('/api/admin/tenant-memberships', requireAuth, adminTenantMembershipsRouter);
+  app.use('/api/tenant-portal', requireAuth, tenantPortalRouter);
   app.use('/api/user/ai-hub', requireAuth, customerAiUserRouter);
   app.use('/api/user', requireAuth, userKeysRouter, selfAnalyticsRouter, selfQuotaRouter, selfRequestsRouter);
 

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Users, LogOut, KeyRound, Check, X, Clock, FileText, Shield, Crown } from 'lucide-react'
+import { Users, LogOut, KeyRound, Check, X, Clock, FileText, Shield, Crown, Building2 } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/page-header'
 import { ConfirmButton } from '@/components/confirm-button'
 import { toast } from '@/lib/toast'
 import { PermissionsDialog } from './PermissionsDialog'
+import { TenantAccessDialog } from './TenantAccessDialog'
 import { UsageLink } from './UsageLink'
 import { GuestAccessCard } from './GuestAccessCard'
 
@@ -24,6 +25,7 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
   const [filter, setFilter] = useState('')
   const [activeTab, setActiveTab] = useState<'accounts' | 'requests'>(can('viewUsers') ? 'accounts' : 'requests')
   const [permissionsUser, setPermissionsUser] = useState<AdminUser | null>(null)
+  const [tenantAccessUser, setTenantAccessUser] = useState<AdminUser | null>(null)
 
   const {
     data, isLoading, isError, error, refetch,
@@ -322,6 +324,15 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
                       title={u.isPrimary ? tc('Primary Admin has full permissions') : tc('Manage granular permissions')}
                     >
                       <Shield className="size-3.5 mr-1" />{tc('Permissions')}</Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!can('permissions')}
+                      onClick={() => setTenantAccessUser(u)}
+                      className="text-xs h-8"
+                      title={tc('Assign Support Tenants and per-tenant AI permissions')}
+                    >
+                      <Building2 className="size-3.5 mr-1" />{tc('Tenant AI')}</Button>
 
                     {!u.isPrimary && (
                       <>
@@ -456,6 +467,13 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
         user={permissionsUser}
         open={Boolean(permissionsUser)}
         onOpenChange={(open) => !open && setPermissionsUser(null)}
+        onSuccess={refreshAll}
+      />
+
+      <TenantAccessDialog
+        user={tenantAccessUser}
+        open={Boolean(tenantAccessUser)}
+        onOpenChange={(open) => !open && setTenantAccessUser(null)}
         onSuccess={refreshAll}
       />
 
