@@ -18,6 +18,7 @@
  * see it and the two consumers cannot drift apart.
  */
 
+import { inspect } from 'node:util';
 import { recordConsoleLine } from './server-logs.js';
 import type { ServerLogLevel } from './server-logs.js';
 
@@ -93,43 +94,129 @@ export function redactSecrets(input: string): string {
   return out;
 }
 
+const OPERATOR_ONLY_LINE_RE =
+  /^([ \t]*(?:Password-reset code|First-run setup code|Your unified API key|Account email)\s*:\s*)(.+)$/gim;
+
+/** Redact local-operator recovery/bootstrap secrets before buffering for dashboard log viewers. */
+export function redactOperatorOnlyLogLines(input: string): string {
+  return input.replace(OPERATOR_ONLY_LINE_RE, '$1[redacted-operator-only]');
+}
+
 // Beyond this, JSON round-tripping an argument costs more than it protects.
 const MAX_OBJECT_REDACTION_BYTES = 128 * 1024;
+const MAX_WALK_DEPTH = 4;
+
+function redactValueDeep(
+  value: unknown,
+  depth: number,
+  seen: WeakMap<object, { changed: boolean; out: unknown }>,
+): { changed: boolean; out: unknown } {
+  if (typeof value === 'string') {
+    const out = redactSecrets(value);
+    return { changed: out !== value, out };
+  }
+  if (value === null || typeof value !== 'object' || depth >= MAX_WALK_DEPTH) {
+    return { changed: false, out: value };
+  }
+  const cached = seen.get(value);
+  if (cached) return cached;
+
+  if (Array.isArray(value)) {
+    const placeholder = { changed: false, out: value };
+    seen.set(value, placeholder);
+    let anyChanged = false;
+    const copy = value.map((item) => {
+      const res = redactValueDeep(item, depth + 1, seen);
+      if (res.changed) anyChanged = true;
+      return res.out;
+    });
+    const finalRes = anyChanged ? { changed: true, out: copy } : { changed: false, out: value };
+    seen.set(value, finalRes);
+    return finalRes;
+  }
+
+  const placeholder = { changed: false, out: value };
+  seen.set(value, placeholder);
+  let anyChanged = false;
+  const copy: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    const res = redactValueDeep(v, depth + 1, seen);
+    if (res.changed) anyChanged = true;
+    copy[k] = res.out;
+  }
+  const finalRes = anyChanged ? { changed: true, out: copy } : { changed: false, out: value };
+  seen.set(value, finalRes);
+  return finalRes;
+}
 
 function redactArg(arg: unknown): unknown {
   if (typeof arg === 'string') return redactSecrets(arg);
 
   if (arg instanceof Error) {
     // Rebuilding the Error would drop subclass fields (ProviderHttpError.status
-    // and friends), so mutate the two string members in place instead.
+    // and friends), so mutate the two string members and redact own properties in place.
     const clone = Object.create(
       Object.getPrototypeOf(arg),
       Object.getOwnPropertyDescriptors(arg),
-    ) as Error;
+    ) as Error & Record<string, unknown>;
     clone.message = redactSecrets(arg.message);
     if (typeof arg.stack === 'string') clone.stack = redactSecrets(arg.stack);
+    const seen = new WeakMap<object, { changed: boolean; out: unknown }>();
+    for (const key of Object.keys(arg)) {
+      const val = (arg as unknown as Record<string, unknown>)[key];
+      const res = redactValueDeep(val, 0, seen);
+      if (res.changed) {
+        try {
+          clone[key] = res.out;
+        } catch {
+          // ignore read-only / accessor own properties
+        }
+      }
+    }
+    if ('cause' in arg && arg.cause !== undefined) {
+      const res = redactValueDeep(arg.cause, 0, seen);
+      if (res.changed) {
+        try {
+          (clone as { cause?: unknown }).cause = res.out;
+        } catch {
+          // ignore non-writable cause
+        }
+      }
+    }
     return clone;
   }
 
   if (arg !== null && typeof arg === 'object') {
     // Round-trip through JSON so a key nested in a logged object is caught, but
     // keep the result an object so console formatting is unchanged. Anything
-    // non-serialisable (cycles, BigInt, sockets) falls through untouched.
+    // non-serialisable or oversized falls back to bounded structural/inspect redaction.
     try {
       const json = JSON.stringify(arg);
-      if (!json || json.length > MAX_OBJECT_REDACTION_BYTES) return arg;
-      const redacted = redactSecrets(json);
-      return redacted === json ? arg : JSON.parse(redacted);
+      if (json && json.length <= MAX_OBJECT_REDACTION_BYTES) {
+        const redacted = redactSecrets(json);
+        return redacted === json ? arg : JSON.parse(redacted);
+      }
     } catch {
-      return arg;
+      // fall through to deep walk / inspect
     }
+    const walked = redactValueDeep(arg, 0, new WeakMap());
+    if (!walked.changed) return arg;
+    try {
+      const walkedJson = JSON.stringify(walked.out);
+      if (walkedJson && walkedJson.length <= MAX_OBJECT_REDACTION_BYTES) {
+        return walked.out;
+      }
+    } catch {
+      return walked.out;
+    }
+    return redactSecrets(inspect(walked.out, { depth: MAX_WALK_DEPTH, breakLength: Infinity, maxStringLength: 4096 }));
   }
 
   return arg;
 }
 
-type ConsoleMethod = 'log' | 'info' | 'warn' | 'error' | 'debug' | 'trace';
-const METHODS: ConsoleMethod[] = ['log', 'info', 'warn', 'error', 'debug', 'trace'];
+type ConsoleMethod = 'log' | 'info' | 'warn' | 'error' | 'debug' | 'trace' | 'dir';
+const METHODS: ConsoleMethod[] = ['log', 'info', 'warn', 'error', 'debug', 'trace', 'dir'];
 
 // console.log is the codebase's ordinary informational writer, so it shares
 // 'info'; debug and trace keep their own level so the dashboard can filter them
@@ -141,6 +228,7 @@ const LEVEL_FOR_METHOD: Record<ConsoleMethod, ServerLogLevel> = {
   error: 'error',
   debug: 'debug',
   trace: 'trace',
+  dir: 'debug',
 };
 
 let installed = false;

@@ -106,23 +106,46 @@ interface ColumnGroup {
  */
 interface SettingGroup {
   kind: 'setting';
-  table: 'settings';
+  table: 'settings' | 'x_gateway_config';
   settingKey: string;
   label: string;
 }
 
 type EncryptionGroup = ColumnGroup | SettingGroup;
 
-// Every place a secret is persisted. Keep this in step with the `encrypt()`
-// call sites in server/src/lib/crypto.ts consumers: api_keys (keys.ts,
-// custom-endpoint.ts, declarative-config.ts), api_keys proxy columns
-// (lib/key-proxy.ts), client_profiles (routes/client-profiles.ts) and the
-// settings blob (lib/proxy.ts).
+// Every place a secret is persisted across core, X-Gateway, AI Platform, and Support.
 const ENCRYPTION_GROUPS: EncryptionGroup[] = [
   { kind: 'columns', table: 'api_keys', idColumn: 'id', encrypted: 'encrypted_key', iv: 'iv', authTag: 'auth_tag', label: 'api key' },
   { kind: 'columns', table: 'api_keys', idColumn: 'id', encrypted: 'proxy_encrypted', iv: 'proxy_iv', authTag: 'proxy_auth_tag', label: 'per-key proxy override' },
   { kind: 'columns', table: 'client_profiles', idColumn: 'id', encrypted: 'encrypted_key', iv: 'iv', authTag: 'auth_tag', label: 'client-profile credential' },
   { kind: 'setting', table: 'settings', settingKey: 'fetch_relay_token', label: 'fetch relay token' },
+  { kind: 'columns', table: 'x_gateway_keys', idColumn: 'id', encrypted: 'encrypted_key', iv: 'iv', authTag: 'auth_tag', label: 'x-gateway credential' },
+  { kind: 'columns', table: 'x_gateway_keys', idColumn: 'id', encrypted: 'proxy_encrypted', iv: 'proxy_iv', authTag: 'proxy_auth_tag', label: 'x-gateway key proxy override' },
+  { kind: 'columns', table: 'x_gateway_proxy_pool', idColumn: 'id', encrypted: 'proxy_encrypted', iv: 'proxy_iv', authTag: 'proxy_auth_tag', label: 'x-gateway proxy pool entry' },
+  { kind: 'setting', table: 'x_gateway_config', settingKey: 'outbound_proxy', label: 'x-gateway outbound proxy' },
+  { kind: 'columns', table: 'custom_ai_mcp_servers', idColumn: 'id', encrypted: 'auth_ciphertext', iv: 'auth_iv', authTag: 'auth_tag', label: 'ai-platform MCP server auth' },
+  { kind: 'columns', table: 'custom_ai_approvals', idColumn: 'id', encrypted: 'args_ciphertext', iv: 'args_iv', authTag: 'args_tag', label: 'ai-platform approval args' },
+  { kind: 'columns', table: 'custom_ai_guard_events', idColumn: 'id', encrypted: 'excerpt_ciphertext', iv: 'excerpt_iv', authTag: 'excerpt_tag', label: 'ai-platform guard excerpt' },
+  { kind: 'columns', table: 'x_support_tenants', idColumn: 'id', encrypted: 'secret_encrypted', iv: 'secret_iv', authTag: 'secret_auth_tag', label: 'support tenant signing secret' },
+  { kind: 'columns', table: 'x_support_db_sources', idColumn: 'id', encrypted: 'token_encrypted', iv: 'token_iv', authTag: 'token_auth_tag', label: 'support db source token' },
+  { kind: 'columns', table: 'x_support_action_executions', idColumn: 'id', encrypted: 'requester_encrypted', iv: 'requester_iv', authTag: 'requester_auth_tag', label: 'support action requester' },
+  { kind: 'columns', table: 'x_support_action_executions', idColumn: 'id', encrypted: 'effective_args_encrypted', iv: 'effective_args_iv', authTag: 'effective_args_auth_tag', label: 'support action effective args' },
+  { kind: 'columns', table: 'x_support_action_executions', idColumn: 'id', encrypted: 'result_encrypted', iv: 'result_iv', authTag: 'result_auth_tag', label: 'support action result' },
+  { kind: 'columns', table: 'x_support_partner_events', idColumn: 'rowid', encrypted: 'payload_encrypted', iv: 'payload_iv', authTag: 'payload_auth_tag', label: 'support partner event' },
+  { kind: 'columns', table: 'x_support_partner_deliveries', idColumn: 'rowid', encrypted: 'target_snapshot_encrypted', iv: 'target_snapshot_iv', authTag: 'target_snapshot_auth_tag', label: 'support partner delivery target' },
+  { kind: 'columns', table: 'x_support_evidence_sources', idColumn: 'rowid', encrypted: 'import_url_encrypted', iv: 'import_url_iv', authTag: 'import_url_auth_tag', label: 'support evidence source URL' },
+  { kind: 'columns', table: 'x_support_evidence_revisions', idColumn: 'rowid', encrypted: 'payload_encrypted', iv: 'payload_iv', authTag: 'payload_auth_tag', label: 'support evidence revision' },
+  { kind: 'columns', table: 'x_support_evidence_chunks', idColumn: 'rowid', encrypted: 'payload_encrypted', iv: 'payload_iv', authTag: 'payload_auth_tag', label: 'support evidence chunk' },
+  { kind: 'columns', table: 'x_support_evidence_suites', idColumn: 'rowid', encrypted: 'cases_encrypted', iv: 'cases_iv', authTag: 'cases_auth_tag', label: 'support evidence suite' },
+  { kind: 'columns', table: 'x_support_evidence_runs', idColumn: 'rowid', encrypted: 'report_encrypted', iv: 'report_iv', authTag: 'report_auth_tag', label: 'support evidence run' },
+  { kind: 'columns', table: 'x_support_evidence_answers', idColumn: 'rowid', encrypted: 'evidence_encrypted', iv: 'evidence_iv', authTag: 'evidence_auth_tag', label: 'support evidence answer' },
+  { kind: 'columns', table: 'x_support_output_policies', idColumn: 'rowid', encrypted: 'payload_encrypted', iv: 'payload_iv', authTag: 'payload_auth_tag', label: 'support output policy' },
+  { kind: 'columns', table: 'x_support_runtime_turns', idColumn: 'rowid', encrypted: 'masked_response_encrypted', iv: 'iv', authTag: 'auth_tag', label: 'support runtime turn' },
+  { kind: 'columns', table: 'x_support_desk_widget_configs', idColumn: 'rowid', encrypted: 'payload_encrypted', iv: 'payload_iv', authTag: 'payload_auth_tag', label: 'support service desk widget config' },
+  { kind: 'columns', table: 'x_support_desk_intakes', idColumn: 'rowid', encrypted: 'payload_encrypted', iv: 'payload_iv', authTag: 'payload_auth_tag', label: 'support service desk intake' },
+  { kind: 'columns', table: 'x_support_desk_copilot_jobs', idColumn: 'rowid', encrypted: 'payload_encrypted', iv: 'payload_iv', authTag: 'payload_auth_tag', label: 'support service desk copilot job' },
+  { kind: 'columns', table: 'x_support_desk_sla_policies', idColumn: 'rowid', encrypted: 'payload_encrypted', iv: 'payload_iv', authTag: 'payload_auth_tag', label: 'support service desk sla policy' },
+  { kind: 'columns', table: 'x_support_desk_ticket_state', idColumn: 'rowid', encrypted: 'meta_encrypted', iv: 'meta_iv', authTag: 'meta_auth_tag', label: 'support service desk ticket state' },
 ];
 
 interface RowToRotate {
@@ -180,8 +203,8 @@ export function rotateSecrets(
 
       const rows = db.prepare(
         `SELECT ${group.idColumn} AS id, ${group.encrypted} AS enc, ${group.iv} AS iv, ${group.authTag} AS tag ` +
-        `FROM ${group.table} WHERE ${group.encrypted} IS NOT NULL`,
-      ).all() as Array<{ id: number; enc: string; iv: string; tag: string }>;
+        `FROM ${group.table} WHERE ${group.encrypted} IS NOT NULL AND length(${group.encrypted}) > 0`,
+      ).all() as Array<{ id: number | string; enc: string; iv: string; tag: string }>;
 
       for (const row of rows) {
         let plaintext: string;
@@ -198,10 +221,10 @@ export function rotateSecrets(
       continue;
     }
 
-    // Ciphertext held as a JSON blob in settings.value.
+    // Ciphertext held as a JSON blob in settings.value or x_gateway_config.value.
     if (!names.has('key') || !names.has('value')) continue;
 
-    const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(group.settingKey) as { value: string } | undefined;
+    const row = db.prepare(`SELECT value FROM ${group.table} WHERE key = ?`).get(group.settingKey) as { value: string } | undefined;
     // An unset or cleared setting stores '' rather than a blob — nothing to do.
     if (!row || !row.value) continue;
 
@@ -211,13 +234,13 @@ export function rotateSecrets(
     } catch {
       return {
         rows: [],
-        error: `${group.label} (settings.${group.settingKey}) is not valid JSON — refusing to guess. Aborting; nothing was written.`,
+        error: `${group.label} (${group.table}.${group.settingKey}) is not valid JSON — refusing to guess. Aborting; nothing was written.`,
       };
     }
     if (!parsed.encrypted || !parsed.iv || !parsed.authTag) {
       return {
         rows: [],
-        error: `${group.label} (settings.${group.settingKey}) is missing encrypted/iv/authTag. Aborting; nothing was written.`,
+        error: `${group.label} (${group.table}.${group.settingKey}) is missing encrypted/iv/authTag. Aborting; nothing was written.`,
       };
     }
 
@@ -227,7 +250,7 @@ export function rotateSecrets(
     } catch (err) {
       return {
         rows: [],
-        error: `cannot decrypt ${group.label} (settings.${group.settingKey}) with --old-key — wrong key or corrupted ciphertext (${(err as Error).message}). Aborting; nothing was written.`,
+        error: `cannot decrypt ${group.label} (${group.table}.${group.settingKey}) with --old-key — wrong key or corrupted ciphertext (${(err as Error).message}). Aborting; nothing was written.`,
       };
     }
     rowsToRotate.push({ group, id: group.settingKey, plaintext, reEncrypted: encryptWith(newKey, plaintext) });
@@ -247,9 +270,7 @@ export function applyRotation(
   const write = db.transaction((items: RowToRotate[]) => {
     for (const r of items) {
       if (r.group.kind === 'setting') {
-        // Same encoding encodeFetchRelayToken() writes, so the running server
-        // reads it back unchanged.
-        db.prepare('UPDATE settings SET value = ? WHERE key = ?')
+        db.prepare(`UPDATE ${r.group.table} SET value = ? WHERE key = ?`)
           .run(JSON.stringify(r.reEncrypted), r.group.settingKey);
         continue;
       }

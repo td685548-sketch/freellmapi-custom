@@ -185,6 +185,11 @@ export interface UrlAssessment {
   reason?: string;
 }
 
+export interface PinnedUrlAssessment extends UrlAssessment {
+  hostname?: string;
+  addresses?: string[];
+}
+
 export interface AssessOptions {
   // Injectable for tests; defaults to a real DNS lookup.
   resolve?: (hostname: string) => Promise<string[]>;
@@ -209,10 +214,47 @@ function blockPrivateEnabled(): boolean {
 }
 
 /**
- * Assess whether an outbound custom-provider URL is safe to contact.
- * Never throws on malformed input — a bad URL comes back as {allowed: false}.
+ * Synchronous base URL safety check for sync stores (blocks bad schemes,
+ * embedded credentials, cloud metadata, link-local literals, and private/loopback
+ * literals when FREEAPI_BLOCK_PRIVATE_PROVIDER_URLS is enabled).
  */
-export async function assessProviderUrl(rawUrl: string, opts: AssessOptions = {}): Promise<UrlAssessment> {
+export function assertSafeHttpBaseUrlSync(rawUrl: string, blockPrivate = blockPrivateEnabled()): string {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error('Base URL must be a valid http(s) URL.');
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('Base URL must use http or https protocol.');
+  }
+  if (url.username || url.password) {
+    throw new Error('Base URL must not contain embedded credentials.');
+  }
+  const hostname = url.hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '').toLowerCase();
+  if (METADATA_HOSTNAMES.has(hostname)) {
+    throw new Error('Cloud metadata endpoints are not reachable.');
+  }
+  if (net.isIP(hostname)) {
+    const cls = classifyIp(hostname);
+    if (cls === 'metadata' || cls === 'link-local') {
+      throw new Error(`Base URL cannot target a ${cls} address.`);
+    }
+    if (blockPrivate && (cls === 'loopback' || cls === 'private')) {
+      throw new Error('Base URL cannot target a private or loopback address when FREEAPI_BLOCK_PRIVATE_PROVIDER_URLS is set.');
+    }
+  }
+  return rawUrl.trim().replace(/\/+$/, '');
+}
+
+/**
+ * Assess whether an outbound provider URL is safe to contact, returning any
+ * validated DNS IP addresses so callers can pin TCP connections against DNS rebinding.
+ */
+export async function assessProviderUrlWithPin(
+  rawUrl: string,
+  opts: AssessOptions = {},
+): Promise<PinnedUrlAssessment> {
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -246,7 +288,7 @@ export async function assessProviderUrl(rawUrl: string, opts: AssessOptions = {}
     }
     if (addresses.length === 0) {
       return opts.allowUnresolved
-        ? { allowed: true }
+        ? { allowed: true, hostname, addresses: [] }
         : { allowed: false, reason: `could not resolve ${hostname}, so its address could not be checked` };
     }
   }
@@ -267,7 +309,78 @@ export async function assessProviderUrl(rawUrl: string, opts: AssessOptions = {}
       };
     }
   }
-  return { allowed: true };
+  return { allowed: true, hostname, addresses };
+}
+
+/**
+ * Assess whether an outbound custom-provider URL is safe to contact.
+ * Never throws on malformed input — a bad URL comes back as {allowed: false}.
+ */
+export async function assessProviderUrl(rawUrl: string, opts: AssessOptions = {}): Promise<UrlAssessment> {
+  const verdict = await assessProviderUrlWithPin(rawUrl, opts);
+  return verdict.allowed ? { allowed: true } : { allowed: false, reason: verdict.reason };
+}
+
+/**
+ * Builds an undici Agent that pins DNS lookup for `expectedHostname` to the
+ * pre-validated IP list so a rebinding authoritative DNS server cannot switch
+ * the target IP between assessProviderUrl() and TCP connect().
+ */
+export async function createPinnedDispatcher(
+  expectedHostname: string,
+  addresses: readonly string[],
+): Promise<import('undici').Dispatcher | undefined> {
+  if (!expectedHostname || addresses.length === 0 || net.isIP(expectedHostname)) {
+    return undefined;
+  }
+  const { Agent } = await import('undici');
+  const cleanExpected = expectedHostname.replace(/^\[|\]$/g, '').replace(/\.$/, '').toLowerCase();
+  const pinnedList = addresses.map(addr => ({
+    address: addr,
+    family: (net.isIP(addr) === 6 ? 6 : 4) as 4 | 6,
+  }));
+  return new Agent({
+    maxRedirections: 0,
+    connect: {
+      lookup: (hostname, lookupOpts, callback) => {
+        const cleanHost = hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '').toLowerCase();
+        if (cleanHost !== cleanExpected) {
+          callback(new Error(`DNS pinning host mismatch: ${cleanHost}`), '', 4);
+          return;
+        }
+        const chosen = pinnedList[0]!;
+        if (lookupOpts?.all) {
+          (callback as unknown as (err: NodeJS.ErrnoException | null, addresses: Array<{ address: string; family: number }>) => void)(
+            null,
+            pinnedList,
+          );
+        } else {
+          callback(null, chosen.address, chosen.family);
+        }
+      },
+    },
+  });
+}
+
+/**
+ * Request-time enforcement returning pinned DNS details alongside validation:
+ * throws when blocked.
+ */
+export async function assertProviderUrlAllowedWithPin(
+  rawUrl: string,
+  opts: AssessOptions = {},
+): Promise<{ hostname: string; addresses: string[]; createDispatcher: () => Promise<import('undici').Dispatcher | undefined> }> {
+  const verdict = await assessProviderUrlWithPin(rawUrl, opts);
+  if (!verdict.allowed) {
+    throw new Error(`Custom provider URL blocked: ${verdict.reason}`);
+  }
+  const hostname = verdict.hostname ?? '';
+  const addresses = verdict.addresses ?? [];
+  return {
+    hostname,
+    addresses,
+    createDispatcher: () => createPinnedDispatcher(hostname, addresses),
+  };
 }
 
 /**

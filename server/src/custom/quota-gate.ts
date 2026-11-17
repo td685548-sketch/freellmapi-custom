@@ -33,10 +33,20 @@ export function enforceUsageQuota(kind: SubjectKind, id: number, res: Response, 
   const end = (finished: boolean) => {
     if (ended) return;
     ended = true;
+    const committed = finished || (res.headersSent && res.statusCode < 400);
+    if (!finished && committed) {
+      // Mid-stream socket close after headers committed: settle on next tick so
+      // the streaming abort handler records consumed tokens before settlement.
+      setImmediate(() => {
+        admission.settle(true, tokensUsed());
+        noteOutcome(kind, id, res.statusCode);
+      });
+      return;
+    }
     admission.settle(finished && res.statusCode < 400, finished ? tokensUsed() : 0);
     if (finished) noteOutcome(kind, id, res.statusCode);
   };
   res.on('finish', () => end(true));
-  res.on('close', () => end(false)); // a hang-up before 'finish' hands the request back
+  res.on('close', () => end(false)); // refund only when closed before response headers are committed
   return true;
 }

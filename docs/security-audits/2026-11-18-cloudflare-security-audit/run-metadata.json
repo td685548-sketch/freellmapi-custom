@@ -1,0 +1,52 @@
+{
+  "run_id": "run-1",
+  "repo": "freellmapi-custom",
+  "target": ".",
+  "source_ref": "0c16a3aaf50629d8af180344c92c061c9122bd0a",
+  "worktree_dirty": true,
+  "worktree_dirty_note": "Pre-existing unstaged modification in .gitignore (+/9router/) prior to audit; target repository untouched by audit",
+  "profile": "standard",
+  "scope_paths": [
+    "server",
+    "client",
+    "cli",
+    "desktop",
+    "shared",
+    "docker",
+    ".github",
+    "Dockerfile",
+    "docker-compose.yml",
+    "package.json"
+  ],
+  "budget": null,
+  "execution_policy": "sandboxed-source-and-local-only",
+  "platform_notes": {
+    "host_os": "win32",
+    "target_execution_sandbox": "Unavailable on Windows host (lacks isolated loopback namespace, empty allowlisted env, read-only toolchain mounts, and POSIX O_NOFOLLOW descriptor-walk promotion). All target code execution is omitted and runtime-dependent findings remain needs_validation.",
+    "validator_cli_note": "validate-coverage-ledger.cjs and validate-findings.cjs CLI entrypoints reject win32 because fs.constants.O_NOFOLLOW and O_NONBLOCK are undefined. Parent-side validation runs their exported preflightJsonText / validateDocument / collectSchemaErrors APIs directly via scratch/run-validators.cjs with lstatSync regular-file and fatal UTF-8 ignoreBOM checks, leaving the installed skill files completely unmodified."
+  },
+  "selected_companions": [
+    "WEB-PROTOCOL-AND-AUTH.md",
+    "AI-AND-LLM.md",
+    "CLIENT-SIDE.md",
+    "DATA-ISOLATION-AND-LIFECYCLE.md",
+    "DESKTOP-MOBILE-AND-LOCAL-IPC.md",
+    "SUPPLY-CHAIN-AND-RELEASE.md",
+    "CLOUD-AND-DEPLOYMENT.md",
+    "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md",
+    "PROTOCOLS-RPC-AND-MESSAGING.md"
+  ],
+  "prior_runs": [],
+  "shared_file_owners": {
+    "parent": [
+      "run-metadata.json",
+      "architecture.md",
+      "coverage-ledger.json",
+      "findings.json",
+      "REPORT.md",
+      "FINDINGS-DETAIL.md",
+      "NEEDS-VALIDATION.md"
+    ]
+  },
+  "run_status": "complete"
+}

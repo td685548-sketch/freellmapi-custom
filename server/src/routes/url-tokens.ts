@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { Router } from 'express';
 import type { NextFunction, Request, Response } from 'express';
 import { getUnifiedApiKey } from '../db/index.js';
@@ -31,6 +32,7 @@ urlTokenRouter.use((req: Request, res: Response, next: NextFunction) => {
   // token was verified; it never appears in the public URL.
   req.headers.authorization = `Bearer ${getUnifiedApiKey()}`;
   (req as Request & { urlTokenAuthenticated?: boolean }).urlTokenAuthenticated = true;
+  (req as Request & { urlTokenScope?: string }).urlTokenScope = crypto.createHash('sha256').update(token).digest('hex').slice(0, 16);
   next();
 });
 

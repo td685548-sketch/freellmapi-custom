@@ -5,6 +5,7 @@ import { createApp } from '../../app.js';
 import { createUser } from '../../services/auth.js';
 import { mintUserApiKey } from '../../services/user-keys.js';
 import { mintXGatewayClientKey, updateXGatewayClientKeyAccess } from '../../custom/x-gateway/client-keys.js';
+import { setEnabled } from '../../custom/x-gateway/config.js';
 import { encrypt } from '../../lib/crypto.js';
 
 describe('X Gateway Gemini Native API & Ollama Emulation', () => {
@@ -18,6 +19,7 @@ describe('X Gateway Gemini Native API & Ollama Emulation', () => {
   beforeAll(async () => {
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     initDb(':memory:');
+    setEnabled(true);
 
     // Seed an X Gateway provider key
     const key = encrypt('gsk_gemini_test');
@@ -211,7 +213,9 @@ describe('X Gateway Gemini Native API & Ollama Emulation', () => {
     });
 
     it('returns Ollama version at /thruline/api/version', async () => {
-      const res = await realFetch(`${base}/thruline/api/version`);
+      const res = await realFetch(`${base}/thruline/api/version`, {
+        headers: { Authorization: `Bearer ${xgwKey}` },
+      });
       expect(res.status).toBe(200);
       const data = await res.json() as any;
       expect(data.version).toBe('0.5.1');
@@ -220,13 +224,32 @@ describe('X Gateway Gemini Native API & Ollama Emulation', () => {
     it('returns model info at /thruline/api/show', async () => {
       const res = await realFetch(`${base}/thruline/api/show`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${xgwKey}` },
         body: JSON.stringify({ model: 'llama-3.3-70b' }),
       });
       expect(res.status).toBe(200);
       const data = await res.json() as any;
       expect(data.modelfile).toContain('FROM llama-3.3-70b');
       expect(data.details.format).toBe('gguf');
+    });
+
+    it('rejects unauthenticated requests and malformed model names on /thruline/api/*', async () => {
+      const unauthTags = await realFetch(`${base}/thruline/api/tags`);
+      expect(unauthTags.status).toBe(401);
+      const unauthVersion = await realFetch(`${base}/thruline/api/version`);
+      expect(unauthVersion.status).toBe(401);
+      const unauthShow = await realFetch(`${base}/thruline/api/show`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'llama-3.3-70b' }),
+      });
+      expect(unauthShow.status).toBe(401);
+      const badShow = await realFetch(`${base}/thruline/api/show`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${xgwKey}` },
+        body: JSON.stringify({ model: 'llama\nRUN evil' }),
+      });
+      expect(badShow.status).toBe(400);
     });
   });
 });

@@ -8,6 +8,7 @@ import type { CompletionOptions } from '../../providers/base.js';
 import { decrypt } from '../../lib/crypto.js';
 import { estimateInputTokens } from '../../lib/content.js';
 import { assessProviderUrl } from '../../lib/url-guard.js';
+import { proxyFetch } from '../../lib/proxy.js';
 import { withQuotaTracking } from './quota/tracking.js';
 import { applyQuotaRouting, isWebCookieProvider } from './quota/store.js';
 import { getAccountCooldown } from '../provider-accounts/auto-ping.js';
@@ -1492,10 +1493,15 @@ async function nativeSearch(
     endpoint.searchParams.set('q', query);
     endpoint.searchParams.set('format', 'json');
     endpoint.searchParams.set('language', 'all');
-    const response = await fetch(endpoint.toString(), {
-      headers: { accept: 'application/json', ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
-      signal,
-    });
+    const response = await proxyFetch(
+      endpoint.toString(),
+      {
+        headers: { accept: 'application/json', ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
+        signal,
+      },
+      'custom',
+      'unknown',
+    );
     const data = await readSearchJson(response, providerId);
     items = Array.isArray(data.results) ? data.results : [];
   } else {
@@ -1813,14 +1819,21 @@ async function fetchWithRedirects(
 ): Promise<{ response: FetchResponse; finalUrl: string }> {
   let current = initial;
   for (let hop = 0; hop <= FETCH_MAX_REDIRECTS; hop += 1) {
-    const response = await fetch(current.toString(), {
-      redirect: 'manual',
-      signal,
-      headers: {
-        accept: 'text/html,application/xhtml+xml,text/plain,application/json;q=0.8,*/*;q=0.5',
-        'user-agent': 'FreeLLMAPI-X-Gateway/1.0',
+    const response = await proxyFetch(
+      current.toString(),
+      {
+        redirect: 'manual',
+        signal,
+        headers: {
+          accept: 'text/html,application/xhtml+xml,text/plain,application/json;q=0.8,*/*;q=0.5',
+          'user-agent': 'FreeLLMAPI-X-Gateway/1.0',
+        },
       },
-    });
+      'custom',
+      'unknown',
+      undefined,
+      { blockPrivate: true, allowManualRedirectResponse: true },
+    );
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get('location');
       if (!location) return { response, finalUrl: current.toString() };

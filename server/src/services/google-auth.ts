@@ -202,8 +202,12 @@ export function finishGoogleLogin(
         | { id: number; email: string; role: 'admin' | 'member' }
         | undefined;
       if (user) {
+        const disableAdminAutoLink =
+          process.env.GOOGLE_DISABLE_ADMIN_AUTO_LINK === '1' ||
+          process.env.GOOGLE_DISABLE_ADMIN_AUTO_LINK === 'true';
         if (
           !identity.authoritative ||
+          (user.role === 'admin' && disableAdminAutoLink) ||
           db
             .prepare('SELECT 1 FROM auth_google_identities WHERE user_id = ?')
             .get(user.id)
@@ -216,13 +220,14 @@ export function finishGoogleLogin(
         // else may have registered this email and know its password. The first
         // Google sign-in is the proof of ownership: from here the account is the
         // Google owner's, so everything the earlier registrant could still use
-        // (password, dashboard sessions, personal keys) is cut off. Members only:
-        // administrator accounts come from first-run setup or deliberate promotion.
+        // (password, dashboard sessions, personal/gateway keys, permissions) is cut off.
+        // Members only: administrator accounts come from first-run setup or deliberate promotion.
         if (user.role === 'member') {
-          db.prepare('UPDATE users SET password_hash = ? WHERE id = ?')
+          db.prepare("UPDATE users SET password_hash = ?, permissions = '[]' WHERE id = ?")
             .run(hashPassword(randomSecret()), user.id);
           db.prepare('DELETE FROM sessions WHERE user_id = ?').run(user.id);
           db.prepare('UPDATE user_api_keys SET revoked = 1 WHERE user_id = ? AND revoked = 0').run(user.id);
+          db.prepare('UPDATE x_gateway_client_keys SET revoked = 1 WHERE user_id = ? AND revoked = 0').run(user.id);
           apiKey = mintUserApiKey(user.id, 'Default Key').key;
         }
       } else {

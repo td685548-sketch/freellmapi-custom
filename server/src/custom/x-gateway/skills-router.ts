@@ -25,10 +25,31 @@ const customSkillUpdateSchema = z.object({
   content: z.string().min(10).max(50000).optional(),
 }).strict();
 
-function extractOrigin(req: Request): string {
-  const host = req.get('host') || 'localhost:3001';
-  const proto = req.get('x-forwarded-proto') || (req.secure ? 'https' : 'http');
-  return `${proto}://${host}`;
+const SAFE_HOST_HEADER_RE = /^([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*|\[[0-9a-fA-F:]+\])(?::([1-9]\d{0,4}))?$/;
+
+function resolveOrigin(req: Request): { origin: string; fromConfiguredBase: boolean } {
+  const configuredBase = process.env.PUBLIC_APP_URL?.trim();
+  if (configuredBase) {
+    try {
+      const parsed = new URL(configuredBase);
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        return { origin: parsed.origin, fromConfiguredBase: true };
+      }
+    } catch {
+      // Ignore invalid PUBLIC_APP_URL and fall back to request host below
+    }
+  }
+  const proto = req.protocol === 'https' ? 'https' : 'http';
+  const rawHost = (req.get('host') || '').trim();
+  const match = SAFE_HOST_HEADER_RE.exec(rawHost);
+  let safeHost = 'localhost:3001';
+  if (match) {
+    const portNum = match[2] ? Number(match[2]) : undefined;
+    if (portNum === undefined || (portNum >= 1 && portNum <= 65535)) {
+      safeHost = rawHost;
+    }
+  }
+  return { origin: `${proto}://${safeHost}`, fromConfiguredBase: false };
 }
 
 function getUserId(req: Request): number | undefined {
@@ -37,7 +58,7 @@ function getUserId(req: Request): number | undefined {
 
 // Console API: GET /api/thruline/skills
 xSkillsRouter.get('/', (req: Request, res: Response) => {
-  const origin = extractOrigin(req);
+  const { origin } = resolveOrigin(req);
   const data = skillsService.listSkills({ origin });
   res.json(data);
 });
@@ -45,7 +66,7 @@ xSkillsRouter.get('/', (req: Request, res: Response) => {
 // Console API: GET /api/thruline/skills/:id
 xSkillsRouter.get('/:id', (req: Request, res: Response) => {
   const id = String(req.params.id ?? '');
-  const origin = extractOrigin(req);
+  const { origin } = resolveOrigin(req);
   const skill = skillsService.getSkill(id, { origin });
   if (!skill) {
     res.status(404).json({ error: { type: 'not_found', message: `Skill '${id}' not found.` } });
@@ -57,14 +78,15 @@ xSkillsRouter.get('/:id', (req: Request, res: Response) => {
 // Console API: GET /api/thruline/skills/:id/raw (serves raw text/markdown)
 xSkillsRouter.get('/:id/raw', (req: Request, res: Response) => {
   const id = String(req.params.id ?? '');
-  const origin = extractOrigin(req);
+  const { origin, fromConfiguredBase } = resolveOrigin(req);
   const markdown = skillsService.getRawSkillMarkdown(id, { origin });
   if (!markdown) {
     res.status(404).type('text/plain').send(`Skill '${id}' not found.`);
     return;
   }
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Cache-Control', 'public, max-age=60');
+  res.vary('Origin').vary('Host').vary('X-Forwarded-Proto');
+  res.setHeader('Cache-Control', fromConfiguredBase ? 'public, max-age=60' : 'private, no-store');
   res.type('text/markdown; charset=utf-8').send(markdown);
 });
 
@@ -124,14 +146,15 @@ xSkillsRouter.delete('/custom/:id', (req: Request, res: Response) => {
 // Public Router: GET /thruline-skills/:id and GET /thruline-skills/:id/SKILL.md (Open without auth for AI agents)
 function handlePublicSkill(req: Request, res: Response) {
   const rawId = String(req.params.id ?? '').replace(/\.md$/i, '').replace(/\/SKILL$/i, '');
-  const origin = extractOrigin(req);
+  const { origin, fromConfiguredBase } = resolveOrigin(req);
   const markdown = skillsService.getRawSkillMarkdown(rawId, { origin });
   if (!markdown) {
     res.status(404).type('text/plain').send(`Skill '${rawId}' not found.`);
     return;
   }
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Cache-Control', 'public, max-age=60');
+  res.vary('Origin').vary('Host').vary('X-Forwarded-Proto');
+  res.setHeader('Cache-Control', fromConfiguredBase ? 'public, max-age=60' : 'private, no-store');
   res.type('text/markdown; charset=utf-8').send(markdown);
 }
 

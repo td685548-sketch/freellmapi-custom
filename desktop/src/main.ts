@@ -103,8 +103,39 @@ if (!app.requestSingleInstanceLock()) {
     });
   });
 
+  const isDashboardSender = (url: string | undefined): boolean => {
+    if (!url) return false;
+    try {
+      const parsed = new URL(url);
+      return parsed.origin === `http://127.0.0.1:${resolvedPort}`;
+    } catch {
+      return false;
+    }
+  };
+
+  const popoverFilePath = path.resolve(__dirname, '../renderer/popover.html');
+  const isPopoverSender = (url: string | undefined): boolean => {
+    if (!url) return false;
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== 'file:') return false;
+      const senderPath = path.resolve(fileURLToPath(parsed));
+      return senderPath.toLowerCase() === popoverFilePath.toLowerCase();
+    } catch {
+      return false;
+    }
+  };
+
+  const assertTrustedDesktopSender = (event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): void => {
+    const senderUrl = event.senderFrame?.url;
+    if (!isDashboardSender(senderUrl) && !isPopoverSender(senderUrl)) {
+      throw new Error('Unauthorized IPC sender origin');
+    }
+  };
+
   // ── popover IPC ──────────────────────────────────────────────────────────
-  ipcMain.handle('freeapi:snapshot', () => {
+  ipcMain.handle('freeapi:snapshot', (event) => {
+    assertTrustedDesktopSender(event);
     const s = todayStats();
     return {
       port: resolvedPort,
@@ -122,7 +153,8 @@ if (!app.requestSingleInstanceLock()) {
       strings: nativeStrings(locale),
     };
   });
-  ipcMain.on('freeapi:theme-changed', async (_e, raw: unknown) => {
+  ipcMain.on('freeapi:theme-changed', async (event, raw: unknown) => {
+    if (!isDashboardSender(event.senderFrame?.url) && !isPopoverSender(event.senderFrame?.url)) return;
     // Older preloads sent the bare resolved string; current ones send
     // { resolved, choice } so a 'system' choice can reach nativeTheme.
     const payload = typeof raw === 'string' ? { resolved: raw } : (raw ?? {}) as { resolved?: unknown; choice?: unknown };
@@ -139,7 +171,8 @@ if (!app.requestSingleInstanceLock()) {
     const { getPopoverWindow } = await import('./popover.js');
     getPopoverWindow()?.webContents.send('freeapi:refresh');
   });
-  ipcMain.on('freeapi:locale-changed', async (_e, raw: string) => {
+  ipcMain.on('freeapi:locale-changed', async (event, raw: string) => {
+    if (!isDashboardSender(event.senderFrame?.url) && !isPopoverSender(event.senderFrame?.url)) return;
     const next = normalizeLocale(raw);
     if (next === locale) return;
     locale = next;
@@ -149,23 +182,63 @@ if (!app.requestSingleInstanceLock()) {
     const { getPopoverWindow } = await import('./popover.js');
     getPopoverWindow()?.webContents.send('freeapi:refresh');
   });
-  ipcMain.handle('freeapi:open-dashboard', () => openDashboard(resolvedPort, sessionToken));
-  ipcMain.handle('freeapi:copy-base-url', () => clipboard.writeText(`http://127.0.0.1:${resolvedPort}/v1`));
-  ipcMain.handle('freeapi:copy-api-key', () => clipboard.writeText(getUnifiedApiKey()));
-  ipcMain.handle('freeapi:get-login-item', () => app.getLoginItemSettings().openAtLogin);
-  ipcMain.handle('freeapi:set-login-item', (_e, open: boolean) => app.setLoginItemSettings({ openAtLogin: open }));
-  ipcMain.handle('freeapi:quit', () => app.quit());
+  ipcMain.handle('freeapi:open-dashboard', (event) => {
+    assertTrustedDesktopSender(event);
+    return openDashboard(resolvedPort, sessionToken);
+  });
+  ipcMain.handle('freeapi:copy-base-url', (event) => {
+    assertTrustedDesktopSender(event);
+    clipboard.writeText(`http://127.0.0.1:${resolvedPort}/v1`);
+  });
+  ipcMain.handle('freeapi:copy-api-key', (event) => {
+    assertTrustedDesktopSender(event);
+    clipboard.writeText(getUnifiedApiKey());
+  });
+  ipcMain.handle('freeapi:get-login-item', (event) => {
+    assertTrustedDesktopSender(event);
+    return app.getLoginItemSettings().openAtLogin;
+  });
+  ipcMain.handle('freeapi:set-login-item', (event, open: boolean) => {
+    assertTrustedDesktopSender(event);
+    return app.setLoginItemSettings({ openAtLogin: open });
+  });
+  ipcMain.handle('freeapi:quit', (event) => {
+    assertTrustedDesktopSender(event);
+    app.quit();
+  });
   // Dashboard → the in-app updater (preload __FREEAPI_UPDATER__). Each call
   // returns the new state; progress arrives as 'freeapi:update-state' events.
-  ipcMain.handle('freeapi:update-state', () => getUpdateState());
-  ipcMain.handle('freeapi:update-check', () => checkForUpdates());
-  ipcMain.handle('freeapi:update-download', () => downloadUpdate());
-  ipcMain.handle('freeapi:update-install', () => installUpdate());
+  ipcMain.handle('freeapi:update-state', (event) => {
+    assertTrustedDesktopSender(event);
+    return getUpdateState();
+  });
+  ipcMain.handle('freeapi:update-check', (event) => {
+    assertTrustedDesktopSender(event);
+    return checkForUpdates();
+  });
+  ipcMain.handle('freeapi:update-download', (event) => {
+    assertTrustedDesktopSender(event);
+    return downloadUpdate();
+  });
+  ipcMain.handle('freeapi:update-install', (event) => {
+    assertTrustedDesktopSender(event);
+    return installUpdate();
+  });
   // Dashboard → a fresh session for the hidden machine account (preload
-  // __FREEAPI_SESSION__). The window never shows a login form: its account has
-  // a random password nobody knows, so when the boot-time session is gone the
-  // only sane answer is a new one. Later windows reuse it too.
-  ipcMain.handle('freeapi:session-token', () => {
+  // __FREEAPI_SESSION__ / preload sync bootstrap). Only the dashboard loopback
+  // origin may request the session token.
+  ipcMain.on('freeapi:session-token-sync', (event) => {
+    if (!isDashboardSender(event.senderFrame?.url)) {
+      event.returnValue = '';
+      return;
+    }
+    sessionToken = ensureSessionToken();
+    event.returnValue = sessionToken;
+  });
+  ipcMain.handle('freeapi:session-token', (event) => {
+    if (!isDashboardSender(event.senderFrame?.url)) {
+      throw new Error('Unauthorized IPC caller origin for session token');
+    }
     sessionToken = ensureSessionToken();
     return sessionToken;
   });

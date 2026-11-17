@@ -141,6 +141,14 @@ vi.mock('../../../server/src/custom/x-gateway/support-runtime-router.js', () => 
   }),
 }));
 
+vi.mock('../../../server/src/custom/provider-accounts/gemini-web-keepalive.js', () => ({
+  startGeminiWebKeepAlive: vi.fn(() => {
+    calls.push('startGeminiWebKeepAlive');
+    return () => {};
+  }),
+  rotateGeminiWebAccountsOnce: vi.fn(async () => 0),
+}));
+
 async function boot(): Promise<void> {
   const { startServer } = await import('../server-host.js');
   await startServer({
@@ -192,6 +200,7 @@ describe('desktop server boot sequence (#949)', () => {
       'startBackupScheduler',
       'startCustomModelSync',
       'startBuiltinModelDiscovery',
+      'startGeminiWebKeepAlive',
       'startWakeDetect',
     ]);
   });

@@ -126,6 +126,8 @@ export async function invokeSupportRuntimeWebhook(options: {
   args: Record<string, unknown>;
   requestId: string;
   conversationId?: string;
+  forceApproval?: boolean;
+  actionSummary?: string;
 }): Promise<{ ok: boolean; status: number; effectiveArgs: Record<string, unknown>; data: unknown }> {
   const { tenantId, context, tool, args, requestId, conversationId } = options;
 
@@ -147,8 +149,8 @@ export async function invokeSupportRuntimeWebhook(options: {
 
   validateArguments(tool, effectiveArgs);
 
-  // If tool mode is read, execute immediately
-  if (mode === 'read') {
+  // If tool mode is read, execute immediately unless caller is proposing a pending action.
+  if (mode === 'read' && !options.forceApproval) {
     const signingSecret = getSupportTenantSigningSecret(tenantId);
     const result = await executeSupportWebhookTool({
       tool,
@@ -194,7 +196,7 @@ export async function invokeSupportRuntimeWebhook(options: {
     userName: context.name,
     userRole: context.role,
     toolName: tool.name,
-    actionSummary: tool.description || `Execute ${tool.name}`,
+    actionSummary: options.actionSummary || tool.description || `Execute ${tool.name}`,
     payload: maskSupportSensitiveData(String(tenantId), effectiveArgs, context.role).masked,
   });
 

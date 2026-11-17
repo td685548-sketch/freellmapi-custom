@@ -1,4 +1,5 @@
 import './env.js';
+import './lib/init-log-redaction.js';
 import { measureStartup, stopPerformanceMetrics } from './custom/performance/metrics.js';
 import { createApp } from './app.js';
 import { initDb, getDb } from './db/index.js';

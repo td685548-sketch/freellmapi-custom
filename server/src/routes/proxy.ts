@@ -12,6 +12,7 @@ import { runDecision, DecisionError, decisionRetryAfterSec, listDecisionModels, 
 import { retryAfterSeconds } from '../lib/retry-hint.js';
 import { runImageGeneration, runVideoGeneration, runSpeech, runTranscription, MediaError, MAX_TRANSCRIPTION_BYTES } from '../services/media.js';
 import multer from 'multer';
+import { getClientContext, noteRequestTokens } from '../lib/client-context.js';
 import { getDb } from '../db/index.js';
 import { resolveAuth, prependSystemPrompt, type ResolvedAuth } from '../lib/system-prompt.js';
 import { applyOutputSavers } from '../custom/output-savers/apply.js';
@@ -1705,6 +1706,7 @@ proxyRouter.post('/completions', async (req: Request, res: Response) => {
           // this check every Ctrl-C during a reasoning model's TTFB window
           // benched the healthy model+key for 90s and logged a provider error.
           if (clientGone && !headerSent && !sawText) {
+            if (headersSentEarly) noteRequestTokens(estimatedInputTokens + totalOutputTokens);
             console.log(`[Proxy] client disconnected before first token from ${route.displayName} — dropping attempt without benching`);
             return 'committed';
           }
@@ -1737,12 +1739,12 @@ proxyRouter.post('/completions', async (req: Request, res: Response) => {
           logRequest(route.platform, route.modelId, route.keyId, 'success', estimatedInputTokens, totalOutputTokens, Date.now() - start, null, ttfbMs, pinnedModelId, null, 'http');
           return 'done';
         } catch (streamErr: any) {
-          // Client abort mid-stream: the pump's own `if (clientGone) break`
-          // can lose the race against the fetch-signal rejection, so the
-          // abort may surface here instead. Rethrow — the shared loop's
-          // client-abort branch stops the ladder without benching or an
-          // error log row (the socket is gone; nothing to render).
-          if (isClientAbortError(streamErr)) throw streamErr;
+          if (isClientAbortError(streamErr)) {
+            if (headerSent || headersSentEarly) {
+              noteRequestTokens(estimatedInputTokens + totalOutputTokens);
+            }
+            throw streamErr;
+          }
           // headerSent = real content went out. headersSentEarly also counts:
           // a #1642 keep-alive ping flushed the SSE headers, so the response
           // is on the wire and this attempt can no longer fail over invisibly.
@@ -2299,6 +2301,20 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   // per-request `X-FreeLLM-Cache` header can force or bypass. Off unless enabled
   // via the RESPONSE_CACHE env var or the response_cache_enabled setting.
   const cacheDirective = parseCacheDirective(req.headers['x-freellm-cache'], req.headers['cache-control']);
+  const clientCtx = getClientContext();
+  const urlTokenScope = (req as Request & { urlTokenScope?: string }).urlTokenScope;
+  const authScope = urlTokenScope
+    ? `url_token:${urlTokenScope}`
+    : auth.kind === 'profile'
+      ? `profile:${auth.profileId}`
+      : auth.kind === 'user'
+        ? `user:${auth.userId}`
+        : clientCtx.userId !== undefined
+          ? `unified_user:${clientCtx.userId}`
+          : 'unified';
+  const restrictionSignature = clientCtx.allowedModels && clientCtx.allowedModels.size > 0
+    ? [...clientCtx.allowedModels].sort().join(',')
+    : undefined;
   // Streaming requests participate in the cache too: same canonical key (the
   // request content is identical), but hits are looked up in the streaming
   // store and replayed as SSE rather than JSON (see below).
@@ -2328,6 +2344,8 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         // effort asks for a different answer, so it must never collide.
         reasoning_effort: samplingParams.reasoning_effort ?? undefined,
         compression: compressionResult.cacheKey,
+        authScope,
+        restrictionSignature,
       })
     : null;
   if (cacheKey) {
@@ -2951,6 +2969,9 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
           // log a provider error for every Ctrl-C during a reasoning model's
           // TTFB window.
           if (clientGone && mode !== 'passthrough' && heldText.trim().length === 0 && completedCalls.length === 0) {
+            if (headersSentEarly) {
+              noteRequestTokens(estimatedInputTokens + injectedHandoffTokens + imageCount * IMAGE_TOKEN_ESTIMATE + totalOutputTokens);
+            }
             console.log(`[Proxy] client disconnected before first token from ${route.displayName} — dropping attempt without benching`);
             return 'committed';
           }
@@ -3102,12 +3123,12 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
             observeServedModel({ platform: route.platform, requestedModel: route.modelId, servedModel: upstreamModel }), 'http');
           return 'done';
         } catch (streamErr: any) {
-          // Client abort mid-stream: the pump's own `if (clientGone) break`
-          // can lose the race against the fetch-signal rejection, so the
-          // abort may surface here instead. Rethrow — the shared loop's
-          // client-abort branch stops the ladder without benching or an
-          // error log row (the socket is gone; nothing to render).
-          if (isClientAbortError(streamErr)) throw streamErr;
+          if (isClientAbortError(streamErr)) {
+            if (headerSent || headersSentEarly) {
+              noteRequestTokens(estimatedInputTokens + injectedHandoffTokens + imageCount * IMAGE_TOKEN_ESTIMATE + totalOutputTokens);
+            }
+            throw streamErr;
+          }
           // headerSent = real content went out. headersSentEarly also counts:
           // a #1642 keep-alive ping flushed the SSE headers, so the response
           // is on the wire and this attempt can no longer fail over invisibly.

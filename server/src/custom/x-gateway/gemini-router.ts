@@ -6,6 +6,7 @@ import { decrypt } from '../../lib/crypto.js';
 import { estimateInputTokens } from '../../lib/content.js';
 import { withQuotaTracking } from './quota/tracking.js';
 import { logRequest } from '../../lib/request-log.js';
+import { setRequestUser } from '../../lib/client-context.js';
 import { sanitizeProviderErrorMessage } from '../../lib/error-redaction.js';
 import { permissionGranted } from '@freellmapi/shared/permissions.js';
 import { validateUserApiKey } from '../../services/user-keys.js';
@@ -32,7 +33,7 @@ import { augmentCandidatesWithCapacityAdapter } from './capacity-adapter.js';
 
 export const geminiRouter = Router();
 
-// CORS preflight and headers for all /v1beta paths
+// CORS preflight and enabled check for all /v1beta and /thruline/v1beta paths
 geminiRouter.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -41,16 +42,32 @@ geminiRouter.use((req, res, next) => {
     res.status(204).end();
     return;
   }
+  if (!getConfigSnapshot().enabled) {
+    if ((req.baseUrl || '').toLowerCase().includes('/thruline')) {
+      res.status(404).json({ error: { message: 'Not found', type: 'not_found' } });
+      return;
+    }
+    // Hand disabled /v1beta traffic cleanly to the upstream Gemini router.
+    next('router');
+    return;
+  }
   next();
 });
 
 function extractGeminiApiKey(req: Request): string | undefined {
-  const headerKey = req.headers['x-goog-api-key'];
-  if (typeof headerKey === 'string' && headerKey.trim()) return headerKey.trim();
-  const queryKey = req.query['key'];
-  if (typeof queryKey === 'string' && queryKey.trim()) return queryKey.trim();
+  const first = (v: string | string[] | undefined): string | undefined => {
+    const x = (Array.isArray(v) ? v[0] : v)?.trim();
+    return x || undefined;
+  };
+  const headerKey = first(req.headers['x-goog-api-key']);
+  if (headerKey) return headerKey;
+  const queryKey = typeof req.query['key'] === 'string' ? req.query['key'].trim() : '';
+  if (queryKey) return queryKey;
   const auth = req.headers['authorization'];
-  if (typeof auth === 'string' && auth.startsWith('Bearer ')) return auth.slice(7).trim();
+  const bearer = typeof auth === 'string' ? auth.replace(/^Bearer\s+/i, '').trim() : '';
+  if (bearer) return bearer;
+  const xApiKey = first(req.headers['x-api-key']);
+  if (xApiKey) return xApiKey;
   return undefined;
 }
 
@@ -149,6 +166,9 @@ geminiRouter.get('/models', (req: Request, res: Response, next: NextFunction) =>
   if (!user || !permissionGranted(user, 'use_x_gateway')) {
     return next();
   }
+  if (typeof user.userId === 'number') {
+    setRequestUser(user.userId);
+  }
 
   const keys = getUsableXGatewayKeys();
   const modelSet = new Set<string>();
@@ -183,6 +203,9 @@ geminiRouter.post(/^\/models\/(.+)$/, async (req: Request, res: Response, next: 
 
   if (!user || !permissionGranted(user, 'use_x_gateway')) {
     return next();
+  }
+  if (typeof user.userId === 'number') {
+    setRequestUser(user.userId);
   }
 
   const rawPath = String((req.params as Record<string, any>)[0] || (req.params as Record<string, any>).modelPath || '');

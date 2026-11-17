@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import type { SessionUser } from '../../services/auth.js';
+import { hasPermission } from '../../middleware/requirePermission.js';
 import {
   SupportStoreError,
   type SupportTenant,
@@ -139,15 +140,15 @@ export function applySupportCors(req: Request, res: Response, tenant?: SupportTe
   if (!origin) return;
 
   const allowedOrigins = tenant?.allowedOrigins ?? [];
-  const isAllowed =
-    allowedOrigins.length === 0 ||
-    allowedOrigins.includes('*') ||
-    allowedOrigins.includes(origin);
-
-  if (isAllowed) {
+  const wildcard = allowedOrigins.length === 0 || allowedOrigins.includes('*');
+  if (wildcard) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  } else if (allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
+  } else {
+    res.setHeader('Vary', 'Origin');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader(
@@ -724,6 +725,21 @@ export async function executeSupportChatPipeline(options: {
 // ---------------------------------------------------------------------------
 
 export const xSupportConsoleRouter = Router();
+
+xSupportConsoleRouter.use((req: Request, res: Response, next: NextFunction) => {
+  const actor = (req as Request & { user?: SessionUser }).user;
+  const required = req.method === 'GET' || req.method === 'HEAD' ? 'use_x_gateway' : 'edit_x_settings';
+  if (!hasPermission(actor, required)) {
+    res.status(403).json({
+      error: {
+        message: `Permission denied: '${required}' required for Support console operation.`,
+        type: 'forbidden',
+      },
+    });
+    return;
+  }
+  next();
+});
 
 // GET /tenants
 xSupportConsoleRouter.get('/tenants', (_req: Request, res: Response) => {

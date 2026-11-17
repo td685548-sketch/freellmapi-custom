@@ -276,8 +276,19 @@ describe('deployed relay script behavior', () => {
   it('Deno relays stream bodies, preserve provider authorization and strip relay credentials', async () => {
     let handler!: (request: Request) => Promise<Response>;
     const fetchMock = vi.fn(async () => new Response('data: hello\n\n', { headers: { 'Content-Type': 'text/event-stream' } }));
-    runInNewContext(DENO_RELAY_CODE, { Deno: { serve: (fn: typeof handler) => { handler = fn; } }, Response, Request, Headers, URL, fetch: fetchMock });
+    runInNewContext(DENO_RELAY_CODE, {
+      Deno: {
+        serve: (fn: typeof handler) => { handler = fn; },
+        env: { get: (k: string) => (k === 'RELAY_TOKEN' ? 'relay-secret' : undefined) },
+      },
+      Response,
+      Request,
+      Headers,
+      URL,
+      fetch: fetchMock,
+    });
     expect((await handler(new Request('https://relay.test/'))).status).toBe(200);
+    expect((await handler(new Request('https://relay.test/', { headers: { 'fetch-relay-target': 'https://provider.test/chat' } }))).status).toBe(401);
     const result = await handler(new Request('https://relay.test/', {
       method: 'POST', body: 'payload', headers: { 'fetch-relay-target': 'https://provider.test/chat', 'fetch-relay-authorization': 'relay-secret', Authorization: 'Bearer provider-secret', Host: 'relay.test' },
     }));
@@ -290,13 +301,13 @@ describe('deployed relay script behavior', () => {
     expect(new Headers(call[1].headers).has('host')).toBe(false);
     expect(call[1].redirect).toBe('manual');
     expect(await new Response(call[1].body).text()).toBe('payload');
-    expect((await handler(new Request('https://relay.test/', { headers: { 'fetch-relay-target': 'file:///etc/passwd' } }))).status).toBe(400);
+    expect((await handler(new Request('https://relay.test/', { headers: { 'fetch-relay-target': 'file:///etc/passwd', 'fetch-relay-authorization': 'relay-secret' } }))).status).toBe(400);
   });
   it('Netlify round-trips binary bodies and strips hop/relay headers', async () => {
     const exports: { handler?: (event: unknown) => Promise<any> } = {};
     const bytes = Buffer.from([0, 255, 128, 42]);
     const fetchMock = vi.fn(async () => new Response(bytes, { status: 201, headers: { 'Content-Type': 'application/octet-stream', 'Content-Encoding': 'gzip', 'Content-Length': '1000' } }));
-    runInNewContext(NETLIFY_RELAY_CODE, { exports, URL, Buffer, fetch: fetchMock });
+    runInNewContext(NETLIFY_RELAY_CODE, { exports, URL, Buffer, process: { env: { RELAY_TOKEN: 'relay-secret' } }, fetch: fetchMock });
     const result = await exports.handler!({ httpMethod: 'POST', body: bytes.toString('base64'), isBase64Encoded: true,
       headers: { 'Fetch-Relay-Target': 'https://provider.test/media', 'Fetch-Relay-Authorization': 'relay-secret', Host: 'relay.test', Authorization: 'Bearer provider-secret' } });
     expect(result.statusCode).toBe(201);
@@ -312,12 +323,13 @@ describe('deployed relay script behavior', () => {
     expect(forwarded.has('fetch-relay-authorization')).toBe(false);
     expect(forwarded.has('host')).toBe(false);
     expect((await exports.handler!({ headers: {} })).statusCode).toBe(200);
-    expect((await exports.handler!({ headers: { 'fetch-relay-target': 'invalid' } })).statusCode).toBe(400);
+    expect((await exports.handler!({ headers: { 'fetch-relay-target': 'https://provider.test/' } })).statusCode).toBe(401);
+    expect((await exports.handler!({ headers: { 'fetch-relay-target': 'invalid', 'fetch-relay-authorization': 'relay-secret' } })).statusCode).toBe(400);
   });
   it('returns safe 502s when deployed script fetches fail', async () => {
     const exports: { handler?: (event: unknown) => Promise<any> } = {};
-    runInNewContext(NETLIFY_RELAY_CODE, { exports, URL, Buffer, fetch: async () => { throw new Error(token); } });
-    const result = await exports.handler!({ headers: { 'fetch-relay-target': 'https://provider.test/' } });
+    runInNewContext(NETLIFY_RELAY_CODE, { exports, URL, Buffer, process: { env: { RELAY_TOKEN: 'relay-secret' } }, fetch: async () => { throw new Error(token); } });
+    const result = await exports.handler!({ headers: { 'fetch-relay-target': 'https://provider.test/', 'fetch-relay-authorization': 'relay-secret' } });
     expect(result.statusCode).toBe(502);
     expect(result.body).not.toContain(token);
   });

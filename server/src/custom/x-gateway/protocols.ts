@@ -1156,7 +1156,7 @@ export async function handleAudioVoices(req: Request, res: Response): Promise<vo
           const base = nativeMediaBase(account, { elevenlabs: 'https://api.elevenlabs.io/v1', cartesia: 'https://api.cartesia.ai', 'fish-audio': 'https://api.fish.audio' });
           if (!base) continue;
           const upstream = await withQuotaTracking(account, 'voices', resolveXGatewayAccountProxy(account), () =>
-            proxyFetch(`${base}${path}`, { headers, signal: requestSignal(req, res) }, account.platform, 'audio', 30_000));
+            proxyFetch(`${base}${path}`, { headers, signal: requestSignal(req, res) }, account.base_url?.trim() ? 'custom' : account.platform, 'audio', 30_000));
           if (!upstream.ok) throw new Error(`Voice catalog returned HTTP ${upstream.status}`);
           const payload = await upstream.json() as any;
           const rows = Array.isArray(payload) ? payload : payload.voices ?? payload.data ?? payload.items ?? [];
@@ -1255,7 +1255,7 @@ export async function handleVideoRequest(req: Request, res: Response): Promise<v
       const targetBase = account.provider === 'fal-ai' && base === 'https://fal.run' ? 'https://queue.fal.run' : base;
       const upstream = await withQuotaTracking(account, modelId, resolveXGatewayAccountProxy(account), () => proxyFetch(
         `${targetBase}${path}`, { method: polling ? 'GET' : 'POST', headers, signal: requestSignal(req, res),
-          ...(!polling ? { body: payload instanceof FormData ? payload : JSON.stringify(payload) } : {}) }, account.platform, 'video', 120_000));
+          ...(!polling ? { body: payload instanceof FormData ? payload : JSON.stringify(payload) } : {}) }, account.base_url?.trim() ? 'custom' : account.platform, 'video', 120_000));
       lastStatus = upstream.status;
       if (!polling && !preferred && [401, 403, 429].includes(upstream.status)) { await upstream.text(); continue; }
       const data = await upstream.text();
@@ -1279,6 +1279,21 @@ export async function handleVideoRequest(req: Request, res: Response): Promise<v
 xGatewayProtocolsRouter.post('/videos/generations', xGatewayAuth, handleVideoRequest);
 xGatewayProtocolsRouter.get('/videos/:videoId', xGatewayAuth, handleVideoRequest);
 
+function enforceProtocolsModelAccess(req: Request, res: Response, model: string): boolean {
+  const access = (req as Request & { user?: ValidatedXGatewayClientKey }).user?.access;
+  if (access?.restricted && !isModelAllowedForKey(access, model)) {
+    res.status(403).json({
+      error: {
+        message: 'Model or combo is not allowed for this API key.',
+        type: 'permission_error',
+        code: 'model_not_allowed',
+      },
+    });
+    return false;
+  }
+  return true;
+}
+
 xGatewayProtocolsRouter.post('/embeddings', xGatewayAuth, async (req: Request, res: Response) => {
   res.setHeader('X-Gateway', 'x');
   const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, any>) : {};
@@ -1289,6 +1304,7 @@ xGatewayProtocolsRouter.post('/embeddings', xGatewayAuth, async (req: Request, r
 
   const rawModel = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'auto';
   const requestedModel = rawModel === 'auto' ? (getMediaDefaults().embedding?.defaultModel || 'auto') : rawModel;
+  if (!enforceProtocolsModelAccess(req, res, requestedModel)) return;
   const { candidates, notFoundError } = resolveCandidateRoutes(requestedModel);
   if (notFoundError) {
     res.status(404).json({ error: { message: notFoundError, type: 'invalid_request_error', code: 'model_not_found' } });
@@ -1327,7 +1343,7 @@ xGatewayProtocolsRouter.post('/embeddings', xGatewayAuth, async (req: Request, r
               model: requestedModel === 'auto' ? modelId : requestedModel,
             }),
           },
-          account.platform,
+          account.base_url?.trim() ? 'custom' : account.platform,
           'embedding',
           60_000,
         ),
@@ -1362,6 +1378,7 @@ xGatewayProtocolsRouter.post('/images/generations', xGatewayAuth, async (req: Re
 
   const rawModel = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'auto';
   const requestedModel = rawModel === 'auto' ? (getMediaDefaults().image?.defaultModel || 'auto') : rawModel;
+  if (!enforceProtocolsModelAccess(req, res, requestedModel)) return;
   const { candidates, notFoundError } = resolveCandidateRoutes(requestedModel, 'image');
   if (notFoundError) {
     res.status(404).json({ error: { message: notFoundError, type: 'invalid_request_error', code: 'model_not_found' } });
@@ -1428,6 +1445,7 @@ xGatewayProtocolsRouter.post('/audio/speech', xGatewayAuth, async (req: Request,
 
   const rawModel = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'auto';
   const requestedModel = rawModel === 'auto' ? (getMediaDefaults().tts?.defaultModel || 'auto') : rawModel;
+  if (!enforceProtocolsModelAccess(req, res, requestedModel)) return;
   const { candidates, notFoundError } = resolveCandidateRoutes(requestedModel);
   if (notFoundError) {
     res.status(404).json({ error: { message: notFoundError, type: 'invalid_request_error', code: 'model_not_found' } });
@@ -1466,7 +1484,7 @@ xGatewayProtocolsRouter.post('/audio/speech', xGatewayAuth, async (req: Request,
               model: modelId,
             }),
           },
-          account.platform,
+          account.base_url?.trim() ? 'custom' : account.platform,
           'audio',
           120_000,
         ),
@@ -1513,7 +1531,9 @@ xGatewayProtocolsRouter.post(
 
     const rawModel =
       typeof req.body?.model === 'string' && req.body.model.trim() ? req.body.model.trim() : 'auto';
+    if (!enforceProtocolsModelAccess(req, res, rawModel)) return;
     const requestedModel = rawModel === 'auto' ? (getMediaDefaults().stt?.defaultModel || 'auto') : rawModel;
+    if (!enforceProtocolsModelAccess(req, res, requestedModel)) return;
     const { candidates, notFoundError } = resolveCandidateRoutes(requestedModel);
     if (notFoundError) {
       res.status(404).json({ error: { message: notFoundError, type: 'invalid_request_error', code: 'model_not_found' } });
@@ -1562,7 +1582,7 @@ xGatewayProtocolsRouter.post(
               },
               body: form,
             },
-            account.platform,
+            account.base_url?.trim() ? 'custom' : account.platform,
             'transcription',
             120_000,
           ),

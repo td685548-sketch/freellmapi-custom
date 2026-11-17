@@ -7,6 +7,7 @@
 // The server sources live in this same repo (../../server). Keep these
 // relative imports in sync with the repo-root default in main.ts.
 import '../../server/src/env.js';
+import '../../server/src/lib/init-log-redaction.js';
 import tls from 'node:tls';
 import type { Server } from 'node:http';
 import { createApp } from '../../server/src/app.js';
@@ -28,6 +29,7 @@ import { installLogRedaction } from '../../server/src/lib/log-redaction.js';
 import { desktopSessionToken } from '../../server/src/services/auth.js';
 import { NodeScheduler } from '../../server/src/lib/scheduler.js';
 import { startWorkerLifecycle } from '../../server/src/custom/x-gateway/support-runtime-router.js';
+import { rotateGeminiWebAccountsOnce, startGeminiWebKeepAlive } from '../../server/src/custom/provider-accounts/gemini-web-keepalive.js';
 
 export { getDb, getUnifiedApiKey, isAutoUpdateCheckEnabled };
 
@@ -161,6 +163,7 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
   startBackupScheduler(scheduler);
   startCustomModelSync(getDb(), scheduler);
   startBuiltinModelDiscovery(getDb(), scheduler);
+  startGeminiWebKeepAlive(scheduler);
   // Post-sleep recovery — the menu-bar app on a laptop is the canonical
   // lid-close case: flush pooled sockets and force-re-probe every key so the
   // first request after wake doesn't ride a dead connection or a pre-sleep
@@ -170,6 +173,7 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
       const idle = Math.round(event.idleMs / 1000);
       console.log(`[wake] resumed after ~${idle}s (${event.reason}${event.signal ? `:${event.signal}` : ''}) — flushing stale sockets, re-probing keys`);
       flushProxyCache();
+      void rotateGeminiWebAccountsOnce();
       try {
         await checkAllKeys({ force: true });
       } catch (err: any) {

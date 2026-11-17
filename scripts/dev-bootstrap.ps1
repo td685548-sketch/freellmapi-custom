@@ -87,6 +87,15 @@ try {
             "ENCRYPTION_KEY=$encryptionKey"
             'PORT=3001'
         ) | Set-Content -LiteralPath $envFile -Encoding ascii
+
+        $icacls = Join-Path $env:SystemRoot 'System32\icacls.exe'
+        if (Test-Path -LiteralPath $icacls) {
+            $currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+            & $icacls $envFile /inheritance:r /grant:r "*${currentSid}:(F)" '*S-1-5-18:(F)' '*S-1-5-32-544:(F)' | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                throw "Unable to set owner-only NTFS permissions on .env (icacls exit code $LASTEXITCODE)."
+            }
+        }
         Write-Host 'Created .env with a new ENCRYPTION_KEY.'
     } else {
         Write-Host '.env already exists; leaving it unchanged.'

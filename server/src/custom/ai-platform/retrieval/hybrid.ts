@@ -29,6 +29,7 @@ export interface RetrieveOptions {
   minScore?: number;
   mode?: RetrievalMode;
   roles?: string[];
+  bypassSupportRoleFilter?: boolean;
   queryTimeoutMs?: number;
   signal?: AbortSignal;
   respectPillarFlag?: boolean;
@@ -306,9 +307,14 @@ export async function retrieve(
   const sourceChunks = loadSourceChunksWithRoles(norm);
   const chunkByKey = new Map<string, SourceChunkRecord>();
   const contentHashesByChunkKey = new Map<string, string>();
+  // Fail closed for support_tenant when roles are omitted unless an explicit internal bypass is set.
+  const effectiveSupportRoles =
+    norm.kind === 'support_tenant' && !opts?.bypassSupportRoleFilter
+      ? (opts?.roles ?? [])
+      : opts?.roles;
   const allowedRoleSet =
-    norm.kind === 'support_tenant' && opts?.roles !== undefined
-      ? new Set(opts.roles.map((r) => r.trim()).filter(Boolean))
+    norm.kind === 'support_tenant' && !opts?.bypassSupportRoleFilter
+      ? new Set((effectiveSupportRoles ?? []).map((r) => r.trim()).filter(Boolean))
       : null;
   const allowedDocIds = norm.kind === 'support_tenant' ? new Set<string>() : undefined;
 
@@ -326,7 +332,7 @@ export async function retrieve(
   }
 
   const fallbackToKeyword = (reason: RetrievalDegradedReason): RetrievalQueryResponse => {
-    const kwCandidates = runKeywordSearch(norm, cleanQuery, candidateLimit, opts?.roles, allowedDocIds);
+    const kwCandidates = runKeywordSearch(norm, cleanQuery, candidateLimit, effectiveSupportRoles, allowedDocIds);
     const hits = buildKeywordHits(kwCandidates, topK, minScore);
     return makeResponse('keyword', hits, true, reason);
   };
@@ -336,7 +342,7 @@ export async function retrieve(
       norm,
       cleanQuery,
       Math.max(topK, candidateLimit),
-      opts?.roles,
+      effectiveSupportRoles,
       allowedDocIds,
     );
     const hits = buildKeywordHits(kwCandidates, topK, minScore);
@@ -376,7 +382,7 @@ export async function retrieve(
   const kwPromise =
     modeRequested === 'hybrid'
       ? Promise.resolve().then(() =>
-          runKeywordSearch(norm, cleanQuery, candidateLimit, opts?.roles, allowedDocIds),
+          runKeywordSearch(norm, cleanQuery, candidateLimit, effectiveSupportRoles, allowedDocIds),
         )
       : Promise.resolve([] as KeywordCandidate[]);
 
