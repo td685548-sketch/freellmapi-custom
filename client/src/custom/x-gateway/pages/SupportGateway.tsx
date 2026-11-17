@@ -146,7 +146,7 @@ export interface ChatMessage {
 // Sample Defaults
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_SAMPLE_SQL = `
+const DEFAULT_SAMPLE_SQL = `
 CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL, category TEXT NOT NULL, price REAL NOT NULL, stock INTEGER NOT NULL);
 INSERT INTO products (id, name, category, price, stock) VALUES (1, 'Wireless Mouse', 'accessories', 19.99, 120);
 INSERT INTO products (id, name, category, price, stock) VALUES (2, 'Mechanical Keyboard', 'accessories', 89.5, 45);
@@ -162,7 +162,7 @@ INSERT INTO customers (id, name, email, tier, password_hash, secret_note) VALUES
 INSERT INTO customers (id, name, email, tier, password_hash, secret_note) VALUES ('cust_102', 'Bob Tran', 'bob@example.com', 'standard', 'pbkdf2$bob-hash', 'Chargeback risk');
 `.trim()
 
-export const DEFAULT_SAMPLE_TABLE_POLICIES: SupportTablePolicy[] = [
+const DEFAULT_SAMPLE_TABLE_POLICIES: SupportTablePolicy[] = [
   {
     tableName: 'products',
     description: 'Public products catalog',
@@ -185,7 +185,7 @@ export const DEFAULT_SAMPLE_TABLE_POLICIES: SupportTablePolicy[] = [
   },
 ]
 
-export const DEFAULT_TENANT_ROLES: SupportRoleConfig[] = [
+const DEFAULT_TENANT_ROLES: SupportRoleConfig[] = [
   { role: 'guest', label: 'Guest', permissions: ['products:read'] },
   { role: 'customer', label: 'Customer', permissions: ['products:read', 'orders:read_own'] },
   { role: 'staff', label: 'Staff', permissions: ['products:read', 'orders:read', 'customers:read'] },
@@ -228,7 +228,7 @@ export default function SupportGateway() {
       apiFetch<{ tenants: SupportTenant[]; sampleSchemaSql?: string }>('/api/thruline/support/tenants', { signal }),
   })
 
-  const tenants = tenantsQuery.data?.tenants ?? []
+  const tenants = useMemo(() => tenantsQuery.data?.tenants ?? [], [tenantsQuery.data?.tenants])
 
   // Active Tenant
   const activeTenant = useMemo(() => {
