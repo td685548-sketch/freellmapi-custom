@@ -3,6 +3,7 @@ import { setRequestAllowedModels, setRequestEndUser, setRequestProfile } from '.
 import { endUserOf, enforceEndUserQuota } from '../custom/end-user-gate.js';
 import { injectKnowledge } from '../custom/knowledge-inject.js';
 import { applyConversation } from '../custom/conversation-inject.js';
+import { checkMandatoryBudget, prepareContextBudget } from '../custom/context-budget/gate.js';
 import { screenContent } from '../custom/content-filter-gate.js';
 import { answerQuickly } from '../custom/quick-answer-gate.js';
 import { latestUserText } from '../custom/content-filter-gate.js';
@@ -123,7 +124,9 @@ export function profileInferenceGate(req: Request, res: Response, next: NextFunc
   // work across both MCP takeover and normal gateway paths, and invalid X-Conversation-Id
   // is still rejected when MCP is enabled.
   if (!internalCall) {
+    prepareContextBudget(req, profile.id);
     if (!applyConversation(req, res, profile.id, endUser, profile.conversations)) return;
+    if (!checkMandatoryBudget(req, res, detectedWire?.wire)) return;
     conversationApplied = true;
   }
 
