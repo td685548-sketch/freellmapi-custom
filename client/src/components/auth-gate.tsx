@@ -1,4 +1,5 @@
 import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, CheckCircle2 } from 'lucide-react'
 import { apiFetch, setToken, UNAUTHORIZED_EVENT, type ApiError } from '@/lib/api'
@@ -707,9 +708,11 @@ function SignedOut({ onAuthed }: { onAuthed: () => void }) {
 
 export function AuthGate({ children }: { children: ReactNode }) {
   const { t } = useI18n()
+  const location = useLocation()
   const queryClient = useQueryClient()
   const revision = useSessionBoundary()
   const { landing, finishLanding } = useExternalAuthLanding(revision)
+  const isPublicRoute = location.pathname === '/status' || location.pathname.startsWith('/status/')
   const { data, isLoading, isError, refetch } = useQuery<AuthStatus>({
     queryKey: ['auth-status', revision],
     queryFn: () => apiFetch('/api/auth/status'),
@@ -760,6 +763,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
     : landing.kind === 'sso'
       ? <ExternalAuthCallback endpoint="/api/auth/sso/complete" onComplete={finishLanding} />
       : <EmailRecovery resetToken={landing.token} onBack={finishLanding} />}</Centered>
+
+  if (isPublicRoute && (!data?.authenticated || isError || isLoading)) {
+    return <div key="public-route" className="contents">{children}</div>
+  }
 
   if (isLoading) {
     return (

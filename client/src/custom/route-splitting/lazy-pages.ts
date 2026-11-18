@@ -32,6 +32,7 @@ export const XGatewayApp = lazyPage(() => import('@/custom/x-gateway/XGatewayApp
 export const AiPlatformApp = lazyNamed(() => import('@/custom/ai-platform/AiPlatformApp'), 'AiPlatformApp')
 export const CustomerAiHubPage = lazyNamed(() => import('@/custom/customer-ai/CustomerAiHubPage'), 'CustomerAiHubPage')
 export const TenantPortalApp = lazyNamed(() => import('@/custom/tenant-portal/TenantPortalApp'), 'TenantPortalApp')
+export const StatusPage = lazyPage(() => import('@/pages/StatusPage'))
 
 type Preloadable = Pick<LazyPage, 'preload'>
 
@@ -64,6 +65,7 @@ const ROUTES: ReadonlyArray<readonly [RegExp, readonly Preloadable[]]> = [
   [/^\/analytics/, [AnalyticsAccessPage]],
   [/^\/logs/, [LogsAccessPage]],
   [/^\/premium/, [PremiumPage]],
+  [/^\/status(\/|$)/, [StatusPage]],
 ]
 
 let preloadTimer: ReturnType<typeof setTimeout> | null = null

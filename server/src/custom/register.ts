@@ -81,6 +81,7 @@ import { providerIconsRouter, providerStaticIconsMiddleware } from './provider-i
 import { quotaVouchersRouter } from './quota-vouchers/router.js';
 import { scenarioRoutingMiddleware } from './scenario-routing/middleware.js';
 import { scenarioRoutingRouter } from './scenario-routing/router.js';
+import { publicStatusRouter } from '../routes/public-status.js';
 
 // Everything this fork adds to the HTTP surface is wired here, so upstream's
 // app.ts keeps a handful of added lines instead of edited mount statements.
@@ -352,4 +353,5 @@ export function registerCustomRoutes(app: Express): void {
   // Start lightweight Telegram interactive approval poller (off in tests unless explicitly ticked).
   startTelegramBotPoller();
   app.use('/api/quota-vouchers', quotaVouchersRouter);
+  app.use('/api/public', publicStatusRouter);
 }

@@ -69,6 +69,7 @@ export function GuestShell({ permissions, trial, onSignIn, onRequest }: { permis
     ...(permissions.includes('view_usage_profiles') || permissions.includes('view_usage_accounts') ? [{ to: '/usage', label: 'Usage' }] : []),
     ...(permissions.includes('view_assistants') ? [{ to: '/assistants', label: 'AI Hub' }] : []),
     ...(trial ? [{ to: '/try', label: 'Try the chat' }] : []),
+    { to: '/status', label: 'System Status' },
   ]
   const home = pages[0]?.to ?? '/models/chat'
 
