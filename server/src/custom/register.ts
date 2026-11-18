@@ -79,6 +79,8 @@ import {
 import { supportSetupCopilotRouter } from './support-setup-copilot/router.js';
 import { providerIconsRouter, providerStaticIconsMiddleware } from './provider-icons/router.js';
 import { quotaVouchersRouter } from './quota-vouchers/router.js';
+import { scenarioRoutingMiddleware } from './scenario-routing/middleware.js';
+import { scenarioRoutingRouter } from './scenario-routing/router.js';
 
 // Everything this fork adds to the HTTP surface is wired here, so upstream's
 // app.ts keeps a handful of added lines instead of edited mount statements.
@@ -253,6 +255,7 @@ export function registerCustomRoutes(app: Express): void {
   // Playground chats (unified key + the dashboard session) are attributed to the signed-in account.
   app.use('/v1', playgroundAttribution);
   app.use('/v1', customerAiSessionRoutingMiddleware);
+  app.use('/v1', scenarioRoutingMiddleware);
   // Roll finished days of the request log into the long-term daily table, after an inference
   // response has gone out (a time check per request; the work itself at most once a day).
   app.use(['/v1', '/v1beta'], (_req, res, next) => { res.once('finish', () => { maybeRollUp(); maybeSendWeeklyReport(); }); next(); });
@@ -300,6 +303,7 @@ export function registerCustomRoutes(app: Express): void {
   // what makes a write need a settings permission; reads stay open so a
   // member-facing status view can show what is active.
   app.use('/api/savers', outputSaversRouter);
+  app.use('/api/scenario-routing', scenarioRoutingRouter);
 
   // The /api/analytics gate above enforces auth + view_logs for this mount too.
   app.use('/api/analytics/provider-tiers', providerTiersRouter);
