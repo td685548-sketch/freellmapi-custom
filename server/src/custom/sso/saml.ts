@@ -134,7 +134,7 @@ function extractEmailAndAttributes(xml: string): { email: string; nameId: string
   return { email, nameId };
 }
 
-function verifyXmlSignature(xml: string, idpCertPem: string): void {
+function verifyXmlSignature(xml: string, idpCertPem: string): string {
   const sigMatch = /<((?:[a-zA-Z0-9_-]+:)?Signature)\b([^>]*)>([\s\S]*?)<\/\1>/i.exec(xml);
   if (!sigMatch) {
     throw new Error('SAML response missing XML digital signature.');
@@ -210,6 +210,7 @@ function verifyXmlSignature(xml: string, idpCertPem: string): void {
   if (!signatureOk) {
     throw new Error('SAML XML signature verification failed.');
   }
+  return refTargetXml;
 }
 
 export function validateSamlPostResponse(params: {
@@ -218,7 +219,7 @@ export function validateSamlPostResponse(params: {
   expectedInResponseTo?: string;
   expectedIssuer?: string;
   nowMs?: number;
-}): { email: string; nameId: string } {
+}): { email: string; nameId: string; assertionId: string } {
   const pem = formatX509Certificate(params.idpCertPem);
   if (!pem) {
     throw new Error('IdP X.509 certificate is not configured.');
@@ -231,7 +232,7 @@ export function validateSamlPostResponse(params: {
     throw new Error('SAMLResponse rejected: DOCTYPE/ENTITY declarations are forbidden.');
   }
 
-  verifyXmlSignature(xml, pem);
+  const signedXml = verifyXmlSignature(xml, pem);
 
   const statusMatch = /<(?:[a-zA-Z0-9_-]+:)?StatusCode\b[^>]*\bValue=["']([^"']+)["']/i.exec(xml);
   if (statusMatch && !statusMatch[1].endsWith(':Success')) {
@@ -240,15 +241,23 @@ export function validateSamlPostResponse(params: {
 
   if (params.expectedInResponseTo) {
     const respInResp = /<(?:[a-zA-Z0-9_-]+:)?Response\b[^>]*\bInResponseTo=["']([^"']+)["']/i.exec(xml)?.[1];
-    const subjInResp = /<(?:[a-zA-Z0-9_-]+:)?SubjectConfirmationData\b[^>]*\bInResponseTo=["']([^"']+)["']/i.exec(xml)?.[1];
+    const subjInResp = /<(?:[a-zA-Z0-9_-]+:)?SubjectConfirmationData\b[^>]*\bInResponseTo=["']([^"']+)["']/i.exec(signedXml)?.[1];
     const actualInResp = respInResp || subjInResp || '';
     if (actualInResp !== params.expectedInResponseTo) {
       throw new Error('SAML InResponseTo does not match active authentication request.');
     }
   }
 
+  const assertionIdMatch =
+    /<(?:[a-zA-Z0-9_-]+:)?Assertion\b[^>]*\bID=["']([^"']+)["']/i.exec(signedXml) ||
+    /<(?:[a-zA-Z0-9_-]+:)?Response\b[^>]*\bID=["']([^"']+)["']/i.exec(signedXml);
+  const assertionId = assertionIdMatch?.[1]?.trim() || '';
+  if (!assertionId) {
+    throw new Error('SAML assertion is missing required ID attribute.');
+  }
+
   const now = params.nowMs ?? Date.now();
-  const condMatch = /<(?:[a-zA-Z0-9_-]+:)?Conditions\b([^>]*)>([\s\S]*?)<\/(?:[a-zA-Z0-9_-]+:)?Conditions>/i.exec(xml);
+  const condMatch = /<(?:[a-zA-Z0-9_-]+:)?Conditions\b([^>]*)>([\s\S]*?)<\/(?:[a-zA-Z0-9_-]+:)?Conditions>/i.exec(signedXml);
   if (condMatch) {
     const condAttrs = condMatch[1] || '';
     const notBeforeRaw = /\bNotBefore=["']([^"']+)["']/i.exec(condAttrs)?.[1];
@@ -271,9 +280,9 @@ export function validateSamlPostResponse(params: {
     }
   }
 
-  const { email, nameId } = extractEmailAndAttributes(xml);
+  const { email, nameId } = extractEmailAndAttributes(signedXml);
   if (!email) {
     throw new Error('SAML assertion did not contain an email address.');
   }
-  return { email, nameId: nameId || email };
+  return { email, nameId: nameId || email, assertionId };
 }

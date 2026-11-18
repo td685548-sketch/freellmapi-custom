@@ -732,6 +732,7 @@ export function listSafeTenantModelOptions(): TenantModelOption[] {
   try {
     const combos = listCombos();
     for (const combo of combos) {
+      if (combo.kind && combo.kind !== 'chat') continue;
       options.push({
         id: combo.name,
         label: combo.name,

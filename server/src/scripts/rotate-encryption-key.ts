@@ -108,6 +108,7 @@ interface SettingGroup {
   kind: 'setting';
   table: 'settings' | 'x_gateway_config';
   settingKey: string;
+  nestedField?: string;
   label: string;
 }
 
@@ -119,6 +120,7 @@ const ENCRYPTION_GROUPS: EncryptionGroup[] = [
   { kind: 'columns', table: 'api_keys', idColumn: 'id', encrypted: 'proxy_encrypted', iv: 'proxy_iv', authTag: 'proxy_auth_tag', label: 'per-key proxy override' },
   { kind: 'columns', table: 'client_profiles', idColumn: 'id', encrypted: 'encrypted_key', iv: 'iv', authTag: 'auth_tag', label: 'client-profile credential' },
   { kind: 'setting', table: 'settings', settingKey: 'fetch_relay_token', label: 'fetch relay token' },
+  { kind: 'setting', table: 'settings', settingKey: 'thruline_sso_config', nestedField: 'oidcClientSecretEnc', label: 'thruline SSO OIDC client secret' },
   { kind: 'columns', table: 'x_gateway_keys', idColumn: 'id', encrypted: 'encrypted_key', iv: 'iv', authTag: 'auth_tag', label: 'x-gateway credential' },
   { kind: 'columns', table: 'x_gateway_keys', idColumn: 'id', encrypted: 'proxy_encrypted', iv: 'proxy_iv', authTag: 'proxy_auth_tag', label: 'x-gateway key proxy override' },
   { kind: 'columns', table: 'x_gateway_proxy_pool', idColumn: 'id', encrypted: 'proxy_encrypted', iv: 'proxy_iv', authTag: 'proxy_auth_tag', label: 'x-gateway proxy pool entry' },
@@ -154,6 +156,7 @@ interface RowToRotate {
   id: number | string;
   plaintext: string;
   reEncrypted: { encrypted: string; iv: string; authTag: string };
+  outerJson?: Record<string, unknown>;
 }
 
 /** Result of a rotate attempt: rows re-encrypted, or an error that aborted it. */
@@ -228,9 +231,33 @@ export function rotateSecrets(
     // An unset or cleared setting stores '' rather than a blob — nothing to do.
     if (!row || !row.value) continue;
 
+    let outerJson: Record<string, unknown> | undefined;
+    let payloadStr = row.value;
+    if (group.nestedField) {
+      let outer: unknown;
+      try {
+        outer = JSON.parse(row.value);
+      } catch {
+        return {
+          rows: [],
+          error: `${group.label} (${group.table}.${group.settingKey}) is not valid JSON — refusing to guess. Aborting; nothing was written.`,
+        };
+      }
+      if (!outer || typeof outer !== 'object' || Array.isArray(outer)) {
+        return {
+          rows: [],
+          error: `${group.label} (${group.table}.${group.settingKey}) is not a JSON object. Aborting; nothing was written.`,
+        };
+      }
+      outerJson = outer as Record<string, unknown>;
+      const rawInner = outerJson[group.nestedField];
+      if (typeof rawInner !== 'string' || !rawInner) continue;
+      payloadStr = rawInner;
+    }
+
     let parsed: { encrypted?: string; iv?: string; authTag?: string };
     try {
-      parsed = JSON.parse(row.value) as { encrypted?: string; iv?: string; authTag?: string };
+      parsed = JSON.parse(payloadStr) as { encrypted?: string; iv?: string; authTag?: string };
     } catch {
       return {
         rows: [],
@@ -253,7 +280,7 @@ export function rotateSecrets(
         error: `cannot decrypt ${group.label} (${group.table}.${group.settingKey}) with --old-key — wrong key or corrupted ciphertext (${(err as Error).message}). Aborting; nothing was written.`,
       };
     }
-    rowsToRotate.push({ group, id: group.settingKey, plaintext, reEncrypted: encryptWith(newKey, plaintext) });
+    rowsToRotate.push({ group, id: group.settingKey, plaintext, reEncrypted: encryptWith(newKey, plaintext), outerJson });
   }
 
   return { rows: rowsToRotate };
@@ -270,8 +297,11 @@ export function applyRotation(
   const write = db.transaction((items: RowToRotate[]) => {
     for (const r of items) {
       if (r.group.kind === 'setting') {
+        const nextValue = r.group.nestedField && r.outerJson
+          ? JSON.stringify({ ...r.outerJson, [r.group.nestedField]: JSON.stringify(r.reEncrypted) })
+          : JSON.stringify(r.reEncrypted);
         db.prepare(`UPDATE ${r.group.table} SET value = ? WHERE key = ?`)
-          .run(JSON.stringify(r.reEncrypted), r.group.settingKey);
+          .run(nextValue, r.group.settingKey);
         continue;
       }
       db.prepare(

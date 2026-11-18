@@ -114,7 +114,8 @@ function SsoSection() {
   const s = useSettingsStrings()
   const client = useQueryClient()
   const revision = useSessionRevision()
-  const canEdit = useUserSession().hasPermission('edit_x_settings')
+  const session = useUserSession()
+  const canEdit = Boolean(session.session?.isPrimary)
   const query = useQuery({ queryKey: ['x-sso-config', revision], queryFn: ({ signal }) => settingsApi.ssoConfig(signal), retry: false })
   const current = query.data
   const validMode = (m: unknown): SsoAuthMode => (m === 'oidc' || m === 'saml' || m === 'both' ? m : 'local')

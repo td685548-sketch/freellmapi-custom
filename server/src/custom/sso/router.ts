@@ -1,7 +1,7 @@
 import express, { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { getDb } from '../../db/index.js';
-import { createSession, createUser, normalizeEmail, userCount } from '../../services/auth.js';
+import { createSession, createUser, normalizeEmail, userCount, type SessionUser } from '../../services/auth.js';
 import { allowAuthRequest, digest, purgeExpiredAuth, randomSecret, safeEqual, seal, unseal } from '../../services/auth-security.js';
 import { consumeGoogleHandoff } from '../../services/google-auth.js';
 import { claimInviteCode } from '../../services/invites.js';
@@ -15,6 +15,7 @@ import {
   decryptSsoClientSecret,
   resolveSsoPublicOrigin,
   saveSsoConfig,
+  SsoConfigError,
 } from './config.js';
 import { buildOidcAuthorizationUrl, createPkcePair, exchangeOidcCodeAndVerify, fetchOidcDiscovery } from './oidc.js';
 import { buildSamlAuthorizeRedirectUrl, buildSpMetadataXml, validateSamlPostResponse } from './saml.js';
@@ -24,6 +25,21 @@ export const ssoAdminRouter = Router();
 
 const ATTEMPT_COOKIE = 'flm_sso_attempt';
 const RESULT_COOKIE = 'flm_sso_result';
+const MAX_PENDING_SAML = 2000;
+const pendingSamlAttempts = new Map<string, { sealed: string; expiresAt: number }>();
+
+function savePendingSamlAttempt(stateHash: string, sealed: string, expiresAt: number): void {
+  const now = Date.now();
+  for (const [k, v] of pendingSamlAttempts) {
+    if (v.expiresAt <= now) pendingSamlAttempts.delete(k);
+  }
+  while (pendingSamlAttempts.size >= MAX_PENDING_SAML) {
+    const oldest = pendingSamlAttempts.keys().next().value;
+    if (oldest === undefined) break;
+    pendingSamlAttempts.delete(oldest);
+  }
+  pendingSamlAttempts.set(stateHash, { sealed, expiresAt });
+}
 
 const attemptSchema = z.object({
   kind: z.enum(['oidc', 'saml']),
@@ -57,9 +73,7 @@ function sameOrigin(req: Request): boolean {
   if (req.get('Sec-Fetch-Site') === 'cross-site') return false;
   if (!origin) return true;
   if (publicUrl && origin === publicUrl) return true;
-  const host = (req.get('x-forwarded-host') || req.get('host') || '').split(',')[0]?.trim();
-  const proto = (req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0]?.trim();
-  return origin === `${proto}://${host}`;
+  return origin === resolveSsoPublicOrigin(req, getSsoConfig());
 }
 
 function finishSsoLogin(email: string, allowAutoProvision: boolean, inviteCode?: string): string {
@@ -68,10 +82,18 @@ function finishSsoLogin(email: string, allowAutoProvision: boolean, inviteCode?:
   return db.transaction(() => {
     if (userCount() === 0) throw new Error('Complete initial admin setup before SSO sign-in.');
     const normEmail = normalizeEmail(email);
-    let user = db.prepare('SELECT id, email, role FROM users WHERE email = ?').get(normEmail) as
-      | { id: number; email: string; role: 'admin' | 'member' }
+    let user = db.prepare('SELECT id, email, role, is_primary FROM users WHERE email = ?').get(normEmail) as
+      | { id: number; email: string; role: 'admin' | 'member'; is_primary: number }
       | undefined;
     let apiKey: string | undefined;
+    if (user && (user.role === 'admin' || Boolean(user.is_primary))) {
+      const allowAdminSso =
+        process.env.SSO_ALLOW_ADMIN_LOGIN === '1' ||
+        process.env.SSO_ALLOW_ADMIN_LOGIN === 'true';
+      if (!allowAdminSso) {
+        throw new Error('Administrator accounts cannot sign in via SSO unless SSO_ALLOW_ADMIN_LOGIN=1 is set.');
+      }
+    }
     if (!user) {
       if (inviteCode) {
         if (!claimInviteCode(inviteCode)) throw new Error('Invalid invitation code.');
@@ -79,7 +101,7 @@ function finishSsoLogin(email: string, allowAutoProvision: boolean, inviteCode?:
         throw new Error('SSO account is not provisioned and auto-provisioning is disabled.');
       }
       const created = createUser(normEmail, randomSecret(), 'member');
-      user = { id: created.userId, email: created.email, role: 'member' };
+      user = { id: created.userId, email: created.email, role: 'member', is_primary: 0 };
       apiKey = mintUserApiKey(user.id, 'Default Key').key;
     }
     const payload = {
@@ -261,16 +283,19 @@ ssoPublicRouter.post('/saml/start', (req: Request, res: Response) => {
     acsUrl: `${origin}/api/auth/sso/saml/acs`,
     relayState: state,
   });
+  const stateHash = digest(`sso:${state}`);
   getDb().prepare('INSERT INTO auth_google_attempts (state_hash, expires_at_ms) VALUES (?, ?)')
-    .run(digest(`sso:${state}`), expiresAt);
-  res.cookie(ATTEMPT_COOKIE, seal({
+    .run(stateHash, expiresAt);
+  const sealedAttempt = seal({
     kind: 'saml',
     state,
     requestId,
     inviteCode: parsed.data.inviteCode,
     origin,
     expiresAt,
-  }), { ...cookieOpts(req, cfg), maxAge: 10 * 60 * 1000 });
+  });
+  savePendingSamlAttempt(stateHash, sealedAttempt, expiresAt);
+  res.cookie(ATTEMPT_COOKIE, sealedAttempt, { ...cookieOpts(req, cfg), maxAge: 10 * 60 * 1000 });
   res.json({ url: authorizeUrl });
 });
 
@@ -285,37 +310,39 @@ ssoPublicRouter.post('/saml/acs', express.urlencoded({ extended: false }), (req:
     if (!isSamlEnabled(cfg)) throw new Error('saml_not_configured');
     const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
     const samlResponse = typeof body.SAMLResponse === 'string' ? body.SAMLResponse : '';
-    const relayState = typeof body.RelayState === 'string' ? body.RelayState : '';
+    const relayState = z.string().min(10).max(128).parse(typeof body.RelayState === 'string' ? body.RelayState : '');
     if (!samlResponse) throw new Error('missing_saml_response');
 
-    let expectedInResponseTo: string | undefined;
-    let inviteCode: string | undefined;
-    let redirectOrigin = origin;
-    if (rawAttempt) {
-      const attempt = attemptSchema.parse(unseal(rawAttempt));
-      if (attempt.kind !== 'saml' || attempt.expiresAt <= Date.now()) {
-        throw new Error('invalid_saml_attempt');
-      }
-      if (relayState && !safeEqual(attempt.state, relayState)) {
-        throw new Error('saml_relay_state_mismatch');
-      }
-      const deleted = getDb().prepare('DELETE FROM auth_google_attempts WHERE state_hash = ? AND expires_at_ms > ?')
-        .run(digest(`sso:${attempt.state}`), Date.now());
-      if (deleted.changes !== 1) throw new Error('replayed_saml_state');
-      expectedInResponseTo = attempt.requestId;
-      inviteCode = attempt.inviteCode;
-      redirectOrigin = attempt.origin;
+    const stateHash = digest(`sso:${relayState}`);
+    const cached = pendingSamlAttempts.get(stateHash);
+    pendingSamlAttempts.delete(stateHash);
+
+    const attemptToken = rawAttempt || cached?.sealed || '';
+    if (!attemptToken) throw new Error('missing_saml_attempt');
+
+    const attempt = attemptSchema.parse(unseal(attemptToken));
+    if (attempt.kind !== 'saml' || !safeEqual(attempt.state, relayState) || attempt.expiresAt <= Date.now() || !attempt.requestId) {
+      throw new Error('invalid_saml_attempt');
     }
+    const deleted = getDb().prepare('DELETE FROM auth_google_attempts WHERE state_hash = ? AND expires_at_ms > ?')
+      .run(stateHash, Date.now());
+    if (deleted.changes !== 1) throw new Error('replayed_saml_state');
 
     const identity = validateSamlPostResponse({
       samlResponseB64: samlResponse,
       idpCertPem: cfg.samlCert,
-      expectedInResponseTo,
+      expectedInResponseTo: attempt.requestId,
       expectedIssuer: cfg.samlIssuer,
     });
-    const ticket = finishSsoLogin(identity.email, cfg.autoProvisionMembers, inviteCode);
+    purgeExpiredAuth();
+    const assertionRecorded = getDb()
+      .prepare('INSERT OR IGNORE INTO auth_google_attempts (state_hash, expires_at_ms) VALUES (?, ?)')
+      .run(digest(`saml-id:${identity.assertionId}`), Date.now() + 24 * 60 * 60 * 1000);
+    if (assertionRecorded.changes !== 1) throw new Error('replayed_saml_assertion');
+
+    const ticket = finishSsoLogin(identity.email, cfg.autoProvisionMembers, attempt.inviteCode);
     res.cookie(RESULT_COOKIE, ticket, { ...opts, maxAge: 2 * 60 * 1000 });
-    res.redirect(`${redirectOrigin}/?auth=sso`);
+    res.redirect(`${attempt.origin}/?auth=sso`);
   } catch (err) {
     console.error('[sso-saml] ACS failed:', err instanceof Error ? err.message : err);
     res.clearCookie(RESULT_COOKIE, opts);
@@ -362,12 +389,25 @@ ssoAdminRouter.get('/', (_req: Request, res: Response) => {
 });
 
 ssoAdminRouter.put('/', (req: Request, res: Response) => {
+  const actor = (req as Request & { user?: SessionUser }).user;
+  if (!actor?.isPrimary) {
+    res.status(403).json({ error: { message: 'Only the primary administrator may modify SSO settings.', type: 'forbidden' } });
+    return;
+  }
   const parsed = updateSsoSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: { message: 'Invalid SSO configuration.', type: 'invalid_request_error', issues: parsed.error.issues } });
     return;
   }
-  const updated = saveSsoConfig(parsed.data);
-  res.setHeader('Cache-Control', 'no-store');
-  res.json(updated);
+  try {
+    const updated = saveSsoConfig(parsed.data);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(updated);
+  } catch (err) {
+    if (err instanceof SsoConfigError) {
+      res.status(err.status).json({ error: { message: err.message, type: 'invalid_request_error' } });
+      return;
+    }
+    throw err;
+  }
 });

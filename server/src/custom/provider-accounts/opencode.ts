@@ -14,6 +14,8 @@ import {
   type KeyValidationResult,
   providerHttpError,
 } from '../../providers/base.js';
+import { proxyFetch } from '../../lib/proxy.js';
+import { assertSafeHttpBaseUrlSync } from '../../lib/url-guard.js';
 import { recordQuotaObservationsFromResponse, type QuotaObservationContext } from '../../services/provider-quota.js';
 import {
   DEFAULT_STREAM_STALL_MS,
@@ -358,7 +360,8 @@ export async function fetchOpenCodeFreeModels(baseUrl = 'https://opencode.ai/zen
   const clean = baseUrl.replace(/\/+$/, '');
   const modelsUrl = clean.endsWith('/models') ? clean : `${clean}/models`;
   try {
-    const res = await fetch(modelsUrl, { signal: AbortSignal.timeout(8000) });
+    assertSafeHttpBaseUrlSync(modelsUrl);
+    const res = await proxyFetch(modelsUrl, { redirect: 'error', signal: AbortSignal.timeout(8000) }, 'opencode', 'unknown');
     if (!res.ok) return [];
     const data = (await res.json()) as { data?: Array<{ id?: string; name?: string }> };
     if (!Array.isArray(data?.data)) return [];
