@@ -73,6 +73,7 @@ import { xSupportServiceDeskConsoleRouter } from './support-service-desk-router.
 import { xSupportServiceDeskLiveTestRouter } from './support-service-desk-live-test-router.js';
 import { xSupportOutputConsoleRouter } from './support-output-router.js';
 import { xSmartRoutingRouter } from './smart-routing-router.js';
+import { requireCloudAiEntitlement } from '../cloud-entitlement/gate.js';
 
 /** Console API for the gateway switch, outbound proxy, dedicated API keys, and default savers.
  *
@@ -519,6 +520,7 @@ xGatewayConsoleRouter.use('/tools', xCliToolsRouter);
 xGatewayConsoleRouter.use('/translator', xTranslatorRouter);
 xGatewayConsoleRouter.use('/skills', xSkillsRouter);
 xGatewayConsoleRouter.use('/sso', ssoAdminRouter);
+xGatewayConsoleRouter.use('/support', requireCloudAiEntitlement('support_suite'));
 xGatewayConsoleRouter.use('/support', xSupportConsoleRouter);
 xGatewayConsoleRouter.use('/support', xSupportEnterpriseConsoleRouter);
 xGatewayConsoleRouter.use('/support', xSupportGovernanceConsoleRouter);

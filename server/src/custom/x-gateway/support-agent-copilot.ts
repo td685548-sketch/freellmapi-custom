@@ -5,6 +5,7 @@
 
 import crypto from 'node:crypto';
 import { getDb } from '../../db/index.js';
+import { ensureVerifiedCloudRuntimePack } from '../cloud-entitlement/service.js';
 import { restoreSupportOutputCitationMarkers, retainSupportOutputCitationText } from './support-output-citations.js';
 import {
   SUPPORT_DESK_LIMITS,
@@ -420,25 +421,8 @@ export async function generateSupportAgentCopilot(params: {
     historyMessages.push({ role: roleForMsg, content: maskedContent });
   }
 
-  const promptInstruction = [
-    'You are an AI Support Copilot for an internal human operator.',
-    'Based strictly on the reference context and conversation history above, provide:',
-    '1. A concise summary of the issue and relevant information.',
-    '2. Exactly 3 suggested response drafts in 3 distinct tones: "empathetic", "direct", and "technical".',
-    'Rules:',
-    '- Completed summary and each draft must independently contain 1 to 5 citations referencing the candidates as [1], [2] or [cite:<id>].',
-    '- Do NOT invent information outside the reference context.',
-    '- Do NOT include tool calls or HTML markup.',
-    '- Respond strictly with a JSON object in this exact schema:',
-    '{',
-    '  "summary": "...",',
-    '  "drafts": [',
-    '    { "tone": "empathetic", "text": "..." },',
-    '    { "tone": "direct", "text": "..." },',
-    '    { "tone": "technical", "text": "..." }',
-    '  ]',
-    '}',
-  ].join('\n');
+  const runtimePack = await ensureVerifiedCloudRuntimePack('support_suite');
+  const promptInstruction = runtimePack.supportAgentCopilotInstruction;
 
   const maskedPromptInstruction = maskSupportSensitiveText(String(tenantId), promptInstruction, role).masked;
 

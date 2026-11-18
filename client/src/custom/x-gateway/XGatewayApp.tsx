@@ -20,6 +20,7 @@ import { useShellStrings } from './shell-strings'
 import { matchNav, useNavGroups } from './shell/nav'
 import { QuickJump } from './shell/QuickJump'
 import { ConfirmHost } from './shell/confirm'
+import { AiActivationGate } from '../cloud-entitlement/AiActivationGate'
 import './x-gateway.css'
 import './x-theme.css'
 
@@ -85,6 +86,7 @@ function XGatewayShell() {
   if (!session.hasPermission('use_x_gateway')) return <NotFoundPage />
   const canView = session.hasPermission('view_keys')
   const protectedPage = (page: ReactNode) => canView ? page : <div className="x-empty" role="alert"><ShieldCheck size={32} /><p>{s.permission}</p></div>
+  const supportPage = (page: ReactNode) => <AiActivationGate variant="thruline">{page}</AiActivationGate>
   const toggleRail = () => setRail(value => {
     try { window.localStorage.setItem(RAIL_KEY, value ? '0' : '1') } catch { /* preference is optional */ }
     return !value
@@ -119,13 +121,13 @@ function XGatewayShell() {
         <Route path="accounts/callback" element={<AccountCallback />} />
         <Route path="endpoint" element={<Endpoint />} />
         <Route path="playground" element={<Playground />} />
-        <Route path="support-integration" element={<SupportIntegration />} />
-        <Route path="support-desk" element={<SupportServiceDesk />} />
-        <Route path="support" element={<SupportGateway />} />
-        <Route path="support-knowledge" element={<SupportKnowledgeStudio />} />
-        <Route path="support-ops" element={<SupportEnterprise />} />
-        <Route path="support-guardrails" element={<SupportGovernance />} />
-        <Route path="support-output" element={<SupportOutput />} />
+        <Route path="support-integration" element={supportPage(<SupportIntegration />)} />
+        <Route path="support-desk" element={supportPage(<SupportServiceDesk />)} />
+        <Route path="support" element={supportPage(<SupportGateway />)} />
+        <Route path="support-knowledge" element={supportPage(<SupportKnowledgeStudio />)} />
+        <Route path="support-ops" element={supportPage(<SupportEnterprise />)} />
+        <Route path="support-guardrails" element={supportPage(<SupportGovernance />)} />
+        <Route path="support-output" element={supportPage(<SupportOutput />)} />
         <Route path="tools" element={<CLITools />} />
         <Route path="skills" element={<SkillsHub />} />
         <Route path="translator" element={<TranslatorInspector />} />

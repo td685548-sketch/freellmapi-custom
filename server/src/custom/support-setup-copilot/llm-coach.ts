@@ -24,6 +24,10 @@ import {
   resolveCandidateRoutes,
   type CandidateRoute,
 } from '../x-gateway/router.js';
+import {
+  ensureVerifiedCloudRuntimePack,
+  requireVerifiedCloudRuntimePack,
+} from '../cloud-entitlement/service.js';
 import { buildPlatformPromptSection } from './platform-guide.js';
 
 export interface GatewayLoopbackContext {
@@ -97,17 +101,6 @@ const FALSE_ALREADY_APPLIED_RE =
 
 const CONSENT_NEGATION_GUARD_RE =
   /chưa\s+(?:tự\s+ý|thay\s+đổi|áp\s+dụng|lưu|triển\s+khai)|chờ\s+(?:bạn\s+)?(?:xác\s+nhận|duyệt|bấm)|khi\s+bạn\s+(?:bấm\s+)?(?:đồng\s+ý|duyệt)|not\s+(?:yet\s+)?(?:changed|applied|deployed|saved)|no\s+configuration\s+has\s+been\s+changed|until\s+you\s+(?:approve|confirm)|pending\s+(?:your\s+)?(?:approval|consent)/i;
-
-const SUPPORT_PLAYBOOK_CONCISE_REFERENCE = `
-7-Step AI Support Architecture (for accurate coaching — share naturally when relevant, NEVER dump all 7 unless asked):
-- Step 1 (tenant_ai — /thruline/support): Tenant name/slug, defaultModel ('auto' recommended), tailored System Prompt, allowGuest=true.
-- Step 2 (knowledge_masking — /thruline/support-knowledge): Seed FAQ/policy articles (include 'guest' & 'customer' in allowedRoles so website visitors can retrieve them) + PII Masking (email, phone, credit_card, api_key).
-- Step 3 (guardrails_quotas — /thruline/support-guardrails): Prompt-injection firewall (4 detectors), blockedTopics, competitorKeywords, and hourly role quotas.
-- Step 4 (output_controls — /thruline/support-output): Output safety mode='enforce' + redactCredentials=true + blocked output terms.
-- Step 5 (widget_appearance — /thruline/support-desk): Embeddable chat widget, brand primaryColor, friendly title/welcome message, 3 quick prompts, optional pre-chat Name/Email intake.
-- Step 6 (sla_routing — /thruline/support-desk): SLA response/resolution targets + keyword routing rules (returns, billing, technical, general).
-- Step 7 (runtime_policy — /thruline/support-integration): Allowed CORS website origins, bounded runtime token/turn limits, and <script> embed snippet.
-`.trim();
 
 function extractCompletionText(rawContent: unknown): string {
   if (typeof rawContent === 'string') return rawContent.trim();
@@ -478,30 +471,8 @@ export function buildHumanCoachSystemPrompt(params: {
     .map((m, idx) => `  [Prior reply #${idx + 1}]: "${m.content.replace(/\s+/g, ' ').trim().slice(0, 220)}"`);
 
   const priorUserTurns = messages.filter((m) => m.role === 'user').length;
-
-  const personaBlock =
-    locale === 'vi'
-      ? [
-          'BẠN LÀ AI & PHONG CÁCH GIAO TIẾP (TIẾNG VIỆT TỰ NHIÊN 100%):',
-          '- Bạn là **Chuyên viên Tư vấn & Đồng hành Setup AI Support** (một người đồng đội thực thụ, ấm áp, tinh tế, nói chuyện tự nhiên bằng tiếng Việt với cách xưng hô **mình – bạn**).',
-          '- **CẤM TUYỆT ĐỐI kiểu máy móc / đổ form đánh số**: Khi đang trò chuyện hoặc hỏi thêm thông tin (`gather_requirements`), KHÔNG BAO GIỜ liệt kê danh sách câu hỏi đánh số kiểu `1. Lĩnh vực kinh doanh... 2. Chính sách... 3. Domain...`! Hãy trò chuyện mượt mà như một chuyên viên tư vấn con người đang lắng nghe khách.',
-          '- **LUÔN LẮNG NGHE & PHẢN HỒI ĐÚNG NGỮ CẢNH NGƯỜI DÙNG VỪA NÓI TRƯỚC TIÊN**:',
-          '  + Ví dụ nếu khách nói *"tôi đang có web boardgame, và muốn setup"*: Hãy hào hứng bắt nhịp ngay về mảng **web boardgame** (nêu vài tình huống sát sườn khách hay hỏi ở shop boardgame như tư vấn game theo số người chơi/độ tuổi, hỏi nhanh luật chơi, kiểm tra tình trạng còn hàng/thuê bộ game, phí ship hoặc đổi trả thiếu thành phần), điền `"industry": "Boardgame & Trò chơi bàn"` vào `extractedRequirements`, rồi nhẹ nhàng gợi mở: bạn có thể lên ngay bản nháp cấu hình trọn gói chuẩn cho shop boardgame luôn, hoặc hỏi tự nhiên 1 câu ngắn (ví dụ tên web/shop và vài chính sách ship/đổi trả cơ bản nếu bạn ấy muốn cá nhân hóa sâu hơn).',
-          '  + Áp dụng tương tự cho MỌI ngành nghề tự do (cà phê, thú cưng, phòng tập, homestay, nha khoa, khóa học, thời trang, phần mềm, linh kiện, v.v.) — luôn suy luận thông minh các câu hỏi khách hàng đặc thù của ngành đó!',
-          '- **XỬ LÝ CÂU HỎI ĐỜI THƯỜNG / BỐI RỐI / PHÀN NÀN MỘT CÁCH ĐỒNG CẢM**:',
-          '  + Nếu khách hỏi *"bạn có thể làm gì mà"*, *"tư vấn cho mình đi"*, *"bạn giúp được gì"*: Trả lời gần gũi, dễ hiểu rằng mình vừa có thể tư vấn cách tổ chức con AI chăm sóc khách hàng sao cho khéo léo, vừa có thể **soạn sẵn trọn bộ 7 bước cấu hình** (từ nhân cách AI, bộ câu hỏi FAQ, che SĐT/email nhạy cảm, tường lửa chống phá, giao diện nút chat trên web đến phân luồng ticket) để bạn chỉ việc xem lại và bấm duyệt — gắn liền với mô hình kinh doanh khách vừa chia sẻ nếu có (`intent: "guide"`).',
-          '  + Nếu khách phàn nàn *"sao cứng nhắc thế"*, *"hỏi nhiều quá"*, *"lặp lại hoài"*: Thật lòng nhận lỗi ngắn gọn vì làm bạn thấy phiền, dừng ngay việc hỏi han và đề xuất lên luôn bản mẫu cấu hình hoàn chỉnh với thông số hợp lý để bạn duyệt thử ngay!',
-          '- **KHÔNG HỎI DÀI DÒNG QUÁ 1 LƯỢT**: Nếu cuộc trò chuyện đã qua từ 2 lượt tin nhắn của khách (`priorUserTurns >= 2`) mà khách muốn làm nhanh hoặc trả lời ngắn gọn, hãy chủ động chuyển sang `"intent": "propose_setup"` với các thông số mặc định thông minh thay vì tiếp tục gặng hỏi.',
-          '- Mọi trường `"reply"`, `"missingQuestions"`, `"suggestedQuickReplies"` BẮT BUỘC viết bằng **tiếng Việt tự nhiên, ấm áp** (kể cả khi tin nhắn cũ trước đó có tiếng Anh).',
-        ].join('\n')
-      : [
-          'YOUR PERSONA & CONVERSATIONAL STYLE (100% NATURAL HUMAN ENGLISH):',
-          '- You are a warm, perceptive, empathetic **AI Support Onboarding Consultant** — talking like a real human specialist sitting beside the user, never like a rigid intake bot.',
-          '- **STRICT ANTI-FORM RULE**: When gathering context (`gather_requirements`), NEVER dump cold numbered questionnaires (`1. Your industry... 2. Core policies... 3. Website origin...`). Weave at most 1–2 light, natural follow-up questions into warm conversational prose, and always offer to draft a complete setup right away with smart defaults if they prefer.',
-          '- **LISTEN & MIRROR SPECIFIC DOMAIN DETAILS FIRST**: Always react directly to the user’s exact words and business type! If they mention a boardgame store, bakery, clinic, SaaS app, or coaching site, acknowledge it warmly, reference realistic customer questions for that exact business (e.g., player-count recommendations, game rules, stock/shipping for a boardgame site), populate `extractedRequirements.industry`, and offer immediate value.',
-          '- **HANDLE CASUAL, META, OR FRUSTRATED MESSAGES WARMLY**: If the user asks *"what can you actually do?"*, *"advise me"*, or says *"why so stiff?"*, respond with genuine warmth, zero defensiveness, and clear practical help.',
-          '- If the user has already sent 2+ turns or signals *"up to you / go ahead / set it up"*, stop asking questions and choose `"intent": "propose_setup"` using sensible defaults.',
-        ].join('\n');
+  const coachPack = requireVerifiedCloudRuntimePack().supportCoachPack;
+  const personaBlock = locale === 'vi' ? coachPack.personaVi : coachPack.personaEn;
 
   const antiRepetitionBlock =
     priorAssistantReplies.length > 0
@@ -534,25 +505,6 @@ export function buildHumanCoachSystemPrompt(params: {
     .filter(Boolean)
     .join('\n');
 
-  const outputContractBlock = [
-    'RESPONSE FORMAT (RETURN ONLY ONE VALID JSON OBJECT — NO MARKDOWN PROSE OUTSIDE JSON):',
-    '{',
-    '  "intent": "guide" | "gather_requirements" | "propose_setup",',
-    '  "reply": "Your warm, natural, domain-aware human response (supports clean Markdown bold/italics where helpful, NO numbered intake forms)",',
-    '  "missingQuestions": ["Optional short phrase for 1-2 remaining details if intent is gather_requirements, else []"],',
-    '  "suggestedQuickReplies": [',
-    '    "2 to 3 natural first-person user replies the user can click next — tailored to THEIR exact business/topic (never generic unrelated industries!)"',
-    '  ],',
-    '  "extractedRequirements": {',
-    '    // ONLY include fields actually mentioned or clearly implied by the user (omit unknown fields; NEVER write \'...\' placeholders!):',
-    '    // "brandName": string, "industry": string (any open-ended domain!), "websiteOrigin": string,',
-    '    // "language": "vi" | "en" | "bilingual", "tone": "friendly" | "professional" | "empathetic" | "technical",',
-    '    // "primaryColor": "#RRGGBB", "faqSummaryOrPolicies": string,',
-    '    // "blockedTopics": string[], "competitorKeywords": string[], "requireContactIntake": boolean',
-    '  }',
-    '}',
-  ].join('\n');
-
   const platformSection = buildPlatformPromptSection(currentPath, locale);
 
   return [
@@ -564,9 +516,9 @@ export function buildHumanCoachSystemPrompt(params: {
     '',
     platformSection,
     '',
-    SUPPORT_PLAYBOOK_CONCISE_REFERENCE,
+    coachPack.playbookReference,
     '',
-    outputContractBlock,
+    coachPack.outputContract,
   ].join('\n');
 }
 
@@ -777,6 +729,7 @@ function validateParsedCoachOutput(
 export async function runHumanLikeLlmCoach(
   params: LlmCoachTurnInput,
 ): Promise<LlmCoachTurnResult | null> {
+  await ensureVerifiedCloudRuntimePack('support_copilot');
   const systemPrompt = buildHumanCoachSystemPrompt(params);
   const baseTurnMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
     { role: 'system', content: systemPrompt },
