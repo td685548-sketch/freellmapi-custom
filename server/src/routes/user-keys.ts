@@ -8,6 +8,7 @@ import {
   revokeUserApiKey,
 } from '../services/user-keys.js';
 import { CustomerAiError } from '../custom/customer-ai/store.js';
+import { getTenantPortalAccessForSession } from '../custom/tenant-portal/store.js';
 import { getUserUsage } from '../services/user-quotas.js';
 import type { SessionUser } from '../services/auth.js';
 
@@ -30,6 +31,7 @@ userKeysRouter.get('/session', (req: Request, res: Response) => {
     userId: user.userId,
     isPrimary: user.isPrimary ?? false,
     permissions: user.permissions ?? [],
+    tenantPortalAccess: getTenantPortalAccessForSession(user),
   });
 });
 

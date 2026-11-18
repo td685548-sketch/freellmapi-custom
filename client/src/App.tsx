@@ -39,7 +39,7 @@ import {
   AgentsPage, AiPlatformApp, AnalyticsAccessPage, AuditLogPage, AudioPage, CustomerAiHubPage, DecisionPage, EmbeddingDetailPage,
   EmbeddingsPage, FallbackPage, FusionPage, ImagePage, InvitesAccessPage, KeysPage, LogsAccessPage,
   MediaDetailPage, ModelDetailPage, PlaygroundPage, PremiumPage, ProfileUsagePage, SearchPage,
-  UsageRankingPage, UserAnalyticsPage, UsersAccessPage, VideoPage, XGatewayApp, preloadRoute,
+  TenantPortalApp, UsageRankingPage, UserAnalyticsPage, UsersAccessPage, VideoPage, XGatewayApp, preloadRoute,
 } from '@/custom/route-splitting/lazy-pages'
 import { RouteFallback } from '@/custom/route-splitting/RouteFallback'
 import { legacyGatewayTarget } from '@/custom/x-gateway/legacy-gateway-target'
@@ -253,7 +253,7 @@ export function Navbar() {
   const tc = useCustomT()
   const location = useLocation()
   const navigate = useNavigate()
-  const { isMember, isAdmin, hasPermission, group } = useAdministrativeAccess()
+  const { isMember, isAdmin, hasPermission, group, session } = useAdministrativeAccess()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [updatesOpen, setUpdatesOpen] = useState(false)
   // The update pill lives outside the navbar; it asks for this dialog by event.
@@ -288,6 +288,9 @@ export function Navbar() {
     ...(canManageInvites ? [{ to: '/invites', labelKey: 'nav.invites', customLabel: 'Invites' }] : []),
     ...(canManageUsers ? [{ to: '/users', labelKey: 'nav.users', customLabel: 'Users' }] : []),
     { to: '/assistants', labelKey: 'AI Hub', customLabel: tc('AI Hub') },
+    ...((session?.tenantPortalAccess?.tenantCount ?? 0) > 0
+      ? [{ to: '/tenant-portal', labelKey: 'Tenant AI', customLabel: tc('Tenant AI') }]
+      : []),
     // Usage and History live in the Analytics dropdown; keep them as top-level
     // tabs only when the Analytics tab itself is hidden for this account.
     ...(!analyticsFolded && canViewUsage ? [{ to: '/usage', labelKey: 'nav.usage', customLabel: 'Usage' }] : []),
@@ -555,6 +558,7 @@ function App() {
                         <Route path="/usage" element={<UsageRankingPage />} />
                         <Route path="/audit" element={<AuditLogPage />} />
                         <Route path="/assistants" element={<CustomerAiHubPage />} />
+                        <Route path="/tenant-portal/*" element={<TenantPortalApp />} />
                         <Route path="/ai-platform/*" element={<AiPlatformApp />} />
                         <Route path="/agents" element={<AgentsPage />} />
                         <Route path="/fallback" element={<Navigate to="/models/chat" replace />} />

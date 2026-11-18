@@ -10,6 +10,10 @@ export interface UserSession {
   role: 'admin' | 'member'
   isPrimary?: boolean
   permissions?: Permission[]
+  tenantPortalAccess?: {
+    tenantCount: number
+    isPlatformOperator: boolean
+  }
 }
 
 export interface UserApiKey {
