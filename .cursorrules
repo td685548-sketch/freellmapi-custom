@@ -3,3 +3,4 @@ Always adhere to the instructions and guidelines in `AGENTS.md` and `.specify/me
 1. All custom extensions must follow the Zero-Conflict Modular Design Rule (dedicated new files, minimal touch on upstream files).
 2. When synchronizing with the official upstream repository, follow the Upstream Synchronization Workflow in `AGENTS.md`.
 3. Never expose or log API keys or secrets in plaintext.
+4. Strict Local `main` Parity: Keep the root `main` checkout 100% identical to GitHub `origin/main` (`HEAD == origin/main`, clean tracked tree) for reliable local server deployment; develop all features/fixes in isolated `.worktrees/<slug>` branches and run `flm deploy` after merging to `origin/main`.
