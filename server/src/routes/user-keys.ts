@@ -6,6 +6,7 @@ import {
   listUserApiKeys,
   mintUserApiKey,
   revokeUserApiKey,
+  rotateUserApiKey,
 } from '../services/user-keys.js';
 import { CustomerAiError } from '../custom/customer-ai/store.js';
 import { getTenantPortalAccessForSession } from '../custom/tenant-portal/store.js';
@@ -83,6 +84,31 @@ userKeysRouter.delete('/keys/:id', (req: Request, res: Response) => {
   }
 
   res.json({ success: true });
+});
+
+// POST /api/user/keys/:id/rotate — rotate an API key (revoke old key and mint a replacement atomically)
+userKeysRouter.post('/keys/:id/rotate', (req: Request, res: Response) => {
+  const user = (req as Request & { user?: SessionUser }).user!;
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) {
+    res.status(400).json({ error: { message: 'Invalid key ID' } });
+    return;
+  }
+
+  try {
+    const rotated = rotateUserApiKey(user.userId, id, user.role);
+    res.status(200).json(rotated);
+  } catch (err: any) {
+    if (err.status === 404 || err.code === 'key_not_found') {
+      res.status(404).json({ error: { message: 'Key not found or already revoked.' } });
+      return;
+    }
+    if (err instanceof CustomerAiError) {
+      res.status(err.status).json({ error: { message: err.message, code: err.code, type: err.code } });
+      return;
+    }
+    throw err;
+  }
 });
 
 // GET /api/user/usage — monthly usage and quota for the authenticated member

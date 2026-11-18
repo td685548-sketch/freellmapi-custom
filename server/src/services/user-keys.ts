@@ -138,6 +138,68 @@ export function revokeUserApiKey(userId: number, keyId: number): boolean {
   return result.changes > 0;
 }
 
+/**
+ * Rotate an existing personal API key: mints a new key inheriting the same name,
+ * routingMode, and assistantId, and atomically marks the old key as revoked.
+ */
+export function rotateUserApiKey(
+  userId: number,
+  keyId: number,
+  callerRole: 'admin' | 'member' = 'member',
+): {
+  oldKeyId: number;
+  key: {
+    id: number;
+    key: string;
+    keyPrefix: string;
+    name: string;
+    createdAt: string;
+    routingMode: KeyRoutingMode;
+    assistantId: number | null;
+  };
+} {
+  const db = getDb();
+  return db.transaction(() => {
+    const existing = db.prepare(`
+      SELECT id, name, routing_mode, assistant_id, revoked
+      FROM user_api_keys
+      WHERE id = ? AND user_id = ?
+    `).get(keyId, userId) as
+      | {
+          id: number;
+          name: string;
+          routing_mode: string | null;
+          assistant_id: number | null;
+          revoked: number;
+        }
+      | undefined;
+
+    if (!existing || existing.revoked) {
+      const err = new Error('Key not found or already revoked.') as any;
+      err.code = 'key_not_found';
+      err.status = 404;
+      throw err;
+    }
+
+    const minted = mintUserApiKey(userId, existing.name, {
+      routingMode: normalizeRoutingMode(existing.routing_mode, 'default'),
+      assistantId: existing.assistant_id,
+      callerRole,
+    });
+
+    db.prepare(`
+      UPDATE user_api_keys
+      SET revoked = 1
+      WHERE id = ? AND user_id = ?
+    `).run(keyId, userId);
+
+    return {
+      oldKeyId: keyId,
+      key: minted,
+    };
+  })();
+}
+
 // last_used_at is informational (shown in the key list), but it used to be an
 // UPDATE on every authenticated request, and each request authenticates twice
 // (the /v1 limit gate, then resolveAuth). SQLite serialises writers and a remote

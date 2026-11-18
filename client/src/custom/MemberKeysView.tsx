@@ -1,6 +1,7 @@
 import { useState } from 'react'
+import { NavLink } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2, Key, CheckCircle2 } from 'lucide-react'
+import { Activity, Plus, RotateCw, Trash2, Key, CheckCircle2 } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -99,9 +100,30 @@ export function MemberKeysView() {
     },
   })
 
+  const rotateKeyMutation = useMutation({
+    mutationFn: (id: number) =>
+      apiFetch<{ key: { key: string; name: string; id: number }; oldKeyId: number }>(`/api/user/keys/${id}/rotate`, {
+        method: 'POST',
+      }),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['user-api-keys'] })
+      setNewlyCreatedKey({ id: res.key.id, secret: res.key.key })
+      toast.success(tc('API Key rotated successfully'))
+    },
+    onError: (err: any) => {
+      toast.error(err.message || tc('Failed to rotate key'))
+    },
+  })
+
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault()
     createKeyMutation.mutate(keyName.trim())
+  }
+
+  const handleRotate = async (id: number, name: string) => {
+    if (await askConfirm(tc('Rotate API key "{name}"? A new key will be created immediately with the same settings, and this key will be revoked.', { name }))) {
+      rotateKeyMutation.mutate(id)
+    }
   }
 
   const handleRevoke = async (id: number, name: string) => {
@@ -116,8 +138,17 @@ export function MemberKeysView() {
         title={tc('Personal API Keys')}
         description={tc('Manage your personal gateway credentials for Cursor, Cline, Claude Code, and other LLM clients.')}
         actions={
-          <Button onClick={() => { setNewlyCreatedKey(null); setCreateOpen(true) }}>
-            <Plus className="mr-1.5 size-4" />{tc('Generate New Key')}</Button>
+          <div className="flex items-center gap-2">
+            <NavLink to="/status">
+              <Button variant="outline" size="sm" className="text-xs">
+                <Activity className="size-3.5 mr-1.5 text-emerald-500" />
+                {tc('System Status')}
+              </Button>
+            </NavLink>
+            <Button onClick={() => { setNewlyCreatedKey(null); setCreateOpen(true) }}>
+              <Plus className="mr-1.5 size-4" />{tc('Generate New Key')}
+            </Button>
+          </div>
         }
       />
 
@@ -245,14 +276,32 @@ export function MemberKeysView() {
                     </div>
                   )}
                 </div>
-                {k.revoked ? <span className="text-xs text-muted-foreground">{tc('Revoked')}</span> : <Button
-                  disabled={revokeKeyMutation.isPending}
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleRevoke(k.id, k.name)}
-                  className="text-destructive hover:bg-destructive/10 hover:text-destructive text-xs shrink-0"
-                >
-                  <Trash2 className="size-3.5 mr-1" />{tc('Revoke')}</Button>}
+                {k.revoked ? (
+                  <span className="text-xs text-muted-foreground">{tc('Revoked')}</span>
+                ) : (
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Button
+                      disabled={rotateKeyMutation.isPending || revokeKeyMutation.isPending}
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleRotate(k.id, k.name)}
+                      className="text-xs h-8"
+                      title={tc('Rotate Key (create new key & revoke this one)')}
+                    >
+                      <RotateCw className={`size-3.5 mr-1 ${rotateKeyMutation.isPending ? 'animate-spin' : ''}`} />
+                      {tc('Rotate')}
+                    </Button>
+                    <Button
+                      disabled={revokeKeyMutation.isPending || rotateKeyMutation.isPending}
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRevoke(k.id, k.name)}
+                      className="text-destructive hover:bg-destructive/10 hover:text-destructive text-xs shrink-0 h-8"
+                    >
+                      <Trash2 className="size-3.5 mr-1" />{tc('Revoke')}
+                    </Button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
