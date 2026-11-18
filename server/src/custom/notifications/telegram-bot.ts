@@ -1,10 +1,15 @@
 import { getDb, getSetting, setSetting } from '../../db/index.js';
 import { decrypt, encrypt } from '../../lib/crypto.js';
+import { FETCH_RELAY_AUTH_HEADER, FETCH_RELAY_TARGET_HEADER } from '../../lib/proxy.js';
 import { providerLog } from '../../lib/server-logs.js';
 import {
   createUserNotification,
   notifyOperatorsWithPermission,
 } from '../../services/in-app-notifications.js';
+import {
+  getBypassedFetchRelayConfig,
+  type BypassedFetchRelayConfig,
+} from '../local-tunnel-direct-outbound.js';
 import { isServerIdle } from '../render-resource-saver.js';
 
 export const TELEGRAM_OPS_SETTING_KEY = 'telegram_ops_bot_config_v1';
@@ -58,6 +63,12 @@ export interface TelegramDeliveryResult {
 
 export interface TelegramUpdate {
   update_id: number;
+  message?: {
+    message_id: number;
+    from?: { id?: number; username?: string; first_name?: string };
+    chat?: { id: number | string };
+    text?: string;
+  };
   callback_query?: {
     id: string;
     from?: { id?: number; username?: string; first_name?: string };
@@ -77,6 +88,7 @@ let pollerTimer: ReturnType<typeof setTimeout> | null = null;
 let pollerRunning = false;
 let pollInFlight = false;
 let cachedOffset: number | null = null;
+let preferBypassedRelay = false;
 
 // Deduplicate noisy repeated provider failure alerts until recovery or 30m window
 const providerIssueFiredAt = new Map<string, number>();
@@ -89,6 +101,7 @@ export function resetTelegramStateForTests(): void {
   providerIssueFiredAt.clear();
   cachedOffset = null;
   fetchOverride = null;
+  preferBypassedRelay = false;
   stopTelegramBotPoller();
 }
 
@@ -230,6 +243,61 @@ export function updateTelegramBotSettings(patch: UpdateTelegramBotInput): Telegr
   return getTelegramBotSettings();
 }
 
+async function dispatchViaBypassedRelay(
+  relay: BypassedFetchRelayConfig,
+  targetUrl: string,
+  init: RequestInit,
+): Promise<Response> {
+  const headers = new Headers(init.headers);
+  headers.delete('host');
+  headers.delete('content-length');
+  headers.set(FETCH_RELAY_TARGET_HEADER, targetUrl);
+  if (relay.fetchRelayToken) {
+    headers.set(FETCH_RELAY_AUTH_HEADER, `Bearer ${relay.fetchRelayToken}`);
+  } else {
+    headers.delete(FETCH_RELAY_AUTH_HEADER);
+  }
+
+  let cleanRelayUrl = relay.proxyUrl;
+  try {
+    const parsed = new URL(relay.proxyUrl);
+    if (parsed.username || parsed.password) {
+      if (!headers.has('authorization') && !headers.has('Authorization')) {
+        const creds = `${decodeURIComponent(parsed.username)}:${decodeURIComponent(parsed.password)}`;
+        headers.set('authorization', `Basic ${Buffer.from(creds).toString('base64')}`);
+      }
+      parsed.username = '';
+      parsed.password = '';
+      cleanRelayUrl = parsed.toString();
+    }
+  } catch {
+    // Let fetch report malformed URL errors if any
+  }
+
+  const transport: TelegramFetchFn = fetchOverride ?? globalThis.fetch;
+  return transport(cleanRelayUrl, {
+    ...init,
+    headers,
+    redirect: 'manual',
+  });
+}
+
+async function parseTelegramResponse(
+  res: Response,
+): Promise<{ ok: boolean; status: number; result?: any; description?: string }> {
+  const data = (await res.json().catch(() => null)) as
+    | { ok?: boolean; result?: any; description?: string }
+    | null;
+  if (!res.ok || !data?.ok) {
+    return {
+      ok: false,
+      status: res.status,
+      description: data?.description || `Telegram HTTP ${res.status}`,
+    };
+  }
+  return { ok: true, status: res.status, result: data.result };
+}
+
 async function telegramRequest(
   botToken: string,
   method: string,
@@ -237,27 +305,46 @@ async function telegramRequest(
   timeoutMs = 10_000,
 ): Promise<{ ok: boolean; status: number | null; result?: any; description?: string }> {
   const url = `https://api.telegram.org/bot${botToken}/${method}`;
+  const bypassedRelay = getBypassedFetchRelayConfig();
+  const buildInit = (ms: number): RequestInit => ({
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(ms),
+  });
+
   try {
+    if (bypassedRelay && preferBypassedRelay) {
+      try {
+        const relayRes = await dispatchViaBypassedRelay(bypassedRelay, url, buildInit(timeoutMs));
+        return await parseTelegramResponse(relayRes);
+      } catch (relayErr) {
+        preferBypassedRelay = false;
+        throw relayErr;
+      }
+    }
+
     const fetcher: TelegramFetchFn =
       fetchOverride ??
       (await import('../../lib/proxy.js').then((m) => m.proxyFetch as unknown as TelegramFetchFn));
-    const res = await fetcher(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    const data = (await res.json().catch(() => null)) as
-      | { ok?: boolean; result?: any; description?: string }
-      | null;
-    if (!res.ok || !data?.ok) {
-      return {
-        ok: false,
-        status: res.status,
-        description: data?.description || `Telegram HTTP ${res.status}`,
-      };
+
+    try {
+      const directTimeout = bypassedRelay ? Math.min(timeoutMs, 3_500) : timeoutMs;
+      const res = await fetcher(url, buildInit(directTimeout));
+      return await parseTelegramResponse(res);
+    } catch (directErr) {
+      if (!bypassedRelay) {
+        throw directErr;
+      }
+      preferBypassedRelay = true;
+      providerLog(
+        'info',
+        '[telegram-ops] Direct api.telegram.org unreachable; falling back to Fetch Relay transport.',
+        { event: 'telegram_ops_relay_fallback' },
+      );
+      const relayRes = await dispatchViaBypassedRelay(bypassedRelay, url, buildInit(timeoutMs));
+      return await parseTelegramResponse(relayRes);
     }
-    return { ok: true, status: res.status, result: data.result };
   } catch (err) {
     return {
       ok: false,
@@ -313,7 +400,16 @@ export async function sendTelegramHtmlMessage(
 }
 
 export async function sendTelegramTestAlert(actorUserId?: number): Promise<TelegramDeliveryResult> {
-  if (actorUserId) {
+  const nowIso = new Date().toISOString();
+  const delivery = await sendTelegramHtmlMessage(
+    [
+      '🔔 <b>FreeLLMAPI — Kiểm tra kết nối Telegram Bot</b>',
+      'Hệ thống cảnh báo vận hành & duyệt đăng ký 1-chạm đang hoạt động bình thường.',
+      `🕒 <code>${escapeHtml(nowIso)}</code>`,
+    ].join('\n'),
+    { force: true },
+  );
+  if (actorUserId && delivery.sent) {
     createUserNotification({
       userId: actorUserId,
       category: 'system',
@@ -323,15 +419,7 @@ export async function sendTelegramTestAlert(actorUserId?: number): Promise<Teleg
       actionUrl: '/usage',
     });
   }
-  const nowIso = new Date().toISOString();
-  return sendTelegramHtmlMessage(
-    [
-      '🔔 <b>FreeLLMAPI — Kiểm tra kết nối Telegram Bot</b>',
-      'Hệ thống cảnh báo vận hành & duyệt đăng ký 1-chạm đang hoạt động bình thường.',
-      `🕒 <code>${escapeHtml(nowIso)}</code>`,
-    ].join('\n'),
-    { force: true },
-  );
+  return delivery;
 }
 
 export function clearProviderAccountIssueDedupe(accountId: number): void {
@@ -585,6 +673,49 @@ export async function handleTelegramUpdate(update: TelegramUpdate): Promise<{
   reason?: string;
 }> {
   const cb = update.callback_query;
+  if (!cb && typeof update.message?.text === 'string') {
+    const text = update.message.text.trim();
+    if (!/^\/(start|ping|status)(?:@[A-Za-z0-9_]+)?(?:\s|$)/i.test(text)) {
+      return { handled: false, reason: 'not_command' };
+    }
+
+    const cfg = readStoredConfig();
+    const token = decryptBotToken(cfg);
+    const expectedChatId = effectiveChatId(cfg);
+    if (!cfg.enabled || !token || !expectedChatId) {
+      return { handled: false, reason: 'bot_disabled' };
+    }
+
+    const incomingChatId =
+      update.message.chat?.id !== undefined ? String(update.message.chat.id).trim() : '';
+    if (!incomingChatId || incomingChatId !== expectedChatId) {
+      return { handled: false, reason: 'unauthorized_chat' };
+    }
+
+    const activeChannels = [
+      cfg.notifyProviderErrors ? '• Cảnh báo lỗi OAuth / Cookie Provider' : null,
+      cfg.notifyRegistrationRequests
+        ? cfg.interactiveApprovalEnabled
+          ? '• Duyệt / Từ chối đơn đăng ký 1 chạm'
+          : '• Thông báo đơn đăng ký mới'
+        : null,
+      cfg.notifyQuotaAlerts ? '• Cảnh báo vượt ngưỡng hạn mức (Quota)' : null,
+    ].filter(Boolean);
+
+    await sendTelegramHtmlMessage(
+      [
+        '✅ <b>FreeLLMAPI Ops Bot đã kết nối thành công!</b>',
+        `• <b>Chat ID quản trị:</b> <code>${escapeHtml(expectedChatId)}</code>`,
+        ...(activeChannels.length > 0
+          ? [`• <b>Các kênh đang bật:</b>\n${activeChannels.join('\n')}`]
+          : ['• <i>Hiện chưa bật kênh cảnh báo tự động nào.</i>']),
+      ].join('\n'),
+      { force: true },
+    );
+
+    return { handled: true, reason: 'command_ack' };
+  }
+
   if (!cb || typeof cb.data !== 'string') {
     return { handled: false, reason: 'not_callback' };
   }
@@ -716,7 +847,7 @@ function saveNextOffset(offset: number): void {
 export async function pollTelegramUpdatesOnce(): Promise<number> {
   if (pollInFlight) return 0;
   const cfg = readStoredConfig();
-  if (!cfg.enabled || !cfg.interactiveApprovalEnabled) return 0;
+  if (!cfg.enabled) return 0;
   const token = decryptBotToken(cfg);
   const chatId = effectiveChatId(cfg);
   if (!token || !chatId) return 0;
@@ -731,7 +862,7 @@ export async function pollTelegramUpdatesOnce(): Promise<number> {
         offset,
         limit: 25,
         timeout: 0,
-        allowed_updates: ['callback_query'],
+        allowed_updates: ['message', 'callback_query'],
       },
       10_000,
     );

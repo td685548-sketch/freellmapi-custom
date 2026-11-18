@@ -1,11 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   applyLocalTunnelDirectOutbound,
+  getBypassedFetchRelayConfig,
   isCloudHostedEnvironment,
   isLocalTunnelEnvironment,
+  resetBypassedFetchRelayForTests,
 } from '../../custom/local-tunnel-direct-outbound.js';
 
 describe('local-tunnel-direct-outbound', () => {
+  afterEach(() => {
+    resetBypassedFetchRelayForTests();
+  });
   it('detects local Tailscale Funnel / loopback tunnel environments with SQLite', () => {
     const env: NodeJS.ProcessEnv = {
       NODE_ENV: 'production',
@@ -34,6 +39,10 @@ describe('local-tunnel-direct-outbound', () => {
     expect(env.PROXY_URL).toBeUndefined();
     expect(env.PROXY_MODE).toBeUndefined();
     expect(env.FETCH_RELAY_TOKEN).toBeUndefined();
+    expect(getBypassedFetchRelayConfig()).toEqual({
+      proxyUrl: 'https://relay.example.workers.dev',
+      fetchRelayToken: 'secret-token',
+    });
     expect(logs.length).toBe(1);
   });
 
@@ -98,5 +107,6 @@ describe('local-tunnel-direct-outbound', () => {
     const res = applyLocalTunnelDirectOutbound(env, () => {});
     expect(res).toEqual({ applied: false, reason: 'not_fetch_relay' });
     expect(env.PROXY_URL).toBe('socks5h://127.0.0.1:1080');
+    expect(getBypassedFetchRelayConfig()).toBeNull();
   });
 });

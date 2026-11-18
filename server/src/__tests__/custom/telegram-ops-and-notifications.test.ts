@@ -2,6 +2,10 @@ import type { Server } from 'node:http';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../../app.js';
 import {
+  applyLocalTunnelDirectOutbound,
+  resetBypassedFetchRelayForTests,
+} from '../../custom/local-tunnel-direct-outbound.js';
+import {
   pollTelegramUpdatesOnce,
   resetTelegramStateForTests,
   setTelegramFetchForTests,
@@ -71,6 +75,7 @@ describe('Two-Way Telegram Ops Bot & In-App Notification Center', () => {
   beforeEach(() => {
     telegramCalls.length = 0;
     queuedTelegramUpdates = [];
+    resetBypassedFetchRelayForTests();
     resetTelegramStateForTests();
     setTelegramFetchForTests(async (url, init) => {
       const method = url.split('/').pop() || '';
@@ -314,5 +319,95 @@ describe('Two-Way Telegram Ops Bot & In-App Notification Center', () => {
     const cleared = await hit('/api/user/notifications/read', 'DELETE', undefined, memberToken);
     expect(cleared.status).toBe(200);
     expect(cleared.body?.deletedCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it('falls back to bypassed Fetch Relay when direct api.telegram.org is ISP-blocked and acknowledges /start', async () => {
+    applyLocalTunnelDirectOutbound(
+      {
+        NODE_ENV: 'production',
+        FREEAPI_DB_DRIVER: 'sqlite',
+        PUBLIC_APP_URL: 'https://laptop-o6msglm4.tailc4d30d.ts.net',
+        TRUST_PROXY: 'loopback',
+        PROXY_MODE: 'fetch-relay',
+        PROXY_URL: 'https://relay.example.workers.dev',
+        FETCH_RELAY_TOKEN: 'relay-secret-999',
+      },
+      () => {},
+    );
+
+    let directAttempts = 0;
+    const relayAttempts: Array<{ target: string | null; auth: string | null; body: Record<string, any> }> = [];
+
+    setTelegramFetchForTests(async (url, init) => {
+      if (url.startsWith('https://api.telegram.org/')) {
+        directAttempts++;
+        throw new DOMException('The operation was aborted', 'AbortError');
+      }
+      if (url.startsWith('https://relay.example.workers.dev')) {
+        const hdrs = new Headers(init?.headers);
+        const target = hdrs.get('fetch-relay-target');
+        const auth = hdrs.get('fetch-relay-authorization');
+        const parsedBody = init?.body ? (JSON.parse(String(init.body)) as Record<string, any>) : {};
+        relayAttempts.push({ target, auth, body: parsedBody });
+
+        if (target?.endsWith('/getUpdates')) {
+          const batch = queuedTelegramUpdates;
+          queuedTelegramUpdates = [];
+          return new Response(JSON.stringify({ ok: true, result: batch }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(
+          JSON.stringify({ ok: true, result: { message_id: ++nextMessageId } }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    // 1. First request tries direct once, catches timeout, and succeeds via Fetch Relay
+    const tested1 = await hit('/api/settings/telegram-alerts/test', 'POST', {}, adminToken);
+    expect(tested1.status).toBe(200);
+    expect(tested1.body?.delivery?.sent).toBe(true);
+    expect(directAttempts).toBe(1);
+    expect(relayAttempts.length).toBe(1);
+    expect(relayAttempts[0]?.auth).toBe('Bearer relay-secret-999');
+    expect(relayAttempts[0]?.target).toContain('/sendMessage');
+
+    // 2. Subsequent poll + /start ack ride straight over the latched Fetch Relay without re-timing-out direct
+    queuedTelegramUpdates = [
+      {
+        update_id: 9001,
+        message: {
+          message_id: 301,
+          from: { username: 'stranger' },
+          chat: { id: 123456 },
+          text: '/start',
+        },
+      },
+      {
+        update_id: 9002,
+        message: {
+          message_id: 302,
+          from: { username: 'ops_lead' },
+          chat: { id: '-100987654321' },
+          text: '/start',
+        },
+      },
+    ];
+
+    const acked = await pollTelegramUpdatesOnce();
+    expect(acked).toBe(1);
+    // Direct attempts remained 1 because preferBypassedRelay latched
+    expect(directAttempts).toBe(1);
+    expect(
+      relayAttempts.some(
+        (r) =>
+          r.target?.endsWith('/sendMessage') &&
+          r.body.chat_id === '-100987654321' &&
+          String(r.body.text).includes('FreeLLMAPI Ops Bot đã kết nối thành công'),
+      ),
+    ).toBe(true);
   });
 });
