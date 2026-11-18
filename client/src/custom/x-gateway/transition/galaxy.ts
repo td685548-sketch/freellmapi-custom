@@ -360,8 +360,8 @@ fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
 
 export const galaxyEffect: Effect = {
   id: 'galaxy',
-  duration: 3400,
-  coveredAt: 0.5,
+  duration: 1350,
+  coveredAt: 0.45,
   wgsl: prelude + shader,
   particles: STARS + WARP,
   palette: () => [

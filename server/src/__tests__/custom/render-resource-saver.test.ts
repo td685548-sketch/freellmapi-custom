@@ -7,6 +7,7 @@ import { getDb, initDb } from '../../db/index.js';
 import type { Scheduler } from '../../lib/scheduler.js';
 import {
   createResourceAwareScheduler,
+  isApiCompressionEnabled,
   isProbeOnlyRequest,
   isResourceSaverEnabled,
   isServerIdle,
@@ -143,6 +144,21 @@ describe('render resource saver', () => {
         FREEAPI_RESOURCE_SAVER: '1',
       } as NodeJS.ProcessEnv),
     ).toBe(true);
+
+    // Local Production SQLite enables /api/* JSON compression automatically while keeping resource saver off
+    expect(
+      isApiCompressionEnabled({
+        NODE_ENV: 'production',
+        FREEAPI_DB_DRIVER: 'sqlite',
+      } as NodeJS.ProcessEnv),
+    ).toBe(true);
+    expect(
+      isApiCompressionEnabled({
+        NODE_ENV: 'production',
+        FREEAPI_API_COMPRESSION: '0',
+      } as NodeJS.ProcessEnv),
+    ).toBe(false);
+    expect(isApiCompressionEnabled({ NODE_ENV: 'test' } as NodeJS.ProcessEnv)).toBe(false);
   });
 
   it('identifies probe-only health requests cleanly', () => {

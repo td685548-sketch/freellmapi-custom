@@ -121,14 +121,26 @@ const apiJsonCompression = compression({
 });
 
 /**
- * Compresses large `/api/*` GET JSON responses (>2 KiB) when resource saver is
- * active, while bypassing `/api/ping` and SSE endpoints so streaming responses
- * are never buffered.
+ * Enables `/api/*` GET JSON compression (>2 KiB) across all production deployments
+ * (including Local Production SQLite + Tunnel servers) as well as Render / Turso
+ * resource-saver hosts, unless explicitly disabled via `FREEAPI_API_COMPRESSION=0`.
+ */
+export function isApiCompressionEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const override = env.FREEAPI_API_COMPRESSION?.trim();
+  if (override === '1') return true;
+  if (override === '0') return false;
+  return env.NODE_ENV === 'production' || isResourceSaverEnabled(env);
+}
+
+/**
+ * Compresses large `/api/*` GET JSON responses (>2 KiB) in production or when
+ * resource saver is active, while bypassing `/api/ping` and SSE endpoints so
+ * streaming responses are never buffered.
  */
 export function createApiJsonCompressionMiddleware(): RequestHandler {
   return (req, res, next) => {
     if (
-      !isResourceSaverEnabled() ||
+      !isApiCompressionEnabled() ||
       req.method !== 'GET' ||
       req.path === '/ping' ||
       STREAMING_API_PATH_RE.test(req.path)

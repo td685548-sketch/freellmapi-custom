@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, CheckCircle2 } from 'lucide-react'
 import { apiFetch, setToken, UNAUTHORIZED_EVENT, type ApiError } from '@/lib/api'
@@ -17,9 +17,11 @@ import { EmailRecovery, ExternalForgotPassword } from '@/custom/EmailRecovery'
 import { ExternalAuthCallback } from '@/custom/ExternalAuthCallback'
 import { useExternalAuthLanding } from '@/custom/use-external-auth'
 import { RegistrationKeyNotice } from '@/custom/RegistrationKeyNotice'
-import { GuestShell } from '@/custom/GuestShell'
+import { lazyNamed } from '@/custom/route-splitting/lazy-page'
 import type { GuestPermission, GuestTrialInfo } from '../../../shared/guest-access'
 import { useCustomT } from '@/custom/i18n/use-custom-t'
+
+const LazyGuestShell = lazyNamed(() => import('@/custom/GuestShell'), 'GuestShell')
 
 // Matches the server rule (routes/auth.ts zod schema).
 const PASSWORD_MIN = 8
@@ -688,7 +690,13 @@ function SignedOut({ onAuthed }: { onAuthed: () => void }) {
   const permissions = guest.data?.permissions ?? []
   if (guest.isLoading) return <Centered><Loader2 className="mx-auto size-4 animate-spin text-muted-foreground" aria-hidden /></Centered>
   if (permissions.length === 0) return <AuthForm mode="login" onAuthed={onAuthed} />
-  if (view === 'browse') return <GuestShell permissions={permissions} trial={guest.data?.trial} onSignIn={() => setView('login')} onRequest={() => setView('request')} />
+  if (view === 'browse') {
+    return (
+      <Suspense fallback={<Centered><Loader2 className="mx-auto size-4 animate-spin text-muted-foreground" aria-hidden /></Centered>}>
+        <LazyGuestShell permissions={permissions} trial={guest.data?.trial} onSignIn={() => setView('login')} onRequest={() => setView('request')} />
+      </Suspense>
+    )
+  }
   return (
     <div className="relative">
       <button type="button" onClick={() => setView('browse')} className="absolute left-4 top-4 z-10 text-sm text-muted-foreground hover:text-foreground">← {tc('Back to browsing')}</button>

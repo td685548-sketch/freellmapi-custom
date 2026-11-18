@@ -1,14 +1,16 @@
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { LogIn, UserPlus, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { GuestPermission, GuestTrialInfo } from '../../../shared/guest-access'
-import { GuestModelsPage } from './GuestModelsPage'
-import { UsageRankingPage } from './UsageRankingPage'
-import { GuestTrialPage } from './GuestTrialPage'
-import { CustomerAiHubPage } from './customer-ai/CustomerAiHubPage'
 import { GUEST_PROMPT_DELAY_MS, GUEST_PROMPT_EVENT, GUEST_PROMPT_SEEN_KEY } from './guest-prompt'
 import { useCustomT } from './i18n/use-custom-t'
+import { lazyNamed } from './route-splitting/lazy-page'
+
+const GuestModelsPage = lazyNamed(() => import('./GuestModelsPage'), 'GuestModelsPage')
+const UsageRankingPage = lazyNamed(() => import('./UsageRankingPage'), 'UsageRankingPage')
+const GuestTrialPage = lazyNamed(() => import('./GuestTrialPage'), 'GuestTrialPage')
+const CustomerAiHubPage = lazyNamed(() => import('./customer-ai/CustomerAiHubPage'), 'CustomerAiHubPage')
 
 // What a signed-out visitor gets when an administrator opened some read-only views to guests: those
 // pages only, a header with "Sign in" / "Request access", and a popup that asks them to sign in five
@@ -88,14 +90,16 @@ export function GuestShell({ permissions, trial, onSignIn, onRequest }: { permis
         </div>
       </header>
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6">
-        <Routes>
-          {permissions.includes('view_models') && <Route path="/models/chat" element={<GuestModelsPage />} />}
-          {permissions.includes('view_models') && <Route path="/models/*" element={<AskAndReturn to="/models/chat" />} />}
-          {pages.some(p => p.to === '/usage') && <Route path="/usage" element={<UsageRankingPage />} />}
-          {permissions.includes('view_assistants') && <Route path="/assistants" element={<CustomerAiHubPage guestMode />} />}
-          {trial && <Route path="/try" element={<GuestTrialPage trial={trial} />} />}
-          <Route path="*" element={<Navigate to={home} replace />} />
-        </Routes>
+        <Suspense fallback={<div className="py-10 text-center text-sm text-muted-foreground">{tc('Loading…')}</div>}>
+          <Routes>
+            {permissions.includes('view_models') && <Route path="/models/chat" element={<GuestModelsPage />} />}
+            {permissions.includes('view_models') && <Route path="/models/*" element={<AskAndReturn to="/models/chat" />} />}
+            {pages.some(p => p.to === '/usage') && <Route path="/usage" element={<UsageRankingPage />} />}
+            {permissions.includes('view_assistants') && <Route path="/assistants" element={<CustomerAiHubPage guestMode />} />}
+            {trial && <Route path="/try" element={<GuestTrialPage trial={trial} />} />}
+            <Route path="*" element={<Navigate to={home} replace />} />
+          </Routes>
+        </Suspense>
       </main>
       {prompt && (
         <SignInPrompt
