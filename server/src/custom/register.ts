@@ -72,6 +72,7 @@ import {
   createApiJsonCompressionMiddleware,
 } from './render-resource-saver.js';
 import { supportSetupCopilotRouter } from './support-setup-copilot/router.js';
+import { providerIconsRouter, providerStaticIconsMiddleware } from './provider-icons/router.js';
 
 // Everything this fork adds to the HTTP surface is wired here, so upstream's
 // app.ts keeps a handful of added lines instead of edited mount statements.
@@ -158,6 +159,8 @@ function installGate(app: Express, gate: PermissionGate): void {
 export function registerCustomRoutes(app: Express): void {
   app.use(createActivityTrackerMiddleware());
   app.use('/api', createApiJsonCompressionMiddleware());
+  app.use('/api/provider-icons', providerIconsRouter);
+  app.use('/providers', providerStaticIconsMiddleware);
 
   // Mark any orphaned running orchestrator runs as interrupted without re-executing steps.
   try {

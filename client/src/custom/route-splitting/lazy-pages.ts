@@ -66,14 +66,27 @@ const ROUTES: ReadonlyArray<readonly [RegExp, readonly Preloadable[]]> = [
   [/^\/premium/, [PremiumPage]],
 ]
 
+let preloadTimer: ReturnType<typeof setTimeout> | null = null
+
 /** Start downloading the code for `pathname` (a router path, without the base). Safe to repeat. */
 export function preloadRoute(pathname: string): void {
-  for (const [pattern, pages] of ROUTES) {
-    if (pattern.test(pathname)) {
-      for (const page of pages) page.preload()
-      return
+  const run = () => {
+    for (const [pattern, pages] of ROUTES) {
+      if (pattern.test(pathname)) {
+        for (const page of pages) page.preload()
+        return
+      }
     }
   }
+  if (typeof window === 'undefined') {
+    run()
+    return
+  }
+  if (preloadTimer !== null) clearTimeout(preloadTimer)
+  preloadTimer = setTimeout(() => {
+    preloadTimer = null
+    run()
+  }, 150)
 }
 
 /** The same, for a browser pathname that still carries the app's base path. */
