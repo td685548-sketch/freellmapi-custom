@@ -92,6 +92,8 @@ export default function Endpoint() {
   const [accessRestricted, setAccessRestricted] = useState(false)
   const [accessAllowInput, setAccessAllowInput] = useState('')
   const [activeCliTab, setActiveCliTab] = useState<'claude-code' | 'codex' | 'cursor-cline' | 'continue' | 'opencode'>('claude-code')
+  const isLocalBrowser = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+  const [endpointTarget, setEndpointTarget] = useState<'local' | 'origin'>(isLocalBrowser ? 'local' : 'origin')
   const canEdit = session.hasPermission('edit_x_settings')
 
   // Pricing states
@@ -343,7 +345,10 @@ export default function Endpoint() {
     setShowAddModel(false)
   }
 
-  const base = new URL(`${import.meta.env.BASE_URL}thruline/v1`, window.location.origin).href
+  const originBase = new URL(`${import.meta.env.BASE_URL}thruline/v1`, window.location.origin).href
+  const localBase = `http://127.0.0.1:3001${import.meta.env.BASE_URL}thruline/v1`
+  const localStandardV1 = `http://127.0.0.1:3001${import.meta.env.BASE_URL}v1`
+  const base = endpointTarget === 'local' ? localBase : originBase
   const anthropicBase = base.replace(/\/v1$/, '')
   const displayKey = newlyCreatedKey ?? s.placeholderKey
   const example = `curl '${base}/chat/completions' \\\n  -H 'Authorization: Bearer ${displayKey}' \\\n  -H 'Content-Type: application/json' \\\n  -d '{"model":"auto","messages":[{"role":"user","content":"Hello"}]}'`
@@ -473,13 +478,54 @@ export default function Endpoint() {
     <p className="x-notice">{s.endpointNotice}</p>
 
     <section className="x-panel x-endpoint-panel">
-      <h2>{s.baseUrl}</h2>
-      <div className="x-code-line">
-        <code>{base}</code>
-        <button className="x-icon-button" aria-label={copied === base ? s.copied : s.copy} onClick={() => void copy(base)}>
-          {copied === base ? <Check size={18} /> : <Copy size={18} />}
-        </button>
+      <div className="x-inline" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+        <h2>{s.baseUrl}</h2>
+        <div style={{ display: 'inline-flex', gap: 6 }}>
+          <button
+            type="button"
+            className={`x-button x-small ${endpointTarget === 'local' ? 'x-primary' : ''}`}
+            onClick={() => setEndpointTarget('local')}
+          >
+            Local (127.0.0.1:3001)
+          </button>
+          {!isLocalBrowser && (
+            <button
+              type="button"
+              className={`x-button x-small ${endpointTarget === 'origin' ? 'x-primary' : ''}`}
+              onClick={() => setEndpointTarget('origin')}
+            >
+              Public / Network ({window.location.host})
+            </button>
+          )}
+        </div>
       </div>
+
+      <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
+        <div>
+          <span className="x-muted" style={{ fontSize: '0.78rem', display: 'block', marginBottom: 4 }}>
+            Thruline / X-Gateway Endpoint ({endpointTarget === 'local' ? 'Gọi trực tiếp Local — không qua mạng ngoài' : 'Truy cập qua mạng / Internet'}):
+          </span>
+          <div className="x-code-line">
+            <code>{base}</code>
+            <button className="x-icon-button" aria-label={copied === base ? s.copied : s.copy} onClick={() => void copy(base)}>
+              {copied === base ? <Check size={18} /> : <Copy size={18} />}
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <span className="x-muted" style={{ fontSize: '0.78rem', display: 'block', marginBottom: 4 }}>
+            OpenAI Standard Local Endpoint (gọi trực tiếp tại máy chủ):
+          </span>
+          <div className="x-code-line">
+            <code>{localStandardV1}</code>
+            <button className="x-icon-button" aria-label={copied === localStandardV1 ? s.copied : s.copy} onClick={() => void copy(localStandardV1)}>
+              {copied === localStandardV1 ? <Check size={18} /> : <Copy size={18} />}
+            </button>
+          </div>
+        </div>
+      </div>
+
       <Link className="x-button" to="/agents">{s.personalKey}<ExternalLink size={14} /></Link>
     </section>
 

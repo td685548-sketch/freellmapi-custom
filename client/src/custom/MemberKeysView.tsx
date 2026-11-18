@@ -27,8 +27,12 @@ export function MemberKeysView() {
   const [keyName, setKeyName] = useState('')
   const [newlyCreatedKey, setNewlyCreatedKey] = useState<{ id: number; secret: string } | null>(null)
   const [guideTab, setGuideTab] = useState<'cursor' | 'cline' | 'terminal' | 'python'>('cursor')
+  const isBrowserLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+  const [endpointMode, setEndpointMode] = useState<'origin' | 'local'>(isBrowserLocal ? 'local' : 'origin')
 
-  const baseUrl = typeof window !== 'undefined' ? `${window.location.origin}/v1` : 'https://freellm-thanhdo.onrender.com/v1'
+  const originBaseUrl = typeof window !== 'undefined' ? `${window.location.origin}/v1` : 'http://127.0.0.1:3001/v1'
+  const localDirectBaseUrl = 'http://127.0.0.1:3001/v1'
+  const baseUrl = endpointMode === 'local' ? localDirectBaseUrl : originBaseUrl
 
   const { data, isLoading } = useQuery<{ keys: UserApiKey[] }>({
     queryKey: ['user-api-keys'],
@@ -261,14 +265,43 @@ export function MemberKeysView() {
         </div>
 
         {/* Base URL bar */}
-        <div className="space-y-1.5">
-          <Label className="text-xs font-medium">{tc('OpenAI Compatible Base URL')}</Label>
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 max-w-lg">
+            <Label className="text-xs font-medium">{tc('OpenAI Compatible Base URL')}</Label>
+            <div className="inline-flex rounded-lg border bg-muted/40 p-0.5 text-[11px]">
+              <button
+                type="button"
+                onClick={() => setEndpointMode('local')}
+                className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
+                  endpointMode === 'local' ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                Local (127.0.0.1:3001)
+              </button>
+              {!isBrowserLocal && (
+                <button
+                  type="button"
+                  onClick={() => setEndpointMode('origin')}
+                  className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
+                    endpointMode === 'origin' ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Public / Network
+                </button>
+              )}
+            </div>
+          </div>
           <div className="flex items-center gap-2 max-w-lg">
             <div className="flex-1 font-mono text-xs bg-muted/60 border rounded-lg px-3 py-2 text-foreground">
               {baseUrl}
             </div>
             <CopyButton text={baseUrl} label={tc('Copy Base URL')} className="h-9 px-3" />
           </div>
+          <p className="text-[11px] text-muted-foreground max-w-lg">
+            {endpointMode === 'local'
+              ? 'Gọi trực tiếp ngay trên máy chủ (0ms, không đi vòng qua mạng ngoài).'
+              : 'Dùng cho các máy tính/thiết bị khác kết nối qua mạng hoặc Internet.'}
+          </p>
         </div>
 
         {/* Tab switcher */}
