@@ -45,6 +45,7 @@ import { compressRequest, formatCompressionHeader } from '../services/compressio
 import { applyDecisionRouting, routingStrategyHeader } from '../services/routing-decision.js';
 import { startStreamKeepalive, streamKeepaliveMs } from '../lib/stream-keepalive.js';
 import { contextRoutingTokens, fitContextForRoute } from '../custom/context-budget/hooks.js';
+import { lookupSemanticCache, storeSemanticCacheEntry, type PendingSemanticEntry } from '../custom/semantic-cache.js';
 
 export const proxyRouter = Router();
 
@@ -2318,36 +2319,45 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   // Streaming requests participate in the cache too: same canonical key (the
   // request content is identical), but hits are looked up in the streaming
   // store and replayed as SSE rather than JSON (see below).
+  const baseCacheParams = {
+    model: requestedModel,
+    messages,
+    temperature,
+    top_p,
+    max_tokens,
+    tools,
+    tool_choice,
+    parallel_tool_calls,
+    // Normalized stop (providerSafeStop), i.e. what is actually forwarded.
+    stop,
+    // The knobs below are NOT in chatCompletionSchema, so zod strips them
+    // from parsed.data; read them from the raw body. They still change what
+    // answer the client is asking for, so requests differing only in one of
+    // them must never collide on a cached entry. Explicit null is coerced
+    // to undefined (dropped from the key) to match how the proxy treats
+    // null-valued optional knobs as absent.
+    response_format: req.body?.response_format ?? undefined,
+    n: req.body?.n ?? undefined,
+    seed: req.body?.seed ?? undefined,
+    top_k: req.body?.top_k ?? undefined,
+    min_p: req.body?.min_p ?? undefined,
+    presence_penalty: req.body?.presence_penalty ?? undefined,
+    frequency_penalty: req.body?.frequency_penalty ?? undefined,
+    repetition_penalty: req.body?.repetition_penalty ?? undefined,
+    logit_bias: req.body?.logit_bias ?? undefined,
+    logprobs: req.body?.logprobs ?? undefined,
+    top_logprobs: req.body?.top_logprobs ?? undefined,
+    // Normalized reasoning knob (flat field or object form) — a different
+    // effort asks for a different answer, so it must never collide.
+    reasoning_effort: samplingParams.reasoning_effort ?? undefined,
+    compression: compressionResult.cacheKey,
+    authScope,
+    restrictionSignature,
+  };
   const cacheKey = (cacheActive(cacheDirective) && isCacheableTemperature(temperature))
-    ? computeCacheKey({
-        model: requestedModel, messages, temperature, top_p, max_tokens, tools, tool_choice, parallel_tool_calls,
-        // Normalized stop (providerSafeStop), i.e. what is actually forwarded.
-        stop,
-        // The knobs below are NOT in chatCompletionSchema, so zod strips them
-        // from parsed.data; read them from the raw body. They still change what
-        // answer the client is asking for, so requests differing only in one of
-        // them must never collide on a cached entry. Explicit null is coerced
-        // to undefined (dropped from the key) to match how the proxy treats
-        // null-valued optional knobs as absent.
-        response_format: req.body?.response_format ?? undefined,
-        n: req.body?.n ?? undefined,
-        seed: req.body?.seed ?? undefined,
-        top_k: req.body?.top_k ?? undefined,
-        min_p: req.body?.min_p ?? undefined,
-        presence_penalty: req.body?.presence_penalty ?? undefined,
-        frequency_penalty: req.body?.frequency_penalty ?? undefined,
-        repetition_penalty: req.body?.repetition_penalty ?? undefined,
-        logit_bias: req.body?.logit_bias ?? undefined,
-        logprobs: req.body?.logprobs ?? undefined,
-        top_logprobs: req.body?.top_logprobs ?? undefined,
-        // Normalized reasoning knob (flat field or object form) — a different
-        // effort asks for a different answer, so it must never collide.
-        reasoning_effort: samplingParams.reasoning_effort ?? undefined,
-        compression: compressionResult.cacheKey,
-        authScope,
-        restrictionSignature,
-      })
+    ? computeCacheKey(baseCacheParams)
     : null;
+  let pendingSemantic: PendingSemanticEntry | null = null;
   if (cacheKey) {
     if (stream) {
       // Streaming hit: replay the captured SSE frame sequence verbatim —
@@ -2376,6 +2386,20 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         res.json(withExecutionId(hit.body, requestGroupId));
         return;
       }
+      const semanticLookup = await lookupSemanticCache({
+        ...baseCacheParams,
+        cacheDirective,
+        stream: false,
+        endUser: clientCtx.endUser ?? undefined,
+      });
+      if (semanticLookup.hit) {
+        res.setHeader('X-Routed-Via', 'semantic-cache');
+        res.setHeader('X-FreeLLM-Cache', 'SEMANTIC-HIT');
+        res.setHeader('X-FreeLLM-Cache-Similarity', semanticLookup.hit.similarity.toFixed(4));
+        res.json(withExecutionId(semanticLookup.hit.body, requestGroupId));
+        return;
+      }
+      pendingSemantic = semanticLookup.pending;
     }
   }
 
@@ -3364,6 +3388,21 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         // cut-off answer forever would be worse than regenerating.
         if (cacheKey && result.choices?.[0]?.finish_reason !== 'length') {
           storeCachedResponse(cacheKey, {
+            body: outboundBody,
+            platform: route.platform,
+            modelId: route.modelId,
+            keyId: route.keyId,
+            promptTokens,
+            completionTokens,
+          });
+        }
+        if (
+          pendingSemantic &&
+          result.choices?.[0]?.finish_reason !== 'length' &&
+          result.choices?.[0]?.finish_reason !== 'tool_calls' &&
+          !result.choices?.[0]?.message?.tool_calls?.length
+        ) {
+          storeSemanticCacheEntry(pendingSemantic, {
             body: outboundBody,
             platform: route.platform,
             modelId: route.modelId,
