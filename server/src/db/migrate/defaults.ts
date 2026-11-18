@@ -102,6 +102,7 @@ import * as customContextBudget from '../migrations/20261117_100000_custom_conte
 import * as customCustomerAiHub from '../migrations/20261118_030000_custom_customer_ai_hub.js';
 import * as customTenantRbac from '../migrations/20261118_043000_custom_tenant_rbac.js';
 import * as customMcpChatContinuation from '../migrations/20261118_090000_custom_mcp_chat_continuation.js';
+import * as customSupportSetupCopilot from '../migrations/20261118_093000_custom_support_setup_copilot.js';
 
 export interface MigrationModule {
   up(db: Db): void;
@@ -296,4 +297,5 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: CUSTOM_CUSTOMER_AI_HUB_FILENAME, module: customCustomerAiHub },
   { filename: '20261118_043000_custom_tenant_rbac.ts', module: customTenantRbac },
   { filename: '20261118_090000_custom_mcp_chat_continuation.ts', module: customMcpChatContinuation },
+  { filename: '20261118_093000_custom_support_setup_copilot.ts', module: customSupportSetupCopilot },
 ];

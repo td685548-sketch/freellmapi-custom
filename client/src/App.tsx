@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useState, type ReactNode } from 'react'
+import { Suspense, lazy, useEffect, useState, type ReactNode } from 'react'
 import { PageSwitch } from './custom/page-switch/PageSwitch'
 import { BrowserRouter, Routes, Route, Navigate, NavLink, Link, useLocation, useNavigate } from 'react-router-dom'
 import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -45,6 +45,8 @@ import { RouteFallback } from '@/custom/route-splitting/RouteFallback'
 import { legacyGatewayTarget } from '@/custom/x-gateway/legacy-gateway-target'
 // ai-platform (T032/US1 — Foundation dashboard)
 import { useCustomT } from '@/custom/i18n/use-custom-t'
+
+const SupportSetupCopilot = lazy(() => import('./custom/support-setup-copilot/SupportSetupCopilot'))
 
 // Every failed mutation surfaces as an error toast, so no action fails
 // silently. A page that already shows the failure inline can opt out with
@@ -523,6 +525,7 @@ function App() {
             <AuthGate>
               {/* One switch above both layouts, so it never moves between FreeLLMAPI and Thruline. */}
               <PageSwitch />
+              <Suspense fallback={null}><SupportSetupCopilot /></Suspense>
               {/* Column, so a full-bleed route can claim the height the navbar
                   leaves without anyone having to know how tall the navbar is.
                   Fixed-position children (toaster, palette, reminder) are out of
