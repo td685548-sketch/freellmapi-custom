@@ -1,14 +1,22 @@
-import { apiFetch } from '@/lib/api';
+import { apiFetch, clearToken, getToken, UNAUTHORIZED_EVENT } from '@/lib/api';
 import type {
   AdminAiAssistant,
   AdminAnomalyRadarReport,
   AssistantAudience,
   AssistantCategory,
+  AssistantThreadDetail,
+  AssistantThreadMessage,
+  AssistantThreadSummary,
   CustomerAiAssistant,
   CustomerQuotaCoachReport,
   KeyRoutingMode,
   UserAiPreferences,
+  UserCustomAssistant,
+  UserCustomAssistantInput,
+  UserKeyCustomBinding,
 } from '../../../../shared/customer-ai';
+
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, '');
 
 export function fetchCustomerAssistants(): Promise<{ assistants: CustomerAiAssistant[] }> {
   return apiFetch('/api/user/ai-hub/catalog');
@@ -32,14 +40,25 @@ export function fetchCustomerQuotaCoach(days = 14): Promise<{ report: CustomerQu
   return apiFetch(`/api/user/ai-hub/coach?days=${days}`);
 }
 
+export function fetchUserKeyCustomBindings(): Promise<{ bindings: UserKeyCustomBinding[] }> {
+  return apiFetch('/api/user/ai-hub/key-bindings');
+}
+
 export function patchUserKeyAiConfig(
   keyId: number,
-  patch: { routingMode?: KeyRoutingMode; assistantId?: number | null },
+  patch: {
+    routingMode?: KeyRoutingMode;
+    assistantId?: number | string | null;
+    userAssistantId?: number | null;
+    assistantRef?: string | null;
+  },
 ): Promise<{
   key: {
     id: number;
     routingMode: KeyRoutingMode;
     assistantId: number | null;
+    userAssistantId?: number | null;
+    assistantRef?: string | null;
     assistantSlug: string | null;
     assistantName: string | null;
   };
@@ -57,6 +76,87 @@ export function postApplyEcoToKeys(keyId?: number): Promise<{ updatedCount: numb
   });
 }
 
+// ─── User-Created Custom Assistants ──────────────────────────────────────────
+
+export function fetchUserCustomAssistants(): Promise<{ assistants: UserCustomAssistant[] }> {
+  return apiFetch('/api/user/ai-hub/custom-assistants');
+}
+
+export function postCreateUserCustomAssistant(
+  body: UserCustomAssistantInput,
+): Promise<{ assistant: UserCustomAssistant }> {
+  return apiFetch('/api/user/ai-hub/custom-assistants', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function patchUpdateUserCustomAssistant(
+  id: number,
+  body: Partial<UserCustomAssistantInput>,
+): Promise<{ assistant: UserCustomAssistant }> {
+  return apiFetch(`/api/user/ai-hub/custom-assistants/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteUserCustomAssistantApi(id: number): Promise<{ success: boolean }> {
+  return apiFetch(`/api/user/ai-hub/custom-assistants/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+// ─── Persistent Threads & Branching ──────────────────────────────────────────
+
+export function fetchAssistantThreads(assistantRef?: string): Promise<{ threads: AssistantThreadSummary[] }> {
+  const qs = assistantRef ? `?assistantRef=${encodeURIComponent(assistantRef)}` : '';
+  return apiFetch(`/api/user/ai-hub/threads${qs}`);
+}
+
+export function postCreateAssistantThread(body: {
+  assistantRef: string;
+  title?: string;
+  routingMode?: KeyRoutingMode;
+}): Promise<{ thread: AssistantThreadDetail }> {
+  return apiFetch('/api/user/ai-hub/threads', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function fetchAssistantThreadDetail(threadId: number): Promise<{ thread: AssistantThreadDetail }> {
+  return apiFetch(`/api/user/ai-hub/threads/${threadId}`);
+}
+
+export function patchAssistantThread(
+  threadId: number,
+  body: { title?: string; routingMode?: KeyRoutingMode },
+): Promise<{ thread: AssistantThreadSummary }> {
+  return apiFetch(`/api/user/ai-hub/threads/${threadId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteAssistantThreadApi(threadId: number): Promise<{ success: boolean }> {
+  return apiFetch(`/api/user/ai-hub/threads/${threadId}`, {
+    method: 'DELETE',
+  });
+}
+
+export function postBranchAssistantThread(
+  threadId: number,
+  body: { fromMessageIndex?: number; fromMessageId?: number; title?: string },
+): Promise<{ thread: AssistantThreadDetail }> {
+  return apiFetch(`/api/user/ai-hub/threads/${threadId}/branch`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+// ─── Assistant Chat & SSE Streaming ──────────────────────────────────────────
+
 export interface AssistantChatResponse {
   reply: string;
   model: string | null;
@@ -66,6 +166,10 @@ export interface AssistantChatResponse {
     completionTokens: number;
     totalTokens: number;
   };
+  threadId?: number | null;
+  thread?: AssistantThreadSummary | null;
+  userMessage?: AssistantThreadMessage | null;
+  assistantMessage?: AssistantThreadMessage | null;
 }
 
 export function postAssistantChat(
@@ -74,12 +178,159 @@ export function postAssistantChat(
     messages: Array<{ role: 'user' | 'assistant'; content: string }>;
     routingMode?: KeyRoutingMode;
     maxTokens?: number;
+    threadId?: number;
   },
 ): Promise<AssistantChatResponse> {
   return apiFetch(`/api/user/ai-hub/assistants/${encodeURIComponent(slug)}/chat`, {
     method: 'POST',
     body: JSON.stringify(body),
   });
+}
+
+export interface StreamAssistantChatCallbacks {
+  onMeta?: (meta: { threadId: number | null; assistantRef: string; routingMode: KeyRoutingMode }) => void;
+  onDelta?: (delta: string) => void;
+}
+
+export async function streamAssistantChat(
+  body: {
+    assistantRef?: string;
+    threadId?: number;
+    createThread?: boolean;
+    threadTitle?: string;
+    message?: string;
+    messages?: Array<{ role: 'user' | 'assistant'; content: string }>;
+    routingMode?: KeyRoutingMode;
+    maxTokens?: number;
+  },
+  callbacks?: StreamAssistantChatCallbacks,
+  signal?: AbortSignal,
+): Promise<AssistantChatResponse> {
+  const token = getToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'text/event-stream, application/json',
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const res = await fetch(`${BASE}/api/user/ai-hub/chat/stream`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  if (!res.ok) {
+    const errPayload = (await res.json().catch(() => null)) as {
+      error?: string | { message?: string; type?: string };
+    } | null;
+    if (
+      res.status === 401 &&
+      typeof errPayload?.error === 'object' &&
+      errPayload?.error?.type === 'authentication_error'
+    ) {
+      clearToken();
+      window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
+    }
+    const message =
+      typeof errPayload?.error === 'string'
+        ? errPayload.error
+        : errPayload?.error?.message || `HTTP ${res.status}`;
+    throw new Error(message);
+  }
+
+  const contentType = (res.headers.get('content-type') ?? '').toLowerCase();
+  if (!contentType.includes('text/event-stream') || !res.body) {
+    const json = (await res.json()) as AssistantChatResponse;
+    if (json.reply) callbacks?.onDelta?.(json.reply);
+    return json;
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let currentEvent = 'message';
+  let accumulatedReply = '';
+  let finalDone: AssistantChatResponse | null = null;
+  let streamError: string | null = null;
+
+  const handleEventBlock = (rawBlock: string) => {
+    const lines = rawBlock.split('\n');
+    let eventName = currentEvent;
+    const dataLines: string[] = [];
+
+    for (const rawLine of lines) {
+      const line = rawLine.replace(/\r$/, '');
+      if (!line || line.startsWith(':')) continue;
+      if (line.startsWith('event:')) {
+        eventName = line.slice(6).trim();
+      } else if (line.startsWith('data:')) {
+        dataLines.push(line.slice(5).trimStart());
+      }
+    }
+    currentEvent = 'message';
+
+    if (dataLines.length === 0) return;
+    const joined = dataLines.join('\n').trim();
+    if (!joined || joined === '[DONE]') return;
+
+    let parsed: Record<string, unknown> | null = null;
+    try {
+      parsed = JSON.parse(joined) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+
+    if (eventName === 'meta' && parsed) {
+      callbacks?.onMeta?.({
+        threadId: typeof parsed.threadId === 'number' ? parsed.threadId : null,
+        assistantRef: typeof parsed.assistantRef === 'string' ? parsed.assistantRef : '',
+        routingMode: (parsed.routingMode as KeyRoutingMode) ?? 'balanced',
+      });
+    } else if (eventName === 'delta' && parsed) {
+      const piece = typeof parsed.delta === 'string' ? parsed.delta : '';
+      if (piece) {
+        accumulatedReply += piece;
+        callbacks?.onDelta?.(piece);
+      }
+    } else if (eventName === 'error' && parsed) {
+      streamError = typeof parsed.message === 'string' ? parsed.message : 'Assistant stream failed';
+    } else if (eventName === 'done' && parsed) {
+      finalDone = parsed as unknown as AssistantChatResponse;
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const blocks = buffer.split(/\r?\n\r?\n/);
+    buffer = blocks.pop() ?? '';
+    for (const block of blocks) {
+      if (block.trim()) handleEventBlock(block);
+    }
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    for (const block of buffer.split(/\r?\n\r?\n/)) {
+      if (block.trim()) handleEventBlock(block);
+    }
+  }
+
+  if (streamError && !accumulatedReply && !finalDone) {
+    throw new Error(streamError);
+  }
+
+  if (finalDone) return finalDone;
+
+  return {
+    reply: accumulatedReply,
+    model: null,
+    routingMode: body.routingMode ?? 'balanced',
+    usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+  };
 }
 
 // ─── Admin APIs (/api/ai-platform/*) ─────────────────────────────────────────
