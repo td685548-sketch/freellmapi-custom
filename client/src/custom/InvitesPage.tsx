@@ -12,11 +12,19 @@ import { toast } from '@/lib/toast'
 import type { InviteCode } from '../../../shared/user-access'
 import { useCustomT } from './i18n/use-custom-t'
 import { askConfirm } from '@/custom/x-gateway/shell/confirm'
+import { useAdministrativeAccess } from './use-administrative-access'
+import { AdminVouchersPanel } from './quota-vouchers/AdminVouchersPanel'
+import { AdminTopUpRequestsPanel } from './quota-vouchers/AdminTopUpRequestsPanel'
 export type { InviteCode } from '../../../shared/user-access'
 
 export function InvitesPage({ capabilities }: { capabilities?: { view: boolean; create: boolean; revoke: boolean } } = {}) {
   const tc = useCustomT()
+  const { can: hasPerm } = useAdministrativeAccess()
   const can = (action: 'view' | 'create' | 'revoke') => capabilities?.[action] !== false
+  const canViewVouchers = Boolean(capabilities?.view) || hasPerm('manage_invites') || hasPerm('manage_users') || hasPerm('view_invites') || hasPerm('view_users') || hasPerm('edit_user_quotas')
+  const canCreateVouchers = Boolean(capabilities?.create) || hasPerm('manage_invites') || hasPerm('manage_users') || hasPerm('create_invites') || hasPerm('edit_user_quotas')
+  const canManageVouchers = Boolean(capabilities?.revoke) || hasPerm('manage_invites') || hasPerm('manage_users') || hasPerm('revoke_invites') || hasPerm('edit_user_quotas')
+  const canReviewTopUps = hasPerm('manage_invites') || hasPerm('manage_users') || hasPerm('edit_user_quotas')
   const queryClient = useQueryClient()
   const [createOpen, setCreateOpen] = useState(false)
   const [code, setCode] = useState('')
@@ -192,6 +200,17 @@ export function InvitesPage({ capabilities }: { capabilities?: { view: boolean; 
           </div>
         )}
       </div>
+
+      <AdminVouchersPanel
+        canView={canViewVouchers}
+        canCreate={canCreateVouchers}
+        canManage={canManageVouchers}
+      />
+
+      <AdminTopUpRequestsPanel
+        canView={canViewVouchers}
+        canReview={canReviewTopUps}
+      />
 
       {/* Create Invite Modal Dialog */}
       {createOpen && (
