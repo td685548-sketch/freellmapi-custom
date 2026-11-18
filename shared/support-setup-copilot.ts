@@ -206,14 +206,215 @@ export interface SupportSetupStatusTenantItem {
   canEditSteps: SupportSetupStepId[];
 }
 
+export const COPILOT_ACTION_TYPES = [
+  'create_personal_key',
+  'switch_key_routing_mode',
+  'open_onboarding_guide',
+] as const;
+
+export type CopilotActionType = (typeof COPILOT_ACTION_TYPES)[number];
+export type CopilotActionRoutingMode = 'eco' | 'balanced' | 'max';
+export type CopilotEffectiveRoutingMode = 'default' | 'eco' | 'balanced' | 'max';
+
+export type CopilotErrorCategory =
+  | 'rate_limit_429'
+  | 'bad_request_400'
+  | 'quota_guardrail_403'
+  | 'upstream_5xx_timeout'
+  | 'other_error';
+
+export type CopilotOnboardingStepId =
+  | 'mint_personal_key'
+  | 'test_in_playground'
+  | 'connect_ide';
+
+export interface CopilotOnboardingStep {
+  stepNumber: 1 | 2 | 3;
+  id: CopilotOnboardingStepId;
+  completed: boolean;
+  titleEn: string;
+  titleVi: string;
+  descriptionEn: string;
+  descriptionVi: string;
+  ctaLabelEn: string;
+  ctaLabelVi: string;
+  targetPath: string;
+}
+
+export interface CopilotOnboardingChecklist {
+  completedCount: number;
+  totalCount: 3;
+  steps: CopilotOnboardingStep[];
+}
+
+export interface CopilotPersonalKeySummary {
+  id: number;
+  name: string;
+  keyPrefix: string;
+  rpmLimit: number;
+  routingMode: CopilotEffectiveRoutingMode;
+  assistantId: number | null;
+  assistantName: string | null;
+  lastUsedAt: string | null;
+  createdAt: string;
+}
+
+export interface CopilotQuotaWindowMetric {
+  used: number;
+  limit: number | null;
+  pct: number | null;
+}
+
+export interface CopilotQuotaUsageSummary {
+  tracked: boolean;
+  rpmLimit: number;
+  dailyRequests: CopilotQuotaWindowMetric;
+  dailyTokens: CopilotQuotaWindowMetric;
+  monthlyRequests: CopilotQuotaWindowMetric;
+  monthlyTokens: CopilotQuotaWindowMetric;
+  highestUsagePct: number | null;
+  isNearExhaustion: boolean;
+  isExhausted: boolean;
+  resetsAt: { day: string; month: string };
+}
+
+export interface CopilotDiagnosticIssue {
+  category: CopilotErrorCategory | 'quota_pressure' | 'high_latency';
+  severity: 'critical' | 'warning' | 'info';
+  count: number;
+  latestAt: string | null;
+  sampleError: string | null;
+  titleEn: string;
+  titleVi: string;
+  rootCauseEn: string;
+  rootCauseVi: string;
+  remediationEn: string;
+  remediationVi: string;
+}
+
+export interface CopilotCreateKeyActionParams {
+  name: string;
+  routingMode?: CopilotActionRoutingMode;
+  assistantId?: number | null;
+  assistantName?: string | null;
+}
+
+export interface CopilotSwitchRoutingModeActionParams {
+  keyId: number;
+  keyName: string;
+  keyPrefix: string;
+  fromRoutingMode: CopilotEffectiveRoutingMode;
+  routingMode: CopilotActionRoutingMode;
+}
+
+export interface CopilotOpenOnboardingActionParams {
+  focusStep?: CopilotOnboardingStepId;
+}
+
+export type CopilotActionParams =
+  | CopilotCreateKeyActionParams
+  | CopilotSwitchRoutingModeActionParams
+  | CopilotOpenOnboardingActionParams;
+
+export interface CopilotActionProposal {
+  id: string;
+  actionType: CopilotActionType;
+  requiresConfirmation: true;
+  titleEn: string;
+  titleVi: string;
+  summaryEn: string;
+  summaryVi: string;
+  confirmLabelEn: string;
+  confirmLabelVi: string;
+  params: CopilotActionParams;
+  onboardingPreview?: CopilotOnboardingChecklist;
+}
+
+export interface CopilotUserDiagnosticReport {
+  generatedAt: string;
+  windowHours: number;
+  overallHealth: 'healthy' | 'degraded' | 'critical';
+  headlineEn: string;
+  headlineVi: string;
+  recentRequests: {
+    total: number;
+    succeeded: number;
+    failed: number;
+    errorRatePct: number;
+    avgLatencyMs: number;
+    highLatencyCount: number;
+  };
+  errorBreakdown: Record<CopilotErrorCategory, number>;
+  issues: CopilotDiagnosticIssue[];
+  activeKeys: CopilotPersonalKeySummary[];
+  quota: CopilotQuotaUsageSummary;
+  onboarding: CopilotOnboardingChecklist;
+  recommendedAction: CopilotActionProposal | null;
+}
+
+export interface CopilotDiagnosticsResponse {
+  ok: true;
+  diagnostic: CopilotUserDiagnosticReport;
+}
+
+export interface CopilotIdeConfigSnippets {
+  gatewayBaseUrl: string;
+  openAiBaseUrl: string;
+  cursor: string;
+  claudeCode: string;
+  openCode: string;
+}
+
+export interface CopilotExecuteActionRequest {
+  actionType: CopilotActionType;
+  confirmed: boolean;
+  params?: {
+    name?: string;
+    routingMode?: CopilotActionRoutingMode;
+    assistantId?: number | null;
+    keyId?: number;
+    focusStep?: CopilotOnboardingStepId;
+  };
+}
+
+export interface CopilotExecuteActionResponse {
+  ok: true;
+  actionType: CopilotActionType;
+  messageEn: string;
+  messageVi: string;
+  createdKey?: {
+    id: number;
+    name: string;
+    rawKey: string;
+    keyPrefix: string;
+    routingMode: CopilotEffectiveRoutingMode;
+    assistantId: number | null;
+    assistantName: string | null;
+    createdAt: string;
+    snippets: CopilotIdeConfigSnippets;
+  };
+  updatedKey?: {
+    id: number;
+    name: string;
+    keyPrefix: string;
+    previousRoutingMode: CopilotEffectiveRoutingMode;
+    routingMode: CopilotActionRoutingMode;
+    assistantId: number | null;
+    assistantName: string | null;
+  };
+  onboarding?: CopilotOnboardingChecklist;
+}
+
 export interface SupportSetupStatusResponse {
   ok: true;
   visible: boolean;
+  memberCopilotVisible?: boolean;
   canCreateTenant: boolean;
   availableModels: Array<{ id: string; label: string }>;
   tenants: SupportSetupStatusTenantItem[];
   activeTenant: SupportSetupTenantDiagnostic | null;
   pendingProposals: SupportSetupProposal[];
+  onboarding?: CopilotOnboardingChecklist;
 }
 
 export interface SupportSetupChatMessage {
@@ -231,7 +432,12 @@ export interface SupportSetupChatRequest {
   baseProposalId?: string;
 }
 
-export type SupportSetupChatIntent = 'guide' | 'gather_requirements' | 'propose_setup';
+export type SupportSetupChatIntent =
+  | 'guide'
+  | 'gather_requirements'
+  | 'propose_setup'
+  | 'diagnose_errors'
+  | 'propose_action';
 
 export interface SupportSetupChatResponse {
   ok: true;
@@ -241,6 +447,8 @@ export interface SupportSetupChatResponse {
   missingQuestions: string[];
   suggestedQuickReplies: string[];
   proposal: SupportSetupProposal | null;
+  userDiagnostic?: CopilotUserDiagnosticReport | null;
+  actionProposal?: CopilotActionProposal | null;
   modelUsed: string | null;
   usedFallback: boolean;
 }

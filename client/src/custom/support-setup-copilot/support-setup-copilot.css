@@ -1192,6 +1192,212 @@
   cursor: not-allowed;
 }
 
+/* AI Error Doctor & Consent-Gated Action Cards */
+.ssc-diag-card,
+.ssc-action-card,
+.ssc-onboarding-card {
+  border: 1px solid var(--ssc-border-strong);
+  border-radius: 14px;
+  background: var(--ssc-bg);
+  box-shadow: 0 8px 22px -12px rgb(15 23 42 / 22%);
+  overflow: hidden;
+  width: 100%;
+  font-size: 11.5px;
+}
+
+.ssc-action-card {
+  border-color: var(--ssc-accent-border);
+}
+
+.ssc-diag-head,
+.ssc-action-head,
+.ssc-onboarding-head {
+  padding: 10px 12px;
+  background:
+    linear-gradient(90deg, var(--ssc-accent-soft) 0%, transparent 100%),
+    var(--ssc-bg-subtle);
+  border-bottom: 1px solid var(--ssc-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ssc-diag-title,
+.ssc-onboarding-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.75px;
+  font-weight: 700;
+  color: var(--ssc-text);
+}
+
+.ssc-diag-body,
+.ssc-action-body,
+.ssc-onboarding-body {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ssc-diag-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.ssc-diag-metric {
+  padding: 6px 8px;
+  border-radius: 9px;
+  background: var(--ssc-bg-subtle);
+  border: 1px solid var(--ssc-border);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ssc-diag-metric-label {
+  font-size: 9.75px;
+  font-weight: 600;
+  color: var(--ssc-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ssc-diag-metric-val {
+  font-size: 12.25px;
+  font-weight: 700;
+  color: var(--ssc-text);
+}
+
+.ssc-diag-issue {
+  padding: 7.5px 9px;
+  border-radius: 10px;
+  background: var(--ssc-bg-subtle);
+  border: 1px solid var(--ssc-border);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ssc-diag-issue--critical {
+  border-color: rgb(220 38 38 / 30%);
+  background: var(--ssc-red-bg);
+}
+
+.ssc-diag-issue--warning {
+  border-color: rgb(180 83 9 / 28%);
+  background: var(--ssc-amber-bg);
+}
+
+.ssc-diag-issue-title {
+  font-weight: 700;
+  font-size: 11.5px;
+  color: var(--ssc-text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.ssc-diag-issue-desc {
+  color: var(--ssc-text-secondary);
+  line-height: 1.42;
+  font-size: 11px;
+}
+
+.ssc-diag-sample {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  color: var(--ssc-muted);
+  word-break: break-all;
+}
+
+.ssc-diag-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
+
+.ssc-key-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--ssc-bg-alt);
+  border: 1px solid var(--ssc-border);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--ssc-text-secondary);
+}
+
+.ssc-raw-key-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: var(--ssc-code-bg);
+  color: var(--ssc-code-text);
+  border: 1px solid rgb(255 255 255 / 14%);
+}
+
+.ssc-raw-key-code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  word-break: break-all;
+  user-select: all;
+}
+
+.ssc-ide-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 9px;
+  background: var(--ssc-bg-subtle);
+  border: 1px solid var(--ssc-border);
+}
+
+.ssc-ide-tab {
+  border: 0;
+  border-radius: 6px;
+  padding: 4px 9px;
+  font-size: 10.75px;
+  font-weight: 600;
+  background: transparent;
+  color: var(--ssc-muted);
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+
+.ssc-ide-tab--active {
+  background: var(--ssc-accent);
+  color: #ffffff;
+}
+
+.ssc-onboarding-step {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 9px;
+  border-radius: 10px;
+  background: var(--ssc-bg-subtle);
+  border: 1px solid var(--ssc-border);
+}
+
+.ssc-onboarding-step--done {
+  border-color: var(--ssc-green-border);
+  background: var(--ssc-green-bg);
+}
+
 @media (max-width: 640px) {
   .ssc-launcher {
     right: 12px;
@@ -1204,6 +1410,9 @@
   }
   .ssc-brief-grid {
     grid-template-columns: 1fr;
+  }
+  .ssc-diag-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .ssc-composer-hint {
     display: none;
