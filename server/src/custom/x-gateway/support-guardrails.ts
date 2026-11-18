@@ -1,4 +1,5 @@
 import { getDb } from '../../db/index.js';
+import { getActiveVerifiedCloudRuntimePack } from '../cloud-entitlement/service.js';
 
 const GUARDRAILS_KEY = 'x_gateway_support_guardrails_v1';
 const QUOTAS_KEY = 'x_gateway_support_quotas_v1';
@@ -250,6 +251,9 @@ export function evaluateSupportInputGuardrails(
     sanitizedText,
   });
 
+  const cloudPack = getActiveVerifiedCloudRuntimePack();
+  const remoteRules = cloudPack?.guardrailRules;
+
   if (policy.maxInputLength > 0 && text.length > policy.maxInputLength) {
     return block('input_too_long', ['max_input_length']);
   }
@@ -265,14 +269,47 @@ export function evaluateSupportInputGuardrails(
           terms.push(m[0]);
         }
       }
+      if (detector === 'ignore_instructions' && remoteRules?.ignoreInstructionsPatterns) {
+        for (const patternStr of remoteRules.ignoreInstructionsPatterns) {
+          try {
+            const re = new RegExp(patternStr, 'i');
+            const m = re.exec(sanitizedText);
+            if (m) {
+              if (!rules.includes(detector)) rules.push(detector);
+              terms.push(m[0]);
+            }
+          } catch {}
+        }
+      }
+      if (detector === 'system_prompt_leak' && remoteRules?.systemPromptLeakPatterns) {
+        for (const patternStr of remoteRules.systemPromptLeakPatterns) {
+          try {
+            const re = new RegExp(patternStr, 'i');
+            const m = re.exec(sanitizedText);
+            if (m) {
+              if (!rules.includes(detector)) rules.push(detector);
+              terms.push(m[0]);
+            }
+          } catch {}
+        }
+      }
     }
     if (rules.length) return block('prompt_injection', rules, terms);
   }
 
   const lower = sanitizedText.toLowerCase();
-  const topics = findTerms(lower, policy.blockedTopics);
+  const effectiveBlockedTopics = [
+    ...policy.blockedTopics,
+    ...(remoteRules?.blockedTopics ?? []),
+  ];
+  const topics = findTerms(lower, effectiveBlockedTopics);
   if (topics.length) return block('blocked_topic', ['blocked_topic'], topics);
-  const competitors = findTerms(lower, policy.competitorKeywords);
+
+  const effectiveCompetitors = [
+    ...policy.competitorKeywords,
+    ...(remoteRules?.competitorKeywords ?? []),
+  ];
+  const competitors = findTerms(lower, effectiveCompetitors);
   if (competitors.length) return block('competitor_mention', ['competitor_mention'], competitors);
 
   return { allowed: true, triggeredRules: [], matchedTerms: [], bypassedByRole: false, sanitizedText };

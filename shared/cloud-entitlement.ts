@@ -28,6 +28,20 @@ export interface CloudCoachRuntimePack {
   outputContract: string;
 }
 
+export interface CloudAiAssistantPrompt {
+  slug: string;
+  name: string;
+  systemPrompt: string;
+  starterPrompts?: string[];
+}
+
+export interface CloudGuardrailRules {
+  ignoreInstructionsPatterns?: string[];
+  systemPromptLeakPatterns?: string[];
+  blockedTopics?: string[];
+  competitorKeywords?: string[];
+}
+
 export interface CloudAiRuntimePack {
   version: number;
   supportCoachPack: CloudCoachRuntimePack;
@@ -35,6 +49,10 @@ export interface CloudAiRuntimePack {
   customerAiDirective: string;
   supportGatewayDirective: string;
   aiPlatformCapabilityGrant: string;
+  customerAiAssistants?: Record<string, CloudAiAssistantPrompt>;
+  systemOneClassifierInstruction?: string;
+  outputSafetyJudgeInstruction?: string;
+  guardrailRules?: CloudGuardrailRules;
 }
 
 export interface CloudSignedLease {

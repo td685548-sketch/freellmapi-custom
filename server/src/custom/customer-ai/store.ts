@@ -1,6 +1,7 @@
 import { getDb } from '../../db/index.js';
 import { resetGuestCache } from '../../services/guest-access.js';
 import type { PresetStrategy } from '../../services/scoring.js';
+import { getActiveVerifiedCloudRuntimePack } from '../cloud-entitlement/service.js';
 import {
   ASSISTANT_AUDIENCES,
   ASSISTANT_CATEGORIES,
@@ -139,9 +140,13 @@ function mapCustomerRow(row: AssistantRow): CustomerAiAssistant {
 }
 
 function mapAdminRow(row: AssistantRow): AdminAiAssistant {
+  const cloudPack = getActiveVerifiedCloudRuntimePack();
+  const remoteAssistant = cloudPack?.customerAiAssistants?.[row.slug];
+  const effectiveSystemPrompt = remoteAssistant?.systemPrompt?.trim() || row.system_prompt;
+
   return {
     ...mapCustomerRow(row),
-    systemPrompt: row.system_prompt,
+    systemPrompt: effectiveSystemPrompt,
     enabled: Boolean(row.enabled),
     sortOrder: Number(row.sort_order ?? 0),
     createdAt: row.created_at,
@@ -217,11 +222,15 @@ export function getAssistantForRuntime(
   if (!row || !row.enabled) return null;
   if (callerRole !== 'admin' && row.audience === 'admin_only') return null;
 
+  const cloudPack = getActiveVerifiedCloudRuntimePack();
+  const remoteAssistant = cloudPack?.customerAiAssistants?.[row.slug];
+  const effectiveSystemPrompt = remoteAssistant?.systemPrompt?.trim() || row.system_prompt;
+
   return {
     id: row.id,
     slug: row.slug,
     name: row.name,
-    systemPrompt: row.system_prompt,
+    systemPrompt: effectiveSystemPrompt,
     recommendedRoutingMode: normalizeRoutingMode(row.recommended_routing_mode, 'balanced'),
   };
 }
