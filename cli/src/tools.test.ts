@@ -786,3 +786,43 @@ describe('tool generators', () => {
     expect(dashboardMetadata).toEqual(expected);
   });
 });
+
+describe('generators with no published context window', () => {
+  // The catalog publishes no window for any of these models. The old code
+  // wrote 128000 into ~15 agents' config files as if the catalog had said
+  // so; now the field is omitted and the agent applies its own default.
+  const noWindowContext: GenerateContext = {
+    ...context,
+    models: [
+      { id: 'auto', name: 'Auto', available: true },
+      { id: 'plain-model', name: 'Plain Model', available: true },
+    ],
+  };
+
+  it('never writes an invented 128000 anywhere, for any tool', () => {
+    for (const tool of tools) {
+      const generation = tool.generate(noWindowContext);
+      const rendered = JSON.stringify(generation);
+      expect(rendered, tool.id).not.toContain('128000');
+      expect(rendered, tool.id).not.toContain('128_000');
+    }
+  });
+
+  it('omits the compaction window from Claude settings and the Codex config', () => {
+    const claude = tools.find(tool => tool.id === 'claude')!.generate(noWindowContext);
+    const env = (claude.files[0].value as { env: Record<string, string> }).env;
+    expect(env.ANTHROPIC_MODEL).toBe('auto');
+    expect(env).not.toHaveProperty('CLAUDE_CODE_AUTO_COMPACT_WINDOW');
+
+    const codex = tools.find(tool => tool.id === 'codex')!.generate(noWindowContext);
+    expect(codex.files[0].content).not.toContain('model_context_window');
+    expect(codex.files[0].content).not.toContain('model_auto_compact_token_limit');
+    expect(codex.notes.join('\n')).toContain('context window not published');
+  });
+
+  it('still writes the published window when the catalog states one', () => {
+    const claude = tools.find(tool => tool.id === 'claude')!.generate(context);
+    const env = (claude.files[0].value as { env: Record<string, string> }).env;
+    expect(env.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe('131072');
+  });
+});
