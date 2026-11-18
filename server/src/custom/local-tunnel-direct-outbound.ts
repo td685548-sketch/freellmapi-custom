@@ -13,6 +13,26 @@ export interface LocalDirectOutboundResult {
     | 'not_fetch_relay';
 }
 
+export interface BypassedFetchRelayConfig {
+  proxyUrl: string;
+  fetchRelayToken: string;
+}
+
+let bypassedFetchRelay: BypassedFetchRelayConfig | null = null;
+
+/**
+ * Returns the Fetch Relay credentials bypassed at startup on a local tunnel server,
+ * allowing ISP-blocked auxiliary services (e.g., `api.telegram.org`) to fall back
+ * to the cloud Fetch Relay while LLM provider traffic stays low-latency direct.
+ */
+export function getBypassedFetchRelayConfig(): BypassedFetchRelayConfig | null {
+  return bypassedFetchRelay ? { ...bypassedFetchRelay } : null;
+}
+
+export function resetBypassedFetchRelayForTests(): void {
+  bypassedFetchRelay = null;
+}
+
 function parseTriStateFlag(raw: string | undefined): boolean | undefined {
   if (raw === undefined || raw.trim() === '') return undefined;
   const normalized = raw.trim().toLowerCase();
@@ -90,6 +110,8 @@ export function applyLocalTunnelDirectOutbound(
   env: NodeJS.ProcessEnv = process.env,
   log: (msg: string) => void = console.log,
 ): LocalDirectOutboundResult {
+  bypassedFetchRelay = null;
+
   if (isCloudHostedEnvironment(env)) {
     return { applied: false, reason: 'cloud_hosted' };
   }
@@ -100,10 +122,15 @@ export function applyLocalTunnelDirectOutbound(
   }
 
   const proxyMode = (env.PROXY_MODE ?? env.proxy_mode ?? '').trim().toLowerCase();
-  const hasProxyUrl = Boolean((env.PROXY_URL ?? env.proxy_url ?? '').trim());
+  const rawProxyUrl = (env.PROXY_URL ?? env.proxy_url ?? '').trim();
+  const rawRelayToken = (env.FETCH_RELAY_TOKEN ?? env.fetch_relay_token ?? '').trim();
+  const hasProxyUrl = Boolean(rawProxyUrl);
 
   if (override === true) {
     if (hasProxyUrl || proxyMode) {
+      if (proxyMode === 'fetch-relay' && rawProxyUrl) {
+        bypassedFetchRelay = { proxyUrl: rawProxyUrl, fetchRelayToken: rawRelayToken };
+      }
       delete env.PROXY_URL;
       delete env.proxy_url;
       delete env.PROXY_MODE;
@@ -125,6 +152,9 @@ export function applyLocalTunnelDirectOutbound(
     return { applied: false, reason: 'not_fetch_relay' };
   }
 
+  if (rawProxyUrl) {
+    bypassedFetchRelay = { proxyUrl: rawProxyUrl, fetchRelayToken: rawRelayToken };
+  }
   delete env.PROXY_URL;
   delete env.proxy_url;
   delete env.PROXY_MODE;
