@@ -28,8 +28,10 @@ import {
   SUPPORT_DESK_LIMITS,
 } from '@freellmapi/shared/support-service-desk.js';
 import { SUPPORT_OUTPUT_LIMITS } from '@freellmapi/shared/support-output.js';
+import { getDb, getUnifiedApiKey } from '../../db/index.js';
 import { decrypt } from '../../lib/crypto.js';
 import type { SessionUser } from '../../services/auth.js';
+import { PLAYGROUND_SESSION_HEADER } from '../playground-attribution.js';
 import { resolveAccountProvider } from '../provider-accounts/execution.js';
 import { resolveXGatewayAccountProxy } from '../provider-accounts/store.js';
 import { getConfigSnapshot } from '../x-gateway/config.js';
@@ -378,8 +380,12 @@ export function extractRequirementsFromMessages(
       /đổi trả|bảo hành|hoàn tiền|giao hàng|ship|freeship|giá|thanh toán|giờ làm việc|chính sách|return|refund|shipping|warranty|pricing|hours|policy|sla/i.test(
         text,
       );
+    const isMetaQuestion =
+      /^(?:xin\s+chào|chào|hello|hi\b|bạn\s+có\s+thể|bạn\s+biết|hướng\s+dẫn|giải\s+thích|làm\s+sao|how\s+do|can\s+you\s+speak)/i.test(
+        text.trim(),
+      );
     const trimmed = text.trim();
-    if (hasPolicyKeywords || (!merged.faqSummaryOrPolicies && trimmed.length >= 60)) {
+    if (!isMetaQuestion && (hasPolicyKeywords || (!merged.faqSummaryOrPolicies && trimmed.length >= 60))) {
       merged.faqSummaryOrPolicies = trimmed.slice(0, 2000);
     }
   }
@@ -413,21 +419,122 @@ export function extractRequirementsFromMessages(
   return merged;
 }
 
+const VI_DIACRITIC_RE =
+  /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i;
+
+const VI_UNACCENTED_PHRASE_RE =
+  /\b(?:xin\s+chao|chao\s+ban|ban\s+co\s+the|co\s+the\s+noi|tieng\s+viet|giup\s+toi|giup\s+minh|cho\s+toi|cho\s+minh|cua\s+toi|cua\s+minh|lam\s+sao|nhu\s+the\s+nao|thiet\s+lap|cai\s+dat|huong\s+dan|buoc\s*[1-7]|duoc\s+khong|tuy\s+ban|lam\s+luon|mac\s+dinh|chua\s+co\s+web|cam\s+on|ban\s+la\s+ai)\b/i;
+
+const EXPLICIT_SPEAK_VI_RE =
+  /\b(?:speak|talk\s+in|reply\s+in|use|switch\s+to)\s+vietnamese\b|(?:nói|dùng|trả\s+lời|giao\s+tiếp|chat)\s*(?:bằng\s*)?tiếng\s*việt|tieng\s+viet\s+(?:khong|duoc\s+khong|nhe|di)/i;
+
+const EXPLICIT_SPEAK_EN_RE =
+  /^(?:please\s+)?(?:can\s+you\s+)?(?:speak|talk\s+in|reply\s+in|switch\s+to)\s+english\b|(?:nói|trả\s+lời\s+bằng)\s+tiếng\s+anh\s+(?:với\s+(?:tôi|mình)|nhé|đi)/i;
+
+const EN_SENTENCE_MARKER_RE =
+  /\b(?:how\s+do|how\s+to|can\s+you|could\s+you|please|set\s+up|configure|explain|my\s+(?:shop|store|company|business|tenant)|auto-complete|standard\s+defaults|hello|hi\s+there|what\s+is|what\s+can\s+you|who\s+are\s+you|support\s+hours|onboarding|collect\s+customer)\b/i;
+
+/**
+ * Automatically detects the user's preferred conversation language ('vi' | 'en')
+ * from their actual chat messages so Vietnamese users get fluent Vietnamese replies
+ * even when the dashboard navbar dropdown is set to English (and vice versa).
+ */
+export function detectConversationLocale(
+  messages: readonly SupportSetupChatMessage[],
+  fallbackLocale: 'vi' | 'en' = 'vi',
+): 'vi' | 'en' {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (!msg || msg.role !== 'user') continue;
+    const text = msg.content.trim();
+    if (!text) continue;
+    if (EXPLICIT_SPEAK_VI_RE.test(text)) return 'vi';
+    if (EXPLICIT_SPEAK_EN_RE.test(text)) return 'en';
+    if (VI_DIACRITIC_RE.test(text) || VI_UNACCENTED_PHRASE_RE.test(text)) return 'vi';
+    if (EN_SENTENCE_MARKER_RE.test(text)) return 'en';
+  }
+  return fallbackLocale;
+}
+
 function isGuideQuestion(text: string): boolean {
   const lower = text.toLowerCase();
   const asksHow =
-    /hướng dẫn|các bước|làm sao|như thế nào|cách dùng|cách setup|tại sao|là gì|roadmap|how to|how do i|steps to|guide|explain|what does|troubleshooting|kiểm tra tình trạng/i.test(
+    /hướng dẫn|các bước|lộ trình|quy trình|làm sao|như thế nào|cách dùng|cách setup|tại sao|là gì|ở đâu|roadmap|how to|how do i|steps to|guide|explain|what does|what is|where do i|troubleshooting|kiểm tra tình trạng/i.test(
       lower,
     );
   const asksAutoDoIt =
-    /setup giúp|setup thay|làm giúp|làm thay|cài đặt tự động|tự động setup|thiết lập giúp|thiết lập thay|tạo giúp|tạo giùm|hoàn thiện giúp|auto[- ]?setup|set up for me|configure for me|do it for me/i.test(
+    /setup giúp|setup thay|làm giúp|làm thay|cài đặt tự động|tự động setup|thiết lập giúp|thiết lập thay|tạo giúp|tạo giùm|hoàn thiện giúp|auto[- ]?setup|set up .*for me|configure .*for me|do it for me/i.test(
       lower,
     );
   return asksHow && !asksAutoDoIt;
 }
 
+function isLanguageOrCapabilityTurn(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length > 140) return false;
+  return (
+    EXPLICIT_SPEAK_VI_RE.test(trimmed) ||
+    EXPLICIT_SPEAK_EN_RE.test(trimmed) ||
+    /(?:bạn|ban|em|ai)\s+(?:có\s+thể|co\s+the|biết|biet)\s+(?:nói|noi)\s+(?:tiếng|tieng)|can\s+you\s+speak|do\s+you\s+speak|(?:bạn|ban)\s+(?:là|la)\s+ai|(?:bạn|ban)\s+(?:làm\s+được\s+gì|lam\s+duoc\s+gi)|chức\s+năng\s+của\s+bạn|who\s+are\s+you|what\s+can\s+you\s+do/i.test(
+      trimmed,
+    )
+  );
+}
+
+function isGreetingOrThanksTurn(text: string): 'greeting' | 'thanks' | null {
+  const trimmed = text.trim();
+  if (trimmed.length > 60) return null;
+  if (
+    /^(?:(?:xin\s+)?(?:chào|chao)(?:\s+(?:bạn|ban|ad|em|anh|chị|ai|mình))?|alo|hi|hello|hey|good\s+(?:morning|afternoon|evening)|ban\s+oi|bạn\s+ơi)[!.?,\s]*$/i.test(
+      trimmed,
+    )
+  ) {
+    return 'greeting';
+  }
+  if (/^(?:cảm\s+ơn|cám\s+ơn|cam\s+on|thank\s+you|thanks|ok\s+cảm\s+ơn|ok\s+cam\s+on|tuyệt\s+vời)[!.?,\s]*$/i.test(trimmed)) {
+    return 'thanks';
+  }
+  return null;
+}
+
+function matchSpecificStepQuestion(text: string): SupportSetupStepId | null {
+  const trimmed = text.trim();
+  // Only treat as a focused step question when user is asking a question / seeking explanation,
+  // not when submitting a full multi-field business description.
+  const looksLikeQuestion =
+    /\?|làm\s+sao|như\s+thế\s+nào|là\s+gì|ở\s+đâu|cách\s+|giải\s+thích|bước\s*[1-7]|step\s*[1-7]|how\s+|what\s+|where\s+|explain/i.test(
+      trimmed,
+    );
+  if (!looksLikeQuestion) return null;
+  // Don't hijack explicit "explain all 7 steps" overview queries
+  if (/(?:7|bảy|all|từng|các)\s*(?:bước|steps)/i.test(trimmed)) return null;
+
+  if (/bước\s*1|step\s*1|system\s*prompt|nhân\s*cách|persona/i.test(trimmed)) return 'tenant_ai';
+  if (/bước\s*2|step\s*2|knowledge|\brag\b|tài\s*liệu|tri\s*thức|\bfaq\b|\bpii\b|masking|che\s*(?:dữ\s*liệu|sđt|email)/i.test(trimmed)) {
+    return 'knowledge_masking';
+  }
+  if (/bước\s*3|step\s*3|guardrail|firewall|tường\s*lửa|injection|quota|hạn\s*mức|chủ\s*đề\s*cấm/i.test(trimmed)) {
+    return 'guardrails_quotas';
+  }
+  if (/bước\s*4|step\s*4|output\s*control|kiểm\s*soát\s*đầu\s*ra|redact|che\s*khóa/i.test(trimmed)) {
+    return 'output_controls';
+  }
+  if (/bước\s*5|step\s*5|widget|nút\s*chat|khung\s*chat|intake|form\s*thu\s*thập/i.test(trimmed)) {
+    return 'widget_appearance';
+  }
+  if (/bước\s*6|step\s*6|\bsla\b|routing|phân\s*luồng|service\s*desk|ticket/i.test(trimmed)) {
+    return 'sla_routing';
+  }
+  if (/bước\s*7|step\s*7|\bcors\b|origin|nhúng|embed|<script|snippet|runtime|context\s*token/i.test(trimmed)) {
+    return 'runtime_policy';
+  }
+  return null;
+}
+
 function asksAutoCompleteWithDefaults(text: string): boolean {
-  return /tiêu chuẩn|mặc định|auto[- ]?complete|standard defaults|tự đề xuất toàn bộ/i.test(text);
+  return /tiêu chuẩn|mặc định|tùy bạn|tuy ban|sao cũng được|chọn giúp|tự chọn|làm luôn|tạo luôn|triển khai luôn|cứ đề xuất|chưa có website|không có website|chua co web|dùng cấu hình mặc định|auto[- ]?complete|standard defaults|tự đề xuất toàn bộ|use defaults|up to you|just set it up|no website yet/i.test(
+    text,
+  );
 }
 
 function hasSufficientContextForProposal(
@@ -438,7 +545,7 @@ function hasSufficientContextForProposal(
   hasBaseProposal: boolean,
 ): boolean {
   if (hasBaseProposal) return true;
-  if (asksAutoCompleteWithDefaults(latestUserMessage) && (activeTenant !== null || Boolean(req.brandName))) {
+  if (asksAutoCompleteWithDefaults(latestUserMessage)) {
     return true;
   }
   const hasPolicyOrIndustry = Boolean(req.industry || req.faqSummaryOrPolicies);
@@ -1158,10 +1265,221 @@ function formatGuideReply(
   return { reply, quickReplies };
 }
 
+const STEP_FOCUSED_GUIDES: Record<
+  SupportSetupStepId,
+  { vi: string; en: string }
+> = {
+  tenant_ai: {
+    vi: [
+      '**Bước 1 — Tenant & Nhân cách AI** (`/thruline/support` · tab *AI & Prompt*):',
+      '- Định nghĩa **System Prompt** (vai trò, giọng điệu, ranh giới trả lời), chọn **Model mặc định** (`auto` để tự chuyển đổi dự phòng) và bật `allowGuest` nếu muốn khách vãng lai chat ngay trên web.',
+      '- Bạn có thể cho mình biết tên shop + giọng điệu mong muốn để mình soạn sẵn System Prompt cho bạn duyệt!',
+    ].join('\n'),
+    en: [
+      '**Step 1 — Tenant & AI Persona** (`/thruline/support` · *AI & Prompt* tab):',
+      '- Configure the **System Prompt** (role, tone, grounding boundaries), choose a **Default Model** (`auto` for automatic failover), and enable `allowGuest` for website visitors.',
+      '- Share your brand name and preferred tone if you want me to draft and apply it for you!',
+    ].join('\n'),
+  },
+  knowledge_masking: {
+    vi: [
+      '**Bước 2 — Tri thức FAQ (RAG) & Che dữ liệu nhạy cảm** (`/thruline/support-knowledge`):',
+      '- Nạp các bài FAQ, bảng giá, chính sách đổi trả/bảo hành. **Lưu ý quan trọng:** nhớ tích quyền `guest` và `customer` trong `allowedRoles` thì khách chat ngoài widget mới tra cứu được tài liệu.',
+      '- Bật **PII Masking** (`email`, `phone`, `credit_card`, `api_key`) để tự động che SĐT/email/thẻ của khách trước khi gửi lên model.',
+    ].join('\n'),
+    en: [
+      '**Step 2 — Knowledge Base (RAG) & PII Masking** (`/thruline/support-knowledge`):',
+      '- Add your FAQs, pricing, and return policies. **Important:** include `guest` and `customer` in `allowedRoles` so customer widgets can retrieve those articles.',
+      '- Turn on **PII Masking** (`email`, `phone`, `credit_card`, `api_key`) to redact sensitive user data automatically.',
+    ].join('\n'),
+  },
+  guardrails_quotas: {
+    vi: [
+      '**Bước 3 — Tường lửa Prompt & Hạn mức vai trò** (`/thruline/support-guardrails`):',
+      '- Bật 4 bộ chặn **Prompt Injection** (chống khách dùng mẹo ép AI lộ prompt hoặc vượt rào), thêm **chủ đề cấm** và **từ khóa đối thủ**.',
+      '- Đặt **Role Quotas** (VD: khách vãng lai 20 lượt/giờ, khách hàng đăng nhập 80 lượt/giờ) để bảo vệ hạn mức token.',
+    ].join('\n'),
+    en: [
+      '**Step 3 — Prompt Firewall & Role Quotas** (`/thruline/support-guardrails`):',
+      '- Enable all 4 **Prompt Injection** detectors, add **blocked topics** and **competitor keywords**, and set hourly request/token quotas per user role (`guest`, `customer`, `staff`).',
+    ].join('\n'),
+  },
+  output_controls: {
+    vi: [
+      '**Bước 4 — Kiểm soát an toàn đầu ra** (`/thruline/support-output`):',
+      '- Chuyển chế độ sang **`enforce`** và bật **Che khóa bí mật (`redactCredentials`)** để mọi câu trả lời của AI đều được quét lần cuối trước khi hiển thị cho khách.',
+    ].join('\n'),
+    en: [
+      '**Step 4 — Output Safety Controls** (`/thruline/support-output`):',
+      '- Set mode to **`enforce`** and enable **`redactCredentials`** so outbound AI replies are scrubbed for leaked secrets or restricted terms before reaching customers.',
+    ].join('\n'),
+  },
+  widget_appearance: {
+    vi: [
+      '**Bước 5 — Giao diện Chat Widget & Form liên hệ** (`/thruline/support-desk`):',
+      '- Bật Widget nhúng web, chọn **màu thương hiệu**, tiêu đề, lời chào mở đầu và 3 câu hỏi gợi ý nhanh.',
+      '- Tùy chọn bật **Pre-chat Intake** nếu bạn muốn thu thập Tên & Email khách trước khi bắt đầu hội thoại.',
+    ].join('\n'),
+    en: [
+      '**Step 5 — Customer Chat Widget & Intake** (`/thruline/support-desk`):',
+      '- Enable the embeddable widget, customize brand colors, welcome message, quick prompts, and optionally require a Name/Email intake form before chat.',
+    ].join('\n'),
+  },
+  sla_routing: {
+    vi: [
+      '**Bước 6 — SLA Service Desk & Tự động phân luồng** (`/thruline/support-desk`):',
+      '- Thiết lập thời gian cam kết phản hồi (VD: khẩn cấp 5 phút, cao 15 phút) và quy tắc từ khóa để tự chuyển ticket về đúng bộ phận **Đổi trả (`returns`)**, **Thanh toán (`billing`)** hoặc **Kỹ thuật (`technical`)**.',
+    ].join('\n'),
+    en: [
+      '**Step 6 — Service Desk SLA & Department Routing** (`/thruline/support-desk`):',
+      '- Configure first-response/resolution SLA targets and keyword rules to auto-route escalated tickets to `returns`, `billing`, or `technical` queues.',
+    ].join('\n'),
+  },
+  runtime_policy: {
+    vi: [
+      '**Bước 7 — Tên miền CORS, Giới hạn Runtime & Mã nhúng** (`/thruline/support-integration`):',
+      '- Khóa **Allowed Origins (CORS)** đúng tên miền website của bạn, đặt giới hạn token/lượt gọi tool mỗi câu trả lời, sau đó copy đoạn mã `<script>` dán vào trước thẻ `</body>` trên website.',
+    ].join('\n'),
+    en: [
+      '**Step 7 — CORS Origins, Runtime Limits & Embed Snippet** (`/thruline/support-integration`):',
+      '- Lock **Allowed Origins (CORS)** to your website domain, set safe token/tool turn limits, and paste the `<script>` snippet into your site.',
+    ].join('\n'),
+  },
+};
+
+function tryBuildConversationalSpecialReply(params: {
+  latestUserMessage: string;
+  locale: 'vi' | 'en';
+  diagnostic: SupportSetupTenantDiagnostic | null;
+  canCreateTenant: boolean;
+  canEditAny: boolean;
+}): { reply: string; quickReplies: string[] } | null {
+  const { latestUserMessage, locale, diagnostic, canCreateTenant, canEditAny } = params;
+  const tenantInfoVi = diagnostic
+    ? `Hiện tại tenant **${diagnostic.tenant.name}** của bạn đang hoàn thành **${diagnostic.completedSteps}/${diagnostic.totalSteps} bước**.`
+    : canCreateTenant
+      ? 'Bạn có thể chọn một tenant sẵn có hoặc nhờ mình tạo mới hoàn toàn một AI Support.'
+      : '';
+  const tenantInfoEn = diagnostic
+    ? `Your active tenant **${diagnostic.tenant.name}** currently has **${diagnostic.completedSteps}/${diagnostic.totalSteps} steps** ready.`
+    : canCreateTenant
+      ? 'You can pick an existing tenant or ask me to create a brand-new AI Support setup.'
+      : '';
+
+  const defaultActionChips =
+    locale === 'vi'
+      ? [
+          ...(diagnostic && canEditAny
+            ? ['Hoàn thiện cấu hình tiêu chuẩn cho tenant hiện tại']
+            : canCreateTenant
+              ? ['Tạo mới 1 AI Support trọn gói thay cho tôi']
+              : []),
+          'Hướng dẫn chi tiết 7 bước setup',
+          ...(canEditAny
+            ? ['Shop mỹ phẩm GlowSkin, đổi trả 7 ngày, màu hồng #ec4899, giọng thân thiện']
+            : []),
+        ]
+      : [
+          ...(diagnostic && canEditAny
+            ? ['Auto-complete current tenant with standard defaults']
+            : canCreateTenant
+              ? ['Create a brand-new AI Support setup for me']
+              : []),
+          'How do I set up a complete AI Support assistant step by step?',
+          ...(canEditAny
+            ? ['GlowSkin Skincare shop, 7-day returns, #ec4899 pink, friendly tone']
+            : []),
+        ];
+
+  if (isLanguageOrCapabilityTurn(latestUserMessage)) {
+    if (locale === 'vi') {
+      return {
+        reply: [
+          'Dạ hoàn toàn được ạ — mình giao tiếp bằng **tiếng Việt** 100% nhé!',
+          '',
+          `Mình là **Trợ lý Setup AI Support**. ${tenantInfoVi}`.trim(),
+          canEditAny
+            ? '- **Nếu muốn mình làm thay trọn gói:** Bạn chỉ cần kể ngắn gọn về shop/dịch vụ (hoặc bấm *"Hoàn thiện cấu hình tiêu chuẩn"* bên dưới), mình sẽ lên sẵn phương án 7 bước và chờ bạn bấm **Đồng ý** mới triển khai.\n- **Nếu muốn tìm hiểu từng phần:** Bạn thắc mắc bước nào (System Prompt, nạp FAQ, che SĐT/email, chặn từ khóa, chỉnh màu Widget, SLA hay nhúng web) cứ hỏi tự nhiên nhé!'
+            : '- Mình có thể giải thích cặn kẽ từng bước cấu hình và chẩn đoán tiến độ hiện tại cho bạn bất cứ lúc nào.',
+        ].join('\n'),
+        quickReplies: defaultActionChips,
+      };
+    }
+    return {
+      reply: [
+        'Yes! I can communicate fluently in **English** (or **Vietnamese** whenever you prefer).',
+        '',
+        `I am your **AI Support Setup Copilot**. ${tenantInfoEn}`.trim(),
+        canEditAny
+          ? '- **Auto-setup for you:** Share a quick summary of your business (or pick standard defaults below), and I will prepare a full 7-step plan for your approval before changing anything.\n- **Step-by-step coaching:** Ask me about any specific step (RAG, PII masking, firewall, widget, SLA, or website embed) anytime!'
+          : '- Ask me about any of the 7 setup studios and I will walk you through it clearly.',
+      ].join('\n'),
+      quickReplies: defaultActionChips,
+    };
+  }
+
+  const greetKind = isGreetingOrThanksTurn(latestUserMessage);
+  if (greetKind === 'greeting') {
+    return {
+      reply:
+        locale === 'vi'
+          ? [
+              `Chào bạn! 👋 ${tenantInfoVi}`.trim(),
+              '',
+              canEditAny
+                ? 'Bạn muốn mình **giải thích cách làm từng bước**, hay muốn mình **tự thiết kế & cấu hình trọn gói** cho doanh nghiệp của bạn (có bước duyệt trước khi chạy)?'
+                : 'Bạn muốn mình giải thích bước nào trong quy trình 7 bước AI Support hôm nay?',
+            ].join('\n')
+          : [
+              `Hello! 👋 ${tenantInfoEn}`.trim(),
+              '',
+              canEditAny
+                ? 'Would you like me to **walk you through the setup steps**, or **build and deploy the setup for you** (with your approval first)?'
+                : 'Which of the 7 AI Support setup steps would you like me to explain?',
+            ].join('\n'),
+      quickReplies: defaultActionChips,
+    };
+  }
+
+  if (greetKind === 'thanks') {
+    return {
+      reply:
+        locale === 'vi'
+          ? 'Rất vui được hỗ trợ bạn! Nếu bạn cần tinh chỉnh thêm màu sắc, lời chào Widget, bổ sung câu hỏi FAQ hay kiểm tra mã nhúng website thì cứ nhắn mình nhé.'
+          : 'Happy to help! Let me know anytime if you want to tweak widget colors, add FAQs, or check your website embed snippet.',
+      quickReplies: defaultActionChips.slice(0, 2),
+    };
+  }
+
+  const focusedStep = matchSpecificStepQuestion(latestUserMessage);
+  if (focusedStep) {
+    const stepGuide = STEP_FOCUSED_GUIDES[focusedStep];
+    const diagStep = diagnostic?.steps.find((s) => s.stepId === focusedStep);
+    const liveLineVi =
+      diagStep && diagStep.canView !== false
+        ? `\n\n**Trạng thái hiện tại trên ${diagnostic!.tenant.name}:** ${diagStep.summaryVi}`
+        : '';
+    const liveLineEn =
+      diagStep && diagStep.canView !== false
+        ? `\n\n**Current status on ${diagnostic!.tenant.name}:** ${diagStep.summaryEn}`
+        : '';
+    return {
+      reply:
+        locale === 'vi'
+          ? `${stepGuide.vi}${liveLineVi}`
+          : `${stepGuide.en}${liveLineEn}`,
+      quickReplies: defaultActionChips,
+    };
+  }
+
+  return null;
+}
+
 function buildGatherRequirementsReply(
   locale: 'vi' | 'en',
   reqs: SupportSetupRequirements,
   activeTenant: SupportTenant | null,
+  priorUserTurnCount = 1,
 ): { reply: string; missingQuestions: string[]; quickReplies: string[] } {
   const missingVi: string[] = [];
   const missingEn: string[] = [];
@@ -1180,45 +1498,88 @@ function buildGatherRequirementsReply(
   }
 
   if (!reqs.websiteOrigin || !reqs.primaryColor || !reqs.tone) {
-    missingVi.push('**Domain website** (để mở CORS & bảo mật), **màu chủ đạo** (VD: xanh dương, hồng #ec4899) và **giọng điệu** (thân thiện / chuyên nghiệp / kỹ thuật)');
-    missingEn.push('**Website origin** (for CORS), **brand color** (e.g. #2563eb), and **tone** (friendly / professional / technical)');
+    missingVi.push('**Domain website** (nếu đã có), **màu chủ đạo** (VD: xanh dương, hồng #ec4899) và **giọng điệu** (thân thiện / chuyên nghiệp / kỹ thuật)');
+    missingEn.push('**Website origin** (if available), **brand color** (e.g. #2563eb), and **tone** (friendly / professional / technical)');
   }
 
-  if (!reqs.competitorKeywords?.length && !reqs.blockedTopics?.length) {
-    missingVi.push('**Quy tắc an toàn tùy chọn**: Có tên đối thủ hoặc chủ đề nhạy cảm nào AI không được phép nhắc tới không? Có cần form thu thập Email/Tên khách trước khi chat không?');
+  if (!reqs.competitorKeywords?.length && !reqs.blockedTopics?.length && priorUserTurnCount <= 1) {
+    missingVi.push('**Quy tắc an toàn tùy chọn**: Tên đối thủ hoặc chủ đề nhạy cảm không được nhắc tới, và có cần thu thập Email/Tên khách trước khi chat không?');
     missingEn.push('**Optional safety rules**: Any competitor names or restricted topics to block, and whether customers should fill a contact intake form before chatting?');
   }
 
+  const capturedVi: string[] = [];
+  const capturedEn: string[] = [];
+  if (reqs.brandName) {
+    capturedVi.push(`thương hiệu **${reqs.brandName}**`);
+    capturedEn.push(`brand **${reqs.brandName}**`);
+  } else if (activeTenant) {
+    capturedVi.push(`tenant **${activeTenant.name}**`);
+    capturedEn.push(`tenant **${activeTenant.name}**`);
+  }
+  if (reqs.industry) {
+    capturedVi.push(`ngành **${reqs.industry}**`);
+    capturedEn.push(`industry **${reqs.industry}**`);
+  }
+  if (reqs.primaryColor) {
+    capturedVi.push(`màu **${reqs.primaryColor}**`);
+    capturedEn.push(`color **${reqs.primaryColor}**`);
+  }
+  if (reqs.tone) {
+    capturedVi.push(`giọng **${reqs.tone}**`);
+    capturedEn.push(`tone **${reqs.tone}**`);
+  }
+
   if (locale === 'vi') {
-    const reply = [
-      'Tôi sẵn sàng **thiết lập trọn bộ 7 bước AI Support** thay cho bạn! Để cấu hình chuẩn xác cho doanh nghiệp của bạn (và trình bạn duyệt trước khi triển khai), hãy cho tôi biết vài thông tin hợp lý sau:',
-      '',
-      ...missingVi.map((q, i) => `${i + 1}. ${q}`),
-      '',
-      'Bạn có thể trả lời tự nhiên trong 1 tin nhắn (hoặc mở mục **Phiếu thông tin nhanh** ngay phía trên ô nhập).',
-    ].join('\n');
+    const reply =
+      priorUserTurnCount <= 1
+        ? [
+            'Mình sẵn sàng **thiết lập trọn bộ 7 bước AI Support** thay cho bạn! Để lên bản cấu hình sát thực tế nhất (và trình bạn duyệt trước khi chạy), bạn chia sẻ giúp mình vài thông tin ngắn nhé:',
+            '',
+            ...missingVi.map((q, i) => `${i + 1}. ${q}`),
+            '',
+            'Bạn cứ mô tả tự nhiên trong 1 tin nhắn, hoặc nhắn **"dùng mặc định"** nếu muốn mình tự chọn thông số chuẩn ngay!',
+          ].join('\n')
+        : [
+            capturedVi.length > 0
+              ? `Mình đang chuẩn bị cấu hình cho ${capturedVi.join(', ')}. Để bản kế hoạch hoàn chỉnh hơn, bạn bổ sung giúp mình thêm:`
+              : 'Để mình tạo bản kế hoạch sát với nhu cầu của bạn nhất, bạn cho mình biết thêm ngắn gọn nhé:',
+            '',
+            ...missingVi.slice(0, 3).map((q, i) => `${i + 1}. ${q}`),
+            '',
+            '💡 *Chưa có sẵn thông tin trên? Bạn chỉ cần bấm **"Dùng cấu hình mặc định & lên kế hoạch ngay"** bên dưới để mình tạo bản nháp luôn!*',
+          ].join('\n');
 
     const quickReplies = activeTenant
       ? [
-          'Hoàn thiện cấu hình tiêu chuẩn cho tenant hiện tại',
-          `Shop mỹ phẩm GlowSkin, website https://glowskin.vn, đổi trả 7 ngày, freeship đơn 300k, màu hồng #ec4899, giọng thân thiện`,
-          `Phần mềm SaaS TechFlow, website https://techflow.io, hỗ trợ kỹ thuật 24/7, giọng chuyên nghiệp, thu thập email khách`,
+          'Dùng cấu hình mặc định & lên kế hoạch ngay',
+          'Shop mỹ phẩm GlowSkin, website https://glowskin.vn, đổi trả 7 ngày, freeship đơn 300k, màu hồng #ec4899, giọng thân thiện',
+          'Phần mềm SaaS TechFlow, website https://techflow.io, hỗ trợ kỹ thuật 24/7, giọng chuyên nghiệp, thu thập email khách',
         ]
       : [
-          `Shop mỹ phẩm GlowSkin, website https://glowskin.vn, đổi trả 7 ngày, freeship đơn 300k, màu hồng #ec4899, giọng thân thiện`,
-          `Phần mềm SaaS TechFlow, website https://techflow.io, hỗ trợ kỹ thuật 24/7, giọng chuyên nghiệp, thu thập email khách`,
+          'Dùng cấu hình mặc định & lên kế hoạch ngay',
+          'Shop mỹ phẩm GlowSkin, website https://glowskin.vn, đổi trả 7 ngày, freeship đơn 300k, màu hồng #ec4899, giọng thân thiện',
+          'Phần mềm SaaS TechFlow, website https://techflow.io, hỗ trợ kỹ thuật 24/7, giọng chuyên nghiệp, thu thập email khách',
         ];
 
     return { reply, missingQuestions: missingVi, quickReplies };
   }
 
-  const reply = [
-    'I can **configure all 7 AI Support steps** for you and present a plan for your approval before making any changes. Please share a few quick details:',
-    '',
-    ...missingEn.map((q, i) => `${i + 1}. ${q}`),
-    '',
-    'Reply naturally in one message, or pick a starter template below.',
-  ].join('\n');
+  const reply =
+    priorUserTurnCount <= 1
+      ? [
+          'I can **configure all 7 AI Support steps** for you and present a plan for your approval before making any changes. Please share a few quick details:',
+          '',
+          ...missingEn.map((q, i) => `${i + 1}. ${q}`),
+          '',
+          'Reply naturally in one message, or say **"use defaults"** if you want me to pick smart defaults right away!',
+        ].join('\n')
+      : [
+          capturedEn.length > 0
+            ? `Got it — preparing setup for ${capturedEn.join(', ')}. Could you share one or two quick details, or let me fill in defaults?`
+            : 'Just share a couple of quick details below — or click **"Use smart defaults & generate plan now"** to proceed immediately:',
+          '',
+          ...missingEn.slice(0, 3).map((q, i) => `${i + 1}. ${q}`),
+        ].join('\n');
 
   const quickReplies = activeTenant
     ? [
@@ -1227,6 +1588,7 @@ function buildGatherRequirementsReply(
         'TechFlow SaaS platform, website https://techflow.io, 24/7 onboarding & API help, professional tone, collect customer email',
       ]
     : [
+        'Use smart defaults & generate plan now',
         'GlowSkin Skincare shop, website https://glowskin.vn, 7-day returns, #ec4899 pink, friendly English tone',
         'TechFlow SaaS platform, website https://techflow.io, 24/7 onboarding & API help, professional tone, collect customer email',
       ];
@@ -1242,87 +1604,194 @@ interface LlmCoachOutput {
   extractedRequirements?: Partial<SupportSetupRequirements>;
 }
 
+export interface GatewayLoopbackContext {
+  host: string;
+  port: number;
+  sessionToken?: string;
+}
+
+function extractCompletionText(rawContent: unknown): string {
+  if (typeof rawContent === 'string') return rawContent.trim();
+  if (Array.isArray(rawContent)) {
+    return rawContent
+      .map((b) =>
+        typeof b === 'object' && b !== null && 'text' in b && typeof (b as { text?: unknown }).text === 'string'
+          ? (b as { text: string }).text
+          : '',
+      )
+      .join('')
+      .trim();
+  }
+  return '';
+}
+
+export function parseLlmCoachResponse(rawText: string): LlmCoachOutput | null {
+  const trimmed = rawText.trim();
+  if (!trimmed) return null;
+
+  const unwrapped = trimmed.replace(/^```(?:json)?\s*|\s*```$/gi, '').trim();
+  const candidates = [unwrapped];
+  const firstBrace = unwrapped.indexOf('{');
+  const lastBrace = unwrapped.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    const slice = unwrapped.slice(firstBrace, lastBrace + 1);
+    if (slice !== unwrapped) candidates.push(slice);
+  }
+
+  for (const jsonCandidate of candidates) {
+    try {
+      const parsed = JSON.parse(jsonCandidate) as LlmCoachOutput;
+      if (parsed && typeof parsed === 'object' && typeof parsed.reply === 'string' && parsed.reply.trim()) {
+        return parsed;
+      }
+    } catch {
+      // Try next extraction strategy
+    }
+  }
+
+  // If a model answered in natural prose instead of strict JSON, preserve its natural reply
+  // as long as it doesn't look like truncated broken JSON.
+  if (!unwrapped.startsWith('{')) {
+    return { reply: unwrapped };
+  }
+  return null;
+}
+
+function hasEnabledMainGatewayKeys(): boolean {
+  try {
+    const row = getDb()
+      .prepare('SELECT COUNT(*) AS c FROM keys WHERE enabled = 1')
+      .get() as { c: number } | undefined;
+    return Number(row?.c ?? 0) > 0;
+  } catch {
+    return false;
+  }
+}
+
 async function tryLlmCoachTurn(params: {
   messages: SupportSetupChatMessage[];
   locale: 'vi' | 'en';
   targetMode: 'create_tenant' | 'update_tenant';
   diagnostic: SupportSetupTenantDiagnostic | null;
   extracted: SupportSetupRequirements;
+  gatewayLoopback?: GatewayLoopbackContext;
 }): Promise<{ output: LlmCoachOutput; modelUsed: string } | null> {
+  const languageDirective =
+    params.locale === 'vi'
+      ? 'CRITICAL LANGUAGE RULE: You MUST write "reply", "missingQuestions", and "suggestedQuickReplies" 100% in natural, friendly Vietnamese (Tiếng Việt) — even if earlier messages in history were in English!'
+      : 'CRITICAL LANGUAGE RULE: You MUST write "reply", "missingQuestions", and "suggestedQuickReplies" in natural, friendly English.';
+
+  const systemContent = [
+    'You are the FreeLLMAPI AI Support Setup Copilot — a warm, intelligent, conversational assistant.',
+    'You NEVER mutate tenant configuration directly; you either converse/answer questions naturally (intent="guide"), ask 1–3 concise, context-aware follow-up questions when needed (intent="gather_requirements"), or prepare a setup plan for customer consent (intent="propose_setup").',
+    'NEVER repeat a generic boilerplate message verbatim. Directly address what the user just asked or said first!',
+    languageDirective,
+    `Target mode: ${params.targetMode}.`,
+    params.diagnostic
+      ? `Active tenant "${params.diagnostic.tenant.name}" (${params.diagnostic.completedSteps}/7 complete): ${JSON.stringify(
+          params.diagnostic.steps
+            .filter((s) => s.canView !== false)
+            .map((s) => ({ stepId: s.stepId, status: s.status })),
+        )}`
+      : 'Active tenant: none selected (new tenant creation).',
+    `Already extracted requirements: ${JSON.stringify(params.extracted)}`,
+    '',
+    SUPPORT_SETUP_TRAINING_GUIDE,
+    '',
+    'Respond with valid JSON matching:',
+    '{"intent":"guide"|"gather_requirements"|"propose_setup","reply":"...","missingQuestions":["..."],"suggestedQuickReplies":["..."],"extractedRequirements":{"brandName":"...","industry":"...","websiteOrigin":"...","language":"vi"|"en"|"bilingual","tone":"friendly"|"professional"|"empathetic"|"technical","primaryColor":"#2563eb","faqSummaryOrPolicies":"...","blockedTopics":[],"competitorKeywords":[],"requireContactIntake":false}}',
+  ].join('\n');
+
+  const turnMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+    { role: 'system', content: systemContent },
+    ...params.messages.slice(-12),
+  ];
+
+  const matchesRequestedLocale = (replyText: string): boolean => {
+    if (params.locale === 'vi') {
+      // Guard against small models echoing an earlier English turn when user switched to Vietnamese
+      return VI_DIACRITIC_RE.test(replyText) || VI_UNACCENTED_PHRASE_RE.test(replyText);
+    }
+    return true;
+  };
+
+  // 1. Try Thruline X-Gateway OAuth/provider accounts if active
   try {
-    if (!getConfigSnapshot().enabled) return null;
-    const { candidates } = resolveCandidateRoutes('auto', 'chat');
-    if (!candidates || candidates.length === 0) return null;
-
-    const systemContent = [
-      'You are the FreeLLMAPI AI Support Setup Copilot.',
-      'You NEVER mutate tenant configuration directly; you either guide the user, ask reasonable requirements questions (intent="gather_requirements"), or prepare a setup plan for consent (intent="propose_setup").',
-      `Language preference: ${params.locale === 'vi' ? 'Vietnamese' : 'English'}.`,
-      `Target mode: ${params.targetMode}.`,
-      params.diagnostic
-        ? `Active tenant "${params.diagnostic.tenant.name}" (${params.diagnostic.completedSteps}/7 complete): ${JSON.stringify(
-            params.diagnostic.steps
-              .filter((s) => s.canView !== false)
-              .map((s) => ({ stepId: s.stepId, status: s.status })),
-          )}`
-        : 'Active tenant: none selected (new tenant creation).',
-      `Already extracted requirements: ${JSON.stringify(params.extracted)}`,
-      '',
-      SUPPORT_SETUP_TRAINING_GUIDE,
-      '',
-      'Respond ONLY with valid JSON matching:',
-      '{"intent":"guide"|"gather_requirements"|"propose_setup","reply":"...","missingQuestions":["..."],"suggestedQuickReplies":["..."],"extractedRequirements":{"brandName":"...","industry":"...","websiteOrigin":"...","language":"vi"|"en"|"bilingual","tone":"friendly"|"professional"|"empathetic"|"technical","primaryColor":"#2563eb","faqSummaryOrPolicies":"...","blockedTopics":[],"competitorKeywords":[],"requireContactIntake":false}}',
-    ].join('\n');
-
-    const turnMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-      { role: 'system', content: systemContent },
-      ...params.messages.slice(-12),
-    ];
-
-    const signal = AbortSignal.timeout(12_000);
-    for (const candidate of candidates.slice(0, 2)) {
-      const { account, modelId } = candidate;
-      const provider = resolveAccountProvider(account);
-      if (!provider) continue;
-      try {
-        const credential = decrypt(account.encrypted_key, account.iv, account.auth_tag);
-        const proxy = resolveXGatewayAccountProxy(account);
-        const res = await withQuotaTracking(account, modelId, proxy, () =>
-          provider.chatCompletion(
-            credential,
-            turnMessages,
-            modelId,
-            { temperature: 0.2, max_tokens: 900, signal },
-            { platform: account.platform, keyId: account.id, modelId },
-          ),
-        );
-        const rawContent = res.choices?.[0]?.message?.content;
-        const text =
-          typeof rawContent === 'string'
-            ? rawContent.trim()
-            : Array.isArray(rawContent)
-              ? rawContent
-                  .map((b) =>
-                    typeof b === 'object' && b !== null && 'text' in b && typeof b.text === 'string'
-                      ? b.text
-                      : '',
-                  )
-                  .join('')
-                  .trim()
-              : '';
-        if (!text) continue;
-        const unwrapped = text.replace(/^```(?:json)?\s*|\s*```$/gi, '').trim();
-        const parsed = JSON.parse(unwrapped) as LlmCoachOutput;
-        if (parsed && typeof parsed === 'object' && typeof parsed.reply === 'string' && parsed.reply.trim()) {
-          return { output: parsed, modelUsed: modelId };
+    if (getConfigSnapshot().enabled) {
+      const { candidates } = resolveCandidateRoutes('auto', 'chat');
+      if (candidates && candidates.length > 0) {
+        const signal = AbortSignal.timeout(12_000);
+        for (const candidate of candidates.slice(0, 2)) {
+          const { account, modelId } = candidate;
+          const provider = resolveAccountProvider(account);
+          if (!provider) continue;
+          try {
+            const credential = decrypt(account.encrypted_key, account.iv, account.auth_tag);
+            const proxy = resolveXGatewayAccountProxy(account);
+            const res = await withQuotaTracking(account, modelId, proxy, () =>
+              provider.chatCompletion(
+                credential,
+                turnMessages,
+                modelId,
+                { temperature: 0.35, max_tokens: 900, signal },
+                { platform: account.platform, keyId: account.id, modelId },
+              ),
+            );
+            const text = extractCompletionText(res.choices?.[0]?.message?.content);
+            const parsed = parseLlmCoachResponse(text);
+            if (parsed?.reply && matchesRequestedLocale(parsed.reply)) {
+              return { output: parsed, modelUsed: modelId };
+            }
+          } catch {
+            // Try next candidate or main FreeLLMAPI gateway
+          }
         }
-      } catch {
-        // Fall through to next candidate or deterministic coach
       }
     }
   } catch {
-    // No candidate routes or unavailable
+    // Fall through to main FreeLLMAPI gateway
   }
+
+  // 2. Fallback to main FreeLLMAPI /v1/chat/completions router when provider keys are configured
+  if (params.gatewayLoopback?.port && hasEnabledMainGatewayKeys()) {
+    try {
+      const { host, port, sessionToken } = params.gatewayLoopback;
+      const headers: Record<string, string> = {
+        'content-type': 'application/json',
+        authorization: `Bearer ${getUnifiedApiKey()}`,
+        'user-agent': 'freellm-support-setup-copilot',
+        host: `127.0.0.1:${port}`,
+      };
+      if (sessionToken) {
+        headers[PLAYGROUND_SESSION_HEADER] = sessionToken;
+      }
+      const upstream = await fetch(`http://${host}:${port}/v1/chat/completions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: 'auto',
+          temperature: 0.35,
+          max_tokens: 900,
+          messages: turnMessages,
+        }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (upstream.ok) {
+        const body = (await upstream.json()) as {
+          model?: string;
+          choices?: Array<{ message?: { content?: unknown } }>;
+        };
+        const text = extractCompletionText(body.choices?.[0]?.message?.content);
+        const parsed = parseLlmCoachResponse(text);
+        if (parsed?.reply && matchesRequestedLocale(parsed.reply)) {
+          return { output: parsed, modelUsed: body.model || 'auto' };
+        }
+      }
+    } catch {
+      // Fall back cleanly to conversational coach
+    }
+  }
+
   return null;
 }
 
@@ -1336,17 +1805,22 @@ export async function runSupportSetupCopilotTurn(params: {
   requirementsHint?: Partial<SupportSetupRequirements>;
   baseProposalId?: string;
   diagnostic: SupportSetupTenantDiagnostic | null;
+  gatewayLoopback?: GatewayLoopbackContext;
 }): Promise<SupportSetupChatResponse> {
   const {
     user,
     scope,
     messages,
     tenantId,
-    locale = 'vi',
+    locale: uiLocale = 'vi',
     requirementsHint,
     baseProposalId,
     diagnostic,
+    gatewayLoopback,
   } = params;
+
+  // Automatically honor the language the user is actually writing in!
+  const locale = detectConversationLocale(messages, uiLocale);
 
   const targetEntry =
     tenantId && tenantId > 0
@@ -1394,6 +1868,7 @@ export async function runSupportSetupCopilotTurn(params: {
         : '';
     return {
       ok: true,
+      replyLocale: locale,
       reply:
         locale === 'vi'
           ? `Tài khoản của bạn không có quyền tạo Support Tenant mới (AI chỉ thực thi đúng trong phạm vi quyền của người dùng hiện tại).${assignedHintVi}`
@@ -1443,10 +1918,31 @@ export async function runSupportSetupCopilotTurn(params: {
   // Read-only accounts (0 editable steps and cannot create tenants) can receive coaching/diagnostics,
   // but must NEVER be prompted for auto-deploy requirements or receive a pending_consent proposal.
   if (canEditSet.size === 0) {
+    const specialReadOnly = tryBuildConversationalSpecialReply({
+      latestUserMessage,
+      locale,
+      diagnostic,
+      canCreateTenant: false,
+      canEditAny: false,
+    });
+    if (specialReadOnly) {
+      return {
+        ok: true,
+        replyLocale: locale,
+        reply: specialReadOnly.reply,
+        intent: 'guide',
+        missingQuestions: [],
+        suggestedQuickReplies: specialReadOnly.quickReplies,
+        proposal: null,
+        modelUsed: null,
+        usedFallback: true,
+      };
+    }
     if (isGuideQuestion(latestUserMessage)) {
       const guide = formatGuideReply(locale, diagnostic, false, false);
       return {
         ok: true,
+        replyLocale: locale,
         reply: guide.reply,
         intent: 'guide',
         missingQuestions: [],
@@ -1458,6 +1954,7 @@ export async function runSupportSetupCopilotTurn(params: {
     }
     return {
       ok: true,
+      replyLocale: locale,
       reply:
         locale === 'vi'
           ? 'Tài khoản hiện tại của bạn đang ở chế độ **Chỉ xem (Read-Only)** trên tenant này (chưa có quyền chỉnh sửa cấu hình). AI tuân thủ nghiêm ngặt quyền người dùng nên sẽ không tạo bản đề xuất tự động triển khai — tuy nhiên tôi vẫn có thể giải thích chi tiết cách hoạt động của từng bước nếu bạn cần!'
@@ -1482,13 +1979,14 @@ export async function runSupportSetupCopilotTurn(params: {
     locale,
   );
 
-  // Attempt live LLM coach when routes exist, then enforce deterministic state machine invariants
+  // Attempt live LLM coach (Thruline accounts first, then main FreeLLMAPI /v1/chat/completions router)
   const llm = await tryLlmCoachTurn({
     messages,
     locale,
     targetMode,
     diagnostic,
     extracted,
+    gatewayLoopback,
   });
 
   const mergedRequirements = llm?.output.extractedRequirements
@@ -1502,10 +2000,20 @@ export async function runSupportSetupCopilotTurn(params: {
         requirementsHint.faqSummaryOrPolicies?.trim()),
   );
 
+  const specialConversational = !explicitBriefSubmitted && !baseProposalId
+    ? tryBuildConversationalSpecialReply({
+        latestUserMessage,
+        locale,
+        diagnostic,
+        canCreateTenant: scope.canCreateTenant,
+        canEditAny: canEditSet.size > 0,
+      })
+    : null;
+
   let intent: SupportSetupChatIntent;
   if (explicitBriefSubmitted) {
     intent = 'propose_setup';
-  } else if (isGuideQuestion(latestUserMessage) && !baseProposalId) {
+  } else if (specialConversational || (isGuideQuestion(latestUserMessage) && !baseProposalId)) {
     intent = 'guide';
   } else if (
     hasSufficientContextForProposal(
@@ -1514,24 +2022,31 @@ export async function runSupportSetupCopilotTurn(params: {
       effectiveTenant,
       latestUserMessage,
       Boolean(baseProposalId),
-    )
+    ) ||
+    (llm?.output.intent === 'propose_setup' &&
+      (effectiveTenant !== null || Boolean(mergedRequirements.brandName)))
   ) {
     intent = 'propose_setup';
+  } else if (llm?.output.intent === 'guide') {
+    intent = 'guide';
   } else {
     intent = 'gather_requirements';
   }
 
   if (intent === 'guide') {
-    const guide = formatGuideReply(locale, diagnostic, scope.canCreateTenant, canEditSet.size > 0);
+    const fallbackGuide =
+      specialConversational ??
+      formatGuideReply(locale, diagnostic, scope.canCreateTenant, canEditSet.size > 0);
     return {
       ok: true,
-      reply: llm?.output.intent === 'guide' && llm.output.reply ? llm.output.reply : guide.reply,
+      replyLocale: locale,
+      reply: llm?.output.reply ? llm.output.reply : fallbackGuide.reply,
       intent: 'guide',
       missingQuestions: [],
       suggestedQuickReplies:
-        llm?.output.intent === 'guide' && llm.output.suggestedQuickReplies?.length
+        llm?.output.suggestedQuickReplies?.length
           ? llm.output.suggestedQuickReplies.slice(0, 4)
-          : guide.quickReplies,
+          : fallbackGuide.quickReplies,
       proposal: null,
       modelUsed: llm?.modelUsed ?? null,
       usedFallback: !llm,
@@ -1539,20 +2054,24 @@ export async function runSupportSetupCopilotTurn(params: {
   }
 
   if (intent === 'gather_requirements') {
-    const gather = buildGatherRequirementsReply(locale, mergedRequirements, effectiveTenant);
+    const priorUserTurnCount = messages.filter((m) => m.role === 'user').length;
+    const gather = buildGatherRequirementsReply(
+      locale,
+      mergedRequirements,
+      effectiveTenant,
+      priorUserTurnCount,
+    );
     return {
       ok: true,
-      reply:
-        llm?.output.intent === 'gather_requirements' && llm.output.reply
-          ? llm.output.reply
-          : gather.reply,
+      replyLocale: locale,
+      reply: llm?.output.reply ? llm.output.reply : gather.reply,
       intent: 'gather_requirements',
       missingQuestions:
-        llm?.output.intent === 'gather_requirements' && llm.output.missingQuestions?.length
+        llm?.output.missingQuestions?.length
           ? llm.output.missingQuestions.slice(0, 5)
           : gather.missingQuestions,
       suggestedQuickReplies:
-        llm?.output.intent === 'gather_requirements' && llm.output.suggestedQuickReplies?.length
+        llm?.output.suggestedQuickReplies?.length
           ? llm.output.suggestedQuickReplies.slice(0, 4)
           : gather.quickReplies,
       proposal: null,
@@ -1580,10 +2099,10 @@ export async function runSupportSetupCopilotTurn(params: {
   const fallbackProposeReply =
     locale === 'vi'
       ? [
-          `Tôi đã chuẩn bị xong **kế hoạch thiết lập trọn gói (${permittedCount}/7 bước)** cho **${savedProposal.tenantName}** (\`${savedProposal.tenantSlug}\`).`,
+          `Mình đã chuẩn bị xong **kế hoạch thiết lập trọn gói (${permittedCount}/7 bước)** cho **${savedProposal.tenantName}** (\`${savedProposal.tenantSlug}\`).`,
           '',
-          '- Tôi **chưa tự ý thay đổi cấu hình** trên hệ thống.',
-          '- Vui lòng xem chi tiết từng bước trong thẻ **Chờ xác nhận triển khai** bên dưới, bỏ chọn bước nào bạn chưa muốn chạy (nếu cần), rồi bấm **Đồng ý & Tự động triển khai** — hoặc nhắn lại cho tôi nếu muốn chỉnh sửa màu sắc, giọng điệu hay chính sách!',
+          '- Mình **chưa tự ý thay đổi cấu hình** trên hệ thống.',
+          '- Vui lòng xem chi tiết từng bước trong thẻ **Chờ xác nhận triển khai** bên dưới, bỏ chọn bước nào bạn chưa muốn chạy (nếu cần), rồi bấm **Đồng ý & Tự động triển khai** — hoặc nhắn lại cho mình nếu muốn chỉnh sửa màu sắc, giọng điệu hay chính sách!',
         ].join('\n')
       : [
           `I prepared a **complete setup plan (${permittedCount}/7 steps)** for **${savedProposal.tenantName}** (\`${savedProposal.tenantSlug}\`).`,
@@ -1594,6 +2113,7 @@ export async function runSupportSetupCopilotTurn(params: {
 
   return {
     ok: true,
+    replyLocale: locale,
     reply:
       llm?.output.intent === 'propose_setup' && llm.output.reply
         ? llm.output.reply

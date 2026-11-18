@@ -1,15 +1,17 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   AlertCircle,
+  ArrowUp,
   ArrowUpRight,
   Bot,
   Check,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Circle,
   ClipboardList,
@@ -18,7 +20,6 @@ import {
   Maximize2,
   Minimize2,
   RotateCcw,
-  Send,
   ShieldCheck,
   Sparkles,
   Wand2,
@@ -44,8 +45,14 @@ import {
   postSupportSetupChat,
   postSupportSetupDecline,
 } from './api';
-import { formatSetupString, useSupportSetupCopilotStrings } from './strings';
+import {
+  formatSetupString,
+  getSupportSetupCopilotStrings,
+} from './strings';
 import './support-setup-copilot.css';
+
+const CLIENT_VI_MARKER_RE =
+  /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]|\b(?:tieng\s+viet|xin\s+chao|chao\s+ban|ban\s+co\s+the|giup\s+toi|giup\s+minh|lam\s+sao|thiet\s+lap|cai\s+dat|huong\s+dan)\b/i;
 
 interface ChatTurn {
   id: string;
@@ -84,13 +91,24 @@ function makeTurnId(): string {
   return `turn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function formatQuickReplyLabel(raw: string): string {
+  const clean = raw.trim();
+  if (clean.length <= 54) return clean;
+  const firstClause = clean.split(/,\s*/)[0]?.trim() ?? '';
+  if (firstClause.length >= 14 && firstClause.length <= 48) {
+    return `${firstClause}…`;
+  }
+  return `${clean.slice(0, 50).trimEnd()}…`;
+}
+
 export function SupportSetupCopilot() {
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { locale } = useI18n();
-  const uiLocale: 'vi' | 'en' = locale === 'vi' ? 'vi' : 'en';
-  const s = useSupportSetupCopilotStrings();
+  const [langOverride, setLangOverride] = useState<'vi' | 'en' | null>(null);
+  const uiLocale: 'vi' | 'en' = langOverride ?? (locale === 'vi' ? 'vi' : 'en');
+  const s = getSupportSetupCopilotStrings(uiLocale);
   const session = useUserSession();
 
   const onEligibleRoute = isSupportSetupCopilotRoute(location.pathname);
@@ -109,6 +127,7 @@ export function SupportSetupCopilot() {
   const [proposalOverrides, setProposalOverrides] = useState<Record<string, SupportSetupProposal>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const messagesRef = useRef<HTMLDivElement | null>(null);
 
   const statusQueryArg =
     targetSelection === 'new'
@@ -148,16 +167,20 @@ export function SupportSetupCopilot() {
     mutationFn: (payload: {
       nextTurns: ChatTurn[];
       requirementsHint?: Partial<SupportSetupRequirements>;
+      effectiveLocale?: 'vi' | 'en';
     }) =>
       postSupportSetupChat({
         tenantId: resolvedTenantId,
         targetMode: resolvedTargetMode,
-        locale: uiLocale,
+        locale: payload.effectiveLocale ?? uiLocale,
         messages: payload.nextTurns.slice(-20).map((t) => ({ role: t.role, content: t.content })),
         requirementsHint: payload.requirementsHint,
         baseProposalId: lastProposalId,
       }),
     onSuccess: (res) => {
+      if (res.replyLocale === 'vi' || res.replyLocale === 'en') {
+        setLangOverride(res.replyLocale);
+      }
       setTurns((prev) => [
         ...prev,
         {
@@ -190,7 +213,7 @@ export function SupportSetupCopilot() {
           role: 'assistant',
           content:
             uiLocale === 'vi'
-              ? `Đã triển khai xong cho **${res.tenant.name}** (${res.diagnostic.completedSteps}/${res.diagnostic.totalSteps} bước đạt). Bạn có thể mở **Live Test** hoặc copy mã nhúng widget ngay bên dưới!`
+              ? `Đã triển khai xong cho **${res.tenant.name}** (${res.diagnostic.completedSteps}/${res.diagnostic.totalSteps} bước đạt). Bạn có thể mở **Live Test** hoặc sao chép mã nhúng widget ngay bên dưới!`
               : `Deployment complete for **${res.tenant.name}** (${res.diagnostic.completedSteps}/${res.diagnostic.totalSteps} steps ready). Copy the embed snippet below or open Live Test!`,
           applyResult: res,
         },
@@ -222,6 +245,23 @@ export function SupportSetupCopilot() {
     },
   });
 
+  // Auto-scroll conversation smoothly whenever messages or typing indicator change
+  useEffect(() => {
+    if (!open || !messagesRef.current) return;
+    const el = messagesRef.current;
+    el.scrollTop = el.scrollHeight;
+  }, [open, turns.length, chatMutation.isPending, applyMutation.isPending]);
+
+  // Auto-resize composer textarea cleanly without ugly native scrollbars
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const nextHeight = Math.min(el.scrollHeight || 22, 108);
+    el.style.height = `${Math.max(22, nextHeight)}px`;
+    el.style.overflowY = (el.scrollHeight || 0) > 108 ? 'auto' : 'hidden';
+  }, [input, open]);
+
   if (!canQueryStatus || !statusData?.visible) {
     return null;
   }
@@ -232,11 +272,16 @@ export function SupportSetupCopilot() {
   ) => {
     const trimmed = text.trim();
     if (!trimmed || chatMutation.isPending) return;
+    let detectedLocale: 'vi' | 'en' = uiLocale;
+    if (CLIENT_VI_MARKER_RE.test(trimmed)) {
+      detectedLocale = 'vi';
+      setLangOverride('vi');
+    }
     const userTurn: ChatTurn = { id: makeTurnId(), role: 'user', content: trimmed };
     const nextTurns = [...turns, userTurn];
     setTurns(nextTurns);
     setInput('');
-    chatMutation.mutate({ nextTurns, requirementsHint });
+    chatMutation.mutate({ nextTurns, requirementsHint, effectiveLocale: detectedLocale });
   };
 
   const handleBriefSubmit = () => {
@@ -344,7 +389,16 @@ export function SupportSetupCopilot() {
               <ShieldCheck size={13} />
               <span>{s.consentBanner}</span>
             </span>
-            {statusBadge && <span className="ssc-status-pill ssc-status-pill--complete">{statusBadge}</span>}
+            {statusBadge ? (
+              <span className="ssc-status-pill ssc-status-pill--complete">{statusBadge}</span>
+            ) : (
+              <span className="ssc-proposal-count">
+                {formatSetupString(s.selectedStepsCount, {
+                  selected: selected.size,
+                  total: proposal.steps.length,
+                })}
+              </span>
+            )}
           </div>
           <div className="ssc-proposal-target">{targetText}</div>
         </div>
@@ -433,7 +487,9 @@ export function SupportSetupCopilot() {
           aria-label={s.launcherTitle}
           onClick={() => setOpen(true)}
         >
-          <Sparkles size={16} />
+          <span className="ssc-launcher-orb" aria-hidden="true">
+            <Sparkles size={15} />
+          </span>
           <span>{s.launcherTitle}</span>
           <span className="ssc-launcher-badge">
             {hasPendingApproval && <span className="ssc-launcher-dot" aria-hidden="true" />}
@@ -449,8 +505,11 @@ export function SupportSetupCopilot() {
         >
           <header className="ssc-header">
             <div className="ssc-header-title">
-              <div className="ssc-header-icon">
-                <Bot size={16} />
+              <div className="ssc-header-icon-wrap">
+                <div className="ssc-header-icon">
+                  <Bot size={17} />
+                </div>
+                <span className="ssc-online-dot" aria-hidden="true" />
               </div>
               <div className="ssc-header-text">
                 <h2>{s.panelTitle}</h2>
@@ -458,6 +517,15 @@ export function SupportSetupCopilot() {
               </div>
             </div>
             <div className="ssc-header-actions">
+              <button
+                type="button"
+                className="ssc-lang-btn"
+                data-testid="support-setup-lang-toggle"
+                title={uiLocale === 'vi' ? 'Switch Copilot to English' : 'Chuyển sang Tiếng Việt'}
+                onClick={() => setLangOverride(uiLocale === 'vi' ? 'en' : 'vi')}
+              >
+                {uiLocale === 'vi' ? 'VI' : 'EN'}
+              </button>
               <button
                 type="button"
                 className="ssc-icon-btn"
@@ -521,7 +589,7 @@ export function SupportSetupCopilot() {
               {canEditAnyStep ? (
                 <button
                   type="button"
-                  className="ssc-link-btn"
+                  className={`ssc-pill-toggle ${briefOpen ? 'ssc-pill-toggle--active' : ''}`}
                   onClick={() => setBriefOpen((v) => !v)}
                 >
                   <ClipboardList size={13} />
@@ -539,19 +607,19 @@ export function SupportSetupCopilot() {
 
             {activeTenantDiag && (
               <div className="ssc-progress-row">
-                <span>
+                <span className="ssc-progress-label">
                   {formatSetupString(s.roadmapProgress, {
                     done: activeTenantDiag.completedSteps,
                     total: activeTenantDiag.totalSteps,
                   })}
                 </span>
-                <div className="ssc-progress-bar" aria-hidden="true">
-                  <div
-                    className="ssc-progress-fill"
-                    style={{
-                      width: `${Math.round((activeTenantDiag.completedSteps / activeTenantDiag.totalSteps) * 100)}%`,
-                    }}
-                  />
+                <div className="ssc-seg-bar" aria-hidden="true">
+                  {activeTenantDiag.steps.map((st) => (
+                    <span
+                      key={st.stepId}
+                      className={`ssc-seg ssc-seg--${st.status}`}
+                    />
+                  ))}
                 </div>
                 <button
                   type="button"
@@ -738,9 +806,13 @@ export function SupportSetupCopilot() {
             </div>
           )}
 
-          <div className="ssc-messages">
+          <div className="ssc-messages" ref={messagesRef}>
             {turns.length === 0 && (
               <div className="ssc-welcome">
+                <span className="ssc-welcome-badge">
+                  <Sparkles size={11} />
+                  <span>{s.welcomeBadge}</span>
+                </span>
                 <h3>{s.welcomeTitle}</h3>
                 <p>{s.welcomeDescription}</p>
                 <div className="ssc-starters">
@@ -750,8 +822,14 @@ export function SupportSetupCopilot() {
                       className="ssc-starter-btn"
                       onClick={() => sendMessage(s.starterAutoSetupPrompt)}
                     >
-                      <Wand2 size={14} />
-                      <span>{s.starterAutoSetup}</span>
+                      <span className="ssc-starter-icon" aria-hidden="true">
+                        <Wand2 size={15} />
+                      </span>
+                      <span className="ssc-starter-copy">
+                        <span className="ssc-starter-title">{s.starterAutoSetup}</span>
+                        <span className="ssc-starter-desc">{s.starterAutoSetupDesc}</span>
+                      </span>
+                      <ChevronRight size={14} className="ssc-starter-arrow" aria-hidden="true" />
                     </button>
                   )}
                   {activeTenantDiag && canEditAnyStep && (
@@ -760,8 +838,14 @@ export function SupportSetupCopilot() {
                       className="ssc-starter-btn"
                       onClick={() => sendMessage(s.starterCompleteCurrentPrompt)}
                     >
-                      <CheckCircle2 size={14} />
-                      <span>{s.starterCompleteCurrent}</span>
+                      <span className="ssc-starter-icon" aria-hidden="true">
+                        <CheckCircle2 size={15} />
+                      </span>
+                      <span className="ssc-starter-copy">
+                        <span className="ssc-starter-title">{s.starterCompleteCurrent}</span>
+                        <span className="ssc-starter-desc">{s.starterCompleteCurrentDesc}</span>
+                      </span>
+                      <ChevronRight size={14} className="ssc-starter-arrow" aria-hidden="true" />
                     </button>
                   )}
                   <button
@@ -769,8 +853,14 @@ export function SupportSetupCopilot() {
                     className="ssc-starter-btn"
                     onClick={() => sendMessage(s.starterGuidePrompt)}
                   >
-                    <Sparkles size={14} />
-                    <span>{s.starterGuide}</span>
+                    <span className="ssc-starter-icon" aria-hidden="true">
+                      <Sparkles size={15} />
+                    </span>
+                    <span className="ssc-starter-copy">
+                      <span className="ssc-starter-title">{s.starterGuide}</span>
+                      <span className="ssc-starter-desc">{s.starterGuideDesc}</span>
+                    </span>
+                    <ChevronRight size={14} className="ssc-starter-arrow" aria-hidden="true" />
                   </button>
                 </div>
               </div>
@@ -780,6 +870,15 @@ export function SupportSetupCopilot() {
 
             {turns.map((turn) => (
               <div className={`ssc-msg-row ssc-msg-row--${turn.role}`} key={turn.id}>
+                {turn.role === 'assistant' && (
+                  <div className="ssc-msg-meta">
+                    <span className="ssc-msg-avatar" aria-hidden="true">
+                      <Sparkles size={11} />
+                    </span>
+                    <span>{s.assistantName}</span>
+                  </div>
+                )}
+
                 <div className={`ssc-bubble ssc-bubble--${turn.role}`}>
                   {turn.role === 'assistant' ? (
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{turn.content}</ReactMarkdown>
@@ -795,10 +894,12 @@ export function SupportSetupCopilot() {
                         key={qr}
                         type="button"
                         className="ssc-chip-btn"
+                        title={qr}
                         disabled={chatMutation.isPending}
                         onClick={() => sendMessage(qr)}
                       >
-                        {qr}
+                        <Sparkles size={11} aria-hidden="true" />
+                        <span className="ssc-chip-label">{formatQuickReplyLabel(qr)}</span>
                       </button>
                     ))}
                   </div>
@@ -878,36 +979,54 @@ export function SupportSetupCopilot() {
 
             {chatMutation.isPending && (
               <div className="ssc-msg-row ssc-msg-row--assistant">
-                <div className="ssc-bubble ssc-bubble--assistant">{s.thinking}</div>
+                <div className="ssc-msg-meta">
+                  <span className="ssc-msg-avatar" aria-hidden="true">
+                    <Sparkles size={11} />
+                  </span>
+                  <span>{s.assistantName}</span>
+                </div>
+                <div className="ssc-typing" role="status">
+                  <span className="ssc-typing-dots" aria-hidden="true">
+                    <span />
+                    <span />
+                    <span />
+                  </span>
+                  <span>{s.thinking}</span>
+                </div>
               </div>
             )}
           </div>
 
           <div className="ssc-composer">
-            <textarea
-              ref={inputRef}
-              rows={1}
-              value={input}
-              placeholder={s.inputPlaceholder}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  sendMessage(input);
-                }
-              }}
-            />
-            <button
-              type="button"
-              className="ssc-btn ssc-btn--primary"
-              data-testid="support-setup-send-btn"
-              aria-label={s.send}
-              disabled={!input.trim() || chatMutation.isPending}
-              onClick={() => sendMessage(input)}
-            >
-              <Send size={13} />
-              <span>{s.send}</span>
-            </button>
+            <div className="ssc-composer-box">
+              <textarea
+                ref={inputRef}
+                rows={1}
+                value={input}
+                placeholder={s.inputPlaceholder}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage(input);
+                  }
+                }}
+              />
+              <div className="ssc-composer-footer">
+                <span className="ssc-composer-hint">{s.composerHint}</span>
+                <button
+                  type="button"
+                  className="ssc-send-btn"
+                  data-testid="support-setup-send-btn"
+                  aria-label={s.send}
+                  disabled={!input.trim() || chatMutation.isPending}
+                  onClick={() => sendMessage(input)}
+                >
+                  <span>{s.send}</span>
+                  <ArrowUp size={13} />
+                </button>
+              </div>
+            </div>
           </div>
         </section>
       )}

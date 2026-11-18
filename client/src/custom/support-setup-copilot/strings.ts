@@ -5,6 +5,7 @@ export interface SupportSetupCopilotStrings {
   launcherTitle: string;
   launcherNew: string;
   launcherPending: string;
+  assistantName: string;
   panelTitle: string;
   panelSubtitle: string;
   tenantLabel: string;
@@ -38,18 +39,24 @@ export interface SupportSetupCopilotStrings {
   briefPoliciesPlaceholder: string;
   briefIntakeLabel: string;
   briefSubmit: string;
+  welcomeBadge: string;
   welcomeTitle: string;
   welcomeDescription: string;
   starterAutoSetup: string;
+  starterAutoSetupDesc: string;
   starterAutoSetupPrompt: string;
   starterCompleteCurrent: string;
+  starterCompleteCurrentDesc: string;
   starterCompleteCurrentPrompt: string;
   starterGuide: string;
+  starterGuideDesc: string;
   starterGuidePrompt: string;
   inputPlaceholder: string;
+  composerHint: string;
   send: string;
   thinking: string;
   consentBanner: string;
+  selectedStepsCount: string;
   consentTargetCreate: string;
   consentTargetUpdate: string;
   consentNoPermission: string;
@@ -76,8 +83,9 @@ const en: SupportSetupCopilotStrings = {
   launcherTitle: 'AI Setup Copilot',
   launcherNew: 'Setup',
   launcherPending: 'Approval',
+  assistantName: 'Setup Copilot',
   panelTitle: 'AI Support Setup Copilot',
-  panelSubtitle: 'Step-by-step coach & consent-gated auto-deployer',
+  panelSubtitle: 'Guided coach & consent-gated deployer',
   tenantLabel: 'Target',
   newTenantOption: '+ Create new AI Support tenant',
   expandPanel: 'Expand panel',
@@ -86,7 +94,7 @@ const en: SupportSetupCopilotStrings = {
   closePanel: 'Minimize',
   roadmapHeading: '7-Step Setup Checklist',
   roadmapProgress: '{done}/{total} ready',
-  roadmapToggleShow: 'Show steps',
+  roadmapToggleShow: 'Checklist',
   roadmapToggleHide: 'Hide steps',
   stepOpen: 'Open',
   stepComplete: 'Ready',
@@ -94,7 +102,7 @@ const en: SupportSetupCopilotStrings = {
   stepMissing: 'Missing',
   stepRestricted: 'Restricted',
   readOnlyBadge: 'Read-only access',
-  briefToggle: 'Quick Business Brief',
+  briefToggle: 'Quick Brief',
   briefHeading: 'Share quick details so AI can build your setup plan',
   briefBrandLabel: 'Brand / Service Name',
   briefBrandPlaceholder: 'e.g. GlowSkin Shop',
@@ -109,19 +117,25 @@ const en: SupportSetupCopilotStrings = {
   briefPoliciesPlaceholder: 'e.g. 7-day returns, free shipping over 300k, support 8am–10pm',
   briefIntakeLabel: 'Require customer name & email before chat',
   briefSubmit: 'Generate Setup Plan',
-  welcomeTitle: 'Need help setting up AI Support?',
+  welcomeBadge: '7-Studio Specialist',
+  welcomeTitle: 'Set up a production-ready AI Support bot in minutes',
   welcomeDescription:
-    'I know all 7 Support Studios. Ask me how anything works, or let me interview you briefly, design the full setup, and deploy everything after your approval.',
+    'Ask how any step works, or describe your business naturally — I will prepare a complete configuration plan and deploy only after your approval.',
   starterAutoSetup: 'Set up everything for me',
+  starterAutoSetupDesc: 'Answer 2–3 quick questions and review a full plan',
   starterAutoSetupPrompt: 'Set up a complete AI Support assistant for me',
-  starterCompleteCurrent: 'Finish missing steps on current tenant',
+  starterCompleteCurrent: 'Complete missing steps on this tenant',
+  starterCompleteCurrentDesc: 'Fill standard defaults for unconfigured studios',
   starterCompleteCurrentPrompt: 'Auto-complete current tenant with standard defaults',
   starterGuide: 'Explain the 7 setup steps',
+  starterGuideDesc: 'Walk through RAG, guardrails, widget, SLA & CORS',
   starterGuidePrompt: 'How do I set up a complete AI Support assistant step by step?',
-  inputPlaceholder: 'Ask how to configure a step, or describe your business to auto-setup…',
+  inputPlaceholder: 'Ask a question or describe your business…',
+  composerHint: 'Enter to send · Shift+Enter for new line',
   send: 'Send',
-  thinking: 'Designing your setup…',
-  consentBanner: 'Consent required — nothing has been changed yet',
+  thinking: 'Analyzing & crafting response…',
+  consentBanner: 'Consent required — no changes applied yet',
+  selectedStepsCount: '{selected}/{total} selected',
   consentTargetCreate: 'New tenant: {name} ({slug})',
   consentTargetUpdate: 'Update tenant: {name} ({slug})',
   consentNoPermission: 'Read-only (no edit permission)',
@@ -138,7 +152,7 @@ const en: SupportSetupCopilotStrings = {
   copySnippet: 'Copy snippet',
   copiedSnippet: 'Copied!',
   openLiveTest: 'Open Live Test',
-  openIntegration: 'Open Integration Studio',
+  openIntegration: 'Integration Studio',
   stepTitles: {
     tenant_ai: '1. Tenant & AI Persona',
     knowledge_masking: '2. Knowledge Base & Masking',
@@ -165,16 +179,17 @@ const vi: SupportSetupCopilotStrings = {
   launcherTitle: 'Trợ lý Setup AI',
   launcherNew: 'Setup',
   launcherPending: 'Chờ duyệt',
+  assistantName: 'Setup Copilot',
   panelTitle: 'Trợ lý Setup AI Support',
-  panelSubtitle: 'Hướng dẫn 7 bước & tự động triển khai theo sự đồng ý của bạn',
+  panelSubtitle: 'Hướng dẫn thông minh & tự triển khai khi bạn đồng ý',
   tenantLabel: 'Mục tiêu',
   newTenantOption: '+ Tạo Tenant AI Support mới',
   expandPanel: 'Mở rộng khung',
-  compactPanel: 'Thu gọn chiều rộng',
+  compactPanel: 'Thu gọn khung',
   clearChat: 'Làm mới hội thoại',
   closePanel: 'Thu nhỏ',
   roadmapHeading: 'Lộ trình 7 bước hoàn chỉnh',
-  roadmapProgress: '{done}/{total} bước đạt',
+  roadmapProgress: '{done}/{total} hoàn tất',
   roadmapToggleShow: 'Xem 7 bước',
   roadmapToggleHide: 'Ẩn 7 bước',
   stepOpen: 'Mở trang',
@@ -183,7 +198,7 @@ const vi: SupportSetupCopilotStrings = {
   stepMissing: 'Chưa bật',
   stepRestricted: 'Giới hạn quyền',
   readOnlyBadge: 'Chế độ Chỉ xem',
-  briefToggle: 'Phiếu thông tin nhanh',
+  briefToggle: 'Phiếu nhanh',
   briefHeading: 'Điền nhanh thông tin để AI thiết kế kế hoạch setup cho bạn',
   briefBrandLabel: 'Tên thương hiệu / Dịch vụ',
   briefBrandPlaceholder: 'VD: Mỹ phẩm GlowSkin',
@@ -198,19 +213,25 @@ const vi: SupportSetupCopilotStrings = {
   briefPoliciesPlaceholder: 'VD: Đổi trả trong 7 ngày, freeship đơn 300k, hỗ trợ 8h–22h',
   briefIntakeLabel: 'Yêu cầu khách nhập Tên & Email trước khi chat',
   briefSubmit: 'Tạo kế hoạch Setup',
-  welcomeTitle: 'Bạn thấy phần AI Support hơi phức tạp?',
+  welcomeBadge: 'Trợ lý chuyên trách 7 Studio',
+  welcomeTitle: 'Thiết lập AI Support hoàn chỉnh chỉ trong vài phút',
   welcomeDescription:
-    'Tôi đã được huấn luyện toàn bộ 7 Studio thiết lập AI Support. Hãy hỏi tôi cách dùng từng bước, hoặc để tôi hỏi bạn vài thông tin hợp lý rồi tự cấu hình & triển khai trọn bộ khi bạn bấm đồng ý.',
+    'Hỏi mình bất kỳ bước nào bạn thấy khó hiểu, hoặc mô tả ngắn về doanh nghiệp để mình lên phương án trọn gói và tự triển khai khi bạn bấm duyệt.',
   starterAutoSetup: 'Setup trọn gói thay cho tôi',
+  starterAutoSetupDesc: 'Hỏi nhanh vài ý cơ bản rồi lên bản kế hoạch 7 bước',
   starterAutoSetupPrompt: 'Hãy thiết lập tự động trọn gói một con AI Support giúp tôi',
-  starterCompleteCurrent: 'Hoàn thiện tenant hiện tại giúp tôi',
+  starterCompleteCurrent: 'Hoàn thiện nhanh tenant hiện tại',
+  starterCompleteCurrentDesc: 'Tự điền cấu hình tiêu chuẩn cho các bước còn thiếu',
   starterCompleteCurrentPrompt: 'Hoàn thiện cấu hình tiêu chuẩn cho tenant hiện tại',
   starterGuide: 'Hướng dẫn chi tiết 7 bước setup',
+  starterGuideDesc: 'Giải thích rõ RAG, tường lửa, Widget, SLA & nhúng web',
   starterGuidePrompt: 'Hướng dẫn tôi chi tiết từng bước để có 1 con AI Support hoàn chỉnh',
-  inputPlaceholder: 'Hỏi cách setup từng bước, hoặc mô tả shop/dịch vụ để AI tự cấu hình…',
+  inputPlaceholder: 'Nhập câu hỏi hoặc mô tả shop để AI tự setup…',
+  composerHint: 'Enter để gửi · Shift+Enter xuống dòng',
   send: 'Gửi',
-  thinking: 'Đang phân tích & thiết kế cấu hình…',
-  consentBanner: 'Chờ khách hàng xác nhận — chưa thay đổi dữ liệu hệ thống',
+  thinking: 'Đang suy nghĩ & chuẩn bị phản hồi…',
+  consentBanner: 'Chờ xác nhận — chưa thay đổi dữ liệu hệ thống',
+  selectedStepsCount: 'Đã chọn {selected}/{total} bước',
   consentTargetCreate: 'Tạo tenant mới: {name} ({slug})',
   consentTargetUpdate: 'Cập nhật tenant: {name} ({slug})',
   consentNoPermission: 'Chỉ xem (tài khoản chưa có quyền sửa bước này)',
@@ -227,7 +248,7 @@ const vi: SupportSetupCopilotStrings = {
   copySnippet: 'Sao chép mã',
   copiedSnippet: 'Đã chép!',
   openLiveTest: 'Mở Live Test ngay',
-  openIntegration: 'Mở Integration Studio',
+  openIntegration: 'Integration Studio',
   stepTitles: {
     tenant_ai: '1. Tenant & Nhân cách AI',
     knowledge_masking: '2. Tri thức FAQ & Che PII',
@@ -249,6 +270,10 @@ const vi: SupportSetupCopilotStrings = {
     bilingual: 'Song ngữ (Việt + Anh)',
   },
 };
+
+export function getSupportSetupCopilotStrings(targetLocale: 'vi' | 'en'): SupportSetupCopilotStrings {
+  return targetLocale === 'vi' ? vi : en;
+}
 
 export function useSupportSetupCopilotStrings(): SupportSetupCopilotStrings {
   const { locale } = useI18n();
