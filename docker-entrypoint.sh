@@ -29,6 +29,11 @@ ensure_owned() {
   fi
 }
 
+# Cap V8 old-space heap on Render's 512 MB instances unless operator set NODE_OPTIONS.
+if [ "${RENDER:-}" = "true" ] && [ -z "${NODE_OPTIONS:-}" ]; then
+  export NODE_OPTIONS="--max-old-space-size=384"
+fi
+
 if [ "$(id -u)" = "0" ]; then
   NODE_UID="$(id -u node)"
   NODE_GID="$(id -g node)"

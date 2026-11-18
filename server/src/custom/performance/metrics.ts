@@ -61,6 +61,7 @@ export class PerformanceMetrics {
   private timer?: ReturnType<typeof setInterval>;
   private since = performance.now();
   private utilization = performance.eventLoopUtilization();
+  private idleWindows = 0;
 
   readonly middleware: RequestHandler = (req, res, next) => {
     if (req.method !== 'GET' || !MEASURED_ROUTES.has(req.path)) return next();
@@ -124,7 +125,22 @@ export class PerformanceMetrics {
     this.loop = monitorEventLoopDelay({ resolution: 20 });
     this.loop.enable();
     if (emit) {
-      this.timer = setInterval(() => emit(this.snapshot(true)), 60_000);
+      this.timer = setInterval(() => {
+        const report = this.snapshot(true);
+        const isPingOnlyIdle =
+          process.env.CUSTOM_PERF_METRICS_VERBOSE !== '1' &&
+          report.routes.every(
+            r => r.route === '/api/ping' && r.server_errors === 0 && r.client_errors === 0,
+          ) &&
+          (report.event_loop?.max_ms ?? 0) < 250;
+        if (isPingOnlyIdle) {
+          this.idleWindows++;
+          if (this.idleWindows % 15 !== 0) return;
+        } else {
+          this.idleWindows = 0;
+        }
+        emit(report);
+      }, 60_000);
       this.timer.unref();
     }
   }
@@ -132,6 +148,7 @@ export class PerformanceMetrics {
   stop() {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
+    this.idleWindows = 0;
     this.loop?.disable(); this.loop = undefined;
   }
 }

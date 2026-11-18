@@ -28,6 +28,7 @@ import { loadCacheFromDb } from './services/cache.js';
 import { installGracefulShutdown } from './lib/graceful-shutdown.js';
 import { startWorkerLifecycle } from './custom/x-gateway/support-runtime-router.js';
 import { rotateGeminiWebAccountsOnce, startGeminiWebKeepAlive } from './custom/provider-accounts/gemini-web-keepalive.js';
+import { createResourceAwareScheduler } from './custom/render-resource-saver.js';
 
 // Before any other statement runs, so no provider key can reach stdout — users
 // paste server output into bug reports. Module scope, not inside main(), so it
@@ -43,7 +44,7 @@ async function main() {
   // listener) can't take the proxy down. Genuine bugs still exit 1.
   installProcessSafetyNet();
 
-  const scheduler = new NodeScheduler();
+  const scheduler = createResourceAwareScheduler(new NodeScheduler());
 
   if (config.dbPath) {
     await restoreDbBackupIfNeeded(config.dbPath);
