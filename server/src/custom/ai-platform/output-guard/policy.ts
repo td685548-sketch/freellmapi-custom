@@ -18,6 +18,11 @@ import { recordCompletedSpan } from '../tracing/collector.js';
 import type { OutputFilter } from '../wire/interceptor.js';
 import { readStoredProfileSystemPrompt } from './context.js';
 import {
+  getRuntimeCredentialScrubEnabled,
+  scrubCredentialsInText,
+  wrapOutputFilterWithCredentialScrubber,
+} from './credential-stream-scrubber.js';
+import {
   analyzeStreamingCapability,
   evaluateLocalDetectors,
   evaluateLocalDetectorsSync,
@@ -91,7 +96,14 @@ function isTrustedBypass(policy: GuardPolicyView, ctx: GuardEvalContext): boolea
 
 function safeRecordEvent(input: Parameters<typeof recordGuardEvent>[0]): void {
   try {
-    recordGuardEvent(input);
+    const safeExcerpt =
+      typeof input.excerptSourceText === 'string' && input.excerptSourceText.length > 0
+        ? scrubCredentialsInText(input.excerptSourceText, { isFinal: true }).text
+        : input.excerptSourceText;
+    recordGuardEvent({
+      ...input,
+      excerptSourceText: safeExcerpt,
+    });
   } catch {
     /* never fail or leak raw output on telemetry write error */
   }
@@ -285,9 +297,11 @@ async function evaluateWithPolicySnapshot(
 export function outputFilterFor(scope: Scope, ctx: GuardEvalContext): OutputFilter | null {
   if (!isPillarEnabled('outputGuard')) return null;
   const policy = getRuntimePolicySnapshot(scope);
-  if (policy.mode === 'off') return null;
+  const scrubEnabled = getRuntimeCredentialScrubEnabled(scope);
+  if (policy.mode === 'off' && !scrubEnabled) return null;
 
-  if (isTrustedBypass(policy, ctx)) {
+  const bypassed = policy.mode !== 'off' && isTrustedBypass(policy, ctx);
+  if (bypassed) {
     safeRecordEvent({
       scope,
       endUser: ctx.endUser,
@@ -297,63 +311,87 @@ export function outputFilterFor(scope: Scope, ctx: GuardEvalContext): OutputFilt
       streamed: ctx.stream,
       runId: ctx.runId ?? null,
     });
-    return null;
+    if (!scrubEnabled) return null;
   }
 
   const { canIncrementalStream } = analyzeStreamingCapability(policy);
-  const buffering = !ctx.stream || !canIncrementalStream;
+  const buffering = !ctx.stream || (policy.mode !== 'off' && !bypassed && !canIncrementalStream);
 
-  return createStreamGuard({
-    mode: policy.mode,
-    holdChars: policy.holdChars,
-    maxDelayMs: policy.maxDelayMs,
-    replacementText: policy.replacementText,
-    buffering,
-    failClosed: policy.failMode === 'block',
-    evaluateLocal: (scanContext) =>
-      evaluateIncrementalSync(scope, scanContext, policy, ctx.systemPrompt),
-    evaluateFinal: buffering
-      ? async (fullText) => {
-          const guardStartedAt = Date.now();
-          const res = await evaluateWithPolicySnapshot(scope, policy, fullText, ctx, {
-            recordEvents: true,
-          });
-          recordCompletedSpan({
-            kind: 'output_guard',
-            name: `output_guard:${scope.kind}:${scope.id}`,
-            durationMs: Date.now() - guardStartedAt,
-            status: res.action === 'blocked' ? 'error' : 'ok',
-            ...(res.reason ? { errorSummary: res.reason } : {}),
-            attributes: {
-              action: res.action,
-              mode: policy.mode,
-              ...(res.reason ? { reason: res.reason } : {}),
-            },
-          });
-          return {
-            action: res.action,
-            text: res.text,
-            reason: res.reason,
-            detector: res.reason,
-          };
-        }
-      : undefined,
-    onEvent: buffering
-      ? undefined
-      : (ev) => {
-          const detector = (ev.detector ?? ev.reason ?? 'keywords') as GuardDetectorId;
-          const action = ev.action === 'pass' ? 'logged' : ev.action;
-          safeRecordEvent({
-            scope,
-            endUser: ctx.endUser,
-            detector,
-            action,
-            wire: ctx.wire,
-            streamed: ctx.stream,
-            runId: ctx.runId ?? null,
-            excerptSourceText: ev.excerptSource ?? undefined,
-          });
-        },
+  const streamGuardFilter =
+    policy.mode === 'off' || bypassed
+      ? null
+      : createStreamGuard({
+          mode: policy.mode,
+          holdChars: policy.holdChars,
+          maxDelayMs: policy.maxDelayMs,
+          replacementText: policy.replacementText,
+          buffering,
+          failClosed: policy.failMode === 'block',
+          evaluateLocal: (scanContext) =>
+            evaluateIncrementalSync(scope, scanContext, policy, ctx.systemPrompt),
+          evaluateFinal: buffering
+            ? async (fullText) => {
+                const guardStartedAt = Date.now();
+                const res = await evaluateWithPolicySnapshot(scope, policy, fullText, ctx, {
+                  recordEvents: true,
+                });
+                recordCompletedSpan({
+                  kind: 'output_guard',
+                  name: `output_guard:${scope.kind}:${scope.id}`,
+                  durationMs: Date.now() - guardStartedAt,
+                  status: res.action === 'blocked' ? 'error' : 'ok',
+                  ...(res.reason ? { errorSummary: res.reason } : {}),
+                  attributes: {
+                    action: res.action,
+                    mode: policy.mode,
+                    ...(res.reason ? { reason: res.reason } : {}),
+                  },
+                });
+                return {
+                  action: res.action,
+                  text: res.text,
+                  reason: res.reason,
+                  detector: res.reason,
+                };
+              }
+            : undefined,
+          onEvent: buffering
+            ? undefined
+            : (ev) => {
+                const detector = (ev.detector ?? ev.reason ?? 'keywords') as GuardDetectorId;
+                const action = ev.action === 'pass' ? 'logged' : ev.action;
+                safeRecordEvent({
+                  scope,
+                  endUser: ctx.endUser,
+                  detector,
+                  action,
+                  wire: ctx.wire,
+                  streamed: ctx.stream,
+                  runId: ctx.runId ?? null,
+                  excerptSourceText: ev.excerptSource ?? undefined,
+                });
+              },
+        });
+
+  if (!scrubEnabled) {
+    return streamGuardFilter;
+  }
+
+  return wrapOutputFilterWithCredentialScrubber({
+    stream: ctx.stream,
+    inner: streamGuardFilter,
+    onScrubbedEvent: (scrubbedExcerptSource) => {
+      safeRecordEvent({
+        scope,
+        endUser: ctx.endUser,
+        detector: 'pii',
+        action: 'masked',
+        wire: ctx.wire,
+        streamed: ctx.stream,
+        runId: ctx.runId ?? null,
+        excerptSourceText: scrubbedExcerptSource,
+      });
+    },
   });
 }
 
@@ -371,11 +409,13 @@ export async function evaluateOutput(
   }
 
   const policy = getRuntimePolicySnapshot(scope);
-  if (policy.mode === 'off') {
+  const scrubEnabled = getRuntimeCredentialScrubEnabled(scope);
+  if (policy.mode === 'off' && !scrubEnabled) {
     return { action: 'pass', text };
   }
 
-  if (isTrustedBypass(policy, ctx)) {
+  const bypassed = policy.mode !== 'off' && isTrustedBypass(policy, ctx);
+  if (bypassed) {
     safeRecordEvent({
       scope,
       endUser: ctx.endUser,
@@ -385,11 +425,38 @@ export async function evaluateOutput(
       streamed: ctx.stream,
       runId: ctx.runId ?? null,
     });
-    return { action: 'pass', text };
+    if (!scrubEnabled) {
+      return { action: 'pass', text };
+    }
+  }
+
+  let workingText = text;
+  let scrubbedCredentials = false;
+  if (scrubEnabled) {
+    const scrubbed = scrubCredentialsInText(text, { isFinal: true });
+    workingText = scrubbed.text;
+    scrubbedCredentials = scrubbed.modified;
+  }
+
+  if (policy.mode === 'off' || bypassed) {
+    if (scrubbedCredentials) {
+      safeRecordEvent({
+        scope,
+        endUser: ctx.endUser,
+        detector: 'pii',
+        action: 'masked',
+        wire: ctx.wire,
+        streamed: ctx.stream,
+        runId: ctx.runId ?? null,
+        excerptSourceText: workingText,
+      });
+      return { action: 'masked', text: workingText, reason: 'pii', triggered: ['pii'] };
+    }
+    return { action: 'pass', text: workingText };
   }
 
   const startedAt = Date.now();
-  const res = await evaluateWithPolicySnapshot(scope, policy, text, ctx, { recordEvents: true });
+  const res = await evaluateWithPolicySnapshot(scope, policy, workingText, ctx, { recordEvents: true });
   recordCompletedSpan({
     kind: 'output_guard',
     name: `output_guard:${scope.kind}:${scope.id}`,
@@ -402,6 +469,29 @@ export async function evaluateOutput(
       ...(res.reason ? { reason: res.reason } : {}),
     },
   });
+  if (res.action === 'blocked') {
+    return res;
+  }
+  if (scrubbedCredentials && res.action !== 'masked') {
+    safeRecordEvent({
+      scope,
+      endUser: ctx.endUser,
+      detector: 'pii',
+      action: 'masked',
+      wire: ctx.wire,
+      streamed: ctx.stream,
+      runId: ctx.runId ?? null,
+      excerptSourceText: res.text,
+    });
+    const nextTriggered = new Set<GuardDetectorId>(res.triggered ?? []);
+    nextTriggered.add('pii');
+    return {
+      action: 'masked',
+      text: res.text,
+      reason: res.reason ?? 'pii',
+      triggered: [...nextTriggered],
+    };
+  }
   return res;
 }
 

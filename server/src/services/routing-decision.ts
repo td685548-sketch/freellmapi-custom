@@ -5,6 +5,7 @@ import { setRequestRoutingStrategy } from '../lib/client-context.js';
 import { CLAIRIC_MODEL, DecisionError, listDecisionCandidates, runDecision } from './decision.js';
 import { getRoutingStrategy } from './router.js';
 import type { PresetStrategy } from './scoring.js';
+import { chooseHeuristicRoutingPreset } from '../custom/x-gateway/intent-router.js';
 
 // Decision routing (#1354). With the 'decision' strategy on, a decision model
 // reads the request and picks which of the four presets (Smartest, Fastest,
@@ -75,7 +76,7 @@ export function setDecisionRoutingSettings(patch: Partial<DecisionRoutingSetting
   }
 }
 
-export type DecisionPickSource = 'decision' | 'cache' | 'low_confidence' | 'timeout' | 'unavailable' | 'error';
+export type DecisionPickSource = 'decision' | 'heuristic' | 'cache' | 'low_confidence' | 'timeout' | 'unavailable' | 'error';
 
 export interface DecisionPick {
   strategy: PresetStrategy;
@@ -121,7 +122,7 @@ const stats: {
 
 function record(pick: DecisionPick): void {
   stats.counts[pick.strategy]++;
-  if (pick.source !== 'decision' && pick.source !== 'cache') {
+  if (pick.source !== 'decision' && pick.source !== 'heuristic' && pick.source !== 'cache') {
     stats.fallbacks[pick.source] = (stats.fallbacks[pick.source] ?? 0) + 1;
   }
   stats.recent.unshift({ ...pick, at: Date.now() });
@@ -175,6 +176,13 @@ export async function chooseRoutingPreset(messages: readonly ChatMessage[], sign
   if (!state) return { strategy: 'balanced', source: 'unavailable' };
 
   const settings = getDecisionRoutingSettings();
+  if (settings.model.toLowerCase() === 'heuristic') {
+    return {
+      strategy: chooseHeuristicRoutingPreset(messages),
+      source: 'heuristic',
+      model: 'heuristic',
+    };
+  }
   // minProbability is part of the key: a pick cached under one threshold must
   // not answer a request judged under another (a low_confidence Balanced held
   // for the TTL would silently undo a threshold lowering — the whole point of
@@ -238,7 +246,9 @@ export async function applyDecisionRouting(
 
 /** Header value: the preset, plus why when it is a fallback. */
 export function routingStrategyHeader(pick: DecisionPick): string {
-  return pick.source === 'decision' || pick.source === 'cache' ? pick.strategy : `${pick.strategy}; fallback=${pick.source}`;
+  return pick.source === 'decision' || pick.source === 'heuristic' || pick.source === 'cache'
+    ? pick.strategy
+    : `${pick.strategy}; fallback=${pick.source}`;
 }
 
 /** Settings + since-boot stats for the dashboard, plus what the setup guide
@@ -249,6 +259,15 @@ export function routingStrategyHeader(pick: DecisionPick): string {
  *  - `keyPlatforms`: providers whose key would make it ready, in priority order. */
 export function getDecisionRoutingStatus() {
   const settings = getDecisionRoutingSettings();
+  if (settings.model.toLowerCase() === 'heuristic') {
+    return {
+      ...settings,
+      ready: true,
+      hasModels: true,
+      keyPlatforms: [] as string[],
+      ...getDecisionRoutingStats(),
+    };
+  }
   const candidates = listDecisionCandidates()
     .filter(m => m.enabled && m.modelId !== CLAIRIC_MODEL)
     .filter(m => settings.model === 'auto' ? !AUTO_SKIP_PLATFORMS.has(m.platform) : m.modelId === settings.model)

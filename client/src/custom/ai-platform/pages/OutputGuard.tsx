@@ -6,6 +6,18 @@ import { GuardEvents } from '../components/GuardEvents';
 import { GuardPolicyEditor } from '../components/GuardPolicyEditor';
 import { PolicyTester } from '../components/PolicyTester';
 import {
+  fetchCredentialScrubSettings,
+  putCredentialScrubSettings,
+} from '../eval-canary-api';
+import {
+  SCRUB_ENABLE_TOGGLE_LABEL,
+  SCRUB_ERROR_MSG,
+  SCRUB_SAVED_MSG,
+  SCRUB_SAVING_LABEL,
+  SCRUB_SECTION_HEADING,
+  SCRUB_SECTION_SUBTITLE,
+} from '../eval-canary-strings';
+import {
   createDefaultGuardPolicy,
   fetchGuardPolicy,
   fetchGuardProfileOptions,
@@ -77,6 +89,10 @@ export function OutputGuard() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
 
+  const [credentialScrubEnabled, setCredentialScrubEnabled] = useState(false);
+  const [savingScrub, setSavingScrub] = useState(false);
+  const [scrubFeedback, setScrubFeedback] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+
   const saveEpochRef = useRef(0);
   const saveAbortRef = useRef<AbortController | null>(null);
   const policyEpochRef = useRef(0);
@@ -86,6 +102,7 @@ export function OutputGuard() {
     setSaveError(null);
     setSavedMessage(null);
     setLoadError(null);
+    setScrubFeedback(null);
   }, []);
 
   // Load scope target options only if user has view_output_guard
@@ -133,9 +150,15 @@ export function OutputGuard() {
     setSavedMessage(null);
 
     try {
-      const res = await fetchGuardPolicy(scope, controller.signal);
+      const [res, scrubRes] = await Promise.all([
+        fetchGuardPolicy(scope, controller.signal),
+        fetchCredentialScrubSettings(scope, controller.signal).catch(() => null),
+      ]);
       if (policyEpochRef.current !== epoch) return;
-      setPolicy(res.policy);
+      if (res?.policy) {
+        setPolicy(res.policy);
+      }
+      setCredentialScrubEnabled(Boolean(scrubRes?.credentialStreamScrubEnabled));
     } catch (err) {
       if (controller.signal.aborted || policyEpochRef.current !== epoch) return;
       setLoadError(err instanceof Error && err.message ? err.message : tc(GUARD_LOAD_POLICY_ERROR));
@@ -224,6 +247,26 @@ export function OutputGuard() {
       }
     } finally {
       if (saveEpochRef.current === epoch) setSaving(false);
+    }
+  }
+
+  async function handleToggleCredentialScrub(nextEnabled: boolean) {
+    if (!canEdit || scope.kind === 'agent' || !scope.id) return;
+    setSavingScrub(true);
+    setScrubFeedback(null);
+    try {
+      const updated = await putCredentialScrubSettings(scope, {
+        credentialStreamScrubEnabled: nextEnabled,
+      });
+      setCredentialScrubEnabled(updated.credentialStreamScrubEnabled);
+      setScrubFeedback({ kind: 'ok', text: tc(SCRUB_SAVED_MSG) });
+    } catch (err) {
+      setScrubFeedback({
+        kind: 'err',
+        text: err instanceof Error && err.message ? err.message : tc(SCRUB_ERROR_MSG),
+      });
+    } finally {
+      setSavingScrub(false);
     }
   }
 
@@ -382,6 +425,44 @@ export function OutputGuard() {
             </div>
           ) : (
             <>
+              <section
+                className="rounded-lg border p-4 space-y-2.5"
+                data-testid="guard-credential-scrub-section"
+              >
+                <div className="space-y-1">
+                  <h3 className="text-sm font-semibold">{tc(SCRUB_SECTION_HEADING)}</h3>
+                  <p className="text-xs text-muted-foreground">{tc(SCRUB_SECTION_SUBTITLE)}</p>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="flex items-center gap-2 text-sm font-medium">
+                    <input
+                      type="checkbox"
+                      data-testid="guard-credential-scrub-toggle"
+                      disabled={!canEdit || savingScrub}
+                      checked={credentialScrubEnabled}
+                      onChange={(e) => void handleToggleCredentialScrub(e.target.checked)}
+                    />
+                    <span>{tc(SCRUB_ENABLE_TOGGLE_LABEL)}</span>
+                  </label>
+                  {savingScrub && (
+                    <span className="text-xs text-muted-foreground">{tc(SCRUB_SAVING_LABEL)}</span>
+                  )}
+                </div>
+                {scrubFeedback && (
+                  <div
+                    role={scrubFeedback.kind === 'err' ? 'alert' : undefined}
+                    data-testid="guard-credential-scrub-feedback"
+                    className={`rounded border px-3 py-1.5 text-xs ${
+                      scrubFeedback.kind === 'err'
+                        ? 'border-destructive/30 bg-destructive/10 text-destructive'
+                        : 'border-emerald-600/30 bg-emerald-600/15 text-emerald-700 dark:text-emerald-400'
+                    }`}
+                  >
+                    {scrubFeedback.text}
+                  </div>
+                )}
+              </section>
+
               <GuardPolicyEditor
                 scope={scope}
                 policy={policy}

@@ -1,4 +1,5 @@
 import { getSetting, setSetting } from '../../db/index.js';
+import { getModelsDevPricingMap, getModelsDevSyncGeneration } from './models-dev-sync.js';
 
 export const PRICING_OVERRIDES_SETTING_KEY = 'x_gateway_pricing_overrides';
 
@@ -140,15 +141,18 @@ export function getDefaultPricing(): ProviderPricingMap {
 }
 
 let lastOverridesRaw: string | undefined;
+let lastModelsDevGen = -1;
 let cachedOverridesMap: ProviderPricingMap = {};
 let cachedMergedMap: ProviderPricingMap | null = null;
 
 function ensurePricingCache(): void {
   const raw = getSetting(PRICING_OVERRIDES_SETTING_KEY) ?? '';
-  if (raw === lastOverridesRaw && cachedMergedMap !== null) {
+  const syncGen = getModelsDevSyncGeneration();
+  if (raw === lastOverridesRaw && syncGen === lastModelsDevGen && cachedMergedMap !== null) {
     return;
   }
   lastOverridesRaw = raw;
+  lastModelsDevGen = syncGen;
   const sanitized: ProviderPricingMap = {};
   if (raw) {
     try {
@@ -182,6 +186,14 @@ function ensurePricingCache(): void {
   }
   cachedOverridesMap = sanitized;
   const merged = clonePricingMap(DEFAULT_MODEL_PRICING);
+  const syncedModelsDev = getModelsDevPricingMap();
+  for (const [provider, models] of Object.entries(syncedModelsDev)) {
+    if (!merged[provider]) merged[provider] = {};
+    for (const [model, rate] of Object.entries(models)) {
+      const base = merged[provider][model];
+      merged[provider][model] = base ? { ...base, ...rate } : { ...rate };
+    }
+  }
   for (const [provider, models] of Object.entries(sanitized)) {
     if (!merged[provider]) merged[provider] = {};
     for (const [model, rate] of Object.entries(models)) {

@@ -30,6 +30,11 @@ import {
   updateAccountCredential,
   type AccountRow,
 } from './store.js';
+import {
+  clearRefreshCircuit,
+  getRefreshCircuitState,
+  recordRefreshCircuitFailure,
+} from './refresh-circuit.js';
 
 /** Do not hammer a token endpoint that just failed for a transient reason. */
 const TRANSIENT_RETRY_COOLDOWN_MS = 30_000;
@@ -75,6 +80,7 @@ export function clearOAuthRefreshState(): void {
 /** Clear one account's cached state, e.g. after reconnect or credential edit. */
 export function clearOAuthRefreshStateForAccount(id: number): void {
   entries.delete(id);
+  clearRefreshCircuit(id);
 }
 
 /**
@@ -127,6 +133,7 @@ async function performRefresh(
     entry.latest = next;
     entry.transientFailure = null;
     entry.retryAfter = 0;
+    clearRefreshCircuit(row.id);
     return next;
   } catch (cause) {
     const replacement = accountRow(row.id);
@@ -136,6 +143,7 @@ async function performRefresh(
       if (credential?.kind === current.kind) return credential;
       throw new AccountError(409, 'Account changed during refresh. Retry the request.');
     }
+    recordRefreshCircuitFailure(row.id, cause);
     const error = cause as OAuthRefreshError;
     if (isPermanent(error)) {
       const failure = new AccountError(
@@ -168,6 +176,13 @@ async function refreshCredential(
   const entry = entryFor(row.id, row.encrypted_key);
   if (entry.permanentFailure) throw entry.permanentFailure;
   if (entry.inFlight) return entry.inFlight;
+  const circuit = getRefreshCircuitState(row.id);
+  if (circuit.inBackoff) {
+    throw new AccountError(
+      502,
+      `${descriptor.name} token refresh is in backoff until ${circuit.until}.`,
+    );
+  }
   if (entry.transientFailure && Date.now() < entry.retryAfter) throw entry.transientFailure;
 
   const task: Promise<OAuthCredential> = performRefresh(row, current, descriptor, entry).finally(() => {

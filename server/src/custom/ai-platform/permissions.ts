@@ -39,12 +39,22 @@ export function aiPlatformPermission(method: string, path: string): Permission {
   if (/^\/prompts\/[^/]+\/[^/]+\/versions\/\d+$/.test(sub) && read) return 'view_prompts';
   if (/^\/prompts\/[^/]+\/[^/]+\/diff$/.test(sub) && read) return 'view_prompts';
   if (/^\/prompts\/[^/]+\/[^/]+\/eval-(?:cases|runs)$/.test(sub) && read) return 'view_prompts';
+  if (/^\/prompts\/[^/]+\/[^/]+\/evals\/(?:cases|runs)$/.test(sub) && read) return 'view_prompts';
+  if (/^\/prompts\/[^/]+\/[^/]+\/evals\/runs\/\d+$/.test(sub) && read) return 'view_prompts';
   if (/^\/prompts\/[^/]+\/[^/]+\/draft$/.test(sub) && (upper === 'PUT' || upper === 'DELETE')) return 'edit_prompts';
   if (/^\/prompts\/[^/]+\/[^/]+\/(?:preview|try|evaluate)$/.test(sub) && upper === 'POST') return 'edit_prompts';
   if (/^\/prompts\/[^/]+\/[^/]+\/eval-cases$/.test(sub) && upper === 'POST') return 'edit_prompts';
   if (/^\/prompts\/[^/]+\/[^/]+\/eval-cases\/\d+$/.test(sub) && (upper === 'PUT' || upper === 'DELETE')) return 'edit_prompts';
+  if (/^\/prompts\/[^/]+\/[^/]+\/evals\/(?:cases|run)$/.test(sub) && upper === 'POST') return 'edit_prompts';
+  if (/^\/prompts\/[^/]+\/[^/]+\/evals\/cases\/\d+$/.test(sub) && (upper === 'PUT' || upper === 'DELETE')) return 'edit_prompts';
   if (/^\/prompts\/[^/]+\/[^/]+\/(?:publish|restore)$/.test(sub) && upper === 'POST') return 'publish_prompts';
   if (/^\/prompts\/[^/]+\/[^/]+\/ab$/.test(sub) && upper === 'PUT') return 'publish_prompts';
+  if (/^\/prompts\/[^/]+\/[^/]+\/canary$/.test(sub)) {
+    if (read) return 'view_prompts';
+    if (upper === 'PUT') return 'publish_prompts';
+    return 'manage_ai_platform';
+  }
+  if (/^\/prompts\/[^/]+\/[^/]+\/canary\/(?:promote|abort)$/.test(sub) && upper === 'POST') return 'publish_prompts';
 
   // Retrieval
   if (sub === '/retrieval/usage' && read) return 'view_retrieval';
@@ -68,6 +78,18 @@ export function aiPlatformPermission(method: string, path: string): Permission {
     return 'manage_ai_platform';
   }
   if (sub === '/prompt-cache/stats' && read) return 'view_prompt_cache';
+
+  // Semantic cache
+  if (/^\/semantic-cache\/[^/]+\/[^/]+\/settings$/.test(sub)) {
+    if (read) return 'view_prompt_cache';
+    if (upper === 'PUT') return 'edit_prompt_cache';
+    return 'manage_ai_platform';
+  }
+  if (/^\/semantic-cache\/[^/]+\/[^/]+\/stats$/.test(sub) && read) return 'view_prompt_cache';
+  if (/^\/semantic-cache\/[^/]+\/[^/]+\/flush$/.test(sub) && upper === 'POST') return 'edit_prompt_cache';
+  if (/^\/semantic-cache\/[^/]+\/[^/]+\/lookup-preview$/.test(sub) && upper === 'POST') {
+    return 'view_prompt_cache';
+  }
 
   // MCP client
   if (sub === '/mcp/servers') {
@@ -107,6 +129,11 @@ export function aiPlatformPermission(method: string, path: string): Permission {
     return 'manage_ai_platform';
   }
   if (/^\/output-guard\/[^/]+\/[^/]+\/test$/.test(sub) && upper === 'POST') return 'view_output_guard';
+  if (/^\/output-guard\/[^/]+\/[^/]+\/credential-scrub$/.test(sub)) {
+    if (read) return 'view_output_guard';
+    if (upper === 'PUT') return 'edit_output_guard';
+    return 'manage_ai_platform';
+  }
 
   // Orchestrator
   if (sub === '/agents') {

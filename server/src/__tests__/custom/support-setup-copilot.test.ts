@@ -2,24 +2,30 @@ import type { Server } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../../app.js';
 import { appendSupportAuditLog, listSupportAuditLogs } from '../../custom/x-gateway/support-enterprise-router.js';
+import { listSupportEvidenceSources } from '../../custom/x-gateway/support-evidence-store.js';
 import { getSupportGuardrailPolicy } from '../../custom/x-gateway/support-guardrails.js';
 import {
   getSupportMaskingPolicy,
   listSupportKnowledgeDocs,
 } from '../../custom/x-gateway/support-knowledge.js';
 import { getSupportOutputPolicy } from '../../custom/x-gateway/support-output-store.js';
-import { getSupportRuntimePolicy } from '../../custom/x-gateway/support-runtime-store.js';
+import {
+  getSupportRuntimePolicy,
+  updateSupportRuntimePolicy,
+} from '../../custom/x-gateway/support-runtime-store.js';
 import {
   getSupportDeskSlaPolicy,
   getSupportDeskWidgetConfig,
 } from '../../custom/x-gateway/support-service-desk-store.js';
 import {
   createSupportTenant,
+  createSupportTool,
   getSupportTenant,
   listSupportTenants,
 } from '../../custom/x-gateway/support-store.js';
-import { initDb } from '../../db/index.js';
+import { getDb, initDb } from '../../db/index.js';
 import { createSession, createUser } from '../../services/auth.js';
+import { setUserPermissions } from '../../services/users.js';
 
 let server: Server;
 let base: string;
@@ -415,5 +421,435 @@ describe('AI Support Setup Copilot (Guided Onboarding & Consent-Gated Auto-Deplo
       primaryToken,
     );
     expect(applyDeclined.status).toBe(409);
+  });
+
+  it('blocks non-setup tenant members, read-only viewers, and Thruline read-only accounts from escalating read or write access', async () => {
+    // 1. Member with ONLY non-setup tenant leaves (view_tenant_members, reply_tenant_desk, view_tenant_analytics)
+    // must get visible: false and 403 on chat (zero setup diagnostics leaked).
+    const nonSetupMember = createUser('team-only@example.com', 'UserPass123!', 'member');
+    const nonSetupToken = createSession(nonSetupMember.userId);
+    const assignNonSetup = await hit(
+      `/api/admin/tenant-memberships/tenants/${existingTenantId}/users/${nonSetupMember.userId}`,
+      'PUT',
+      {
+        rolePreset: 'custom',
+        permissions: ['view_tenant_members', 'reply_tenant_desk', 'view_tenant_analytics'],
+      },
+      primaryToken,
+    );
+    expect(assignNonSetup.status).toBe(200);
+
+    const nonSetupStatus = await hit('/api/support-setup-copilot/status', 'GET', undefined, nonSetupToken);
+    expect(nonSetupStatus.status).toBe(200);
+    expect(nonSetupStatus.body?.visible).toBe(false);
+    expect(nonSetupStatus.body?.activeTenant).toBeNull();
+
+    const nonSetupChat = await hit(
+      '/api/support-setup-copilot/chat',
+      'POST',
+      { tenantId: existingTenantId, messages: [{ role: 'user', content: 'Setup giúp tôi' }] },
+      nonSetupToken,
+    );
+    expect(nonSetupChat.status).toBe(403);
+
+    // 2. Read-only Tenant Viewer ('viewer' preset): can view diagnostics & guide,
+    // but NEVER generates pending_consent proposals and CANNOT create tenants.
+    const viewerUser = createUser('tenant-viewer@example.com', 'UserPass123!', 'member');
+    const viewerToken = createSession(viewerUser.userId);
+    const assignViewer = await hit(
+      `/api/admin/tenant-memberships/tenants/${existingTenantId}/users/${viewerUser.userId}`,
+      'PUT',
+      { rolePreset: 'viewer' },
+      primaryToken,
+    );
+    expect(assignViewer.status).toBe(200);
+
+    const viewerStatus = await hit('/api/support-setup-copilot/status', 'GET', undefined, viewerToken);
+    expect(viewerStatus.status).toBe(200);
+    expect(viewerStatus.body?.visible).toBe(true);
+    expect(viewerStatus.body?.canCreateTenant).toBe(false);
+    expect(viewerStatus.body?.tenants[0]?.canEditSteps).toEqual([]);
+
+    const viewerAutoSetup = await hit(
+      '/api/support-setup-copilot/chat',
+      'POST',
+      {
+        tenantId: existingTenantId,
+        locale: 'vi',
+        requirementsHint: {
+          brandName: 'Unauthorized Brand',
+          industry: 'Retail',
+          faqSummaryOrPolicies: 'No refunds',
+        },
+        messages: [
+          {
+            role: 'user',
+            content: 'Shop mỹ phẩm GlowSkin, website https://glowskin.vn, đổi trả 7 ngày, setup giúp tôi',
+          },
+        ],
+      },
+      viewerToken,
+    );
+    expect(viewerAutoSetup.status).toBe(200);
+    expect(viewerAutoSetup.body?.intent).toBe('guide');
+    expect(viewerAutoSetup.body?.proposal).toBeNull();
+    expect(String(viewerAutoSetup.body?.reply)).toContain('Read-Only');
+
+    const viewerCreateAttempt = await hit(
+      '/api/support-setup-copilot/chat',
+      'POST',
+      {
+        targetMode: 'create_tenant',
+        locale: 'vi',
+        messages: [{ role: 'user', content: 'Tạo mới 1 tenant AI Support tên HackTenant' }],
+      },
+      viewerToken,
+    );
+    expect(viewerCreateAttempt.status).toBe(200);
+    expect(viewerCreateAttempt.body?.intent).toBe('guide');
+    expect(viewerCreateAttempt.body?.proposal).toBeNull();
+
+    // 3. Thruline read-only operator ('use_x_gateway' WITHOUT 'edit_x_settings'):
+    // output_controls requires 'edit_x_settings', so step 4 must be 'restricted' (canView: false).
+    const thrulineViewer = createUser('thruline-readonly@example.com', 'UserPass123!', 'member');
+    setUserPermissions(thrulineViewer.userId, ['use_x_gateway'], primaryAdminId);
+    const thrulineViewerToken = createSession(thrulineViewer.userId);
+
+    const thrulineStatus = await hit(
+      `/api/support-setup-copilot/status?tenantId=${existingTenantId}`,
+      'GET',
+      undefined,
+      thrulineViewerToken,
+    );
+    expect(thrulineStatus.status).toBe(200);
+    expect(thrulineStatus.body?.visible).toBe(true);
+    expect(thrulineStatus.body?.canCreateTenant).toBe(false);
+    const outputDiag = (thrulineStatus.body?.activeTenant?.steps as Array<Record<string, any>>).find(
+      (s) => s.stepId === 'output_controls',
+    );
+    expect(outputDiag?.status).toBe('restricted');
+    expect(outputDiag?.canView).toBe(false);
+    expect(outputDiag?.canEdit).toBe(false);
+  });
+
+  it('prevents cross-step write escalation, cross-section read leaks, Evidence library escalation, toolPolicy wiping, unlisted model injection, and cross-tenant access', async () => {
+    const lockedTenant = createSupportTenant({
+      name: 'Vault FinTech',
+      slug: 'vault-fintech',
+      defaultModel: 'auto',
+      systemPrompt: 'Initial Vault prompt.',
+      allowedOrigins: ['https://vault.fintech.example'],
+      createdBy: primaryAdminId,
+    }).tenant;
+
+    const sensitiveTool = createSupportTool(lockedTenant.id, {
+      name: 'refund_wire_transfer',
+      description: 'Refund a high-value wire transfer',
+      endpointUrl: 'https://api.fintech.example/refund',
+      httpMethod: 'POST',
+      allowedRoles: ['customer', 'admin'],
+    });
+    updateSupportRuntimePolicy(lockedTenant.id, {
+      toolPolicies: [{ toolId: sensitiveTool.id, mode: 'approval_required' }],
+    });
+
+    // 1. Cross-tenant isolation: tenantMemberToken (only assigned to existingTenantId) cannot query or chat against lockedTenant
+    const crossChat = await hit(
+      '/api/support-setup-copilot/chat',
+      'POST',
+      {
+        tenantId: lockedTenant.id,
+        messages: [{ role: 'user', content: 'Hoàn thiện cấu hình tiêu chuẩn cho tenant hiện tại' }],
+      },
+      tenantMemberToken,
+    );
+    expect(crossChat.status).toBe(403);
+
+    // 2. Single-leaf user with ONLY 'edit_tenant_ai' on lockedTenant:
+    // - Cannot view Steps 2–7, embedSnippet, or allowedOrigins
+    // - Cannot modify allowedOrigins even if supplying websiteOrigin in chat
+    // - Cannot inject an unlisted internal model ID
+    const aiOnlyUser = createUser('ai-only@example.com', 'UserPass123!', 'member');
+    const aiOnlyToken = createSession(aiOnlyUser.userId);
+    await hit(
+      `/api/admin/tenant-memberships/tenants/${lockedTenant.id}/users/${aiOnlyUser.userId}`,
+      'PUT',
+      { rolePreset: 'custom', permissions: ['edit_tenant_ai'] },
+      primaryToken,
+    );
+
+    const aiOnlyStatus = await hit(
+      `/api/support-setup-copilot/status?tenantId=${lockedTenant.id}`,
+      'GET',
+      undefined,
+      aiOnlyToken,
+    );
+    expect(aiOnlyStatus.status).toBe(200);
+    expect(aiOnlyStatus.body?.activeTenant?.embedSnippet).toBe('');
+    expect(aiOnlyStatus.body?.activeTenant?.tenant?.allowedOrigins).toEqual([]);
+    const restrictedSteps = (aiOnlyStatus.body?.activeTenant?.steps as Array<Record<string, any>>).filter(
+      (s) => s.stepId !== 'tenant_ai',
+    );
+    expect(restrictedSteps).toHaveLength(6);
+    expect(restrictedSteps.every((s) => s.status === 'restricted' && s.canView === false && s.canEdit === false)).toBe(
+      true,
+    );
+
+    const aiOnlyPropose = await hit(
+      '/api/support-setup-copilot/chat',
+      'POST',
+      {
+        tenantId: lockedTenant.id,
+        locale: 'en',
+        requirementsHint: {
+          brandName: 'Vault FinTech AI',
+          industry: 'FinTech Banking',
+          websiteOrigin: 'https://attacker-origin.evil.test',
+          faqSummaryOrPolicies: '24/7 card freeze support',
+          defaultModel: 'unlisted-private-root-model-v9',
+        },
+        messages: [{ role: 'user', content: 'Set up Vault FinTech AI' }],
+      },
+      aiOnlyToken,
+    );
+    expect(aiOnlyPropose.status).toBe(200);
+    const aiProp = aiOnlyPropose.body?.proposal;
+    expect(aiProp).toBeTruthy();
+    // Unlisted model was sanitized back to existing safe 'auto'
+    expect(aiProp.requirements.defaultModel).toBe('auto');
+    // Unpermitted steps have scrubbed empty payloads
+    for (const step of aiProp.steps as Array<Record<string, any>>) {
+      if (step.stepId === 'tenant_ai') {
+        expect(step.canApply).toBe(true);
+      } else {
+        expect(step.canApply).toBe(false);
+        expect(step.payload).toEqual({});
+      }
+    }
+
+    const aiOnlyApply = await hit(
+      `/api/support-setup-copilot/proposals/${aiProp.id}/apply`,
+      'POST',
+      { approved: true },
+      aiOnlyToken,
+    );
+    expect(aiOnlyApply.status).toBe(200);
+    // CRITICAL: allowedOrigins on lockedTenant MUST remain untouched!
+    expect(getSupportTenant(lockedTenant.id).allowedOrigins).toEqual([
+      'https://vault.fintech.example',
+    ]);
+    expect(getSupportTenant(lockedTenant.id).name).toBe('Vault FinTech AI');
+
+    // Even if proposal_json in DB were tampered with an unlisted model, executor defense-in-depth blocks it with 403
+    const secondAiChat = await hit(
+      '/api/support-setup-copilot/chat',
+      'POST',
+      {
+        tenantId: lockedTenant.id,
+        locale: 'en',
+        requirementsHint: { brandName: 'Vault FinTech AI', industry: 'FinTech' },
+        messages: [{ role: 'user', content: 'Update AI persona' }],
+      },
+      aiOnlyToken,
+    );
+    const tamperedProp = secondAiChat.body?.proposal;
+    tamperedProp.steps[0].payload.defaultModel = 'tampered-internal-model';
+    getDb()
+      .prepare('UPDATE custom_support_setup_proposals SET proposal_json = ? WHERE id = ?')
+      .run(JSON.stringify(tamperedProp), tamperedProp.id);
+
+    const tamperedApply = await hit(
+      `/api/support-setup-copilot/proposals/${tamperedProp.id}/apply`,
+      'POST',
+      { approved: true },
+      aiOnlyToken,
+    );
+    expect(tamperedApply.status).toBe(403);
+
+    // 3. Single-leaf 'edit_tenant_knowledge' user seeds KB + masking WITHOUT writing Platform-Operator Evidence sources
+    const kbOnlyUser = createUser('kb-only@example.com', 'UserPass123!', 'member');
+    const kbOnlyToken = createSession(kbOnlyUser.userId);
+    await hit(
+      `/api/admin/tenant-memberships/tenants/${lockedTenant.id}/users/${kbOnlyUser.userId}`,
+      'PUT',
+      { rolePreset: 'custom', permissions: ['edit_tenant_knowledge'] },
+      primaryToken,
+    );
+
+    const kbChat = await hit(
+      '/api/support-setup-copilot/chat',
+      'POST',
+      {
+        tenantId: lockedTenant.id,
+        locale: 'en',
+        requirementsHint: {
+          brandName: 'Vault FinTech AI',
+          industry: 'FinTech',
+          faqSummaryOrPolicies: 'Wire transfers settle in 1 business day.',
+        },
+        messages: [{ role: 'user', content: 'Seed FAQ knowledge' }],
+      },
+      kbOnlyToken,
+    );
+    const kbApply = await hit(
+      `/api/support-setup-copilot/proposals/${kbChat.body?.proposal?.id}/apply`,
+      'POST',
+      { approved: true },
+      kbOnlyToken,
+    );
+    expect(kbApply.status).toBe(200);
+    expect(listSupportKnowledgeDocs(String(lockedTenant.id)).length).toBeGreaterThanOrEqual(3);
+    expect(listSupportEvidenceSources(lockedTenant.id)).toHaveLength(0);
+
+    // 4. Single-leaf 'edit_tenant_integration' user updates CORS + runtime WITHOUT wiping approval_required toolPolicies
+    const integrationOnlyUser = createUser('integration-only@example.com', 'UserPass123!', 'member');
+    const integrationOnlyToken = createSession(integrationOnlyUser.userId);
+    await hit(
+      `/api/admin/tenant-memberships/tenants/${lockedTenant.id}/users/${integrationOnlyUser.userId}`,
+      'PUT',
+      { rolePreset: 'custom', permissions: ['edit_tenant_integration'] },
+      primaryToken,
+    );
+
+    const intChat = await hit(
+      '/api/support-setup-copilot/chat',
+      'POST',
+      {
+        tenantId: lockedTenant.id,
+        locale: 'en',
+        requirementsHint: {
+          brandName: 'Vault FinTech AI',
+          industry: 'FinTech',
+          websiteOrigin: 'https://app.fintech.example',
+        },
+        messages: [{ role: 'user', content: 'Configure CORS origin https://app.fintech.example' }],
+      },
+      integrationOnlyToken,
+    );
+    const intApply = await hit(
+      `/api/support-setup-copilot/proposals/${intChat.body?.proposal?.id}/apply`,
+      'POST',
+      { approved: true },
+      integrationOnlyToken,
+    );
+    expect(intApply.status).toBe(200);
+    expect(getSupportTenant(lockedTenant.id).allowedOrigins).toEqual([
+      'https://app.fintech.example',
+    ]);
+    expect(getSupportRuntimePolicy(lockedTenant.id).toolPolicies).toEqual([
+      { toolId: sensitiveTool.id, mode: 'approval_required' },
+    ]);
+  });
+
+  it('enforces live RBAC on TOCTOU permission downgrade or revocation after a proposal is drafted', async () => {
+    const toctouUser = createUser('toctou-member@example.com', 'UserPass123!', 'member');
+    const toctouToken = createSession(toctouUser.userId);
+
+    // Initially grant ai_configurator (6 editable steps)
+    await hit(
+      `/api/admin/tenant-memberships/tenants/${existingTenantId}/users/${toctouUser.userId}`,
+      'PUT',
+      { rolePreset: 'ai_configurator' },
+      primaryToken,
+    );
+
+    const draftRes = await hit(
+      '/api/support-setup-copilot/chat',
+      'POST',
+      {
+        tenantId: existingTenantId,
+        locale: 'vi',
+        messages: [{ role: 'user', content: 'Hoàn thiện cấu hình tiêu chuẩn cho tenant hiện tại' }],
+      },
+      toctouToken,
+    );
+    expect(draftRes.status).toBe(200);
+    const proposalId = draftRes.body?.proposal?.id as string;
+    expect(proposalId).toBeTruthy();
+
+    // Admin downgrades user BEFORE apply: now ONLY allowed 'edit_tenant_widget' (revoking AI, KB, Guardrails)
+    const downgradeRes = await hit(
+      `/api/admin/tenant-memberships/tenants/${existingTenantId}/users/${toctouUser.userId}`,
+      'PUT',
+      { rolePreset: 'custom', permissions: ['edit_tenant_widget'] },
+      primaryToken,
+    );
+    expect(downgradeRes.status).toBe(200);
+
+    // GET /status immediately re-projects pendingProposals so revoked steps show canApply=false & empty payload
+    const statusAfterDowngrade = await hit(
+      `/api/support-setup-copilot/status?tenantId=${existingTenantId}`,
+      'GET',
+      undefined,
+      toctouToken,
+    );
+    expect(statusAfterDowngrade.status).toBe(200);
+    const projected = (statusAfterDowngrade.body?.pendingProposals as Array<Record<string, any>>).find(
+      (p) => p.id === proposalId,
+    );
+    expect(projected).toBeTruthy();
+    const projectedEditable = (projected?.steps as Array<Record<string, any>>)
+      .filter((s) => s.canApply)
+      .map((s) => s.stepId);
+    expect(projectedEditable).toEqual(['widget_appearance', 'sla_routing']);
+
+    // Default apply (which includes originally drafted steps that were just revoked) MUST fail with 403!
+    const staleApply = await hit(
+      `/api/support-setup-copilot/proposals/${proposalId}/apply`,
+      'POST',
+      { approved: true },
+      toctouToken,
+    );
+    expect(staleApply.status).toBe(403);
+
+    // Applying ONLY a still-permitted step ('widget_appearance') succeeds cleanly
+    const scopedApply = await hit(
+      `/api/support-setup-copilot/proposals/${proposalId}/apply`,
+      'POST',
+      { approved: true, selectedSteps: ['widget_appearance'] },
+      toctouToken,
+    );
+    expect(scopedApply.status).toBe(200);
+    const appliedIds = (scopedApply.body?.stepResults as Array<{ stepId: string; status: string }>)
+      .filter((r) => r.status === 'applied')
+      .map((r) => r.stepId);
+    expect(appliedIds).toEqual(['widget_appearance']);
+
+    // Draft one more proposal, then downgrade user to 'viewer' (0 edit steps) -> status hides pending proposals and apply fails 403
+    const draft2 = await hit(
+      '/api/support-setup-copilot/chat',
+      'POST',
+      {
+        tenantId: existingTenantId,
+        locale: 'vi',
+        messages: [{ role: 'user', content: 'Hoàn thiện cấu hình tiêu chuẩn cho tenant hiện tại' }],
+      },
+      toctouToken,
+    );
+    const prop2Id = draft2.body?.proposal?.id as string;
+    expect(prop2Id).toBeTruthy();
+
+    await hit(
+      `/api/admin/tenant-memberships/tenants/${existingTenantId}/users/${toctouUser.userId}`,
+      'PUT',
+      { rolePreset: 'viewer' },
+      primaryToken,
+    );
+
+    const viewerStatus = await hit(
+      `/api/support-setup-copilot/status?tenantId=${existingTenantId}`,
+      'GET',
+      undefined,
+      toctouToken,
+    );
+    expect(viewerStatus.body?.pendingProposals).toEqual([]);
+
+    const revokedApply = await hit(
+      `/api/support-setup-copilot/proposals/${prop2Id}/apply`,
+      'POST',
+      { approved: true, selectedSteps: ['widget_appearance'] },
+      toctouToken,
+    );
+    expect(revokedApply.status).toBe(403);
   });
 });

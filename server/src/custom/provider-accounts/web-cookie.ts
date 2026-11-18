@@ -17,6 +17,16 @@ import { probeGeminiWebSession, runGeminiWebChat, streamGeminiWebChat } from './
 import { runDeepSeekWebChat, streamDeepSeekWebChat } from './deepseek-web-chat.js';
 import { generateUcWebImages, mintUcSession } from './uc-web.js';
 import { playgroundMediaUrl, storePlaygroundMedia } from '../x-gateway/playground-media.js';
+import type { ClaudeSignedThinkingBlock, ClaudeThinkingSegment } from '@freellmapi/shared/thinking-continuity.js';
+import {
+  restoreClaudeThinkingBlocks,
+  storeClaudeThinkingBlocks,
+  storeClaudeThinkingFromResponse,
+} from '../x-gateway/thinking-store.js';
+import {
+  normalizeThinkingBudget,
+  spliceClaudeThinkingSegmentsIntoContent,
+} from '../x-gateway/thinking-normalize.js';
 import {
   fetchChatGptWebAccessToken,
   normalizeChatGptWebCookie,
@@ -1096,14 +1106,24 @@ export class WebCookieProvider extends BaseProvider {
 export class AnthropicWireProvider extends BaseProvider {
   readonly platform: Platform = 'custom';
   readonly name: string;
+  private readonly providerId: string;
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
   private readonly extraHeaders: Record<string, string>;
 
-  constructor(config: { name: string; baseUrl: string; timeoutMs?: number; extraHeaders?: Record<string, string> }) {
+  constructor(config: {
+    providerId?: string;
+    name: string;
+    baseUrl: string;
+    timeoutMs?: number;
+    extraHeaders?: Record<string, string>;
+  }) {
     super();
     this.name = config.name;
     this.baseUrl = config.baseUrl.trim().replace(/\/+$/, '');
+    this.providerId =
+      config.providerId?.trim().toLowerCase() ||
+      (this.baseUrl.includes('api.anthropic.com') ? 'claude' : 'anthropic');
     this.timeoutMs = config.timeoutMs ?? 120_000;
     this.extraHeaders = config.extraHeaders ?? {};
   }
@@ -1113,6 +1133,7 @@ export class AnthropicWireProvider extends BaseProvider {
     modelId: string,
     stream: boolean,
     options?: CompletionOptions,
+    connectionId?: string,
   ): Record<string, unknown> {
     const systemParts: string[] = [];
     const anthropicMessages: Array<{ role: 'user' | 'assistant'; content: unknown }> = [];
@@ -1124,23 +1145,36 @@ export class AnthropicWireProvider extends BaseProvider {
         continue;
       }
       if (msg.role === 'tool') {
-        anthropicMessages.push({
-          role: 'user',
-          content: [
-            {
-              type: 'tool_result',
-              tool_use_id: msg.tool_call_id ?? 'toolu_0',
-              content: contentToString(msg.content),
-              ...(msg.is_error === true ? { is_error: true } : {}),
-            },
-          ],
-        });
+        const toolResultBlock = {
+          type: 'tool_result',
+          tool_use_id: msg.tool_call_id ?? 'toolu_0',
+          content: contentToString(msg.content),
+          ...(msg.is_error === true ? { is_error: true } : {}),
+        };
+        const prev = anthropicMessages[anthropicMessages.length - 1];
+        if (prev && prev.role === 'user' && Array.isArray(prev.content)) {
+          prev.content.push(toolResultBlock);
+        } else {
+          anthropicMessages.push({
+            role: 'user',
+            content: [toolResultBlock],
+          });
+        }
         continue;
       }
       if (msg.role === 'assistant' && msg.tool_calls?.length) {
-        const blocks: unknown[] = [];
+        const msgRecord = msg as unknown as {
+          thinking_blocks?: ClaudeSignedThinkingBlock[];
+          _restoredClaudeSegments?: ClaudeThinkingSegment[];
+        };
+        const rawBlocks: Record<string, unknown>[] = [];
+        if (Array.isArray(msgRecord.thinking_blocks)) {
+          for (const tb of msgRecord.thinking_blocks) {
+            rawBlocks.push({ ...tb });
+          }
+        }
         const text = contentToString(msg.content);
-        if (text) blocks.push({ type: 'text', text });
+        if (text) rawBlocks.push({ type: 'text', text });
         for (const tc of msg.tool_calls) {
           let input: unknown = {};
           try {
@@ -1148,13 +1182,25 @@ export class AnthropicWireProvider extends BaseProvider {
           } catch {
             input = {};
           }
-          blocks.push({
+          rawBlocks.push({
             type: 'tool_use',
             id: tc.id,
             name: tc.function.name,
             input,
           });
         }
+
+        const segments =
+          msgRecord._restoredClaudeSegments ??
+          (!Array.isArray(msgRecord.thinking_blocks) && connectionId
+            ? restoreClaudeThinkingBlocks({
+                toolUseIds: msg.tool_calls.map(tc => tc.id),
+                provider: this.providerId,
+                model: modelId,
+                connectionId,
+              })
+            : null);
+        const blocks = spliceClaudeThinkingSegmentsIntoContent(rawBlocks, segments);
         anthropicMessages.push({ role: 'assistant', content: blocks });
         continue;
       }
@@ -1168,15 +1214,41 @@ export class AnthropicWireProvider extends BaseProvider {
       anthropicMessages.push({ role: 'user', content: 'Hello' });
     }
 
+    const rawThinking = (options as (CompletionOptions & { anthropicThinking?: Record<string, unknown> }) | undefined)
+      ?.anthropicThinking;
+    const normalizedThinking =
+      options?.reasoning_effort !== undefined || rawThinking
+        ? normalizeThinkingBudget({
+            effort: options?.reasoning_effort,
+            thinking: rawThinking as { type?: unknown; budget_tokens?: unknown } | undefined,
+            maxTokens: options?.max_tokens,
+            defaultMaxTokens: 4096,
+            targetFamily: 'claude',
+          })
+        : null;
+
+    const effectiveMaxTokens = normalizedThinking?.maxTokens ?? options?.max_tokens ?? 4096;
+    const thinkingPayload = rawThinking ?? normalizedThinking?.anthropicThinking;
+    const manualThinkingActive =
+      thinkingPayload !== undefined &&
+      (thinkingPayload.type === 'enabled' || thinkingPayload.type === 'adaptive');
+
     const body: Record<string, unknown> = {
       model: modelId,
-      max_tokens: options?.max_tokens ?? 4096,
+      max_tokens: effectiveMaxTokens,
       messages: anthropicMessages,
       stream,
     };
+    if (thinkingPayload) {
+      body.thinking = thinkingPayload;
+    }
     if (systemParts.length > 0) body.system = systemParts.join('\n\n');
-    if (options?.temperature !== undefined) body.temperature = options.temperature;
-    if (options?.top_p !== undefined) body.top_p = options.top_p;
+    if (options?.temperature !== undefined && (!manualThinkingActive || options.temperature === 1)) {
+      body.temperature = options.temperature;
+    }
+    if (options?.top_p !== undefined && !manualThinkingActive) {
+      body.top_p = options.top_p;
+    }
     if (options?.tools?.length) {
       body.tools = options.tools.map(t => ({
         name: t.function.name,
@@ -1227,7 +1299,13 @@ export class AnthropicWireProvider extends BaseProvider {
     messages: ChatMessage[],
     modelId: string,
     options?: CompletionOptions,
+    quotaContext?: QuotaObservationContext,
   ): Promise<ChatCompletionResponse> {
+    const connectionId =
+      quotaContext?.providerAccountId ??
+      (quotaContext?.keyId !== undefined && quotaContext?.keyId !== null
+        ? String(quotaContext.keyId)
+        : undefined);
     const url = parseOAuthCredential(apiKey)?.kind === 'claude'
       ? 'https://api.anthropic.com/v1/messages?beta=true'
       : `${this.baseUrl}/messages`;
@@ -1236,7 +1314,9 @@ export class AnthropicWireProvider extends BaseProvider {
       {
         method: 'POST',
         headers: this.buildHeaders(apiKey),
-        body: JSON.stringify(prepareClaudeOAuthBody(apiKey, this.buildAnthropicBody(messages, modelId, false, options))),
+        body: JSON.stringify(
+          prepareClaudeOAuthBody(apiKey, this.buildAnthropicBody(messages, modelId, false, options, connectionId)),
+        ),
       },
       options?.timeoutMs ?? this.timeoutMs,
       { signal: options?.signal, timeoutBounds: 'request' },
@@ -1255,10 +1335,21 @@ export class AnthropicWireProvider extends BaseProvider {
     const data = (await res.json()) as Record<string, any>;
     const blocks = Array.isArray(data.content) ? data.content : [];
     const textParts: string[] = [];
+    const reasoningParts: string[] = [];
     const toolCalls: ChatToolCall[] = [];
 
+    if (connectionId) {
+      storeClaudeThinkingFromResponse(data, {
+        provider: this.providerId,
+        model: modelId,
+        connectionId,
+      });
+    }
+
     for (const block of blocks) {
-      if (block?.type === 'text' && typeof block.text === 'string') {
+      if (block?.type === 'thinking' && typeof block.thinking === 'string') {
+        reasoningParts.push(block.thinking);
+      } else if (block?.type === 'text' && typeof block.text === 'string') {
         textParts.push(block.text);
       } else if (block?.type === 'tool_use') {
         toolCalls.push({
@@ -1274,6 +1365,7 @@ export class AnthropicWireProvider extends BaseProvider {
 
     const promptTokens = data.usage?.input_tokens ?? estimateInputTokens(messages);
     const completionTokens = data.usage?.output_tokens ?? Math.ceil(textParts.join('').length / 4);
+    const reasoningContent = reasoningParts.join('');
 
     return {
       id: String(data.id ?? this.makeId()),
@@ -1286,6 +1378,7 @@ export class AnthropicWireProvider extends BaseProvider {
           message: {
             role: 'assistant',
             content: textParts.join('') || (toolCalls.length > 0 ? null : ''),
+            ...(reasoningContent ? { reasoning_content: reasoningContent } : {}),
             ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
           },
           finish_reason: toolCalls.length > 0 ? 'tool_calls' : (data.stop_reason === 'max_tokens' ? 'length' : 'stop'),
@@ -1304,7 +1397,13 @@ export class AnthropicWireProvider extends BaseProvider {
     messages: ChatMessage[],
     modelId: string,
     options?: CompletionOptions,
+    quotaContext?: QuotaObservationContext,
   ): AsyncGenerator<ChatCompletionChunk> {
+    const connectionId =
+      quotaContext?.providerAccountId ??
+      (quotaContext?.keyId !== undefined && quotaContext?.keyId !== null
+        ? String(quotaContext.keyId)
+        : undefined);
     const url = parseOAuthCredential(apiKey)?.kind === 'claude'
       ? 'https://api.anthropic.com/v1/messages?beta=true'
       : `${this.baseUrl}/messages`;
@@ -1313,7 +1412,9 @@ export class AnthropicWireProvider extends BaseProvider {
       {
         method: 'POST',
         headers: this.buildHeaders(apiKey),
-        body: JSON.stringify(prepareClaudeOAuthBody(apiKey, this.buildAnthropicBody(messages, modelId, true, options))),
+        body: JSON.stringify(
+          prepareClaudeOAuthBody(apiKey, this.buildAnthropicBody(messages, modelId, true, options, connectionId)),
+        ),
       },
       options?.timeoutMs ?? this.timeoutMs,
       { signal: options?.signal },
@@ -1339,6 +1440,12 @@ export class AnthropicWireProvider extends BaseProvider {
     const firstByteMs = this.firstByteBudgetMs(chatTimeoutMs, stallTimeoutMs);
     let awaitingFirstByte = true;
     let buffer = '';
+    let streamModel = modelId;
+    let stopReason: string | null = null;
+    let nextToolIndex = 0;
+    const blockByIndex = new Map<number, Record<string, any>>();
+    const toolIndexByBlock = new Map<number, number>();
+    const assembledBlocks: Record<string, unknown>[] = [];
 
     try {
       while (true) {
@@ -1362,21 +1469,149 @@ export class AnthropicWireProvider extends BaseProvider {
 
           try {
             const ev = JSON.parse(payloadStr) as Record<string, any>;
-            if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta' && typeof ev.delta.text === 'string') {
-              yield {
-                id,
-                object: 'chat.completion.chunk',
-                created,
-                model: modelId,
-                choices: [{ index: 0, delta: { content: ev.delta.text }, finish_reason: null }],
-              };
+            if (ev.type === 'message_start' && typeof ev.message?.model === 'string' && ev.message.model) {
+              streamModel = ev.message.model;
+            } else if (ev.type === 'content_block_start' && ev.content_block && typeof ev.content_block === 'object') {
+              const idx = Number(ev.index ?? 0);
+              const cb = ev.content_block as Record<string, any>;
+              if (cb.type === 'thinking') {
+                blockByIndex.set(idx, {
+                  type: 'thinking',
+                  thinking: typeof cb.thinking === 'string' ? cb.thinking : '',
+                  signature: typeof cb.signature === 'string' ? cb.signature : '',
+                });
+              } else if (cb.type === 'redacted_thinking') {
+                blockByIndex.set(idx, {
+                  type: 'redacted_thinking',
+                  data: typeof cb.data === 'string' ? cb.data : '',
+                });
+              } else if (cb.type === 'tool_use') {
+                const toolIdx = nextToolIndex++;
+                toolIndexByBlock.set(idx, toolIdx);
+                const callId = String(cb.id || `call_${toolIdx + 1}`);
+                const callName = String(cb.name || '');
+                blockByIndex.set(idx, {
+                  type: 'tool_use',
+                  id: callId,
+                  name: callName,
+                  partialJson: '',
+                });
+                yield {
+                  id,
+                  object: 'chat.completion.chunk',
+                  created,
+                  model: streamModel,
+                  choices: [{
+                    index: 0,
+                    delta: {
+                      tool_calls: [{
+                        index: toolIdx,
+                        id: callId,
+                        type: 'function',
+                        function: { name: callName, arguments: '' },
+                      } as ChatToolCall],
+                    },
+                    finish_reason: null,
+                  }],
+                };
+              }
+            } else if (ev.type === 'content_block_delta' && ev.delta) {
+              const idx = Number(ev.index ?? 0);
+              const active = blockByIndex.get(idx);
+              if (ev.delta.type === 'text_delta' && typeof ev.delta.text === 'string') {
+                yield {
+                  id,
+                  object: 'chat.completion.chunk',
+                  created,
+                  model: streamModel,
+                  choices: [{ index: 0, delta: { content: ev.delta.text }, finish_reason: null }],
+                };
+              } else if (ev.delta.type === 'thinking_delta' && typeof ev.delta.thinking === 'string') {
+                if (active?.type === 'thinking') {
+                  active.thinking += ev.delta.thinking;
+                }
+                yield {
+                  id,
+                  object: 'chat.completion.chunk',
+                  created,
+                  model: streamModel,
+                  choices: [{ index: 0, delta: { reasoning_content: ev.delta.thinking }, finish_reason: null }],
+                };
+              } else if (ev.delta.type === 'signature_delta' && typeof ev.delta.signature === 'string') {
+                if (active?.type === 'thinking') {
+                  active.signature += ev.delta.signature;
+                }
+              } else if (ev.delta.type === 'input_json_delta' && typeof ev.delta.partial_json === 'string') {
+                if (active?.type === 'tool_use') {
+                  active.partialJson += ev.delta.partial_json;
+                }
+                const toolIdx = toolIndexByBlock.get(idx) ?? 0;
+                yield {
+                  id,
+                  object: 'chat.completion.chunk',
+                  created,
+                  model: streamModel,
+                  choices: [{
+                    index: 0,
+                    delta: {
+                      tool_calls: [{
+                        index: toolIdx,
+                        function: { arguments: ev.delta.partial_json },
+                      } as unknown as ChatToolCall],
+                    },
+                    finish_reason: null,
+                  }],
+                };
+              }
+            } else if (ev.type === 'content_block_stop') {
+              const idx = Number(ev.index ?? 0);
+              const finished = blockByIndex.get(idx);
+              if (finished) {
+                blockByIndex.delete(idx);
+                if (finished.type === 'tool_use') {
+                  let parsedInput: unknown = {};
+                  try {
+                    parsedInput = finished.partialJson ? JSON.parse(finished.partialJson) : {};
+                  } catch {
+                    parsedInput = {};
+                  }
+                  assembledBlocks.push({
+                    type: 'tool_use',
+                    id: finished.id,
+                    name: finished.name,
+                    input: parsedInput,
+                  });
+                } else {
+                  assembledBlocks.push(finished);
+                }
+              }
+            } else if (ev.type === 'message_delta' && typeof ev.delta?.stop_reason === 'string') {
+              stopReason = ev.delta.stop_reason;
             } else if (ev.type === 'message_stop') {
+              for (const leftover of blockByIndex.values()) {
+                assembledBlocks.push(leftover);
+              }
+              blockByIndex.clear();
+              if (connectionId && assembledBlocks.length > 0) {
+                storeClaudeThinkingBlocks({
+                  content: assembledBlocks,
+                  provider: this.providerId,
+                  model: streamModel,
+                  connectionId,
+                });
+              }
+              const finishReason =
+                nextToolIndex > 0 || stopReason === 'tool_use'
+                  ? 'tool_calls'
+                  : stopReason === 'max_tokens'
+                    ? 'length'
+                    : 'stop';
               yield {
                 id,
                 object: 'chat.completion.chunk',
                 created,
-                model: modelId,
-                choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+                model: streamModel,
+                choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
               };
             }
           } catch {

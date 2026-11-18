@@ -15,6 +15,13 @@ import { isPillarEnabled } from '../flags.js';
 import { GatewayCallError, callGateway } from '../loopback.js';
 import { parseScopeParam } from '../scope.js';
 import {
+  abortCanary,
+  disableCanaryIfMatchesPublished,
+  getCanaryConfig,
+  promoteCanary,
+  setCanaryConfig,
+} from './canary.js';
+import {
   createEvalCase,
   deleteEvalCase,
   listEvalCases,
@@ -23,6 +30,15 @@ import {
   updateEvalCase,
   type EvalCallResult,
 } from './eval.js';
+import {
+  createEvalCase as createGoldenEvalCase,
+  deleteEvalCase as deleteGoldenEvalCase,
+  getEvalRun as getGoldenEvalRun,
+  listEvalCases as listGoldenEvalCases,
+  listEvalRuns as listGoldenEvalRuns,
+  runPromptEvaluation as runGoldenPromptEvaluation,
+  updateEvalCase as updateGoldenEvalCase,
+} from './evals.js';
 import {
   PromptNotFoundError,
   PromptStoreError,
@@ -38,6 +54,7 @@ import {
   setPromptAbSplit,
 } from './store.js';
 import { renderWith, sanitizeVariableValue, validateTemplate } from './template.js';
+import { EVAL_CANARY_LIMITS } from '@freellmapi/shared/ai-platform-eval-canary.js';
 
 class RouterPromptError extends Error {
   constructor(
@@ -665,6 +682,9 @@ promptsAdminRouter.post(
       }
       const user = getUser(req);
       const head = publish(scope, parsed.data.revision, user?.userId ?? null);
+      if (head.publishedVersion !== null) {
+        disableCanaryIfMatchesPublished(getDb(), scope, head.publishedVersion);
+      }
       res.json({ head });
     } catch (err) {
       sendPromptsError(res, err);
@@ -688,6 +708,9 @@ promptsAdminRouter.post(
       }
       const user = getUser(req);
       const head = restore(scope, parsed.data.version, parsed.data.revision, user?.userId ?? null);
+      if (head.publishedVersion !== null) {
+        disableCanaryIfMatchesPublished(getDb(), scope, head.publishedVersion);
+      }
       res.json({ head });
     } catch (err) {
       sendPromptsError(res, err);
@@ -838,6 +861,227 @@ promptsAdminRouter.post(
       sendPromptsError(res, err);
     } finally {
       cleanup();
+    }
+  },
+);
+
+const evalRunBodySchema = z
+  .object({
+    candidateVersion: z.number().int().positive().optional(),
+    baselineVersion: z.number().int().positive().nullable().optional(),
+    model: z.string().trim().min(1).max(200).optional(),
+    caseIds: z.array(z.number().int().positive()).max(EVAL_CANARY_LIMITS.maxCasesPerScope).optional(),
+  })
+  .strict();
+
+const canaryUpdateBodySchema = z
+  .object({
+    enabled: z.boolean(),
+    candidateVersion: z.number().int().positive().nullable(),
+    trafficPercent: z
+      .number()
+      .int()
+      .min(EVAL_CANARY_LIMITS.minTrafficPercent)
+      .max(EVAL_CANARY_LIMITS.maxTrafficPercent),
+    resetMetrics: z.boolean().optional(),
+  })
+  .strict();
+
+const canaryPromoteBodySchema = z
+  .object({
+    revision: z.number().int().min(0).optional(),
+  })
+  .strict();
+
+promptsAdminRouter.get(
+  '/prompts/:scopeKind/:scopeId/evals/cases',
+  requirePerm('view_prompts'),
+  (req, res) => {
+    try {
+      const scope = parseRouteScope(req);
+      res.json({ cases: listGoldenEvalCases(scope) });
+    } catch (err) {
+      sendPromptsError(res, err);
+    }
+  },
+);
+
+promptsAdminRouter.post(
+  '/prompts/:scopeKind/:scopeId/evals/cases',
+  requirePerm('edit_prompts'),
+  async (req, res) => {
+    try {
+      const scope = parseRouteScope(req);
+      const evalCase = await createGoldenEvalCase(scope, req.body);
+      res.status(201).json({ evalCase });
+    } catch (err) {
+      sendPromptsError(res, err);
+    }
+  },
+);
+
+promptsAdminRouter.put(
+  '/prompts/:scopeKind/:scopeId/evals/cases/:caseId',
+  requirePerm('edit_prompts'),
+  async (req, res) => {
+    try {
+      const scope = parseRouteScope(req);
+      const caseId = parsePositiveInt(req.params.caseId, 'eval case id');
+      const evalCase = await updateGoldenEvalCase(scope, caseId, req.body);
+      res.json({ evalCase });
+    } catch (err) {
+      sendPromptsError(res, err);
+    }
+  },
+);
+
+promptsAdminRouter.delete(
+  '/prompts/:scopeKind/:scopeId/evals/cases/:caseId',
+  requirePerm('edit_prompts'),
+  (req, res) => {
+    try {
+      const scope = parseRouteScope(req);
+      const caseId = parsePositiveInt(req.params.caseId, 'eval case id');
+      deleteGoldenEvalCase(scope, caseId);
+      res.json({ deleted: true });
+    } catch (err) {
+      sendPromptsError(res, err);
+    }
+  },
+);
+
+promptsAdminRouter.get(
+  '/prompts/:scopeKind/:scopeId/evals/runs',
+  requirePerm('view_prompts'),
+  (req, res) => {
+    try {
+      const scope = parseRouteScope(req);
+      const limit =
+        req.query.limit !== undefined && req.query.limit !== ''
+          ? parsePositiveInt(req.query.limit, 'limit')
+          : undefined;
+      res.json({ runs: listGoldenEvalRuns(scope, limit) });
+    } catch (err) {
+      sendPromptsError(res, err);
+    }
+  },
+);
+
+promptsAdminRouter.get(
+  '/prompts/:scopeKind/:scopeId/evals/runs/:runId',
+  requirePerm('view_prompts'),
+  (req, res) => {
+    try {
+      const scope = parseRouteScope(req);
+      const runId = parsePositiveInt(req.params.runId, 'eval run id');
+      res.json({ run: getGoldenEvalRun(scope, runId) });
+    } catch (err) {
+      sendPromptsError(res, err);
+    }
+  },
+);
+
+promptsAdminRouter.post(
+  '/prompts/:scopeKind/:scopeId/evals/run',
+  requirePerm('edit_prompts'),
+  async (req, res) => {
+    const { signal, cleanup } = attachDisconnectAbort(res);
+
+    try {
+      const scope = parseRouteScope(req);
+      const parsed = evalRunBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        throw new RouterPromptError(
+          400,
+          'validation_error',
+          `Invalid eval run payload: ${parsed.error.issues[0]?.message ?? 'validation failed'}`,
+        );
+      }
+      const user = getUser(req);
+      const run = await runGoldenPromptEvaluation(scope, parsed.data, {
+        req,
+        actorId: user?.userId ?? null,
+        signal,
+      });
+      res.json({ run });
+    } catch (err) {
+      sendPromptsError(res, err);
+    } finally {
+      cleanup();
+    }
+  },
+);
+
+promptsAdminRouter.get(
+  '/prompts/:scopeKind/:scopeId/canary',
+  requirePerm('view_prompts'),
+  (req, res) => {
+    try {
+      const scope = parseRouteScope(req);
+      res.json({ canary: getCanaryConfig(scope) });
+    } catch (err) {
+      sendPromptsError(res, err);
+    }
+  },
+);
+
+promptsAdminRouter.put(
+  '/prompts/:scopeKind/:scopeId/canary',
+  requirePerm('publish_prompts'),
+  (req, res) => {
+    try {
+      const scope = parseRouteScope(req);
+      const parsed = canaryUpdateBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        throw new RouterPromptError(
+          422,
+          'validation_error',
+          `Invalid canary configuration: ${parsed.error.issues[0]?.message ?? 'validation failed'}`,
+        );
+      }
+      const user = getUser(req);
+      const canary = setCanaryConfig(scope, parsed.data, user?.userId ?? null);
+      res.json({ canary });
+    } catch (err) {
+      sendPromptsError(res, err);
+    }
+  },
+);
+
+promptsAdminRouter.post(
+  '/prompts/:scopeKind/:scopeId/canary/promote',
+  requirePerm('publish_prompts'),
+  (req, res) => {
+    try {
+      const scope = parseRouteScope(req);
+      const parsed = canaryPromoteBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        throw new RouterPromptError(
+          400,
+          'validation_error',
+          `Invalid canary promote payload: ${parsed.error.issues[0]?.message ?? 'validation failed'}`,
+        );
+      }
+      const user = getUser(req);
+      const result = promoteCanary(scope, parsed.data.revision, user?.userId ?? null);
+      res.json(result);
+    } catch (err) {
+      sendPromptsError(res, err);
+    }
+  },
+);
+
+promptsAdminRouter.post(
+  '/prompts/:scopeKind/:scopeId/canary/abort',
+  requirePerm('publish_prompts'),
+  (req, res) => {
+    try {
+      const scope = parseRouteScope(req);
+      const user = getUser(req);
+      const result = abortCanary(scope, user?.userId ?? null);
+      res.json(result);
+    } catch (err) {
+      sendPromptsError(res, err);
     }
   },
 );
