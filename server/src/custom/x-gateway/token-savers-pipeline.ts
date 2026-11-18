@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import type { ChatMessage } from '@freellmapi/shared/types.js';
 import { isRtkEnabled, compressMessages } from './rtk.js';
+import { compactGatewayConversation, isAgenticCompactorEnabled } from './agentic-compaction.js';
 import { isHeadroomPhantomSavings, compressWithHeadroom } from './headroom.js';
 import { isPxpipeEnabled, isVisionCapableModel, compressMessagesWithPxpipeVision } from './pxpipe.js';
 import { readOutputSaverSettings } from '../output-savers/config.js';
@@ -24,6 +25,7 @@ export interface PreprocessPipelineResult {
   appliedSavers: string[];
   tokensSavedEst: number;
   rtkTokensSavedEst: number;
+  agenticTokensSavedEst: number;
   headroomTokensSavedEst: number;
   pxpipeTokensSavedEst: number;
   outputSaverApplied?: string;
@@ -47,6 +49,7 @@ export function isTokenSaversBypassed(req?: Request): {
   allInputBypassed: boolean;
   outputBypassed: boolean;
   rtkBypassed: boolean;
+  agenticBypassed: boolean;
   headroomBypassed: boolean;
   pxpipeBypassed: boolean;
 } {
@@ -71,6 +74,13 @@ export function isTokenSaversBypassed(req?: Request): {
     isBypassedByHeader(req, 'x-rtk') ||
     isBypassedByHeader(req, 'x-rtk-saver');
 
+  const agenticBypass =
+    globalBypass ||
+    isBypassedByHeader(req, 'x-disable-agentic') ||
+    isBypassedByHeader(req, 'x-disable-agentic-saver') ||
+    isBypassedByHeader(req, 'x-agentic') ||
+    isBypassedByHeader(req, 'x-agentic-saver');
+
   const headroomBypass =
     globalBypass ||
     isBypassedByHeader(req, 'x-disable-headroom') ||
@@ -89,6 +99,7 @@ export function isTokenSaversBypassed(req?: Request): {
     allInputBypassed: globalBypass,
     outputBypassed: outputBypass,
     rtkBypassed: rtkBypass,
+    agenticBypassed: agenticBypass,
     headroomBypassed: headroomBypass,
     pxpipeBypassed: pxpipeBypass,
   };
@@ -111,6 +122,7 @@ export async function preprocessGatewayMessages(
     allInputBypassed,
     outputBypassed,
     rtkBypassed,
+    agenticBypassed,
     headroomBypassed,
     pxpipeBypassed,
   } = isTokenSaversBypassed(req);
@@ -121,6 +133,7 @@ export async function preprocessGatewayMessages(
   let messages: ChatMessage[] = structuredClone(options.messages);
   const appliedSavers: string[] = [];
   let rtkTokensSavedEst = 0;
+  let agenticTokensSavedEst = 0;
   let headroomTokensSavedEst = 0;
   let pxpipeTokensSavedEst = 0;
   let outputSaverApplied: string | undefined;
@@ -138,6 +151,23 @@ export async function preprocessGatewayMessages(
         if (Array.isArray(targetBody.messages)) {
           messages = targetBody.messages as ChatMessage[];
         }
+      }
+    } catch {
+      // Fail open
+    }
+  }
+
+  // 1.5. Agentic & Code-Safe Input Compactor (Zero-Sidecar)
+  if (!allInputBypassed && !agenticBypassed && isAgenticCompactorEnabled()) {
+    try {
+      const agenticRes = compactGatewayConversation({
+        messages,
+        rawBody: options.rawBody,
+      });
+      if (agenticRes.applied) {
+        messages = agenticRes.messages;
+        agenticTokensSavedEst = agenticRes.tokensSavedEst;
+        appliedSavers.push('Agentic');
       }
     } catch {
       // Fail open
@@ -222,7 +252,8 @@ export async function preprocessGatewayMessages(
     }
   }
 
-  const totalTokensSavedEst = rtkTokensSavedEst + headroomTokensSavedEst + pxpipeTokensSavedEst;
+  const totalTokensSavedEst =
+    rtkTokensSavedEst + agenticTokensSavedEst + headroomTokensSavedEst + pxpipeTokensSavedEst;
 
   const result: PreprocessPipelineResult = {
     messages: messages as ChatMessage[],
@@ -230,6 +261,7 @@ export async function preprocessGatewayMessages(
     appliedSavers,
     tokensSavedEst: totalTokensSavedEst,
     rtkTokensSavedEst,
+    agenticTokensSavedEst,
     headroomTokensSavedEst,
     pxpipeTokensSavedEst,
     outputSaverApplied,
@@ -250,6 +282,9 @@ export async function preprocessGatewayMessages(
     }
     if (rtkTokensSavedEst > 0) {
       res.setHeader('X-RTK-Saved-Tokens-Est', String(rtkTokensSavedEst));
+    }
+    if (agenticTokensSavedEst > 0) {
+      res.setHeader('X-Agentic-Saved-Tokens-Est', String(agenticTokensSavedEst));
     }
     if (headroomTokensSavedEst > 0) {
       res.setHeader('X-Headroom-Saved-Tokens-Est', String(headroomTokensSavedEst));
