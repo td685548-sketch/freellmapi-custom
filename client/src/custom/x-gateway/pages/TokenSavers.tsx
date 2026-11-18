@@ -27,6 +27,7 @@ import {
 import { apiFetch } from '@/lib/api'
 import { useUserSession } from '../../use-session'
 import { useSessionRevision } from '../../session-state'
+import AgenticCompactorPanel from '../components/AgenticCompactorPanel'
 import { useXStrings } from '../strings'
 
 const levels = ['off', 'lite', 'full', 'ultra', 'wenyan'] as const
@@ -600,6 +601,8 @@ export default function TokenSavers() {
             </div>
           </section>
         </div>
+
+        <AgenticCompactorPanel canEdit={canEdit} />
 
         {/* Token Savings AreaChart & Metrics Dashboard */}
         <section className="x-panel" style={{ marginTop: '1.5rem', padding: '1.25rem' }}>

@@ -6,6 +6,7 @@ import { useUserSession } from '../../use-session'
 import { useSessionRevision } from '../../session-state'
 import { settingsApi, type SsoAuthMode, type XRoutingDefaults } from '../settings-api'
 import { useSettingsStrings } from '../settings-strings'
+import { SmartRoutingV2Panel } from '../components/SmartRoutingV2Panel'
 
 const validLimit = (value: string) => /^\d{1,3}$/.test(value) && Number(value) >= 1 && Number(value) <= 100
 
@@ -208,6 +209,7 @@ export default function Settings() {
   return <>
     <div className="x-page-heading"><div><h1>{s.title}</h1><p>{s.help}</p></div><span className="x-heading-icon"><SettingsIcon size={28} /></span></div>
     <RoutingSection />
+    <SmartRoutingV2Panel />
     <LanguageSection />
     <AccountSection />
     <SsoSection />

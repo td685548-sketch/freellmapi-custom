@@ -21,6 +21,11 @@ import {
 } from './config.js';
 import { resetRouteHealth } from './router.js';
 import {
+  clearThinkingContinuityStore,
+  getThinkingContinuitySnapshot,
+  setThinkingContinuityMode,
+} from './thinking-store.js';
+import {
   listXGatewayClientKeys,
   mintXGatewayClientKey,
   revokeXGatewayClientKey,
@@ -67,6 +72,7 @@ import { xSupportEvidenceConsoleRouter } from './support-evidence-router.js';
 import { xSupportServiceDeskConsoleRouter } from './support-service-desk-router.js';
 import { xSupportServiceDeskLiveTestRouter } from './support-service-desk-live-test-router.js';
 import { xSupportOutputConsoleRouter } from './support-output-router.js';
+import { xSmartRoutingRouter } from './smart-routing-router.js';
 
 /** Console API for the gateway switch, outbound proxy, dedicated API keys, and default savers.
  *
@@ -255,6 +261,32 @@ xGatewayConsoleRouter.put('/routing-health', (req, res) => {
     resetRouteHealth();
   }
   res.json({ penaltyTtlMinutes: getRouteHealthTtlMinutes() });
+});
+
+const thinkingContinuitySchema = z.object({
+  mode: z.enum(['enabled', 'bypass']),
+}).strict();
+
+const thinkingContinuityClearSchema = z.object({
+  memoryOnly: z.boolean().optional(),
+  resetDiagnostics: z.boolean().optional(),
+}).strict();
+
+xGatewayConsoleRouter.get('/thinking-continuity', (_req, res) => {
+  res.json(getThinkingContinuitySnapshot());
+});
+
+xGatewayConsoleRouter.put('/thinking-continuity', (req, res) => {
+  requireUserId(req);
+  const body = parse(thinkingContinuitySchema, req.body);
+  setThinkingContinuityMode(body.mode);
+  res.json(getThinkingContinuitySnapshot());
+});
+
+xGatewayConsoleRouter.post('/thinking-continuity/clear', (req, res) => {
+  requireUserId(req);
+  const body = parse(thinkingContinuityClearSchema, req.body ?? {});
+  res.json(clearThinkingContinuityStore(body));
 });
 
 xGatewayConsoleRouter.get('/pricing', (_req, res) => {
@@ -481,6 +513,7 @@ xGatewayConsoleRouter.use(xGatewayManagementRouter);
 xGatewayConsoleRouter.use(xGatewayMediaRouter);
 xGatewayConsoleRouter.use(xQuotaRouter);
 xGatewayConsoleRouter.use(xRoutingDefaultsRouter);
+xGatewayConsoleRouter.use('/smart-routing', xSmartRoutingRouter);
 xGatewayConsoleRouter.use('/proxy-pool', xProxyPoolRouter);
 xGatewayConsoleRouter.use('/tools', xCliToolsRouter);
 xGatewayConsoleRouter.use('/translator', xTranslatorRouter);

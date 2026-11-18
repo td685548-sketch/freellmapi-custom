@@ -141,7 +141,8 @@ export default function ProviderAccounts() {
   const cooldownQuery = useQuery({
     queryKey: ['x-account-cooldowns', revision],
     queryFn: ({ signal }) => apiFetch<{ cooldowns: Record<number, string> }>('/api/thruline-accounts/cooldowns', { signal }),
-    refetchInterval: 5_000,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
     retry: false,
   })
   const cooldowns = cooldownQuery.data?.cooldowns ?? {}

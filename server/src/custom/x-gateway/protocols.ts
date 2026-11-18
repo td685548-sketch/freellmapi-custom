@@ -46,6 +46,13 @@ import {
 import { preprocessGatewayMessages } from './token-savers-pipeline.js';
 import { sanitizeProviderErrorMessage } from '../../lib/error-redaction.js';
 import { isModelAllowedForKey, type ValidatedXGatewayClientKey } from './client-keys.js';
+import type { ClaudeSignedThinkingBlock } from '@freellmapi/shared/thinking-continuity.js';
+import { peekClaudeThinkingBlocks } from './thinking-store.js';
+import {
+  captureGatewayThinkingResponse,
+  prepareGatewayThinkingRequest,
+  spliceClaudeThinkingSegmentsIntoContent,
+} from './thinking-normalize.js';
 
 export const xGatewayProtocolsRouter = Router();
 
@@ -144,12 +151,24 @@ function convertAnthropicMessages(body: Record<string, any>): {
 
     const textParts: string[] = [];
     const imageBlocks: ChatContentBlock[] = [];
+    const thinkingBlocks: ClaudeSignedThinkingBlock[] = [];
     const toolCalls: ChatToolCall[] = [];
     const toolResults: ChatMessage[] = [];
 
     for (const block of msg.content) {
       if (!block || typeof block !== 'object') continue;
-      if (block.type === 'text' && typeof block.text === 'string') {
+      if (block.type === 'thinking' && typeof block.thinking === 'string') {
+        thinkingBlocks.push({
+          type: 'thinking',
+          thinking: block.thinking,
+          signature: typeof block.signature === 'string' ? block.signature : '',
+        });
+      } else if (block.type === 'redacted_thinking' && typeof block.data === 'string') {
+        thinkingBlocks.push({
+          type: 'redacted_thinking',
+          data: block.data,
+        });
+      } else if (block.type === 'text' && typeof block.text === 'string') {
         textParts.push(block.text);
       } else if (block.type === 'image' && block.source) {
         const src = block.source;
@@ -161,6 +180,12 @@ function convertAnthropicMessages(body: Record<string, any>): {
               : null;
         if (url) imageBlocks.push({ type: 'image_url', image_url: { url } } as ChatContentBlock);
       } else if (block.type === 'tool_use') {
+        const thoughtSig =
+          typeof block.thought_signature === 'string' && block.thought_signature
+            ? block.thought_signature
+            : typeof block.thoughtSignature === 'string' && block.thoughtSignature
+              ? block.thoughtSignature
+              : undefined;
         toolCalls.push({
           id: String(block.id ?? `toolu_${crypto.randomBytes(6).toString('hex')}`),
           type: 'function',
@@ -168,6 +193,7 @@ function convertAnthropicMessages(body: Record<string, any>): {
             name: String(block.name ?? ''),
             arguments: JSON.stringify(block.input ?? {}),
           },
+          ...(thoughtSig ? { thought_signature: thoughtSig } : {}),
         });
       } else if (block.type === 'tool_result') {
         toolResults.push({
@@ -185,7 +211,8 @@ function convertAnthropicMessages(body: Record<string, any>): {
         role: 'assistant',
         content: joinedText.length > 0 ? joinedText : null,
         ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
-      });
+        ...(thinkingBlocks.length > 0 ? { thinking_blocks: thinkingBlocks } : {}),
+      } as ChatMessage);
     } else {
       messages.push(...toolResults);
       if (imageBlocks.length > 0) {
@@ -315,9 +342,14 @@ xGatewayProtocolsRouter.post('/messages', xGatewayAuth, async (req: Request, res
     };
 
     const estimatedPromptTokens = estimateInputTokens(messages, converted.tools);
+    const rawAnthropicThinking =
+      body.thinking && typeof body.thinking === 'object' && !Array.isArray(body.thinking)
+        ? (body.thinking as { type?: unknown; budget_tokens?: unknown })
+        : null;
     let lastError: unknown = null;
 
-    for (const { account, modelId } of candidates) {
+    for (let candidateIdx = 0; candidateIdx < candidates.length; candidateIdx += 1) {
+      const { account, modelId } = candidates[candidateIdx]!;
       const provider = resolveAccountProvider(account);
       if (!provider) continue;
 
@@ -330,11 +362,20 @@ xGatewayProtocolsRouter.post('/messages', xGatewayAuth, async (req: Request, res
       }
 
       const effectiveProxy = resolveXGatewayAccountProxy(account);
+      const prepared = prepareGatewayThinkingRequest({
+        messages,
+        options,
+        rawThinking: rawAnthropicThinking,
+        provider: account.provider,
+        modelId,
+        accountId: account.id,
+        isFailover: candidateIdx > 0,
+      });
 
       if (!isStream) {
         try {
           const completion = await withQuotaTracking(account, modelId, effectiveProxy, () =>
-            provider.chatCompletion(credential, messages, modelId, options, {
+            provider.chatCompletion(credential, prepared.messages, modelId, prepared.options, {
               platform: account.platform,
               keyId: account.id,
               modelId,
@@ -345,6 +386,12 @@ xGatewayProtocolsRouter.post('/messages', xGatewayAuth, async (req: Request, res
           const respMsg = completion.choices?.[0]?.message;
           const text = contentToString(respMsg?.content ?? '');
           const toolCalls = respMsg?.tool_calls ?? [];
+          captureGatewayThinkingResponse({
+            toolCalls,
+            provider: account.provider,
+            modelId: completion.model || modelId,
+            accountId: account.id,
+          });
           const promptTokens = completion.usage?.prompt_tokens ?? estimatedPromptTokens;
           const completionTokens =
             completion.usage?.completion_tokens ?? Math.max(1, Math.ceil(text.length / 4));
@@ -365,12 +412,22 @@ xGatewayProtocolsRouter.post('/messages', xGatewayAuth, async (req: Request, res
             'x-gateway',
           );
 
-          const contentBlocks: Array<Record<string, unknown>> = [];
-          if (typeof respMsg?.reasoning_content === 'string' && respMsg.reasoning_content) {
-            contentBlocks.push({ type: 'thinking', thinking: respMsg.reasoning_content, signature: '' });
+          const baseBlocks: Array<Record<string, unknown>> = [];
+          const storedSignedSegments =
+            toolCalls.length > 0
+              ? peekClaudeThinkingBlocks({
+                  toolUseIds: toolCalls.map(tc => tc.id),
+                  provider: account.provider,
+                  model: completion.model || modelId,
+                  connectionId: String(account.id),
+                })
+              : null;
+
+          if (!storedSignedSegments && typeof respMsg?.reasoning_content === 'string' && respMsg.reasoning_content) {
+            baseBlocks.push({ type: 'thinking', thinking: respMsg.reasoning_content, signature: '' });
           }
           if (text) {
-            contentBlocks.push({ type: 'text', text });
+            baseBlocks.push({ type: 'text', text });
           }
           for (const tc of toolCalls) {
             let parsedInput: unknown = {};
@@ -379,13 +436,14 @@ xGatewayProtocolsRouter.post('/messages', xGatewayAuth, async (req: Request, res
             } catch {
               parsedInput = {};
             }
-            contentBlocks.push({
+            baseBlocks.push({
               type: 'tool_use',
               id: tc.id,
               name: tc.function.name,
               input: parsedInput,
             });
           }
+          const contentBlocks = spliceClaudeThinkingSegmentsIntoContent(baseBlocks, storedSignedSegments);
 
           res.setHeader('X-Routed-Via', `${account.provider}/${modelId}`);
           res.status(200).json({
@@ -409,7 +467,7 @@ xGatewayProtocolsRouter.post('/messages', xGatewayAuth, async (req: Request, res
       } else {
         try {
           await withQuotaTracking(account, modelId, effectiveProxy, async () => {
-            const stream = provider.streamChatCompletion(credential, messages, modelId, options, {
+            const stream = provider.streamChatCompletion(credential, prepared.messages, modelId, prepared.options, {
               platform: account.platform,
               keyId: account.id,
               modelId,
@@ -475,6 +533,12 @@ xGatewayProtocolsRouter.post('/messages', xGatewayAuth, async (req: Request, res
             if (!completionTokens) completionTokens = Math.max(1, Math.ceil(textChars / 4));
 
             toolStream.finish();
+            captureGatewayThinkingResponse({
+              toolCalls: toolStream.calls,
+              provider: account.provider,
+              modelId,
+              accountId: account.id,
+            });
             writeAnthropicSse(res, 'content_block_stop', { type: 'content_block_stop', index: 0 });
             writeAnthropicSse(res, 'message_delta', {
               type: 'message_delta',
@@ -709,7 +773,8 @@ async function handleResponses(req: Request, res: Response): Promise<void> {
     }
 
     const options: CompletionOptions = {
-      reasoning_effort: parseModelThinkingSuffix(typeof body.model === 'string' ? body.model : undefined).thinkingEffort as CompletionOptions['reasoning_effort'],
+      reasoning_effort: (parseModelThinkingSuffix(typeof body.model === 'string' ? body.model : undefined).thinkingEffort ??
+        (typeof body.reasoning?.effort === 'string' ? body.reasoning.effort : undefined)) as CompletionOptions['reasoning_effort'],
       signal: requestSignal(req, res),
       temperature: typeof body.temperature === 'number' ? body.temperature : undefined,
       max_tokens: typeof body.max_output_tokens === 'number' ? body.max_output_tokens : undefined,
@@ -723,7 +788,8 @@ async function handleResponses(req: Request, res: Response): Promise<void> {
     const responseId = `resp_${crypto.randomBytes(12).toString('hex')}`;
     let lastError: unknown = null;
 
-    for (const { account, modelId } of candidates) {
+    for (let candidateIdx = 0; candidateIdx < candidates.length; candidateIdx += 1) {
+      const { account, modelId } = candidates[candidateIdx]!;
       const provider = resolveAccountProvider(account);
       if (!provider) continue;
 
@@ -736,11 +802,19 @@ async function handleResponses(req: Request, res: Response): Promise<void> {
       }
 
       const effectiveProxy = resolveXGatewayAccountProxy(account);
+      const prepared = prepareGatewayThinkingRequest({
+        messages,
+        options,
+        provider: account.provider,
+        modelId,
+        accountId: account.id,
+        isFailover: candidateIdx > 0,
+      });
 
       if (!isStream) {
         try {
           const completion = await withQuotaTracking(account, modelId, effectiveProxy, () =>
-            provider.chatCompletion(credential, messages, modelId, options, {
+            provider.chatCompletion(credential, prepared.messages, modelId, prepared.options, {
               platform: account.platform,
               keyId: account.id,
               modelId,
@@ -751,6 +825,12 @@ async function handleResponses(req: Request, res: Response): Promise<void> {
           const respMsg = completion.choices?.[0]?.message;
           const text = contentToString(respMsg?.content ?? '');
           const toolCalls = respMsg?.tool_calls ?? [];
+          captureGatewayThinkingResponse({
+            toolCalls,
+            provider: account.provider,
+            modelId: completion.model || modelId,
+            accountId: account.id,
+          });
           const promptTokens = completion.usage?.prompt_tokens ?? estimatedPromptTokens;
           const completionTokens =
             completion.usage?.completion_tokens ?? Math.max(1, Math.ceil(text.length / 4));
@@ -790,7 +870,7 @@ async function handleResponses(req: Request, res: Response): Promise<void> {
       } else {
         try {
           await withQuotaTracking(account, modelId, effectiveProxy, async () => {
-            const stream = provider.streamChatCompletion(credential, messages, modelId, options, {
+            const stream = provider.streamChatCompletion(credential, prepared.messages, modelId, prepared.options, {
               platform: account.platform,
               keyId: account.id,
               modelId,
@@ -876,6 +956,12 @@ async function handleResponses(req: Request, res: Response): Promise<void> {
             });
 
             toolStream.finish();
+            captureGatewayThinkingResponse({
+              toolCalls: toolStream.calls,
+              provider: account.provider,
+              modelId,
+              accountId: account.id,
+            });
             const completed = toolStream.finalizeResponse(buildResponsesPayload({
               id: responseId,
               model: modelId,
