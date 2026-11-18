@@ -1,0 +1,290 @@
+name: SnapDeploy Auto-Deploy
+
+on:
+  workflow_run:
+    workflows: ["CI", "Docker"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+# Serialize production deployments so simultaneous CI + Docker completions
+# never race or consume duplicate SnapDeploy deploy-cap units.
+concurrency:
+  group: snapdeploy-deploy-main
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to SnapDeploy
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main'
+      )
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Verify main CI and Docker workflows are both green
+        id: gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          MAIN_SHA="$(gh api "repos/${REPO}/git/ref/heads/main" --jq '.object.sha')"
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            TARGET_SHA="${MAIN_SHA}"
+          else
+            TARGET_SHA="${WORKFLOW_RUN_SHA}"
+          fi
+
+          echo "Target commit: ${TARGET_SHA}"
+          echo "Current main:  ${MAIN_SHA}"
+
+          if [ "${TARGET_SHA}" != "${MAIN_SHA}" ]; then
+            echo "Skipping superseded commit ${TARGET_SHA}; main has moved to ${MAIN_SHA}."
+            echo "should_deploy=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          RUNS_JSON="$(gh api "repos/${REPO}/actions/runs?head_sha=${TARGET_SHA}&event=push&per_page=100")"
+
+          CI_SUMMARY="$(jq -r '
+            [.workflow_runs[] | select(.path == ".github/workflows/ci.yml")]
+            | sort_by(.run_number) | last
+            | if . == null then "missing|null|0"
+              else "\(.status)|\(.conclusion // "null")|\(.updated_at)" end
+          ' <<< "${RUNS_JSON}")"
+
+          DOCKER_SUMMARY="$(jq -r '
+            [.workflow_runs[] | select(.path == ".github/workflows/docker.yml")]
+            | sort_by(.run_number) | last
+            | if . == null then "missing|null|0"
+              else "\(.status)|\(.conclusion // "null")|\(.updated_at)" end
+          ' <<< "${RUNS_JSON}")"
+
+          IFS='|' read -r CI_STATUS CI_CONCLUSION CI_UPDATED <<< "${CI_SUMMARY}"
+          IFS='|' read -r DOCKER_STATUS DOCKER_CONCLUSION DOCKER_UPDATED <<< "${DOCKER_SUMMARY}"
+
+          echo "CI workflow:     status=${CI_STATUS}, conclusion=${CI_CONCLUSION}, updated=${CI_UPDATED}"
+          echo "Docker workflow: status=${DOCKER_STATUS}, conclusion=${DOCKER_CONCLUSION}, updated=${DOCKER_UPDATED}"
+
+          if [ "${CI_STATUS}" != "completed" ] || [ "${CI_CONCLUSION}" != "success" ]; then
+            echo "Waiting for CI workflow to complete with success on ${TARGET_SHA}; skipping deploy for now."
+            echo "should_deploy=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          if [ "${DOCKER_STATUS}" != "completed" ] || [ "${DOCKER_CONCLUSION}" != "success" ]; then
+            echo "Waiting for Docker workflow to complete with success on ${TARGET_SHA}; skipping deploy for now."
+            echo "should_deploy=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          CI_EPOCH="$(date -d "${CI_UPDATED}" +%s)"
+          DOCKER_EPOCH="$(date -d "${DOCKER_UPDATED}" +%s)"
+          if [ "${CI_EPOCH}" -gt "${DOCKER_EPOCH}" ]; then
+            GATE_EPOCH="${CI_EPOCH}"
+          else
+            GATE_EPOCH="${DOCKER_EPOCH}"
+          fi
+
+          echo "Both CI and Docker are green for ${TARGET_SHA}."
+          echo "should_deploy=true" >> "${GITHUB_OUTPUT}"
+          echo "target_sha=${TARGET_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "gate_epoch=${GATE_EPOCH}" >> "${GITHUB_OUTPUT}"
+
+      - name: Trigger SnapDeploy redeploy and verify health
+        if: steps.gate.outputs.should_deploy == 'true'
+        env:
+          SNAPDEPLOY_API_KEY: ${{ secrets.SNAPDEPLOY_API_KEY }}
+          SNAPDEPLOY_CONTAINER_ID: ${{ secrets.SNAPDEPLOY_CONTAINER_ID }}
+          EVENT_NAME: ${{ github.event_name }}
+          TARGET_SHA: ${{ steps.gate.outputs.target_sha }}
+          GATE_EPOCH: ${{ steps.gate.outputs.gate_epoch }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${SNAPDEPLOY_API_KEY}" ] || [ -z "${SNAPDEPLOY_CONTAINER_ID}" ]; then
+            echo "SNAPDEPLOY_API_KEY or SNAPDEPLOY_CONTAINER_ID is not configured; skipping SnapDeploy deployment."
+            exit 0
+          fi
+
+          API_BASE="https://snapdeploy.dev/api/mobile"
+
+          sd_get() {
+            curl -fsS \
+              -H "X-API-Key: ${SNAPDEPLOY_API_KEY}" \
+              -H "Accept: application/json" \
+              "${API_BASE}$1"
+          }
+
+          sd_post() {
+            local path="$1"
+            local idem="${2:-}"
+            local tmp_body
+            tmp_body="$(mktemp)"
+            local code
+            if [ -n "${idem}" ]; then
+              code="$(curl -sS -o "${tmp_body}" -w "%{http_code}" -X POST \
+                -H "X-API-Key: ${SNAPDEPLOY_API_KEY}" \
+                -H "Accept: application/json" \
+                -H "Idempotency-Key: ${idem}" \
+                "${API_BASE}${path}")"
+            else
+              code="$(curl -sS -o "${tmp_body}" -w "%{http_code}" -X POST \
+                -H "X-API-Key: ${SNAPDEPLOY_API_KEY}" \
+                -H "Accept: application/json" \
+                "${API_BASE}${path}")"
+            fi
+            SD_LAST_BODY="$(cat "${tmp_body}")"
+            rm -f "${tmp_body}"
+            SD_LAST_CODE="${code}"
+          }
+
+          CONTAINER_JSON="$(sd_get "/containers/${SNAPDEPLOY_CONTAINER_ID}")"
+          STATUS="$(jq -r '.status // "UNKNOWN"' <<< "${CONTAINER_JSON}")"
+          PREV_COUNT="$(jq -r '.deploymentCount // 0' <<< "${CONTAINER_JSON}")"
+          IN_PROGRESS="$(jq -r '.actionLocks.deploymentInProgress // false' <<< "${CONTAINER_JSON}")"
+          LAST_DEPLOYED_AT="$(jq -r '.lastDeployedAt // ""' <<< "${CONTAINER_JSON}")"
+          APP_URL="$(jq -r '.url // ""' <<< "${CONTAINER_JSON}")"
+          INIT_DEPS_JSON="$(sd_get "/containers/${SNAPDEPLOY_CONTAINER_ID}/deployments?limit=1" || echo '[]')"
+          PREV_DEP_ID="$(jq -r '(if type == "array" then .[0] else (.deployments[0] // null) end) | .deploymentId // ""' <<< "${INIT_DEPS_JSON}")"
+
+          echo "Container status=${STATUS}, deploymentCount=${PREV_COUNT}, inProgress=${IN_PROGRESS}, prevDeployment=${PREV_DEP_ID}, url=${APP_URL}"
+
+          if [ "${EVENT_NAME}" = "workflow_run" ] && [ -n "${LAST_DEPLOYED_AT}" ] && [ "${LAST_DEPLOYED_AT}" != "null" ]; then
+            LAST_DEPLOYED_EPOCH="$(date -d "${LAST_DEPLOYED_AT}" +%s || echo 0)"
+            if [ "${LAST_DEPLOYED_EPOCH}" -ge "${GATE_EPOCH}" ]; then
+              echo "Container was already deployed at ${LAST_DEPLOYED_AT} after CI & Docker finished; skipping duplicate trigger."
+              exit 0
+            fi
+          fi
+
+          if CAP_JSON="$(sd_get "/deploy-cap" 2>/dev/null)"; then
+            echo "SnapDeploy quota: $(jq -c '{remaining: .remaining, dailyLimit: .dailyLimit, capped: .capped}' <<< "${CAP_JSON}")"
+          fi
+
+          IDEM_KEY="gha-${TARGET_SHA}"
+          SD_LAST_CODE=""
+          SD_LAST_BODY=""
+
+          if [ "${IN_PROGRESS}" = "true" ]; then
+            echo "A deployment is already in progress on SnapDeploy; waiting for it to finish."
+          elif [ "${STATUS}" = "RUNNING" ]; then
+            echo "Triggering rolling redeploy via /restart for ${TARGET_SHA}..."
+            sd_post "/containers/${SNAPDEPLOY_CONTAINER_ID}/restart" "${IDEM_KEY}"
+            if [ "${SD_LAST_CODE}" = "402" ] || [ "${SD_LAST_CODE}" = "429" ]; then
+              echo "::warning::SnapDeploy quota limit reached (HTTP ${SD_LAST_CODE}): ${SD_LAST_BODY}"
+              exit 0
+            fi
+            if [[ ! "${SD_LAST_CODE}" =~ ^2 ]]; then
+              echo "::error::SnapDeploy /restart failed (HTTP ${SD_LAST_CODE}): ${SD_LAST_BODY}"
+              exit 1
+            fi
+          else
+            echo "Container is ${STATUS}; attempting /restart first..."
+            sd_post "/containers/${SNAPDEPLOY_CONTAINER_ID}/restart" "${IDEM_KEY}"
+            if [ "${SD_LAST_CODE}" = "402" ] || [ "${SD_LAST_CODE}" = "429" ]; then
+              echo "::warning::SnapDeploy quota limit reached (HTTP ${SD_LAST_CODE}): ${SD_LAST_BODY}"
+              exit 0
+            fi
+            if [[ ! "${SD_LAST_CODE}" =~ ^2 ]]; then
+              echo "/restart returned HTTP ${SD_LAST_CODE} while ${STATUS}; calling /start..."
+              sd_post "/containers/${SNAPDEPLOY_CONTAINER_ID}/start" "${IDEM_KEY}-start"
+              if [ "${SD_LAST_CODE}" = "402" ] || [ "${SD_LAST_CODE}" = "429" ]; then
+                echo "::warning::SnapDeploy quota limit reached (HTTP ${SD_LAST_CODE}): ${SD_LAST_BODY}"
+                exit 0
+              fi
+              if [[ ! "${SD_LAST_CODE}" =~ ^2 ]]; then
+                echo "::error::SnapDeploy /start failed (HTTP ${SD_LAST_CODE}): ${SD_LAST_BODY}"
+                exit 1
+              fi
+
+              # If /start performed a fast wake without pulling a fresh deployment,
+              # trigger /restart once RUNNING so the new :main image from GHCR is pulled.
+              for _ in $(seq 1 15); do
+                sleep 4
+                WAKE_JSON="$(sd_get "/containers/${SNAPDEPLOY_CONTAINER_ID}")"
+                WAKE_STATUS="$(jq -r '.status // "UNKNOWN"' <<< "${WAKE_JSON}")"
+                WAKE_COUNT="$(jq -r '.deploymentCount // 0' <<< "${WAKE_JSON}")"
+                WAKE_IN_PROG="$(jq -r '.actionLocks.deploymentInProgress // false' <<< "${WAKE_JSON}")"
+                if [ "${WAKE_IN_PROG}" = "true" ] || [ "${WAKE_COUNT}" -gt "${PREV_COUNT}" ]; then
+                  echo "Full image deployment started from /start."
+                  break
+                fi
+                if [ "${WAKE_STATUS}" = "RUNNING" ]; then
+                  echo "Container woke via fast path; triggering /restart to pull latest main image..."
+                  sd_post "/containers/${SNAPDEPLOY_CONTAINER_ID}/restart" "${IDEM_KEY}-restart"
+                  if [ "${SD_LAST_CODE}" = "402" ] || [ "${SD_LAST_CODE}" = "429" ]; then
+                    echo "::warning::SnapDeploy quota limit reached (HTTP ${SD_LAST_CODE}): ${SD_LAST_BODY}"
+                    exit 0
+                  fi
+                  if [[ ! "${SD_LAST_CODE}" =~ ^2 ]]; then
+                    echo "::error::SnapDeploy /restart after wake failed (HTTP ${SD_LAST_CODE}): ${SD_LAST_BODY}"
+                    exit 1
+                  fi
+                  break
+                fi
+              done
+            fi
+          fi
+
+          echo "Polling SnapDeploy deployment status..."
+          START_POLL="$(date +%s)"
+          DEADLINE=$(( START_POLL + 300 ))
+          OBSERVED_ROLLOUT="false"
+          FINAL_OK="false"
+
+          while [ "$(date +%s)" -lt "${DEADLINE}" ]; do
+            sleep 6
+            CUR_JSON="$(sd_get "/containers/${SNAPDEPLOY_CONTAINER_ID}")"
+            CUR_STATUS="$(jq -r '.status // "UNKNOWN"' <<< "${CUR_JSON}")"
+            CUR_COUNT="$(jq -r '.deploymentCount // 0' <<< "${CUR_JSON}")"
+            CUR_IN_PROG="$(jq -r '.actionLocks.deploymentInProgress // false' <<< "${CUR_JSON}")"
+            CUR_ROLLING="$(jq -r '.rollingRestart // false' <<< "${CUR_JSON}")"
+            DEPS_JSON="$(sd_get "/containers/${SNAPDEPLOY_CONTAINER_ID}/deployments?limit=1")"
+            DEP_ID="$(jq -r '(if type == "array" then .[0] else (.deployments[0] // null) end) | .deploymentId // ""' <<< "${DEPS_JSON}")"
+            DEP_STATUS="$(jq -r '(if type == "array" then .[0] else (.deployments[0] // null) end) | .status // "UNKNOWN"' <<< "${DEPS_JSON}")"
+            DEP_STEP="$(jq -r '(if type == "array" then .[0] else (.deployments[0] // null) end) | .currentStep // ""' <<< "${DEPS_JSON}")"
+
+            if [ "${CUR_IN_PROG}" = "true" ] || [ "${CUR_ROLLING}" = "true" ] || [ "${CUR_COUNT}" -gt "${PREV_COUNT}" ] || [ "${DEP_ID}" != "${PREV_DEP_ID}" ]; then
+              OBSERVED_ROLLOUT="true"
+            fi
+
+            echo "  container=${CUR_STATUS}, inProgress=${CUR_IN_PROG}, rolling=${CUR_ROLLING}, dep=${DEP_ID} ${DEP_STATUS} (${DEP_STEP})"
+
+            if [ "${DEP_ID}" != "${PREV_DEP_ID}" ] && { [ "${DEP_STATUS}" = "FAILED" ] || [ "${DEP_STATUS}" = "CANCELLED" ] || [ "${DEP_STATUS}" = "ROLLED_BACK" ]; }; then
+              echo "::error::SnapDeploy deployment ${DEP_ID} ended with status ${DEP_STATUS}."
+              exit 1
+            fi
+
+            ELAPSED=$(( $(date +%s) - START_POLL ))
+            if [ "${OBSERVED_ROLLOUT}" = "false" ] && [ "${ELAPSED}" -lt 20 ]; then
+              continue
+            fi
+
+            if [ "${CUR_STATUS}" = "RUNNING" ] && [ "${CUR_IN_PROG}" = "false" ] && [ "${CUR_ROLLING}" = "false" ] && [ "${DEP_STATUS}" = "COMPLETED" ]; then
+              FINAL_OK="true"
+              break
+            fi
+          done
+
+          if [ "${FINAL_OK}" != "true" ]; then
+            echo "::warning::SnapDeploy rollout is still settling after 5 minutes; continuing to health check."
+          fi
+
+          if [ -n "${APP_URL}" ] && [ "${APP_URL}" != "null" ]; then
+            echo "Verifying ${APP_URL}/api/ping..."
+            PING_RESP="$(curl -fsS --retry 5 --retry-delay 3 "${APP_URL}/api/ping")"
+            echo "Health check OK: ${PING_RESP}"
+          fi
