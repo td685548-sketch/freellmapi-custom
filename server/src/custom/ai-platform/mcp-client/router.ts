@@ -459,7 +459,13 @@ mcpAdminRouter.post('/approvals/:id/approve', requirePerm('approve_ai_actions'),
   }
   try {
     const id = parsePositiveId(req.params.id, 'approval');
-    const approval = await approveAction(id, getUser(req)?.userId ?? null, parsed.data);
+    const approval = await approveAction(
+      id,
+      getUser(req)?.userId ?? null,
+      parsed.data,
+      undefined,
+      { req },
+    );
     res.json({ approval });
   } catch (err) {
     sendMcpError(res, err);
@@ -480,7 +486,12 @@ mcpAdminRouter.post('/approvals/:id/reject', requirePerm('approve_ai_actions'), 
   }
   try {
     const id = parsePositiveId(req.params.id, 'approval');
-    const approval = await rejectAction(id, getUser(req)?.userId ?? null, parsed.data);
+    const approval = await rejectAction(
+      id,
+      getUser(req)?.userId ?? null,
+      parsed.data,
+      { req },
+    );
     res.json({ approval });
   } catch (err) {
     sendMcpError(res, err);

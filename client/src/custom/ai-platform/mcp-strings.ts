@@ -109,7 +109,16 @@ export const MCP_SERVER_DISABLED_BADGE = 'Server disabled';
 
 // ─── Approval Queue ───────────────────────────────────────────────────────────
 export const MCP_APPROVALS_HEADING = 'Tool execution approvals';
-export const MCP_APPROVALS_US2_NOTE = 'US2 executes the approved tool once and records the masked result. Automatic chat resume belongs to US7.';
+export const MCP_APPROVALS_US2_NOTE = 'Executes approved write tools once, records the masked result, and resumes pending chat turns automatically.';
+export const MCP_APPROVAL_CONTINUATION_LABEL = 'Assistant continuation';
+export const MCP_CONTINUATION_PENDING = 'Continuation pending';
+export const MCP_CONTINUATION_RUNNING = 'Resuming assistant reply…';
+export const MCP_CONTINUATION_COMPLETED = 'Completed';
+export const MCP_CONTINUATION_AWAITING = 'Awaiting follow-up approval';
+export const MCP_CONTINUATION_REJECTED = 'Rejected';
+export const MCP_CONTINUATION_FAILED = 'Continuation failed';
+export const MCP_CONTINUATION_EXPIRED = 'Expired';
+export const MCP_CONTINUATION_NEXT_ID = 'Follow-up approval #{id}';
 export const MCP_FILTER_STATUS = 'Status filter';
 export const MCP_STATUS_ALL = 'All';
 export const MCP_APPROVAL_PENDING = 'Pending';

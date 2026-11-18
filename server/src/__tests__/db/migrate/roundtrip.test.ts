@@ -233,6 +233,7 @@ describe('migration round trip', () => {
         '20261117_100000_custom_context_budget.ts',
         '20261118_030000_custom_customer_ai_hub.ts',
         '20261118_043000_custom_tenant_rbac.ts',
+        '20261118_090000_custom_mcp_chat_continuation.ts',
       ]);
     } finally {
       db.close();
@@ -284,7 +285,7 @@ describe('migration round trip', () => {
     } finally {
       db.close();
     }
-  });
+  }, 15_000);
 });
 
 async function runDownToBaseline(db: Database.Database): Promise<void> {

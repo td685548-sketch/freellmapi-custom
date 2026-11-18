@@ -7,12 +7,18 @@ import {
   type McpApprovalDecisionInput,
   type McpApprovalStatus,
   type McpApprovalView,
+  type McpContinuationStatus,
   type ToolContext,
 } from '@freellmapi/shared/ai-platform-mcp.js';
 import { getDb } from '../../../db/index.js';
 import { decrypt, encrypt } from '../../../lib/crypto.js';
 import { isPillarEnabled } from '../flags.js';
 import { maskData, maskText } from '../masking.js';
+import {
+  expireChatContinuations,
+  resumeChatContinuation,
+} from '../mcp-client/chat-continuation.js';
+import type { ToolLoopDeps } from '../mcp-client/tool-loop.js';
 import { normalizeScope } from '../scope.js';
 import { validateScope } from '../mcp-client/bindings.js';
 import {
@@ -62,6 +68,13 @@ interface ApprovalRow {
   duration_ms?: number | null;
   result_bytes?: number | null;
   executed_at?: string | null;
+  continuation_ciphertext?: string | null;
+  continuation_status?: McpContinuationStatus | null;
+  continuation_reply_masked?: string | null;
+  continuation_next_approval_id?: number | null;
+  continuation_model?: string | null;
+  continuation_error?: string | null;
+  continuation_finished_at?: string | null;
   tool_name?: string | null;
   exposed_name?: string | null;
   server_id?: number | null;
@@ -119,6 +132,24 @@ function toApprovalView(row: ApprovalRow): McpApprovalView {
     executedAt: row.executed_at ?? null,
     durationMs: row.duration_ms ?? null,
     resultBytes: row.result_bytes ?? null,
+    ...(row.continuation_status !== undefined
+      ? { continuationStatus: row.continuation_status }
+      : {}),
+    ...(row.continuation_reply_masked !== undefined
+      ? { continuationReplyMasked: row.continuation_reply_masked }
+      : {}),
+    ...(row.continuation_next_approval_id !== undefined
+      ? { continuationNextApprovalId: row.continuation_next_approval_id }
+      : {}),
+    ...(row.continuation_model !== undefined
+      ? { continuationModel: row.continuation_model }
+      : {}),
+    ...(row.continuation_error !== undefined
+      ? { continuationError: row.continuation_error }
+      : {}),
+    ...(row.continuation_finished_at !== undefined
+      ? { continuationFinishedAt: row.continuation_finished_at }
+      : {}),
   };
 }
 
@@ -365,6 +396,7 @@ export function expireApprovals(now: Date = new Date()): number {
     ).run();
   }
 
+  expireChatContinuations(db);
   return res.changes;
 }
 
@@ -373,7 +405,12 @@ export async function approveAction(
   actorId: number | null,
   input?: McpApprovalDecisionInput,
   executor?: WriteApprovalExecutor,
-  opts?: { req?: Request; deps?: OrchestratorEngineDeps },
+  opts?: {
+    req?: Request;
+    deps?: OrchestratorEngineDeps;
+    toolLoopDeps?: ToolLoopDeps;
+    awaitContinuationMs?: number;
+  },
 ): Promise<McpApprovalView> {
   if (!isPillarEnabled('mcpClient') && !isPillarEnabled('orchestrator')) {
     throw new McpPillarDisabledError();
@@ -531,6 +568,30 @@ export async function approveAction(
     } catch {
       // resumeRun persists terminal run error; keep approval outcome intact.
     }
+  } else if (claimed.continuation_ciphertext) {
+    const toolOutputText =
+      finalStatus === 'succeeded'
+        ? (resultMasked ?? '{}')
+        : JSON.stringify({
+            error: {
+              type: finalStatus,
+              message: errorText ?? 'Approved tool execution failed.',
+            },
+          });
+    const continuationPromise = resumeChatContinuation(
+      id,
+      { approved: true, toolOutputText, note: view.decisionNote },
+      { req: opts?.req, toolLoopDeps: opts?.toolLoopDeps },
+    );
+    continuationPromise.catch(() => {});
+    const waitMs = Math.max(0, opts?.awaitContinuationMs ?? 3_000);
+    if (waitMs > 0) {
+      await Promise.race([
+        continuationPromise,
+        new Promise<void>((resolve) => setTimeout(resolve, waitMs)),
+      ]);
+    }
+    return toApprovalView(selectApprovalById(id)!);
   }
   return view;
 }
@@ -615,6 +676,13 @@ export async function rejectAction(
     } catch {
       // Keep rejection outcome intact.
     }
+  } else if (updatedRow.continuation_ciphertext) {
+    await resumeChatContinuation(
+      id,
+      { approved: false, toolOutputText: '', note: view.decisionNote },
+      { req: opts?.req },
+    );
+    return toApprovalView(selectApprovalById(id)!);
   }
   return view;
 }
