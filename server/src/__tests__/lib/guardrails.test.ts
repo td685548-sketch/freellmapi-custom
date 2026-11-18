@@ -21,6 +21,7 @@ import {
   REQUEST_MAX_TOKENS_BUDGET_SETTING,
   MAX_CONSECUTIVE_UPSTREAM_FAILS_SETTING,
   TOKEN_BUDGET_OUTPUT_CAP,
+  DEFAULT_MAX_CONSECUTIVE_UPSTREAM_FAILS,
 } from '../../lib/guardrails.js';
 
 beforeEach(() => {
@@ -32,10 +33,26 @@ afterEach(() => {
   delete process.env.MAX_CONSECUTIVE_UPSTREAM_FAILS;
 });
 
-describe('guardrail setting getters (setting → env → 0)', () => {
-  it('default to 0 (disabled) when nothing is configured', () => {
+describe('guardrail setting getters (setting → env → default)', () => {
+  it('defaults to 0 (disabled) for the token budget and 6 for the breaker when nothing is configured', () => {
     expect(getRequestMaxTokensBudget()).toBe(0);
+    expect(getMaxConsecutiveUpstreamFails()).toBe(DEFAULT_MAX_CONSECUTIVE_UPSTREAM_FAILS);
+    expect(DEFAULT_MAX_CONSECUTIVE_UPSTREAM_FAILS).toBe(6);
+  });
+
+  it('an explicit 0 still disables the breaker', () => {
+    settingStore.set(MAX_CONSECUTIVE_UPSTREAM_FAILS_SETTING, '0');
     expect(getMaxConsecutiveUpstreamFails()).toBe(0);
+    process.env.MAX_CONSECUTIVE_UPSTREAM_FAILS = '0';
+    settingStore.clear();
+    expect(getMaxConsecutiveUpstreamFails()).toBe(0);
+  });
+
+  it('a garbage breaker setting falls back to the default (or a valid env var)', () => {
+    settingStore.set(MAX_CONSECUTIVE_UPSTREAM_FAILS_SETTING, 'lots');
+    expect(getMaxConsecutiveUpstreamFails()).toBe(DEFAULT_MAX_CONSECUTIVE_UPSTREAM_FAILS);
+    process.env.MAX_CONSECUTIVE_UPSTREAM_FAILS = '4';
+    expect(getMaxConsecutiveUpstreamFails()).toBe(4);
   });
 
   it('read the settings-table value', () => {
