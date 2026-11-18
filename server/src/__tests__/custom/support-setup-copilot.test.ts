@@ -1,6 +1,10 @@
 import type { Server } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../../app.js';
+import {
+  detectConversationLocale,
+  parseLlmCoachResponse,
+} from '../../custom/support-setup-copilot/playbook.js';
 import { appendSupportAuditLog, listSupportAuditLogs } from '../../custom/x-gateway/support-enterprise-router.js';
 import { listSupportEvidenceSources } from '../../custom/x-gateway/support-evidence-store.js';
 import { getSupportGuardrailPolicy } from '../../custom/x-gateway/support-guardrails.js';
@@ -851,5 +855,114 @@ describe('AI Support Setup Copilot (Guided Onboarding & Consent-Gated Auto-Deplo
       toctouToken,
     );
     expect(revokedApply.status).toBe(403);
+  });
+
+  it('automatically switches to Vietnamese even when UI locale is English and varies replies naturally without repeating boilerplate', async () => {
+    // 1. Exact reproduction of user screenshot: UI sends locale='en' after an English turn,
+    // and user asks "bạn có thể nói tiếng việt không"
+    const langAskRes = await hit(
+      '/api/support-setup-copilot/chat',
+      'POST',
+      {
+        tenantId: existingTenantId,
+        locale: 'en',
+        messages: [
+          { role: 'user', content: 'Set up a complete AI Support assistant for me' },
+          {
+            role: 'assistant',
+            content:
+              'I can configure all 7 AI Support steps for you and present a plan for your approval before making any changes.',
+          },
+          { role: 'user', content: 'bạn có thể nói tiếng việt không' },
+        ],
+      },
+      primaryToken,
+    );
+
+    expect(langAskRes.status).toBe(200);
+    expect(langAskRes.body?.replyLocale).toBe('vi');
+    expect(langAskRes.body?.intent).toBe('guide');
+    expect(String(langAskRes.body?.reply)).toContain('tiếng Việt');
+    expect(String(langAskRes.body?.reply)).not.toContain('I can **configure all 7 AI Support steps**');
+    expect(
+      (langAskRes.body?.suggestedQuickReplies as string[]).some((q) => /tiêu chuẩn|7 bước|GlowSkin/i.test(q)),
+    ).toBe(true);
+
+    // 2. Greeting in unaccented Vietnamese with UI locale='en' -> distinct warm Vietnamese greeting
+    const greetRes = await hit(
+      '/api/support-setup-copilot/chat',
+      'POST',
+      {
+        tenantId: existingTenantId,
+        locale: 'en',
+        messages: [{ role: 'user', content: 'xin chao ban' }],
+      },
+      primaryToken,
+    );
+    expect(greetRes.status).toBe(200);
+    expect(greetRes.body?.replyLocale).toBe('vi');
+    expect(greetRes.body?.reply).not.toBe(langAskRes.body?.reply);
+    expect(String(greetRes.body?.reply)).toContain('Chào bạn');
+
+    // 3. Focused single-step question -> answers specifically about Step 2 (RAG & PII Masking)
+    const step2Res = await hit(
+      '/api/support-setup-copilot/chat',
+      'POST',
+      {
+        tenantId: existingTenantId,
+        locale: 'en',
+        messages: [{ role: 'user', content: 'bước 2 nạp tài liệu FAQ làm sao để khách thấy được?' }],
+      },
+      primaryToken,
+    );
+    expect(step2Res.status).toBe(200);
+    expect(step2Res.body?.replyLocale).toBe('vi');
+    expect(step2Res.body?.intent).toBe('guide');
+    expect(String(step2Res.body?.reply)).toContain('Bước 2');
+    expect(String(step2Res.body?.reply)).toContain('allowedRoles');
+    expect(step2Res.body?.reply).not.toBe(greetRes.body?.reply);
+
+    // 4. User says "chưa có website, tùy bạn dùng mặc định làm luôn đi" -> immediately generates Vietnamese proposal!
+    const proceedNowRes = await hit(
+      '/api/support-setup-copilot/chat',
+      'POST',
+      {
+        tenantId: existingTenantId,
+        locale: 'en',
+        messages: [
+          { role: 'user', content: 'bạn có thể nói tiếng việt không' },
+          { role: 'user', content: 'tôi chưa có website, tùy bạn dùng mặc định làm luôn giúp mình đi' },
+        ],
+      },
+      primaryToken,
+    );
+    expect(proceedNowRes.status).toBe(200);
+    expect(proceedNowRes.body?.replyLocale).toBe('vi');
+    expect(proceedNowRes.body?.intent).toBe('propose_setup');
+    expect(proceedNowRes.body?.proposal).toBeTruthy();
+    expect(String(proceedNowRes.body?.reply)).toContain('Chờ xác nhận triển khai');
+  });
+
+  it('parses fenced, prose-wrapped, and plain-text LLM replies resiliently and detects conversation locale', () => {
+    expect(
+      detectConversationLocale([{ role: 'user', content: 'bạn có thể nói tiếng việt không' }], 'en'),
+    ).toBe('vi');
+    expect(
+      detectConversationLocale([{ role: 'user', content: 'giup toi thiet lap shop' }], 'en'),
+    ).toBe('vi');
+    expect(
+      detectConversationLocale([{ role: 'user', content: 'How do I configure CORS origins?' }], 'vi'),
+    ).toBe('en');
+
+    const proseWrapped = parseLlmCoachResponse(
+      'Dưới đây là phản hồi:\n```json\n{"intent":"guide","reply":"Dạ mình hỗ trợ tiếng Việt 100% ạ!"}\n```',
+    );
+    expect(proseWrapped?.intent).toBe('guide');
+    expect(proseWrapped?.reply).toBe('Dạ mình hỗ trợ tiếng Việt 100% ạ!');
+
+    const plainProse = parseLlmCoachResponse(
+      'Dạ chào bạn! Mình hoàn toàn giao tiếp bằng tiếng Việt tự nhiên nhé.',
+    );
+    expect(plainProse?.reply).toContain('tiếng Việt tự nhiên');
   });
 });

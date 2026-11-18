@@ -250,6 +250,10 @@ const vi: SupportSetupCopilotStrings = {
   },
 };
 
+export function getSupportSetupCopilotStrings(targetLocale: 'vi' | 'en'): SupportSetupCopilotStrings {
+  return targetLocale === 'vi' ? vi : en;
+}
+
 export function useSupportSetupCopilotStrings(): SupportSetupCopilotStrings {
   const { locale } = useI18n();
   return locale === 'vi' ? vi : en;

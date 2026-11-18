@@ -235,6 +235,7 @@ export type SupportSetupChatIntent = 'guide' | 'gather_requirements' | 'propose_
 export interface SupportSetupChatResponse {
   ok: true;
   reply: string;
+  replyLocale?: 'vi' | 'en';
   intent: SupportSetupChatIntent;
   missingQuestions: string[];
   suggestedQuickReplies: string[];

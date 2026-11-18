@@ -44,8 +44,14 @@ import {
   postSupportSetupChat,
   postSupportSetupDecline,
 } from './api';
-import { formatSetupString, useSupportSetupCopilotStrings } from './strings';
+import {
+  formatSetupString,
+  getSupportSetupCopilotStrings,
+} from './strings';
 import './support-setup-copilot.css';
+
+const CLIENT_VI_MARKER_RE =
+  /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]|\b(?:tieng\s+viet|xin\s+chao|chao\s+ban|ban\s+co\s+the|giup\s+toi|giup\s+minh|lam\s+sao|thiet\s+lap|cai\s+dat|huong\s+dan)\b/i;
 
 interface ChatTurn {
   id: string;
@@ -89,8 +95,9 @@ export function SupportSetupCopilot() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { locale } = useI18n();
-  const uiLocale: 'vi' | 'en' = locale === 'vi' ? 'vi' : 'en';
-  const s = useSupportSetupCopilotStrings();
+  const [langOverride, setLangOverride] = useState<'vi' | 'en' | null>(null);
+  const uiLocale: 'vi' | 'en' = langOverride ?? (locale === 'vi' ? 'vi' : 'en');
+  const s = getSupportSetupCopilotStrings(uiLocale);
   const session = useUserSession();
 
   const onEligibleRoute = isSupportSetupCopilotRoute(location.pathname);
@@ -148,16 +155,20 @@ export function SupportSetupCopilot() {
     mutationFn: (payload: {
       nextTurns: ChatTurn[];
       requirementsHint?: Partial<SupportSetupRequirements>;
+      effectiveLocale?: 'vi' | 'en';
     }) =>
       postSupportSetupChat({
         tenantId: resolvedTenantId,
         targetMode: resolvedTargetMode,
-        locale: uiLocale,
+        locale: payload.effectiveLocale ?? uiLocale,
         messages: payload.nextTurns.slice(-20).map((t) => ({ role: t.role, content: t.content })),
         requirementsHint: payload.requirementsHint,
         baseProposalId: lastProposalId,
       }),
     onSuccess: (res) => {
+      if (res.replyLocale === 'vi' || res.replyLocale === 'en') {
+        setLangOverride(res.replyLocale);
+      }
       setTurns((prev) => [
         ...prev,
         {
@@ -232,11 +243,16 @@ export function SupportSetupCopilot() {
   ) => {
     const trimmed = text.trim();
     if (!trimmed || chatMutation.isPending) return;
+    let detectedLocale: 'vi' | 'en' = uiLocale;
+    if (CLIENT_VI_MARKER_RE.test(trimmed)) {
+      detectedLocale = 'vi';
+      setLangOverride('vi');
+    }
     const userTurn: ChatTurn = { id: makeTurnId(), role: 'user', content: trimmed };
     const nextTurns = [...turns, userTurn];
     setTurns(nextTurns);
     setInput('');
-    chatMutation.mutate({ nextTurns, requirementsHint });
+    chatMutation.mutate({ nextTurns, requirementsHint, effectiveLocale: detectedLocale });
   };
 
   const handleBriefSubmit = () => {
@@ -458,6 +474,15 @@ export function SupportSetupCopilot() {
               </div>
             </div>
             <div className="ssc-header-actions">
+              <button
+                type="button"
+                className="ssc-lang-btn"
+                data-testid="support-setup-lang-toggle"
+                title={uiLocale === 'vi' ? 'Switch Copilot to English' : 'Chuyển sang Tiếng Việt'}
+                onClick={() => setLangOverride(uiLocale === 'vi' ? 'en' : 'vi')}
+              >
+                {uiLocale === 'vi' ? 'VI' : 'EN'}
+              </button>
               <button
                 type="button"
                 className="ssc-icon-btn"
