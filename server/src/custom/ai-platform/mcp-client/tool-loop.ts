@@ -17,6 +17,7 @@ import { hasEnabledToolsModel, resolveRoutingChain } from '../../../services/rou
 import { compactLoopMessagesForBudget } from '../../context-budget/loop-guard.js';
 import { callGateway, type LoopbackRequest } from '../loopback.js';
 import { toolsForScope } from './bindings.js';
+import { saveChatApprovalContinuation } from './chat-continuation.js';
 import type { LoopSafeParams } from './messages.js';
 
 export interface RunToolLoopInput {
@@ -332,10 +333,37 @@ export async function runToolLoop(
 
     const pending = results.find((r) => r.pendingApprovalId !== undefined);
     if (pending) {
+      if (!input.runId) {
+        try {
+          saveChatApprovalContinuation(pending.pendingApprovalId!, {
+            version: 1,
+            scope: input.scope,
+            endUser: input.endUser ?? null,
+            model: input.model,
+            callerTools: input.callerTools,
+            maxRounds,
+            roundsUsed: rounds,
+            ...(input.params ? { params: input.params } : {}),
+            conversationWithAssistantCall: [...conversation],
+            batchResults: results.map((r) => ({
+              toolCallId: r.call.id,
+              toolName: r.call.function.name,
+              text: r.text,
+              pendingApprovalId: r.pendingApprovalId ?? null,
+            })),
+          });
+        } catch {
+          // Best-effort: approval pause must still return cleanly if DB columns are unavailable.
+        }
+      }
       return {
         message: {
           role: 'assistant',
-          content: `Tool execution requires administrator approval (approval_id: ${pending.pendingApprovalId}).`,
+          content:
+            `Tool execution requires administrator approval (approval_id: ${pending.pendingApprovalId}).` +
+            (!input.runId
+              ? ` Poll GET /v1/ai/mcp-approvals/${pending.pendingApprovalId} for completion.`
+              : ''),
         },
         finishReason: 'stop',
         usage: totalUsage,

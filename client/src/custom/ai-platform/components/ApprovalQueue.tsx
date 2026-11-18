@@ -7,6 +7,7 @@ import {
   rejectMcpAction,
   type McpApprovalStatus,
   type McpApprovalView,
+  type McpContinuationStatus,
 } from '../mcp-api';
 import {
   MCP_ACTION_FORBIDDEN,
@@ -14,6 +15,7 @@ import {
   MCP_APPROVALS_US2_NOTE,
   MCP_APPROVAL_APPROVED,
   MCP_APPROVAL_CONFLICT,
+  MCP_APPROVAL_CONTINUATION_LABEL,
   MCP_APPROVAL_EXECUTING,
   MCP_APPROVAL_EXECUTING_NOTICE,
   MCP_APPROVAL_EXPIRED,
@@ -25,6 +27,14 @@ import {
   MCP_APPROVAL_UNKNOWN_NOTICE,
   MCP_APPROVE,
   MCP_CALL_MASKED_RESULT,
+  MCP_CONTINUATION_AWAITING,
+  MCP_CONTINUATION_COMPLETED,
+  MCP_CONTINUATION_EXPIRED,
+  MCP_CONTINUATION_FAILED,
+  MCP_CONTINUATION_NEXT_ID,
+  MCP_CONTINUATION_PENDING,
+  MCP_CONTINUATION_REJECTED,
+  MCP_CONTINUATION_RUNNING,
   MCP_DECISION_NOTE,
   MCP_EXPIRES_AT,
   MCP_FILTER_STATUS,
@@ -49,6 +59,16 @@ const STATUS_LABEL: Record<McpApprovalStatus, string> = {
   unknown: MCP_APPROVAL_UNKNOWN,
   rejected: MCP_APPROVAL_REJECTED,
   expired: MCP_APPROVAL_EXPIRED,
+};
+
+const CONTINUATION_STATUS_LABEL: Record<McpContinuationStatus, string> = {
+  pending: MCP_CONTINUATION_PENDING,
+  running: MCP_CONTINUATION_RUNNING,
+  completed: MCP_CONTINUATION_COMPLETED,
+  awaiting_approval: MCP_CONTINUATION_AWAITING,
+  rejected: MCP_CONTINUATION_REJECTED,
+  failed: MCP_CONTINUATION_FAILED,
+  expired: MCP_CONTINUATION_EXPIRED,
 };
 
 export function ApprovalQueue({ canApprove }: ApprovalQueueProps) {
@@ -217,6 +237,44 @@ export function ApprovalQueue({ canApprove }: ApprovalQueueProps) {
                     <pre className="mt-1 overflow-x-auto rounded bg-muted/50 p-2 font-mono text-[11px]">
                       {item.resultMasked ?? item.error}
                     </pre>
+                  </div>
+                )}
+
+                {item.continuationStatus && (
+                  <div
+                    className="rounded border bg-muted/20 p-2.5 text-xs space-y-1.5"
+                    data-testid={`mcp-approval-continuation-${item.id}`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-medium text-muted-foreground">
+                        {tc(MCP_APPROVAL_CONTINUATION_LABEL)}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="rounded bg-muted px-2 py-0.5 text-[11px]">
+                          {tc(CONTINUATION_STATUS_LABEL[item.continuationStatus])}
+                        </span>
+                        {item.continuationModel && (
+                          <span className="font-mono text-[11px] text-muted-foreground">
+                            {item.continuationModel}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {item.continuationReplyMasked && (
+                      <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded bg-background/60 p-2 font-sans text-xs">
+                        {item.continuationReplyMasked}
+                      </pre>
+                    )}
+                    {item.continuationNextApprovalId != null && (
+                      <div className="text-[11px] text-amber-700 dark:text-amber-400">
+                        {tc(MCP_CONTINUATION_NEXT_ID, { id: item.continuationNextApprovalId })}
+                      </div>
+                    )}
+                    {item.continuationError && (
+                      <div className="text-[11px] text-destructive">
+                        {item.continuationError}
+                      </div>
+                    )}
                   </div>
                 )}
 

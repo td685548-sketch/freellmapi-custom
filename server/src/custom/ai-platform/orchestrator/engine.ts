@@ -149,7 +149,7 @@ export function recordServerLocalAddress(req: Request): void {
   }
 }
 
-function getRecordedServerAddress(req?: Request): { localAddress: string; localPort: number } {
+export function getRecordedServerAddress(req?: Request): { localAddress: string; localPort: number } {
   const port = req?.socket?.localPort;
   if (typeof port === 'number' && Number.isInteger(port) && port > 0) {
     const rawAddr = req?.socket?.localAddress ?? '127.0.0.1';

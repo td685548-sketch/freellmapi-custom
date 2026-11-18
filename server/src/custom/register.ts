@@ -61,6 +61,7 @@ import { startIndexWorker } from './ai-platform/retrieval/indexer.js';
 import { isPillarEnabled } from './ai-platform/flags.js';
 import { extractRequestedModel, markInterruptedRuns, recordServerLocalAddress } from './ai-platform/orchestrator/engine.js';
 import { runsPublicRouter } from './ai-platform/orchestrator/runs-public.js';
+import { mcpApprovalsPublicRouter } from './ai-platform/mcp-client/approvals-public.js';
 import { detectWire } from './ai-platform/wire/detect.js';
 import { CLIENT_PROFILE_KEY_PREFIX, resolveAuth } from '../lib/system-prompt.js';
 import { extractInferenceToken } from '../middleware/user-rate-limit.js';
@@ -183,8 +184,9 @@ export function registerCustomRoutes(app: Express): void {
     }
     next();
   });
-  // Public read-only status for a client key's own orchestrator flow runs (ahead of user/profile gates).
+  // Public read-only status for a client key's own orchestrator flow runs & MCP approval continuations (ahead of user/profile gates).
   app.use('/v1/ai', runsPublicRouter);
+  app.use('/v1/ai', mcpApprovalsPublicRouter);
   // Reject flow:<slug> calls made with non-client-profile keys (unified/personal) cleanly.
   app.use(['/v1', '/v1beta'], (req: Request, res: Response, next: NextFunction) => {
     if (req.method !== 'POST') {

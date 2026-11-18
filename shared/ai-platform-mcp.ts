@@ -71,6 +71,15 @@ export type McpApprovalStatus =
   | 'rejected'
   | 'expired';
 
+export type McpContinuationStatus =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'awaiting_approval'
+  | 'rejected'
+  | 'failed'
+  | 'expired';
+
 export type McpTransportErrorCode =
   | 'timeout'
   | 'unsafe_url'
@@ -209,8 +218,34 @@ export interface McpApprovalView {
   executedAt?: string | null;
   durationMs?: number | null;
   resultBytes?: number | null;
+  continuationStatus?: McpContinuationStatus | null;
+  continuationReplyMasked?: string | null;
+  continuationNextApprovalId?: number | null;
+  continuationModel?: string | null;
+  continuationError?: string | null;
+  continuationFinishedAt?: string | null;
   expiresAt: string;
   createdAt: string;
+}
+
+export interface PublicMcpApprovalResponse {
+  id: number;
+  status: McpApprovalStatus;
+  tool_name: string | null;
+  decision_note: string | null;
+  tool_result: string | null;
+  error: string | null;
+  continuation: {
+    status: McpContinuationStatus;
+    output_text: string | null;
+    model: string | null;
+    next_approval_id: number | null;
+    error: string | null;
+    finished_at: string | null;
+  } | null;
+  created_at: string;
+  expires_at: string;
+  executed_at: string | null;
 }
 
 export interface McpApprovalSnapshot {

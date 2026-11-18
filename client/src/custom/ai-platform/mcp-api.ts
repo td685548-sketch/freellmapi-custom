@@ -44,6 +44,7 @@ export type {
   McpBindingView,
   McpCallsResponse,
   McpCallView,
+  McpContinuationStatus,
   McpDeleteServerResponse,
   McpInUseErrorDetails,
   McpServerInput,
