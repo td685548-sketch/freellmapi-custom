@@ -487,4 +487,65 @@ describe('SupportSetupCopilot widget', () => {
     expect(roadmap?.textContent).toContain('Giới hạn quyền');
     expect(roadmap?.querySelectorAll('.ssc-link-btn')).toHaveLength(1);
   });
+
+  it('auto-switches Copilot UI to Vietnamese when user types Vietnamese under an English dashboard locale', async () => {
+    const chatPayloads: Array<{ locale?: string }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith('/api/user/session')) {
+          return json({ userId: 1, email: 'admin@example.com', role: 'admin', isPrimary: true, permissions: ['*'] });
+        }
+        if (url.includes('/api/support-setup-copilot/status')) {
+          return json(sampleStatus(true));
+        }
+        if (url.endsWith('/api/support-setup-copilot/chat')) {
+          chatPayloads.push(JSON.parse(String(init?.body ?? '{}')) as { locale?: string });
+          const resp: SupportSetupChatResponse = {
+            ok: true,
+            replyLocale: 'vi',
+            reply: 'Dạ hoàn toàn được ạ — mình giao tiếp bằng tiếng Việt 100% nhé!',
+            intent: 'guide',
+            missingQuestions: [],
+            suggestedQuickReplies: ['Hoàn thiện cấu hình tiêu chuẩn cho tenant hiện tại'],
+            proposal: null,
+            modelUsed: null,
+            usedFallback: true,
+          };
+          return json(resp);
+        }
+        return json({});
+      }),
+    );
+
+    // Global dashboard locale is 'en' (matching "English ▼" in top bar)
+    mount('/thruline/providers', 'en');
+    await flush();
+
+    const launcher = container.querySelector('[data-testid="support-setup-copilot-launcher"]') as HTMLButtonElement;
+    expect(launcher?.textContent).toContain('AI Setup Copilot');
+    act(() => launcher.click());
+    await flush();
+
+    expect(container.querySelector('h2')?.textContent).toBe('AI Support Setup Copilot');
+    expect(container.querySelector('[data-testid="support-setup-lang-toggle"]')?.textContent).toBe('EN');
+
+    const textarea = container.querySelector('.ssc-composer textarea') as HTMLTextAreaElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+    act(() => {
+      setter?.call(textarea, 'bạn có thể nói tiếng việt không');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      textarea.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const sendBtn = container.querySelector('[data-testid="support-setup-send-btn"]') as HTMLButtonElement;
+    act(() => sendBtn.click());
+    await flush();
+
+    expect(chatPayloads[0]?.locale).toBe('vi');
+    expect(container.querySelector('h2')?.textContent).toBe('Trợ lý Setup AI Support');
+    expect(container.querySelector('[data-testid="support-setup-lang-toggle"]')?.textContent).toBe('VI');
+    expect(container.textContent).toContain('giao tiếp bằng tiếng Việt 100%');
+  });
 });

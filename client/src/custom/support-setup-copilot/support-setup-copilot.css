@@ -188,6 +188,24 @@
   color: var(--ssc-text);
 }
 
+.ssc-lang-btn {
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid var(--ssc-border);
+  background: var(--ssc-bg);
+  color: var(--ssc-text);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.ssc-lang-btn:hover {
+  border-color: var(--ssc-accent);
+  color: var(--ssc-accent);
+}
+
 .ssc-toolbar {
   display: flex;
   flex-direction: column;

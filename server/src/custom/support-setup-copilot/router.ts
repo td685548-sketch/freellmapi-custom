@@ -48,6 +48,27 @@ function requireSignedInUser(req: Request, res: Response, next: NextFunction): v
 
 supportSetupCopilotRouter.use(requireSignedInUser);
 
+function extractGatewayLoopback(req: Request): {
+  host: string;
+  port: number;
+  sessionToken?: string;
+} | undefined {
+  const port = req.socket?.localPort ?? 0;
+  if (!port || port <= 0) return undefined;
+  const rawAddr = (req.socket?.localAddress ?? '').replace(/^::ffff:/i, '');
+  const host =
+    !rawAddr || rawAddr === '::' || rawAddr === '0.0.0.0'
+      ? '127.0.0.1'
+      : rawAddr.includes(':')
+        ? `[${rawAddr}]`
+        : rawAddr;
+  const bearer = req.headers.authorization?.replace(/^Bearer\s+/i, '').trim();
+  const dash = req.headers['x-dashboard-token'];
+  const sessionToken =
+    bearer || (Array.isArray(dash) ? dash[0] : dash)?.trim() || undefined;
+  return { host, port, sessionToken };
+}
+
 function paramStr(value: unknown): string {
   return Array.isArray(value) ? String(value[0] ?? '') : String(value ?? '');
 }
@@ -267,6 +288,7 @@ supportSetupCopilotRouter.post('/chat', async (req: Request, res: Response, next
       requirementsHint,
       baseProposalId,
       diagnostic,
+      gatewayLoopback: extractGatewayLoopback(req),
     });
 
     res.json(response);
