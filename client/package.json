@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "lint:support-ai": "eslint --max-warnings=0 \"src/custom/ai-platform\" \"src/custom/x-gateway/**/Support*\" \"src/custom/x-gateway/**/support-*\" \"src/custom/Context*.tsx\" \"src/custom/CacheSettingsSection.tsx\"",
+    "lint:support-ai": "eslint --max-warnings=0 \"src/custom/ai-platform\" \"src/custom/x-gateway/**/Support*\" \"src/custom/x-gateway/**/support-*\" \"src/custom/Context*.tsx\" \"src/custom/CacheSettingsSection.tsx\" \"src/custom/support-setup-copilot\"",
     "test": "vitest run && npm run check:i18n",
     "check:i18n": "node scripts/check-i18n.mjs",
     "preview": "vite preview"

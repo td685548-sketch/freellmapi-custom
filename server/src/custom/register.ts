@@ -71,6 +71,7 @@ import {
   createActivityTrackerMiddleware,
   createApiJsonCompressionMiddleware,
 } from './render-resource-saver.js';
+import { supportSetupCopilotRouter } from './support-setup-copilot/router.js';
 
 // Everything this fork adds to the HTTP surface is wired here, so upstream's
 // app.ts keeps a handful of added lines instead of edited mount statements.
@@ -319,6 +320,7 @@ export function registerCustomRoutes(app: Express): void {
   app.use('/api/admin/registration-requests', requireAuth, requireActionPermission('manage_requests'), adminRegistrationRequestsRouter);
   app.use('/api/admin/tenant-memberships', requireAuth, adminTenantMembershipsRouter);
   app.use('/api/tenant-portal', requireAuth, tenantPortalRouter);
+  app.use('/api/support-setup-copilot', requireAuth, supportSetupCopilotRouter);
   app.use('/api/user/ai-hub', requireAuth, customerAiUserRouter);
   app.use('/api/user', requireAuth, userKeysRouter, selfAnalyticsRouter, selfQuotaRouter, selfRequestsRouter);
 
