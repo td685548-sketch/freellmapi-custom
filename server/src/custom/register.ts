@@ -66,6 +66,10 @@ import { CLIENT_PROFILE_KEY_PREFIX, resolveAuth } from '../lib/system-prompt.js'
 import { extractInferenceToken } from '../middleware/user-rate-limit.js';
 import { customerAiUserRouter } from './customer-ai/router.js';
 import { customerAiSessionRoutingMiddleware } from './customer-ai/runtime.js';
+import {
+  createActivityTrackerMiddleware,
+  createApiJsonCompressionMiddleware,
+} from './render-resource-saver.js';
 
 // Everything this fork adds to the HTTP surface is wired here, so upstream's
 // app.ts keeps a handful of added lines instead of edited mount statements.
@@ -150,6 +154,9 @@ function installGate(app: Express, gate: PermissionGate): void {
 }
 
 export function registerCustomRoutes(app: Express): void {
+  app.use(createActivityTrackerMiddleware());
+  app.use('/api', createApiJsonCompressionMiddleware());
+
   // Mark any orphaned running orchestrator runs as interrupted without re-executing steps.
   try {
     markInterruptedRuns();

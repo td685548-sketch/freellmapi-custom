@@ -1,3 +1,6 @@
+import { getDb } from '../../db/index.js';
+import { isTursoDatabase, tursoWriteVersion } from '../../db/turso.js';
+import type { Db } from '../../db/types.js';
 import { decrypt } from '../../lib/crypto.js';
 import { withKeyProxy } from '../../lib/proxy.js';
 import type { Scheduler } from '../../lib/scheduler.js';
@@ -16,10 +19,29 @@ import {
 export const GEMINI_WEB_KEEPALIVE_INTERVAL_MS = 9 * 60_000;
 
 let sweepInFlight: Promise<number> | null = null;
+let emptyState: { db: Db; writeVersion: number; untilMs: number } | null = null;
 
 /** Rotate cookies once for all enabled `gemini-web` accounts and persist updates. */
 export async function rotateGeminiWebAccountsOnce(): Promise<number> {
   if (sweepInFlight) return sweepInFlight;
+
+  let db: Db | null = null;
+  try {
+    db = getDb();
+  } catch {
+    db = null;
+  }
+
+  const now = Date.now();
+  if (
+    db &&
+    emptyState &&
+    emptyState.db === db &&
+    emptyState.writeVersion === tursoWriteVersion(db) &&
+    now < emptyState.untilMs
+  ) {
+    return 0;
+  }
 
   sweepInFlight = (async () => {
     let rotatedCount = 0;
@@ -29,6 +51,18 @@ export async function rotateGeminiWebAccountsOnce(): Promise<number> {
     } catch {
       return 0;
     }
+
+    if (accounts.every((row) => row.enabled !== 1)) {
+      if (db) {
+        emptyState = {
+          db,
+          writeVersion: tursoWriteVersion(db),
+          untilMs: now + (isTursoDatabase(db) ? 60 * 60_000 : 9 * 60_000),
+        };
+      }
+      return 0;
+    }
+    emptyState = null;
 
     for (const row of accounts) {
       if (row.enabled !== 1) continue;

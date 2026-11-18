@@ -19,3 +19,14 @@ dist
 npm-debug.log*
 repo-assets
 free-ai-apis.pdf
+.worktrees
+9router
+.claude
+.clinerules
+.cursor
+.specify
+docs
+examples
+scripts
+server/src/__tests__
+cli/src/__tests__

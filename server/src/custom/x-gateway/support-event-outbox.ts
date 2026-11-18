@@ -1,6 +1,7 @@
 import { up as upgradeFencing } from '../../db/migrations/20261112_180001_support_runtime_fencing.js';
 import crypto from 'node:crypto';
 import { getDb, type Db } from '../../db/index.js';
+import { isTursoDatabase } from '../../db/turso.js';
 import { encrypt, decrypt } from '../../lib/crypto.js';
 import { up as bootstrapExecutionOutboxTables } from '../../db/migrations/20261112_170002_support_execution_outbox.js';
 import { getSupportTenantSigningSecret } from './support-store.js';
@@ -159,6 +160,7 @@ export function enqueueSupportPartnerEvent(options: {
     'SELECT id FROM x_support_partner_events WHERE tenant_id = ? AND type = ? AND dedup_key = ?',
   ).get(tenantId, event, dedupKey) as { id: string };
 
+  markOutboxDirty(db);
   return createdOrExisting?.id || eventId;
 }
 
@@ -247,12 +249,29 @@ export function retrySupportEventDelivery(tenantId: number, deliveryId: string):
     SET state = 'pending', attempts = 0, next_attempt_at = ?, claim_until = NULL, sanitized_last_error = NULL, updated_at = ?
     WHERE tenant_id = ? AND id = ?
   `).run(now, now, tenantId, deliveryId);
+  markOutboxDirty(db);
 }
 
 let isDraining = false;
 let drainEpoch = 0;
 let lastWorkerProgressAt: number | null = null;
 let drainAbort: AbortController | null = null;
+let workerInterval: NodeJS.Timeout | null = null;
+let nudgeTimer: ReturnType<typeof setTimeout> | null = null;
+const emptyOutboxCheckedAt = new WeakMap<Db, number>();
+
+function markOutboxDirty(db: Db): void {
+  emptyOutboxCheckedAt.delete(db);
+  if (workerInterval !== null && !nudgeTimer && !isDraining) {
+    nudgeTimer = setTimeout(() => {
+      nudgeTimer = null;
+      drainSupportEventOutbox().catch(() => {
+        // worker loop error ignored
+      });
+    }, 15);
+    nudgeTimer.unref?.();
+  }
+}
 
 /**
  * Drains eligible outbox records with lease claims, backoff, and safe HTTP delivery.
@@ -272,24 +291,47 @@ export async function drainSupportEventOutbox(options?: { now?: number; limit?: 
     const nowIso = new Date(nowTime).toISOString();
     const limit = options?.limit ?? 20;
 
-    // Expired last attempts are terminal; a crashed sender must not retry forever.
-    db.prepare("UPDATE x_support_partner_deliveries SET state = 'dead', sanitized_last_error = 'last_attempt_interrupted', claim_until = NULL, claim_token = NULL WHERE state = 'delivering' AND claim_until <= ? AND attempts >= 5").run(nowIso);
+    // Single parameterless probe avoids mutating DB state or scanning joins when empty.
+    const summary = db.prepare(`
+      SELECT
+        COUNT(*) AS active_count,
+        SUM(CASE WHEN state = 'delivering' AND attempts >= 5 THEN 1 ELSE 0 END) AS terminal_candidates,
+        MIN(CASE
+          WHEN state = 'pending' THEN COALESCE(next_attempt_at, '')
+          WHEN state = 'delivering' THEN COALESCE(claim_until, '')
+        END) AS earliest_due
+      FROM x_support_partner_deliveries
+      WHERE state IN ('pending', 'delivering')
+    `).get() as { active_count: number; terminal_candidates: number | null; earliest_due: string | null } | undefined;
+
+    if (!summary || Number(summary.active_count) === 0) {
+      emptyOutboxCheckedAt.set(db, Date.now());
+      completed = true;
+      return;
+    }
+
+    emptyOutboxCheckedAt.delete(db);
+
+    const hasTerminalCandidates = Number(summary.terminal_candidates ?? 0) > 0;
+    if (hasTerminalCandidates) {
+      // Expired last attempts are terminal; a crashed sender must not retry forever.
+      db.prepare("UPDATE x_support_partner_deliveries SET state = 'dead', sanitized_last_error = 'last_attempt_interrupted', claim_until = NULL, claim_token = NULL WHERE state = 'delivering' AND claim_until <= ? AND attempts >= 5").run(nowIso);
+    } else if (summary.earliest_due && summary.earliest_due > nowIso) {
+      completed = true;
+      return;
+    }
+
     // Select candidates only. Claim each immediately before network dispatch.
-    let claimed: DeliveryRow[] = [];
-    db.transaction(() => {
-      claimed = db.prepare(`
-        SELECT d.*, e.type AS event_type, e.payload_encrypted, e.payload_iv, e.payload_auth_tag
-        FROM x_support_partner_deliveries d
-        JOIN x_support_partner_events e ON d.event_id = e.id
-        WHERE (d.state = 'pending' OR (d.state = 'delivering' AND d.claim_until <= ?))
-          AND d.attempts < 5
-          AND (d.next_attempt_at IS NULL OR d.next_attempt_at <= ?)
-        ORDER BY d.next_attempt_at ASC, d.id ASC
-        LIMIT ?
-      `).all(nowIso, nowIso, limit) as DeliveryRow[];
-
-
-    })();
+    const claimed = db.prepare(`
+      SELECT d.*, e.type AS event_type, e.payload_encrypted, e.payload_iv, e.payload_auth_tag
+      FROM x_support_partner_deliveries d
+      JOIN x_support_partner_events e ON d.event_id = e.id
+      WHERE (d.state = 'pending' OR (d.state = 'delivering' AND d.claim_until <= ?))
+        AND d.attempts < 5
+        AND (d.next_attempt_at IS NULL OR d.next_attempt_at <= ?)
+      ORDER BY d.next_attempt_at ASC, d.id ASC
+      LIMIT ?
+    `).all(nowIso, nowIso, limit) as DeliveryRow[];
 
     // Step 2: Deliver each claimed item outside of any transaction
     for (const delivery of claimed) {
@@ -455,8 +497,6 @@ export async function drainSupportEventOutbox(options?: { now?: number; limit?: 
   }
 }
 
-let workerInterval: NodeJS.Timeout | null = null;
-
 export function getSupportEventWorkerHealth(): { running: boolean; healthy: boolean } {
   const running = workerInterval !== null;
   return { running, healthy: running && lastWorkerProgressAt !== null && Date.now() - lastWorkerProgressAt <= 15_000 };
@@ -471,15 +511,30 @@ export function startSupportEventWorker(): () => void {
   }
 
   lastWorkerProgressAt = null;
-  workerInterval = setInterval(() => {
+  const runTick = () => {
+    try {
+      const db = getDb();
+      const lastEmpty = emptyOutboxCheckedAt.get(db);
+      const idleSkipMs = isTursoDatabase(db) ? 60_000 : 5_000;
+      if (lastEmpty !== undefined && Date.now() - lastEmpty < idleSkipMs) {
+        lastWorkerProgressAt = Date.now();
+        return;
+      }
+    } catch {
+      // Fall through to drainSupportEventOutbox when DB is not ready yet.
+    }
     drainSupportEventOutbox().catch(() => {
       // worker loop error ignored
     });
-  }, 1000);
+  };
+
+  workerInterval = setInterval(runTick, 5_000);
 
   if (typeof workerInterval.unref === 'function') {
     workerInterval.unref();
   }
+
+  runTick();
 
   return stopSupportEventWorker;
 }
@@ -488,6 +543,10 @@ export function stopSupportEventWorker(): void {
   drainEpoch++;
   lastWorkerProgressAt = null;
   drainAbort?.abort();
+  if (nudgeTimer) {
+    clearTimeout(nudgeTimer);
+    nudgeTimer = null;
+  }
   if (workerInterval) {
     clearInterval(workerInterval);
     workerInterval = null;

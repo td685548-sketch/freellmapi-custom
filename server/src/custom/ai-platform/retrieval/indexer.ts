@@ -8,6 +8,8 @@ import {
   type ScopeKind,
 } from '@freellmapi/shared/ai-platform-retrieval.js';
 import { getDb } from '../../../db/index.js';
+import { isTursoDatabase } from '../../../db/turso.js';
+import type { Db } from '../../../db/types.js';
 import { sanitizeProviderErrorMessage } from '../../../lib/error-redaction.js';
 import {
   EmbeddingsError,
@@ -89,6 +91,15 @@ let workerTimer: ReturnType<typeof setInterval> | null = null;
 let pendingTickTimer: ReturnType<typeof setTimeout> | null = null;
 let activeDrainPromise: Promise<void> | null = null;
 const scopesNeedingRescan = new Set<string>();
+const idleQueueSkipUntil = new WeakMap<Db, number>();
+
+function clearIdleQueueSkip(db?: Db): void {
+  try {
+    idleQueueSkipUntil.delete(db ?? getDb());
+  } catch {
+    // DB may not be initialized yet.
+  }
+}
 
 export function setEmbeddingsRunnerForTests(fn: EmbeddingsRunner | null): void {
   testEmbeddingsRunner = fn;
@@ -281,6 +292,7 @@ function shouldRunBackgroundTick(): boolean {
 }
 
 function scheduleTick(delayMs = 25): void {
+  clearIdleQueueSkip();
   if (!shouldRunBackgroundTick()) return;
   if (pendingTickTimer) return;
   pendingTickTimer = setTimeout(() => {
@@ -288,6 +300,39 @@ function scheduleTick(delayMs = 25): void {
     void drainBackgroundTick();
   }, delayMs);
   pendingTickTimer.unref?.();
+}
+
+function backgroundPollTick(): void {
+  if (!shouldRunBackgroundTick()) return;
+  if (testEmbeddingsRunner === null) {
+    try {
+      const db = getDb();
+      const now = Date.now();
+      const skipUntil = idleQueueSkipUntil.get(db) ?? 0;
+      if (now < skipUntil) return;
+      const row = db
+        .prepare(
+          `SELECT COUNT(*) AS cnt, MIN(COALESCE(retry_after, '')) AS earliest
+             FROM custom_ai_index_jobs
+            WHERE status = 'queued'`,
+        )
+        .get() as { cnt: number; earliest: string | null } | undefined;
+      if (Number(row?.cnt ?? 0) === 0) {
+        idleQueueSkipUntil.set(db, now + (isTursoDatabase(db) ? 60_000 : 5_000));
+        return;
+      }
+      if (row?.earliest) {
+        const retryAt = Date.parse(row.earliest);
+        if (Number.isFinite(retryAt) && retryAt > now) {
+          idleQueueSkipUntil.set(db, Math.min(retryAt, now + 60_000));
+          return;
+        }
+      }
+    } catch {
+      return;
+    }
+  }
+  void drainBackgroundTick();
 }
 
 async function drainBackgroundTick(): Promise<void> {
@@ -317,6 +362,7 @@ export function enqueueReindexJob(
 ): RetrievalIndexJobView {
   const norm = normalizeScope(scope);
   const db = getDb();
+  clearIdleQueueSkip(db);
   const target = resolveJobTarget(norm);
   const sourceChunks = loadSourceChunks(norm);
   const nowIso = new Date().toISOString();
@@ -823,8 +869,10 @@ export async function runPendingIndexJobsUntilIdle(opts?: {
 }
 
 const MISSING_EMBEDDINGS_SWEEP_MS = 5 * 60_000;
+const TURSO_IDLE_MISSING_EMBEDDINGS_SWEEP_MS = 30 * 60_000;
 const FAILED_JOB_COOLDOWN_MS = 30 * 60_000;
 let lastMissingEmbeddingsSweepAt = 0;
+let lastSweepIdle = false;
 
 /**
  * Queues a reindex for every previously indexed scope that has source chunks
@@ -869,10 +917,18 @@ export function enqueueMissingEmbeddingJobs(now = Date.now()): number {
 function maybeSweepMissingEmbeddings(): void {
   if (!shouldRunBackgroundTick()) return;
   const now = Date.now();
-  if (now - lastMissingEmbeddingsSweepAt < MISSING_EMBEDDINGS_SWEEP_MS) return;
+  let sweepIntervalMs = MISSING_EMBEDDINGS_SWEEP_MS;
+  try {
+    if (lastSweepIdle && isTursoDatabase(getDb())) {
+      sweepIntervalMs = TURSO_IDLE_MISSING_EMBEDDINGS_SWEEP_MS;
+    }
+  } catch {
+    // Use default sweep cadence when DB is not ready.
+  }
+  if (now - lastMissingEmbeddingsSweepAt < sweepIntervalMs) return;
   lastMissingEmbeddingsSweepAt = now;
   try {
-    enqueueMissingEmbeddingJobs(now);
+    lastSweepIdle = enqueueMissingEmbeddingJobs(now) === 0;
   } catch {
     // Never crash the worker timer (e.g. DB closed during test teardown).
   }
@@ -899,9 +955,10 @@ export function startIndexWorker(intervalMs = 1_500): void {
   }
 
   lastMissingEmbeddingsSweepAt = 0;
+  lastSweepIdle = false;
   workerTimer = setInterval(() => {
     maybeSweepMissingEmbeddings();
-    void drainBackgroundTick();
+    backgroundPollTick();
   }, Math.max(25, intervalMs));
   workerTimer.unref?.();
 
@@ -913,6 +970,8 @@ export function startIndexWorker(intervalMs = 1_500): void {
  */
 export function stopIndexWorker(): void {
   workerRunning = false;
+  lastSweepIdle = false;
+  clearIdleQueueSkip();
   if (workerTimer) {
     clearInterval(workerTimer);
     workerTimer = null;
