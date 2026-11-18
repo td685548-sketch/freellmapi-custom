@@ -1194,8 +1194,37 @@ export function exhaustedRetryError(lastError: any, maxRetries?: number, ctx?: E
     };
   }
 
-  // Circuit-breaker guardrail stop. Checked after the aggregate and bad-request
-  // diagnoses, which are more specific about WHY the pool is failing.
+  // 429 only when EVERY candidate is unavailable until a known time (or the
+  // caller gave us no per-attempt classes to aggregate — the legacy shape).
+  // This outranks the circuit-breaker stop below, like the auth/413/404
+  // aggregates above it: a unanimous rate-limit trail is a 429 with a
+  // concrete retry time whether the loop ran to the cap or the breaker cut
+  // it short, so the breaker must not shadow it with a generic 503.
+  if (attempts.length === 0 || everyAttempt(UNAVAILABLE_UNTIL_KNOWN_TIME)) {
+    const attemptCount = attempts.length > 0 ? attempts.length : maxRetries;
+    const scope = attemptCount == null
+      ? 'All models rate-limited'
+      : `All models rate-limited after ${attemptCount} attempt${attemptCount === 1 ? '' : 's'}`;
+    const retryAtMs = getSoonestCooldownExpiry() ?? undefined;
+    const eta = formatResetEta(retryAtMs);
+    const etaNote = eta ? ` Soonest cooldown reset ${eta}.` : '';
+    const breakerNote = ctx?.breakerFails
+      ? ` (failover stopped early by the circuit-breaker guardrail after ${ctx.breakerFails} consecutive upstream ` +
+        `failure${ctx.breakerFails === 1 ? '' : 's'} — remaining candidates were skipped)`
+      : '';
+    return {
+      kind: 'rate_limit',
+      status: 429,
+      type: 'rate_limit_error',
+      code: 'rate_limit_exceeded',
+      ...(retryAtMs != null ? { retryAtMs } : {}),
+      message: `${scope}${budgetNote}${breakerNote}.${etaNote}${trail} Last error: ${safeLastError}`,
+    };
+  }
+
+  // Circuit-breaker guardrail stop. Checked after every aggregate diagnosis
+  // (auth, context, model-not-found, bad-request, and the unanimous 429
+  // above), which are more specific about WHY the pool is failing.
   if (ctx?.breakerFails) {
     const breakerEta = formatResetEta(getSoonestCooldownExpiry());
     const breakerEtaNote = breakerEta ? ` Soonest cooldown reset ${breakerEta}.` : '';
@@ -1208,26 +1237,6 @@ export function exhaustedRetryError(lastError: any, maxRetries?: number, ctx?: E
         `failure${ctx.breakerFails === 1 ? '' : 's'} (max_consecutive_upstream_fails). The enabled pool looks ` +
         `unhealthy right now, so the remaining candidates were skipped instead of burning quota on them.` +
         `${breakerEtaNote}${trail} Last error: ${safeLastError}`,
-    };
-  }
-
-  // 429 only when EVERY candidate is unavailable until a known time (or the
-  // caller gave us no per-attempt classes to aggregate — the legacy shape).
-  if (attempts.length === 0 || everyAttempt(UNAVAILABLE_UNTIL_KNOWN_TIME)) {
-    const attemptCount = attempts.length > 0 ? attempts.length : maxRetries;
-    const scope = attemptCount == null
-      ? 'All models rate-limited'
-      : `All models rate-limited after ${attemptCount} attempt${attemptCount === 1 ? '' : 's'}`;
-    const retryAtMs = getSoonestCooldownExpiry() ?? undefined;
-    const eta = formatResetEta(retryAtMs);
-    const etaNote = eta ? ` Soonest cooldown reset ${eta}.` : '';
-    return {
-      kind: 'rate_limit',
-      status: 429,
-      type: 'rate_limit_error',
-      code: 'rate_limit_exceeded',
-      ...(retryAtMs != null ? { retryAtMs } : {}),
-      message: `${scope}${budgetNote}.${etaNote}${trail} Last error: ${safeLastError}`,
     };
   }
 

@@ -621,6 +621,10 @@ describe('runFallbackLoop: dispatch outcome contract', () => {
 
 describe('runFallbackLoop: circuit-breaker guardrail (max_consecutive_upstream_fails)', () => {
   const retryable429 = () => Object.assign(new Error('429 Too Many Requests'), { status: 429 });
+  // 5xx classifies as 'upstream_error', which has no unanimous aggregate
+  // diagnosis of its own, so a breaker trip over a 5xx trail renders the
+  // generic 503 breaker body. (An all-429 trail keeps its 429 — see below.)
+  const retryable500 = () => Object.assign(new Error('500 Internal Server Error'), { status: 500 });
 
   it('is off when the limit is explicitly 0: a doomed chain still runs to the attempt cap', async () => {
     const onExhausted = vi.fn();
@@ -635,7 +639,7 @@ describe('runFallbackLoop: circuit-breaker guardrail (max_consecutive_upstream_f
 
   it('is on by default at 6: a doomed chain stops after six hops without any configuration', async () => {
     const onExhausted = vi.fn();
-    const dispatch = vi.fn(async () => { throw retryable429(); });
+    const dispatch = vi.fn(async () => { throw retryable500(); });
 
     await runFallbackLoop(hooksSkeleton({ maxRetries: 20, dispatch, onExhausted, sleep: async () => {} }));
 
@@ -651,9 +655,9 @@ describe('runFallbackLoop: circuit-breaker guardrail (max_consecutive_upstream_f
 
   it('trips after N consecutive retryable failures and renders a 503 with the trail', async () => {
     const onExhausted = vi.fn();
-    const dispatch = vi.fn(async () => { throw retryable429(); });
+    const dispatch = vi.fn(async () => { throw retryable500(); });
 
-    await runFallbackLoop(hooksSkeleton({ maxRetries: 20, breakerLimit: 3, dispatch, onExhausted }));
+    await runFallbackLoop(hooksSkeleton({ maxRetries: 20, breakerLimit: 3, dispatch, onExhausted, sleep: async () => {} }));
 
     expect(dispatch).toHaveBeenCalledTimes(3); // stopped at the limit, not the cap
     expect(onExhausted).toHaveBeenCalledTimes(1);
@@ -664,6 +668,28 @@ describe('runFallbackLoop: circuit-breaker guardrail (max_consecutive_upstream_f
     expect(body.message).toContain('circuit-breaker');
     expect(body.message).toContain('3 consecutive upstream failures');
     expect(body.message).toContain('Attempt trail:');
+    expect(info.attempts).toHaveLength(3);
+    expect(info.timedOut).toBe(false);
+  });
+
+  it('an all-rate-limited trip keeps the 429 diagnosis instead of the breaker 503', async () => {
+    // Regression test for CI run #337 (PR #147): the breaker default-on at 6
+    // shadowed a unanimous 429 trail with a generic 503, breaking the
+    // fallback-detail-header exhaustion contract (expected 429). The breaker
+    // still stops the rotation early; only the rendered status keeps the
+    // more specific rate-limit diagnosis, with the early stop disclosed.
+    const onExhausted = vi.fn();
+    const dispatch = vi.fn(async () => { throw retryable429(); });
+
+    await runFallbackLoop(hooksSkeleton({ maxRetries: 20, breakerLimit: 3, dispatch, onExhausted, sleep: async () => {} }));
+
+    expect(dispatch).toHaveBeenCalledTimes(3); // breaker stopped the rotation
+    expect(onExhausted).toHaveBeenCalledTimes(1);
+    const [body, info] = onExhausted.mock.calls[0];
+    expect(body.kind).toBe('rate_limit');
+    expect(body.status).toBe(429);
+    expect(body.code).toBe('rate_limit_exceeded');
+    expect(body.message).toContain('circuit-breaker');
     expect(info.attempts).toHaveLength(3);
     expect(info.timedOut).toBe(false);
   });

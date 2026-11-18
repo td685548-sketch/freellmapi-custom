@@ -92,7 +92,7 @@ abortInFlight: () => hedgeAbort.abort(newHedgeAbortError())
 
 - `max_consecutive_upstream_fails` (setting `max_consecutive_upstream_fails`, default 6; 0 disables).
 - Counts consecutive retryable upstream failures across the attempt loop.
-- Trips → `breakerFails` in `ExhaustionContext` → **503 service_unavailable** with "upstream_unhealthy" code.
+- Trips → `breakerFails` in `ExhaustionContext` → **503 service_unavailable** with "upstream_unhealthy" code, except when every attempt shares one unanimous aggregate diagnosis (all rate-limited → keeps **429** with `retryAtMs`, all-auth → 502, context-too-large → 413, model-not-found → 404): the specific diagnosis outranks the breaker stop, and the early stop is disclosed in the message instead.
 - "The enabled pool looks unhealthy right now, so the remaining candidates were skipped instead of burning quota on them."
 - **Inter-hop backoff**: between two hops on a 429/5xx the loop waits 100ms → 200ms → 400ms → 500ms (plus up to 100ms jitter), but only when the retry budget still affords four times the wait, so the wait never starves the next hop; a short provider `Retry-After` below the computed backoff is honored exactly, a long one is not waited out (the key is already benched, the next hop tries a different key). Successful requests and non-429/5xx failures (401 rotation, model-not-found, skipBench) pay no delay.
 
