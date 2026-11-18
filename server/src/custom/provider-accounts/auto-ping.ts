@@ -9,6 +9,7 @@ import type { XQuotaWindow } from '@freellmapi/shared/x-quota.js';
 import { accountRow, resolveXGatewayAccountProxy, setAccountStatus } from './store.js';
 import { resolveAccountProvider } from './execution.js';
 import { resolveAccountCredential } from './oauth-lifecycle.js';
+import { isInPersistedRefreshBackoff } from './refresh-circuit.js';
 import { withKeyProxy } from '../../lib/proxy.js';
 
 export interface AutoPingSchedule {
@@ -260,6 +261,7 @@ export function setAutoPingSchedule(accountId: number, patch: Partial<AutoPingSc
 export async function pingAccount(accountId: number): Promise<{
   ok: boolean;
   latencyMs: number;
+  skipped?: boolean;
   message?: string;
 }> {
   const start = Date.now();
@@ -268,6 +270,15 @@ export async function pingAccount(accountId: number): Promise<{
     row = accountRow(accountId);
   } catch {
     return { ok: false, latencyMs: Date.now() - start, message: 'Account not found' };
+  }
+
+  if (isInPersistedRefreshBackoff(accountId)) {
+    return {
+      ok: false,
+      skipped: true,
+      latencyMs: Date.now() - start,
+      message: 'Skipped: OAuth refresh circuit is in backoff',
+    };
   }
 
   const provider = resolveAccountProvider(row);
