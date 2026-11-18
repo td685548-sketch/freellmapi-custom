@@ -27,6 +27,8 @@ export default defineConfig(({ mode }) => {
             groups: [
               { name: 'vendor-icons', test: /node_modules[\\/]lucide-react/ },
               { name: 'vendor-ui', test: /node_modules[\\/](?:@base-ui|@tanstack|react(?:-dom|-router)?(?:[\\/]|$))/ },
+              { name: 'vendor-markdown', test: /node_modules[\\/](?:react-markdown|remark-gfm|highlight\.js|micromark|mdast|unist|hast)/ },
+              { name: 'i18n-vi-custom', test: /src[\\/]custom[\\/]i18n[\\/]vi\.ts$/ },
             ],
           },
         },
@@ -38,6 +40,10 @@ export default defineConfig(({ mode }) => {
         // which can collide with wslrelay / Docker Desktop listeners on the same port.
         '/api': `http://127.0.0.1:${serverPort}`,
         '/v1': `http://127.0.0.1:${serverPort}`,
+        '/v1beta': `http://127.0.0.1:${serverPort}`,
+        '/thruline': `http://127.0.0.1:${serverPort}`,
+        '/mcp': `http://127.0.0.1:${serverPort}`,
+        '/docs': `http://127.0.0.1:${serverPort}`,
       },
     },
   }

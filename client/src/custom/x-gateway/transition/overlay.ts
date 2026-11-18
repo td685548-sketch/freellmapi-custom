@@ -173,7 +173,12 @@ export async function playEffect(effect: Effect, options: PlayOptions): Promise<
     const frame = (now: number) => {
       if (done) return
       const t = Math.min(Math.max((now - start) / effect.duration, 0), 1)
-      if (!covered && t >= effect.coveredAt) { covered = true; options.onCovered() }
+      if (!covered && t >= effect.coveredAt) {
+        covered = true
+        // Let clicks & scrolling pass straight through to the destination route while the reveal fades out
+        canvas.style.pointerEvents = 'none'
+        options.onCovered()
+      }
       data[4] = t
       try {
         device.queue.writeBuffer(uniforms, 0, data)

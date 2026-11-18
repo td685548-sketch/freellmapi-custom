@@ -30,6 +30,7 @@ import { startWorkerLifecycle } from './custom/x-gateway/support-runtime-router.
 import { rotateGeminiWebAccountsOnce, startGeminiWebKeepAlive } from './custom/provider-accounts/gemini-web-keepalive.js';
 import { createResourceAwareScheduler } from './custom/render-resource-saver.js';
 import { applyLocalTunnelDirectOutbound } from './custom/local-tunnel-direct-outbound.js';
+import { applyLocalSqlitePerformancePragmas } from './custom/sqlite-performance.js';
 
 // Before any other statement runs, so no provider key can reach stdout — users
 // paste server output into bug reports. Module scope, not inside main(), so it
@@ -53,6 +54,7 @@ async function main() {
     await restoreDbBackupIfNeeded();
   }
   measureStartup('database_init', () => initDb(config.dbPath ?? undefined));
+  applyLocalSqlitePerformancePragmas(getDb());
   const stopSupportWorker = startWorkerLifecycle();
   applyDeclarativeConfigFromEnv();
   // After initDb: the unknown-model half of this check reads the catalog.
