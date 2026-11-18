@@ -29,6 +29,8 @@ import {
 } from './prompts/render.js';
 import { getFlowBySlug, isFlowGrantedToProfile } from './orchestrator/definitions.js';
 import { executeFlowHttpRequest, extractRequestedModel, isFlowModel } from './orchestrator/engine.js';
+import { runSemanticCachePreRequest } from './semantic-cache/runtime.js';
+import { isSemanticCacheEnabledForScope } from './semantic-cache/store.js';
 
 export type OutputFilterProvider = (ctx: ProfileGuardContext) => OutputFilter | null;
 
@@ -123,15 +125,18 @@ export async function runPreRequest(
   _endUser: string | null,
 ): Promise<'continue' | 'handled'> {
   const flags = getFlags();
+  const profileScope = { kind: 'profile' as const, id: String(_profile.id) };
+  const semanticCacheActive = isSemanticCacheEnabledForScope(profileScope);
 
-  // Fast path: all flags false → no I/O, no req/res modification.
+  // Fast path: all flags false and semantic cache off → no I/O, no req/res modification.
   if (
     !flags.prompts &&
     !flags.retrieval &&
     !flags.promptCache &&
     !flags.mcpClient &&
     !flags.outputGuard &&
-    !flags.orchestrator
+    !flags.orchestrator &&
+    !semanticCacheActive
   ) {
     return 'continue';
   }
@@ -284,6 +289,12 @@ export async function runPreRequest(
 
   // 10. SLOT: outputGuard / response interceptor (idempotent; also installed before early handlers)
   installOutputGuardIfNeeded(req, res, _profile, _endUser);
+
+  // 11. SLOT: semanticCache (opt-in exact + semantic response cache lookup & post-response capture)
+  if (semanticCacheActive) {
+    const cacheOutcome = await runSemanticCachePreRequest(req, res, profileScope, _endUser);
+    if (cacheOutcome === 'handled') return 'handled';
+  }
 
   return 'continue';
 }
