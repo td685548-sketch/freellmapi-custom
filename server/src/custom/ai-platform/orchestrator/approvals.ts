@@ -15,8 +15,8 @@ import { decrypt, encrypt } from '../../../lib/crypto.js';
 import { isPillarEnabled } from '../flags.js';
 import { maskData, maskText } from '../masking.js';
 import {
-  expireChatContinuations,
-  resumeChatContinuation,
+  expireChatContinuations as expireInlineChatContinuations,
+  resumeChatContinuation as resumeInlineChatContinuation,
 } from '../mcp-client/chat-continuation.js';
 import type { ToolLoopDeps } from '../mcp-client/tool-loop.js';
 import { normalizeScope } from '../scope.js';
@@ -27,6 +27,7 @@ import {
 } from '../mcp-client/approval-safety.js';
 import { recordToolCall, transitionToolCallOutcome } from '../mcp-client/calls.js';
 import { CURRENT_OWNER_INSTANCE_ID } from '../mcp-client/owner-instance.js';
+import { collectMcpOAuthSecrets } from '../mcp-client/oauth.js';
 import { assertToolExecutable } from '../mcp-client/registry.js';
 import {
   sanitizeMcpError,
@@ -40,6 +41,10 @@ import {
   McpValidationError,
   canonicalJson,
 } from '../mcp-client/store.js';
+import {
+  expireChatContinuations,
+  resumeChatContinuation,
+} from './chat-resume.js';
 import { resumeRun, type OrchestratorEngineDeps } from './engine.js';
 
 interface ApprovalRow {
@@ -214,6 +219,9 @@ function collectServerSecrets(serverId?: number | null): string[] {
     } catch {
       // Ignore undecryptable rows when collecting redaction needles.
     }
+  }
+  for (const oauthSecret of collectMcpOAuthSecrets(serverId)) {
+    if (oauthSecret.length > 0) secrets.push(oauthSecret);
   }
   return secrets;
 }
@@ -396,7 +404,9 @@ export function expireApprovals(now: Date = new Date()): number {
     ).run();
   }
 
-  expireChatContinuations(db);
+  expireInlineChatContinuations(db);
+  expireChatContinuations(now);
+
   return res.changes;
 }
 
@@ -568,30 +578,74 @@ export async function approveAction(
     } catch {
       // resumeRun persists terminal run error; keep approval outcome intact.
     }
-  } else if (claimed.continuation_ciphertext) {
-    const toolOutputText =
-      finalStatus === 'succeeded'
-        ? (resultMasked ?? '{}')
-        : JSON.stringify({
-            error: {
-              type: finalStatus,
-              message: errorText ?? 'Approved tool execution failed.',
-            },
-          });
-    const continuationPromise = resumeChatContinuation(
-      id,
-      { approved: true, toolOutputText, note: view.decisionNote },
-      { req: opts?.req, toolLoopDeps: opts?.toolLoopDeps },
-    );
-    continuationPromise.catch(() => {});
-    const waitMs = Math.max(0, opts?.awaitContinuationMs ?? 3_000);
-    if (waitMs > 0) {
-      await Promise.race([
-        continuationPromise,
-        new Promise<void>((resolve) => setTimeout(resolve, waitMs)),
-      ]);
+  } else {
+    let handledByResumeTable = false;
+    try {
+      const continuation = await resumeChatContinuation(view.id, {
+        approved: true,
+        approval: view,
+        req: opts?.req,
+        deps: opts?.deps,
+      });
+      if (continuation) {
+        handledByResumeTable = true;
+        try {
+          const mappedStatus: McpContinuationStatus =
+            continuation.status === 'resuming' ? 'running' : continuation.status;
+          db.prepare(
+            `UPDATE custom_ai_approvals
+                SET continuation_status = ?,
+                    continuation_reply_masked = ?,
+                    continuation_next_approval_id = ?,
+                    continuation_model = ?,
+                    continuation_error = ?,
+                    continuation_finished_at = ?
+              WHERE id = ?`,
+          ).run(
+            mappedStatus,
+            continuation.assistantMessageMasked,
+            continuation.nextApprovalId,
+            continuation.servedModel ?? continuation.model,
+            continuation.error,
+            continuation.completedAt,
+            id,
+          );
+        } catch {
+          // Inline continuation columns may not exist in stubbed unit-test schemas
+        }
+        const refreshed = toApprovalView(selectApprovalById(id)!);
+        refreshed.continuation = continuation;
+        return refreshed;
+      }
+    } catch {
+      // Keep approval outcome intact when async chat resume encounters an error.
     }
-    return toApprovalView(selectApprovalById(id)!);
+
+    if (!handledByResumeTable && claimed.continuation_ciphertext) {
+      const toolOutputText =
+        finalStatus === 'succeeded'
+          ? (resultMasked ?? '{}')
+          : JSON.stringify({
+              error: {
+                type: finalStatus,
+                message: errorText ?? 'Approved tool execution failed.',
+              },
+            });
+      const continuationPromise = resumeInlineChatContinuation(
+        id,
+        { approved: true, toolOutputText, note: view.decisionNote },
+        { req: opts?.req, toolLoopDeps: opts?.toolLoopDeps },
+      );
+      continuationPromise.catch(() => {});
+      const waitMs = Math.max(0, opts?.awaitContinuationMs ?? 3_000);
+      if (waitMs > 0) {
+        await Promise.race([
+          continuationPromise,
+          new Promise<void>((resolve) => setTimeout(resolve, waitMs)),
+        ]);
+      }
+      return toApprovalView(selectApprovalById(id)!);
+    }
   }
   return view;
 }
@@ -676,13 +730,44 @@ export async function rejectAction(
     } catch {
       // Keep rejection outcome intact.
     }
-  } else if (updatedRow.continuation_ciphertext) {
-    await resumeChatContinuation(
-      id,
-      { approved: false, toolOutputText: '', note: view.decisionNote },
-      { req: opts?.req },
-    );
-    return toApprovalView(selectApprovalById(id)!);
+  } else {
+    let handledByResumeTable = false;
+    try {
+      const continuation = await resumeChatContinuation(view.id, {
+        approved: false,
+        approval: view,
+        req: opts?.req,
+        deps: opts?.deps,
+      });
+      if (continuation) {
+        handledByResumeTable = true;
+        try {
+          db.prepare(
+            `UPDATE custom_ai_approvals
+                SET continuation_status = 'rejected',
+                    continuation_reply_masked = ?,
+                    continuation_finished_at = ?
+              WHERE id = ?`,
+          ).run(continuation.assistantMessageMasked, continuation.completedAt, id);
+        } catch {
+          // Inline continuation columns optional in minimal unit tests
+        }
+        const refreshed = toApprovalView(selectApprovalById(id)!);
+        refreshed.continuation = continuation;
+        return refreshed;
+      }
+    } catch {
+      // Keep rejection outcome intact.
+    }
+
+    if (!handledByResumeTable && updatedRow.continuation_ciphertext) {
+      await resumeInlineChatContinuation(
+        id,
+        { approved: false, toolOutputText: '', note: view.decisionNote },
+        { req: opts?.req },
+      );
+      return toApprovalView(selectApprovalById(id)!);
+    }
   }
   return view;
 }

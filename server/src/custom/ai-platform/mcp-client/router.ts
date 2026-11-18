@@ -14,10 +14,20 @@ import {
   listApprovals,
   rejectAction,
 } from '../orchestrator/approvals.js';
+import { getChatApprovalContinuation } from '../orchestrator/chat-resume.js';
 import { parseScopeParam } from '../scope.js';
 import { getBindings, setBindings } from './bindings.js';
 import { listToolCalls } from './calls.js';
 import { maybeRunMcpMaintenance } from './maintenance.js';
+import {
+  completeMcpOAuthCallback,
+  discoverOAuthEndpoints,
+  getMcpOAuthStatus,
+  refreshMcpOAuthCredentials,
+  revokeMcpOAuthCredentials,
+  startMcpOAuthFlow,
+  upsertMcpOAuthConfig,
+} from './oauth.js';
 import {
   createServer,
   deleteServer,
@@ -30,7 +40,8 @@ import {
   testServer,
   updateServer,
 } from './registry.js';
-import { McpServiceError, McpValidationError } from './store.js';
+import { McpNotFoundError, McpServiceError, McpValidationError } from './store.js';
+import { getDb } from '../../../db/index.js';
 
 function getUser(req: Request): SessionUser | undefined {
   return (req as Request & { user?: SessionUser }).user;
@@ -149,7 +160,7 @@ const serverCreateSchema = z
     slug: z.string(),
     name: z.string(),
     url: z.string(),
-    authKind: z.enum(['none', 'bearer', 'header']),
+    authKind: z.enum(['none', 'bearer', 'header', 'oauth2']),
     authHeaderName: z.string().nullable().optional(),
     secret: z.string().nullable().optional(),
     enabled: z.boolean().optional(),
@@ -165,13 +176,49 @@ const serverPatchSchema = z
     slug: z.string().optional(),
     name: z.string().optional(),
     url: z.string().optional(),
-    authKind: z.enum(['none', 'bearer', 'header']).optional(),
+    authKind: z.enum(['none', 'bearer', 'header', 'oauth2']).optional(),
     authHeaderName: z.string().nullable().optional(),
     secret: z.string().nullable().optional(),
     enabled: z.boolean().optional(),
     timeoutMs: z.number().int().optional(),
     maxResultBytes: z.number().int().optional(),
     maxConcurrency: z.number().int().optional(),
+  })
+  .strict();
+
+const oauthConfigSchema = z
+  .object({
+    issuerUrl: z.string().nullable().optional(),
+    authorizationEndpoint: z.string().nullable().optional(),
+    tokenEndpoint: z.string().nullable().optional(),
+    revocationEndpoint: z.string().nullable().optional(),
+    clientId: z.string(),
+    clientSecret: z.string().nullable().optional(),
+    clearClientSecret: z.boolean().optional(),
+    scopes: z.array(z.string()).optional(),
+    redirectUri: z.string(),
+  })
+  .strict();
+
+const oauthStartSchema = z
+  .object({
+    config: oauthConfigSchema.optional(),
+    redirectUri: z.string().optional(),
+    scopes: z.array(z.string()).optional(),
+  })
+  .strict();
+
+const oauthCallbackSchema = z
+  .object({
+    code: z.string(),
+    state: z.string(),
+    redirectUri: z.string().optional(),
+  })
+  .strict();
+
+const oauthDiscoverSchema = z
+  .object({
+    issuerUrl: z.string(),
   })
   .strict();
 
@@ -280,6 +327,148 @@ mcpAdminRouter.post('/mcp/servers/:id/sync', requirePerm('edit_mcp_servers'), as
   try {
     const id = parsePositiveId(req.params.id, 'server');
     const result = await syncServerTools(id, getUser(req)?.userId ?? null);
+    res.json(result);
+  } catch (err) {
+    sendMcpError(res, err);
+  }
+});
+
+// ── MCP OAuth 2.1 + PKCE (S256) ──────────────────────────────────────────────
+
+mcpAdminRouter.get(
+  ['/mcp/servers/:id/oauth', '/mcp/servers/:id/oauth/status'],
+  requirePerm('view_mcp_servers'),
+  (req, res) => {
+    try {
+      const id = parsePositiveId(req.params.id, 'server');
+      res.json({ oauth: getMcpOAuthStatus(id) });
+    } catch (err) {
+      sendMcpError(res, err);
+    }
+  },
+);
+
+mcpAdminRouter.put('/mcp/servers/:id/oauth/config', requirePerm('edit_mcp_servers'), async (req, res) => {
+  const parsed = oauthConfigSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({
+      error: {
+        type: 'invalid_request_error',
+        code: 'invalid_oauth_config',
+        message: 'Invalid MCP OAuth 2.1 configuration payload.',
+      },
+    });
+    return;
+  }
+  try {
+    const id = parsePositiveId(req.params.id, 'server');
+    const oauth = await upsertMcpOAuthConfig(id, parsed.data);
+    res.json({ oauth });
+  } catch (err) {
+    sendMcpError(res, err);
+  }
+});
+
+mcpAdminRouter.post('/mcp/servers/:id/oauth/discover', requirePerm('edit_mcp_servers'), async (req, res) => {
+  const parsed = oauthDiscoverSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({
+      error: {
+        type: 'invalid_request_error',
+        code: 'invalid_oauth_config',
+        message: 'Expected { issuerUrl: string }.',
+      },
+    });
+    return;
+  }
+  try {
+    parsePositiveId(req.params.id, 'server');
+    const discovery = await discoverOAuthEndpoints(parsed.data.issuerUrl);
+    res.json({ discovery });
+  } catch (err) {
+    sendMcpError(res, err);
+  }
+});
+
+mcpAdminRouter.post('/mcp/servers/:id/oauth/start', requirePerm('edit_mcp_servers'), async (req, res) => {
+  const parsed = oauthStartSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({
+      error: {
+        type: 'invalid_request_error',
+        code: 'invalid_oauth_config',
+        message: 'Invalid MCP OAuth 2.1 PKCE start payload.',
+      },
+    });
+    return;
+  }
+  try {
+    const id = parsePositiveId(req.params.id, 'server');
+    const payload = await startMcpOAuthFlow(id, parsed.data, getUser(req)?.userId ?? null);
+    res.json(payload);
+  } catch (err) {
+    sendMcpError(res, err);
+  }
+});
+
+mcpAdminRouter.post('/mcp/servers/:id/oauth/callback', requirePerm('edit_mcp_servers'), async (req, res) => {
+  const parsed = oauthCallbackSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({
+      error: {
+        type: 'invalid_request_error',
+        code: 'invalid_oauth_callback',
+        message: 'Expected { code, state }.',
+      },
+    });
+    return;
+  }
+  try {
+    const id = parsePositiveId(req.params.id, 'server');
+    const oauth = await completeMcpOAuthCallback(id, parsed.data);
+    res.json({ oauth });
+  } catch (err) {
+    sendMcpError(res, err);
+  }
+});
+
+mcpAdminRouter.get('/mcp/servers/:id/oauth/callback', requirePerm('edit_mcp_servers'), async (req, res) => {
+  const code = typeof req.query.code === 'string' ? req.query.code : '';
+  const state = typeof req.query.state === 'string' ? req.query.state : '';
+  const redirectUri = typeof req.query.redirect_uri === 'string' ? req.query.redirect_uri : undefined;
+  try {
+    const id = parsePositiveId(req.params.id, 'server');
+    const oauth = await completeMcpOAuthCallback(id, { code, state, redirectUri });
+    res.json({ oauth });
+  } catch (err) {
+    sendMcpError(res, err);
+  }
+});
+
+mcpAdminRouter.post('/mcp/servers/:id/oauth/refresh', requirePerm('edit_mcp_servers'), async (req, res) => {
+  try {
+    const id = parsePositiveId(req.params.id, 'server');
+    const oauth = await refreshMcpOAuthCredentials(id);
+    res.json({ oauth });
+  } catch (err) {
+    sendMcpError(res, err);
+  }
+});
+
+mcpAdminRouter.post('/mcp/servers/:id/oauth/revoke', requirePerm('edit_mcp_servers'), async (req, res) => {
+  try {
+    const id = parsePositiveId(req.params.id, 'server');
+    const result = await revokeMcpOAuthCredentials(id);
+    res.json(result);
+  } catch (err) {
+    sendMcpError(res, err);
+  }
+});
+
+mcpAdminRouter.delete('/mcp/servers/:id/oauth', requirePerm('edit_mcp_servers'), async (req, res) => {
+  try {
+    const id = parsePositiveId(req.params.id, 'server');
+    const result = await revokeMcpOAuthCredentials(id);
     res.json(result);
   } catch (err) {
     sendMcpError(res, err);
@@ -497,3 +686,22 @@ mcpAdminRouter.post('/approvals/:id/reject', requirePerm('approve_ai_actions'), 
     sendMcpError(res, err);
   }
 });
+
+mcpAdminRouter.get(
+  ['/mcp/approvals/:id/continuation', '/approvals/:id/continuation'],
+  requirePerm('approve_ai_actions'),
+  (req, res) => {
+    try {
+      const id = parsePositiveId(req.params.id, 'approval');
+      const scope = parseScopeQuery(req.query.scope);
+      const exists = getDb().prepare('SELECT id FROM custom_ai_approvals WHERE id = ?').get(id);
+      if (!exists) {
+        throw new McpNotFoundError(`Approval ${id} not found.`);
+      }
+      const continuation = getChatApprovalContinuation(id, scope);
+      res.json({ continuation });
+    } catch (err) {
+      sendMcpError(res, err);
+    }
+  },
+);

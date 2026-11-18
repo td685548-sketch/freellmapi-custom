@@ -242,6 +242,7 @@ describe('migration round trip', () => {
         '20261118_120000_custom_learned_caps_models_dev.ts',
         '20261118_130000_custom_account_weights_circuit.ts',
         '20261118_140000_custom_prompt_eval_canary.ts',
+        '20261118_150000_custom_tracing_mcp_oauth_scheduler.ts',
       ]);
     } finally {
       db.close();

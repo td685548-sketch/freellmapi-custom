@@ -1,4 +1,8 @@
 import type { Scope, ScopeKind, Wire } from './ai-platform.js';
+import type {
+  ChatApprovalContinuationView,
+  McpOAuthConnectionStatus,
+} from './ai-platform-tracing-oauth.js';
 import type { ChatMessage, ChatToolCall, ChatToolDefinition, TokenUsage } from './types.js';
 
 export type { Scope, ScopeKind, Wire, ChatMessage, ChatToolCall, ChatToolDefinition, TokenUsage };
@@ -45,7 +49,7 @@ export const MCP_LIMITS = {
 
 // ── Enums & Status Unions ────────────────────────────────────────────────────
 
-export type McpAuthKind = 'none' | 'bearer' | 'header';
+export type McpAuthKind = 'none' | 'bearer' | 'header' | 'oauth2';
 export type McpServerStatus = 'unknown' | 'ok' | 'error' | 'paused';
 export type McpToolState = 'pending' | 'allowed' | 'blocked' | 'missing';
 export type McpToolEffect = 'read' | 'write';
@@ -97,6 +101,7 @@ export interface McpServerView {
   authKind: McpAuthKind;
   authHeaderName: string | null;
   hasSecret: boolean;
+  oauthStatus?: McpOAuthConnectionStatus;
   enabled: boolean;
   timeoutMs: number;
   maxResultBytes: number;
@@ -224,6 +229,7 @@ export interface McpApprovalView {
   continuationModel?: string | null;
   continuationError?: string | null;
   continuationFinishedAt?: string | null;
+  continuation?: ChatApprovalContinuationView | null;
   expiresAt: string;
   createdAt: string;
 }

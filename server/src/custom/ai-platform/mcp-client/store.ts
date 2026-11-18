@@ -16,6 +16,7 @@ import {
   type McpToolState,
   type McpToolView,
 } from '@freellmapi/shared/ai-platform-mcp.js';
+import type { McpOAuthConnectionStatus } from '@freellmapi/shared/ai-platform-tracing-oauth.js';
 import { getDb } from '../../../db/index.js';
 import type { Db } from '../../../db/types.js';
 import { sanitizeMcpText, sanitizeMcpValue } from './sanitize.js';
@@ -236,7 +237,41 @@ export function buildExposedToolName(
 
 // ── Public Projection Whitelists (NEVER spread SQL rows) ─────────────────────
 
+function lookupOAuthBadge(serverId: number): McpOAuthConnectionStatus {
+  try {
+    const db = getDb();
+    if (!hasTable(db, 'custom_ai_mcp_oauth_credentials')) return 'unconfigured';
+    const row = db
+      .prepare(
+        `SELECT access_token_ciphertext, access_token_iv, access_token_tag, expires_at
+           FROM custom_ai_mcp_oauth_credentials
+          WHERE server_id = ?`,
+      )
+      .get(serverId) as
+      | {
+          access_token_ciphertext: string | null;
+          access_token_iv: string | null;
+          access_token_tag: string | null;
+          expires_at: string | null;
+        }
+      | undefined;
+    if (!row || !row.access_token_ciphertext || !row.access_token_iv || !row.access_token_tag) {
+      return 'unconfigured';
+    }
+    if (row.expires_at) {
+      const expMs = Date.parse(row.expires_at);
+      if (Number.isFinite(expMs) && expMs <= Date.now()) {
+        return 'expired';
+      }
+    }
+    return 'connected';
+  } catch {
+    return 'unconfigured';
+  }
+}
+
 export function toServerView(row: McpServerRow): McpServerView {
+  const oauthStatus = row.auth_kind === 'oauth2' ? lookupOAuthBadge(row.id) : undefined;
   return {
     id: row.id,
     slug: row.slug,
@@ -245,6 +280,7 @@ export function toServerView(row: McpServerRow): McpServerView {
     authKind: row.auth_kind,
     authHeaderName: row.auth_header_name,
     hasSecret: Boolean(row.auth_ciphertext && row.auth_iv && row.auth_tag),
+    ...(oauthStatus !== undefined ? { oauthStatus } : {}),
     enabled: row.enabled === 1,
     timeoutMs: row.timeout_ms,
     maxResultBytes: row.max_result_bytes,

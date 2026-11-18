@@ -1,6 +1,7 @@
 import { getDb } from '../../../db/index.js';
 import { expireApprovals } from '../orchestrator/approvals.js';
 import { pruneToolCalls, transitionToolCallOutcome } from './calls.js';
+import { pruneExpiredOAuthPkceStates } from './oauth.js';
 import { CURRENT_OWNER_INSTANCE_ID, isOwnerDefinitelyDead } from './owner-instance.js';
 
 export { CURRENT_OWNER_INSTANCE_ID } from './owner-instance.js';
@@ -95,6 +96,7 @@ export function maybeRunMcpMaintenance(options?: {
   }
 
   lastMaintenanceAtMs = nowMs;
+  pruneExpiredOAuthPkceStates(now);
   const expiredApprovals = expireApprovals(now);
   const prunedToolCalls = pruneToolCalls(now);
   const reconciledExecuting = reconcileStaleExecutingApprovals(

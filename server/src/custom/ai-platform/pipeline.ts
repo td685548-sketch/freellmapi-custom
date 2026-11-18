@@ -248,6 +248,7 @@ export async function runPreRequest(
         maxRounds: preparedMcp.plan.maxRounds,
         signal: ac.signal,
         endUser: preparedMcp.endUser,
+        wire: preparedMcp.plan.wire,
         params: preparedMcp.params,
       });
 

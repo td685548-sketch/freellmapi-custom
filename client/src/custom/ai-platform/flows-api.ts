@@ -14,6 +14,14 @@ import type {
   McpApprovalStatus,
   McpApprovalView,
 } from '../../../../shared/ai-platform-mcp';
+import type {
+  AsyncFlowRunInput,
+  AsyncFlowRunResponse,
+  FlowScheduleInput,
+  FlowScheduleKind,
+  FlowScheduleResponse,
+  FlowScheduleView,
+} from '../../../../shared/ai-platform-tracing-oauth';
 import {
   AGENT_SLUG_REGEX,
   DEFAULT_FLOW_LIMITS,
@@ -45,6 +53,8 @@ export type {
   AgentInput,
   AgentPatchInput,
   AgentView,
+  AsyncFlowRunInput,
+  AsyncFlowRunResponse,
   FlowCreateInput,
   FlowDefinition,
   FlowDetailView,
@@ -55,6 +65,10 @@ export type {
   FlowRunStatus,
   FlowRunStepView,
   FlowRunView,
+  FlowScheduleInput,
+  FlowScheduleKind,
+  FlowScheduleResponse,
+  FlowScheduleView,
   FlowStepKind,
   FlowStepStatus,
   FlowStopReason,
@@ -370,6 +384,51 @@ export async function tryFlow(
 
 export async function deleteFlow(id: number, signal?: AbortSignal): Promise<{ ok: true }> {
   return apiFetch<{ ok: true }>(`/api/ai-platform/flows/${id}`, {
+    method: 'DELETE',
+    signal,
+  });
+}
+
+// ─── Async Trigger & Scheduled Execution (Spec 035) ───────────────────────────
+
+export async function triggerAsyncFlowRun(
+  flowId: number,
+  input: AsyncFlowRunInput,
+  signal?: AbortSignal,
+): Promise<AsyncFlowRunResponse> {
+  return apiFetch<AsyncFlowRunResponse>(`/api/ai-platform/flows/${flowId}/runs/async`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+    signal,
+  });
+}
+
+export async function fetchFlowSchedule(
+  flowId: number,
+  signal?: AbortSignal,
+): Promise<FlowScheduleResponse> {
+  return apiFetch<FlowScheduleResponse>(`/api/ai-platform/flows/${flowId}/schedule`, {
+    signal,
+  });
+}
+
+export async function saveFlowSchedule(
+  flowId: number,
+  input: FlowScheduleInput,
+  signal?: AbortSignal,
+): Promise<FlowScheduleResponse> {
+  return apiFetch<FlowScheduleResponse>(`/api/ai-platform/flows/${flowId}/schedule`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+    signal,
+  });
+}
+
+export async function deleteFlowSchedule(
+  flowId: number,
+  signal?: AbortSignal,
+): Promise<{ ok: true }> {
+  return apiFetch<{ ok: true }>(`/api/ai-platform/flows/${flowId}/schedule`, {
     method: 'DELETE',
     signal,
   });

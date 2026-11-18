@@ -110,6 +110,7 @@ import * as customThoughtSignatures from '../migrations/20261118_110000_custom_t
 import * as customLearnedCapsModelsDev from '../migrations/20261118_120000_custom_learned_caps_models_dev.js';
 import * as customAccountWeightsCircuit from '../migrations/20261118_130000_custom_account_weights_circuit.js';
 import * as customPromptEvalCanary from '../migrations/20261118_140000_custom_prompt_eval_canary.js';
+import * as customTracingMcpOauthScheduler from '../migrations/20261118_150000_custom_tracing_mcp_oauth_scheduler.js';
 
 export interface MigrationModule {
   up(db: Db): void;
@@ -312,4 +313,5 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: '20261118_120000_custom_learned_caps_models_dev.ts', module: customLearnedCapsModelsDev },
   { filename: '20261118_130000_custom_account_weights_circuit.ts', module: customAccountWeightsCircuit },
   { filename: '20261118_140000_custom_prompt_eval_canary.ts', module: customPromptEvalCanary },
+  { filename: '20261118_150000_custom_tracing_mcp_oauth_scheduler.ts', module: customTracingMcpOauthScheduler },
 ];

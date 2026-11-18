@@ -8,6 +8,7 @@ import http from 'node:http';
 import type { Request } from 'express';
 import type { ChatMessage, ChatToolDefinition, TokenUsage } from '@freellmapi/shared/types.js';
 import { extractInferenceToken } from '../../middleware/user-rate-limit.js';
+import { getLoopbackTraceHeaders } from './tracing/collector.js';
 
 // ── Re-export types used by callers ─────────────────────────────────────────
 
@@ -319,6 +320,7 @@ export async function callGateway(
     'content-type': 'application/json',
     'content-length': Buffer.byteLength(bodyJson),
     [HEADER_NAME]: internalHeader,
+    ...getLoopbackTraceHeaders(),
   };
   if (body.skipEnrichment) headers['x-ai-platform-enriched'] = '1';
   if (authHeader) headers['authorization'] = authHeader;

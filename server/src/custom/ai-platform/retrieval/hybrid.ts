@@ -10,6 +10,7 @@ import { searchKnowledgeRanked } from '../../../services/profile-knowledge.js';
 import * as supportKnowledge from '../../x-gateway/support-knowledge.js';
 import { isPillarEnabled } from '../flags.js';
 import { normalizeScope, type Scope } from '../scope.js';
+import { recordCompletedSpan } from '../tracing/collector.js';
 import { buildCitations } from './citations.js';
 import {
   getEmbeddingsRunnerForHybrid,
@@ -287,18 +288,35 @@ export async function retrieve(
     hits: RetrievalHit[],
     degraded: boolean,
     degradedReason?: RetrievalDegradedReason,
-  ): RetrievalQueryResponse => ({
-    scope: norm,
-    query: cleanQuery,
-    modeRequested,
-    modeUsed,
-    degraded,
-    ...(degradedReason ? { degradedReason } : {}),
-    latencyMs: Math.max(0, Date.now() - startedAt),
-    indexGeneration,
-    hits,
-    citations: buildCitations(hits),
-  });
+  ): RetrievalQueryResponse => {
+    const latencyMs = Math.max(0, Date.now() - startedAt);
+    recordCompletedSpan({
+      kind: 'retrieval',
+      name: `retrieval:${norm.kind}:${norm.id}`,
+      durationMs: latencyMs,
+      status: 'ok',
+      attributes: {
+        modeRequested,
+        modeUsed,
+        degraded,
+        ...(degradedReason ? { degradedReason } : {}),
+        hitsCount: hits.length,
+        topK,
+      },
+    });
+    return {
+      scope: norm,
+      query: cleanQuery,
+      modeRequested,
+      modeUsed,
+      degraded,
+      ...(degradedReason ? { degradedReason } : {}),
+      latencyMs,
+      indexGeneration,
+      hits,
+      citations: buildCitations(hits),
+    };
+  };
 
   if (!cleanQuery.trim()) {
     return makeResponse(modeRequested, [], false);

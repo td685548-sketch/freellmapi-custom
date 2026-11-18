@@ -7,6 +7,18 @@
 
 import { apiFetch } from '@/lib/api';
 import type {
+  ChatApprovalContinuationResponse,
+  ChatApprovalContinuationView,
+  McpOAuthCallbackInput,
+  McpOAuthConfigInput,
+  McpOAuthConnectionStatus,
+  McpOAuthRevokeResponse,
+  McpOAuthStartInput,
+  McpOAuthStartResponse,
+  McpOAuthStatusResponse,
+  McpOAuthStatusView,
+} from '../../../../shared/ai-platform-tracing-oauth';
+import type {
   McpAllowedOriginsInput,
   McpAllowedOriginsResponse,
   McpApprovalDecisionInput,
@@ -65,6 +77,19 @@ export type {
   Scope,
   ScopeKind,
 } from '../../../../shared/ai-platform-mcp';
+
+export type {
+  ChatApprovalContinuationResponse,
+  ChatApprovalContinuationView,
+  McpOAuthCallbackInput,
+  McpOAuthConfigInput,
+  McpOAuthConnectionStatus,
+  McpOAuthRevokeResponse,
+  McpOAuthStartInput,
+  McpOAuthStartResponse,
+  McpOAuthStatusResponse,
+  McpOAuthStatusView,
+};
 
 export { MCP_LIMITS, MCP_PROTOCOL_VERSION, MCP_SLUG_REGEX } from '../../../../shared/ai-platform-mcp';
 
@@ -262,4 +287,81 @@ export async function putAllowedInternalOrigins(input: McpAllowedOriginsInput, s
     body: JSON.stringify(input),
     signal,
   });
+}
+
+// ─── MCP OAuth 2.1 + PKCE (S256) & Chat Continuation ─────────────────────────
+
+export async function fetchMcpOAuthStatus(
+  serverId: number,
+  signal?: AbortSignal,
+): Promise<McpOAuthStatusResponse> {
+  return apiFetch<McpOAuthStatusResponse>(`/api/ai-platform/mcp/servers/${serverId}/oauth/status`, {
+    signal,
+  });
+}
+
+export async function saveMcpOAuthConfig(
+  serverId: number,
+  input: McpOAuthConfigInput,
+  signal?: AbortSignal,
+): Promise<McpOAuthStatusResponse> {
+  return apiFetch<McpOAuthStatusResponse>(`/api/ai-platform/mcp/servers/${serverId}/oauth/config`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+    signal,
+  });
+}
+
+export async function startMcpOAuthPkce(
+  serverId: number,
+  input?: McpOAuthStartInput,
+  signal?: AbortSignal,
+): Promise<McpOAuthStartResponse> {
+  return apiFetch<McpOAuthStartResponse>(`/api/ai-platform/mcp/servers/${serverId}/oauth/start`, {
+    method: 'POST',
+    body: JSON.stringify(input ?? {}),
+    signal,
+  });
+}
+
+export async function completeMcpOAuthCallback(
+  serverId: number,
+  input: McpOAuthCallbackInput,
+  signal?: AbortSignal,
+): Promise<McpOAuthStatusResponse> {
+  return apiFetch<McpOAuthStatusResponse>(`/api/ai-platform/mcp/servers/${serverId}/oauth/callback`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+    signal,
+  });
+}
+
+export async function refreshMcpOAuth(
+  serverId: number,
+  signal?: AbortSignal,
+): Promise<McpOAuthStatusResponse> {
+  return apiFetch<McpOAuthStatusResponse>(`/api/ai-platform/mcp/servers/${serverId}/oauth/refresh`, {
+    method: 'POST',
+    signal,
+  });
+}
+
+export async function revokeMcpOAuth(
+  serverId: number,
+  signal?: AbortSignal,
+): Promise<McpOAuthRevokeResponse> {
+  return apiFetch<McpOAuthRevokeResponse>(`/api/ai-platform/mcp/servers/${serverId}/oauth/revoke`, {
+    method: 'POST',
+    signal,
+  });
+}
+
+export async function fetchChatApprovalContinuation(
+  approvalId: number,
+  signal?: AbortSignal,
+): Promise<ChatApprovalContinuationResponse> {
+  return apiFetch<ChatApprovalContinuationResponse>(
+    `/api/ai-platform/mcp/approvals/${approvalId}/continuation`,
+    { signal },
+  );
 }

@@ -19,6 +19,7 @@ import { promptCacheAdminRouter } from './prompt-cache/router.js';
 import { promptsAdminRouter } from './prompts/router.js';
 import { retrievalAdminRouter } from './retrieval/router.js';
 import { semanticCacheAdminRouter } from './semantic-cache/router.js';
+import { tracingAdminRouter } from './tracing/router.js';
 import { customerAiAdminRouter } from '../customer-ai/router.js';
 
 const RETENTION_KEY = 'ai_platform_retention_v1';
@@ -200,4 +201,5 @@ aiPlatformRouter.use(promptCacheAdminRouter);
 aiPlatformRouter.use(semanticCacheAdminRouter);
 aiPlatformRouter.use(promptsAdminRouter);
 aiPlatformRouter.use(orchestratorAdminRouter);
+aiPlatformRouter.use(tracingAdminRouter);
 aiPlatformRouter.use(customerAiAdminRouter);

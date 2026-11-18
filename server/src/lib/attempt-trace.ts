@@ -59,13 +59,49 @@ export interface RequestTrace {
 }
 
 const storage = new AsyncLocalStorage<RequestTrace>();
+type AttemptTraceObserver = (records: readonly AttemptTraceRecord[], startedAtMs: number) => void;
+const observers = new Set<AttemptTraceObserver>();
+
+export function registerAttemptTraceObserver(observer: AttemptTraceObserver): () => void {
+  observers.add(observer);
+  return () => {
+    observers.delete(observer);
+  };
+}
+
+function notifyObservers(trace: RequestTrace, startedAtMs: number): void {
+  if (observers.size === 0 || trace.records.length === 0) return;
+  for (const obs of observers) {
+    try {
+      obs(trace.records, startedAtMs);
+    } catch {
+      // Observers must never interfere with the request path
+    }
+  }
+}
 
 export function newRequestTrace(): RequestTrace {
   return { records: [], lastRequestRowId: null };
 }
 
 export function runWithRequestTrace<T>(trace: RequestTrace, fn: () => T): T {
-  return storage.run(trace, fn);
+  const startedAtMs = Date.now();
+  return storage.run(trace, () => {
+    let result: T;
+    try {
+      result = fn();
+    } catch (err) {
+      notifyObservers(trace, startedAtMs);
+      throw err;
+    }
+    if (result && typeof (result as unknown as { finally?: unknown }).finally === 'function') {
+      return (result as unknown as Promise<unknown>).finally(() => {
+        notifyObservers(trace, startedAtMs);
+      }) as unknown as T;
+    }
+    notifyObservers(trace, startedAtMs);
+    return result;
+  });
 }
 
 export function getRequestTrace(): RequestTrace | undefined {

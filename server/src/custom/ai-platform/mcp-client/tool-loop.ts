@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type { Request } from 'express';
-import type { Scope } from '@freellmapi/shared/ai-platform.js';
+import type { Scope, Wire } from '@freellmapi/shared/ai-platform.js';
 import {
   MCP_LIMITS,
   type BoundTool,
@@ -16,6 +16,13 @@ import { getDb } from '../../../db/index.js';
 import { hasEnabledToolsModel, resolveRoutingChain } from '../../../services/router.js';
 import { compactLoopMessagesForBudget } from '../../context-budget/loop-guard.js';
 import { callGateway, type LoopbackRequest } from '../loopback.js';
+import { savePausedChatContinuation } from '../orchestrator/chat-resume.js';
+import {
+  noteTraceOutcome,
+  noteTraceUsage,
+  recordCompletedSpan,
+  runWithSpan,
+} from '../tracing/collector.js';
 import { toolsForScope } from './bindings.js';
 import { saveChatApprovalContinuation } from './chat-continuation.js';
 import type { LoopSafeParams } from './messages.js';
@@ -31,6 +38,7 @@ export interface RunToolLoopInput {
   turnId?: string;
   endUser?: string | null;
   role?: string;
+  wire?: Wire;
   params?: LoopSafeParams;
 }
 
@@ -205,12 +213,24 @@ export async function runToolLoop(
     }
     rounds += 1;
 
+    const budgetStartedAt = Date.now();
     const guarded = compactLoopMessagesForBudget({
       messages: conversation,
       model: input.model,
       profileId: input.scope.kind === 'profile' ? Number(input.scope.id) : undefined,
       tools: combinedTools,
       maxOutputTokens: input.params?.maxTokens,
+    });
+    recordCompletedSpan({
+      kind: 'context_budget',
+      name: `context_budget:round_${rounds}`,
+      durationMs: Date.now() - budgetStartedAt,
+      status: 'ok',
+      attributes: {
+        round: rounds,
+        inputMessages: conversation.length,
+        outputMessages: guarded.messages.length,
+      },
     });
 
     const gwRes = await gateway(req, {
@@ -226,6 +246,12 @@ export async function runToolLoop(
       signal: input.signal,
     });
 
+    noteTraceUsage({
+      servedModel: gwRes.servedModel,
+      promptTokens: gwRes.usage.prompt_tokens,
+      completionTokens: gwRes.usage.completion_tokens,
+      cachedTokens: gwRes.usage.prompt_tokens_details?.cached_tokens,
+    });
     totalUsage = addUsage(totalUsage, gwRes.usage);
     lastMessage = gwRes.message;
     lastFinish = gwRes.finishReason;
@@ -305,18 +331,51 @@ export async function runToolLoop(
       }
 
       const seq = ++stepSeq;
-      const outcome = await execTool(
+      const outcome = await runWithSpan(
+        'mcp_tool_call',
+        `mcp:${bound.exposedName}`,
         {
-          scope: input.scope,
-          endUser: input.endUser ?? null,
-          ...(input.role ? { role: input.role } : {}),
-          ...(input.runId ? { runId: input.runId } : {}),
-          turnId,
+          serverSlug: bound.serverSlug,
+          toolName: bound.name,
+          exposedName: bound.exposedName,
+          effect: bound.effect,
           stepSeq: seq,
-          signal: input.signal,
         },
-        bound,
-        parsedArgs.value,
+        async (span) => {
+          const resOutcome = await execTool(
+            {
+              scope: input.scope,
+              endUser: input.endUser ?? null,
+              ...(input.role ? { role: input.role } : {}),
+              ...(input.runId ? { runId: input.runId } : {}),
+              turnId,
+              stepSeq: seq,
+              signal: input.signal,
+            },
+            bound,
+            parsedArgs.value,
+          );
+          if (span) {
+            if (resOutcome.kind === 'awaiting_approval') {
+              span.end({
+                status: 'awaiting_approval',
+                attributes: { approvalId: resOutcome.approvalId },
+              });
+            } else if (resOutcome.kind === 'error') {
+              span.end({
+                status: 'error',
+                errorSummary: resOutcome.errorType,
+                attributes: { errorType: resOutcome.errorType },
+              });
+            } else {
+              span.end({
+                status: 'ok',
+                attributes: { bytes: resOutcome.bytes, truncated: resOutcome.truncated },
+              });
+            }
+          }
+          return resOutcome;
+        },
       );
 
       if (outcome.kind === 'awaiting_approval') {
@@ -332,10 +391,11 @@ export async function runToolLoop(
     });
 
     const pending = results.find((r) => r.pendingApprovalId !== undefined);
-    if (pending) {
+    if (pending && pending.pendingApprovalId !== undefined) {
+      noteTraceOutcome({ status: 'awaiting_approval', servedModel });
       if (!input.runId) {
         try {
-          saveChatApprovalContinuation(pending.pendingApprovalId!, {
+          saveChatApprovalContinuation(pending.pendingApprovalId, {
             version: 1,
             scope: input.scope,
             endUser: input.endUser ?? null,
@@ -354,6 +414,30 @@ export async function runToolLoop(
           });
         } catch {
           // Best-effort: approval pause must still return cleanly if DB columns are unavailable.
+        }
+        try {
+          savePausedChatContinuation({
+            approvalId: pending.pendingApprovalId,
+            scope: input.scope,
+            endUser: input.endUser ?? null,
+            wire: input.wire ?? 'openai-chat',
+            model: input.model,
+            servedModel,
+            conversation,
+            batchItems: results.map((r) =>
+              r.pendingApprovalId !== undefined
+                ? { call: r.call, pendingApprovalId: r.pendingApprovalId }
+                : { call: r.call, completedText: r.text },
+            ),
+            callerTools: input.callerTools,
+            maxRounds,
+            roundsUsed: rounds,
+            usageSoFar: totalUsage,
+            params: input.params,
+            req,
+          });
+        } catch {
+          // Best-effort continuation save when DB schema is stubbed in minimal unit tests
         }
       }
       return {

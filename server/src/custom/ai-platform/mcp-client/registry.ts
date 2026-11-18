@@ -46,7 +46,7 @@ import {
 export { getAllowedInternalOrigins, setAllowedInternalOrigins };
 export type { McpTransportConfig, McpTransportClient };
 
-const VALID_AUTH_KINDS = new Set<McpAuthKind>(['none', 'bearer', 'header']);
+const VALID_AUTH_KINDS = new Set<McpAuthKind>(['none', 'bearer', 'header', 'oauth2']);
 
 function sanitizeErrorMessage(err: unknown, secret?: string | null): string {
   return sanitizeMcpError(err, secret ? [secret] : undefined).slice(0, 500);
@@ -112,7 +112,7 @@ function validateAuth(
   authHeaderName: string | null | undefined,
 ): { authKind: McpAuthKind; authHeaderName: string | null } {
   if (!VALID_AUTH_KINDS.has(authKind)) {
-    throw new McpValidationError("authKind must be 'none', 'bearer', or 'header'.", 'invalid_auth', 400);
+    throw new McpValidationError("authKind must be 'none', 'bearer', 'header', or 'oauth2'.", 'invalid_auth', 400);
   }
   if (authKind === 'header') {
     const header = String(authHeaderName ?? '').trim();
