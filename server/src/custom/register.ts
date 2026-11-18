@@ -29,6 +29,9 @@ import { maybeSendWeeklyReport } from '../services/usage-report.js';
 import { usageReportSettingsRouter } from '../routes/usage-report-settings.js';
 import { contextPolicyRouter, contextPolicySettingsRouter } from '../routes/context-policy.js';
 import { starterQuotaSettingsRouter } from '../routes/starter-quota-settings.js';
+import { userNotificationsRouter } from '../routes/notifications.js';
+import { telegramAlertSettingsRouter } from './notifications/router.js';
+import { startTelegramBotPoller } from './notifications/telegram-bot.js';
 import { auditMiddleware } from '../services/audit-log.js';
 import { auditLogRouter } from '../routes/audit-log.js';
 import { playgroundAttribution } from './playground-attribution.js';
@@ -287,6 +290,8 @@ export function registerCustomRoutes(app: Express): void {
   app.use('/api/settings/context-policy', contextPolicySettingsRouter);
   // Default starter usage quota automatically assigned to newly created member accounts.
   app.use('/api/settings/starter-quota', starterQuotaSettingsRouter);
+  // Two-way Telegram Ops Bot settings & live test endpoint.
+  app.use('/api/settings/telegram-alerts', telegramAlertSettingsRouter);
   // Usage ranking of accounts and client keys; its view_usage gate is in PERMISSION_GATES.
   app.use('/api/usage', usageRouter);
 
@@ -329,7 +334,7 @@ export function registerCustomRoutes(app: Express): void {
   app.use('/api/tenant-portal', requireAuth, tenantPortalRouter);
   app.use('/api/support-setup-copilot', requireAuth, supportSetupCopilotRouter);
   app.use('/api/user/ai-hub', requireAuth, customerAiUserRouter);
-  app.use('/api/user', requireAuth, userKeysRouter, selfAnalyticsRouter, selfQuotaRouter, selfRequestsRouter);
+  app.use('/api/user', requireAuth, userKeysRouter, userNotificationsRouter, selfAnalyticsRouter, selfQuotaRouter, selfRequestsRouter);
 
   // AI Platform admin API — mounted after auth/permission gates (gate is in PERMISSION_GATES above).
   // Implementation routers (flags, overview, etc.) will be added in later tasks.
@@ -339,4 +344,6 @@ export function registerCustomRoutes(app: Express): void {
   startIndexWorker();
   // Start background orchestrator flow scheduler (off in tests unless explicitly ticked).
   startFlowScheduler();
+  // Start lightweight Telegram interactive approval poller (off in tests unless explicitly ticked).
+  startTelegramBotPoller();
 }

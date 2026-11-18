@@ -2,6 +2,7 @@ import { getDb, getSetting, setSetting } from '../db/index.js';
 import { providerLog } from '../lib/server-logs.js';
 import type { UsageAmount, UsageQuota } from '@freellmapi/shared/usage-quota.js';
 import { notificationEmailAvailable, sendNotificationEmail } from './notification-mailer.js';
+import { deliverUsageAlertChannels } from '../custom/notifications/telegram-bot.js';
 
 // Early warnings for accounts and client keys, so an operator hears about trouble before the web app's
 // users do:
@@ -77,6 +78,7 @@ export async function deliverAlert(alert: UsageAlert, now: number = Date.now()):
     const sent = await sendNotificationEmail(settings.email, `[FreeLLMAPI] ${alert.message.slice(0, 120)}`, `${alert.message}\n\nTime: ${at}\n`).catch(() => false);
     result.email = { sent };
   }
+  await deliverUsageAlertChannels(alert);
   return result;
 }
 

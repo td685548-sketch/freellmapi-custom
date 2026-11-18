@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { useCustomT, type CustomT } from './i18n/use-custom-t'
+import { TelegramBotSettingsCard } from './TelegramBotSettingsCard'
 
 interface AlertSettings { webhookUrl: string; email: string; emailAvailable: boolean }
 interface Delivery { webhook: { sent: boolean; status: number | null } | null; email: { sent: boolean } | null }
@@ -134,6 +135,7 @@ export function UsageAlertsCard({ canEdit }: { canEdit: boolean }) {
         )}
       </form>
       <WeeklyReportSection canEdit={canEdit} />
+      <TelegramBotSettingsCard />
     </section>
   )
 }

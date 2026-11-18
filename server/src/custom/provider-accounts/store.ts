@@ -12,6 +12,10 @@ import { decryptProxyUrl, encryptProxyUrl, isValidKeyProxyUrl, KEY_PROXY_URL_ERR
 import { parseModelScope } from '../../lib/model-scope.js';
 import { assertSafeHttpBaseUrlSync } from '../../lib/url-guard.js';
 import { clearCooldownsForKey } from '../../services/ratelimit.js';
+import {
+  clearProviderAccountIssueDedupe,
+  notifyProviderAccountIssue,
+} from '../notifications/telegram-bot.js';
 import { getOutboundProxyUrl } from '../x-gateway/config.js';
 import {
   getProxyPoolConfig,
@@ -939,10 +943,23 @@ export function deleteAccount(id: number): void {
 }
 
 export function setAccountStatus(id: number, status: 'healthy' | 'error' | 'unknown'): void {
+  const prev = getDb()
+    .prepare('SELECT provider, label, status, enabled FROM x_gateway_keys WHERE id = ?')
+    .get(id) as { provider: string; label: string; status: string; enabled: number } | undefined;
   getDb()
     .prepare('UPDATE x_gateway_keys SET status = ?, last_checked_at = CURRENT_TIMESTAMP WHERE id = ?')
     .run(status, id);
   invalidateXGatewayKeyCache();
+  if (status === 'healthy') {
+    clearProviderAccountIssueDedupe(id);
+  } else if (status === 'error' && prev && prev.enabled === 1 && prev.status !== 'error') {
+    notifyProviderAccountIssue({
+      accountId: id,
+      provider: prev.provider,
+      label: prev.label,
+      reason: 'Provider account health check or OAuth credential failed and moved to error state.',
+    });
+  }
 }
 
 export function updateAccountCredential(id: number, credential: OAuthCredential | string, expectedCipher?: string): boolean {

@@ -10,6 +10,7 @@ import {
   resolveXGatewayAccountProxy,
   updateAccountCredential,
 } from './store.js';
+import { notifyProviderAccountIssue } from '../notifications/telegram-bot.js';
 
 /**
  * Google's Gemini web client rotates `__Secure-1PSIDTS` roughly every 9 minutes
@@ -77,8 +78,14 @@ export async function rotateGeminiWebAccountsOnce(): Promise<number> {
           updateAccountCredential(row.id, result.cookieHeader, row.encrypted_key);
           rotatedCount++;
         }
-      } catch {
+      } catch (err) {
         // One failing or expired account must not stop rotation for other accounts.
+        notifyProviderAccountIssue({
+          accountId: row.id,
+          provider: 'gemini-web',
+          label: row.label,
+          reason: err instanceof Error ? err.message : 'Gemini Web cookie keep-alive rotation failed.',
+        });
       }
     }
 
