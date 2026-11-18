@@ -29,6 +29,13 @@ import {
   validateFlowDraftDefinition,
 } from './definitions.js';
 import { cancelRun, recordServerLocalAddress, startRun } from './engine.js';
+import {
+  deleteFlowSchedule,
+  getFlowSchedule,
+  tickFlowSchedules,
+  triggerAsyncFlowRun,
+  upsertFlowSchedule,
+} from './scheduler.js';
 import { getRunDetail, getRunRecord, listRuns } from './trace.js';
 
 function getUser(req: Request): SessionUser | undefined {
@@ -252,6 +259,27 @@ const flowTrySchema = z
   .object({
     message: z.string().min(1),
     endUser: z.string().nullable().optional(),
+  })
+  .strict();
+
+const asyncFlowRunSchema = z
+  .object({
+    message: z.string().min(1),
+    profileId: z.number().int().nonnegative().optional(),
+    endUser: z.string().nullable().optional(),
+    isDryRun: z.boolean().optional(),
+  })
+  .strict();
+
+const flowScheduleSchema = z
+  .object({
+    enabled: z.boolean(),
+    scheduleKind: z.enum(['interval', 'cron']),
+    intervalSeconds: z.number().int().nullable().optional(),
+    cronExpr: z.string().nullable().optional(),
+    profileId: z.number().int().nonnegative().optional(),
+    endUser: z.string().nullable().optional(),
+    inputMessage: z.string().min(1),
   })
   .strict();
 
@@ -496,6 +524,80 @@ orchestratorAdminRouter.delete('/flows/:id', requirePerm('edit_flows'), (req, re
     const id = parsePositiveInt(req.params.id, 'flow');
     deleteFlow(id);
     res.json({ deleted: true });
+  } catch (err) {
+    sendOrchestratorError(res, err);
+  }
+});
+
+// ── Async Flow Runs & Schedules ──────────────────────────────────────────────
+
+orchestratorAdminRouter.post('/flows/:id/runs/async', requirePerm('edit_flows'), (req, res) => {
+  recordServerLocalAddress(req);
+  const parsed = asyncFlowRunSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({
+      error: {
+        type: 'invalid_request_error',
+        code: 'invalid_request',
+        message: parsed.error.issues[0]?.message ?? 'Invalid async flow run payload.',
+      },
+    });
+    return;
+  }
+  try {
+    const id = parsePositiveInt(req.params.id, 'flow');
+    const accepted = triggerAsyncFlowRun(id, parsed.data, { req });
+    res.status(202).json(accepted);
+  } catch (err) {
+    sendOrchestratorError(res, err);
+  }
+});
+
+orchestratorAdminRouter.get('/flows/:id/schedule', requirePerm('view_flows'), (req, res) => {
+  try {
+    const id = parsePositiveInt(req.params.id, 'flow');
+    res.json({ schedule: getFlowSchedule(id) });
+  } catch (err) {
+    sendOrchestratorError(res, err);
+  }
+});
+
+orchestratorAdminRouter.put('/flows/:id/schedule', requirePerm('edit_flows'), (req, res) => {
+  const parsed = flowScheduleSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({
+      error: {
+        type: 'invalid_request_error',
+        code: 'invalid_schedule',
+        message: parsed.error.issues[0]?.message ?? 'Invalid flow schedule payload.',
+      },
+    });
+    return;
+  }
+  try {
+    const id = parsePositiveInt(req.params.id, 'flow');
+    const schedule = upsertFlowSchedule(id, parsed.data);
+    res.json({ schedule });
+  } catch (err) {
+    sendOrchestratorError(res, err);
+  }
+});
+
+orchestratorAdminRouter.delete('/flows/:id/schedule', requirePerm('edit_flows'), (req, res) => {
+  try {
+    const id = parsePositiveInt(req.params.id, 'flow');
+    res.json(deleteFlowSchedule(id));
+  } catch (err) {
+    sendOrchestratorError(res, err);
+  }
+});
+
+orchestratorAdminRouter.post('/flows/:id/schedule/tick', requirePerm('edit_flows'), async (req, res) => {
+  recordServerLocalAddress(req);
+  try {
+    parsePositiveInt(req.params.id, 'flow');
+    const result = await tickFlowSchedules();
+    res.json(result);
   } catch (err) {
     sendOrchestratorError(res, err);
   }

@@ -16,6 +16,7 @@ import {
 } from '@freellmapi/shared/ai-platform-orchestrator.js';
 import { getDb } from '../../../db/index.js';
 import { maskData, maskText } from '../masking.js';
+import { noteTraceUsage, recordCompletedSpan } from '../tracing/collector.js';
 
 const RETENTION_KEY = 'ai_platform_retention_v1';
 const TRUNCATED_MARKER = '\n...[truncated]';
@@ -299,7 +300,35 @@ export function appendRunStep(input: AppendRunStepInput): FlowRunStepView {
       .get(input.runId, seq) as FlowRunStepRow;
   });
 
-  return toStepView(insertTx());
+  const stepView = toStepView(insertTx());
+  recordCompletedSpan({
+    kind: input.kind === 'guard' ? 'output_guard' : 'orchestrator_step',
+    name: `${input.kind}:${input.agentSlug}${input.toolName ? `:${input.toolName}` : ''}`,
+    durationMs: nonNegInt(input.durationMs),
+    status:
+      input.status === 'error'
+        ? 'error'
+        : input.status === 'skipped'
+          ? 'skipped'
+          : 'ok',
+    model: input.model ?? null,
+    promptTokens: nonNegInt(input.promptTokens),
+    completionTokens: nonNegInt(input.completionTokens),
+    errorSummary: errorMasked,
+    attributes: {
+      runId: input.runId,
+      seq: stepView.seq,
+      stepKind: input.kind,
+      agentSlug: input.agentSlug,
+      ...(input.toolName ? { toolName: input.toolName } : {}),
+    },
+  });
+  noteTraceUsage({
+    servedModel: input.model ?? undefined,
+    promptTokens: nonNegInt(input.promptTokens),
+    completionTokens: nonNegInt(input.completionTokens),
+  });
+  return stepView;
 }
 
 export function updateRunProgress(

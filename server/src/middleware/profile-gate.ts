@@ -17,9 +17,16 @@ import { extractInferenceToken } from './user-rate-limit.js';
 import { installOutputGuardIfNeeded, runPreRequest } from '../custom/ai-platform/pipeline.js';
 import { captureInternalCall, isEnrichmentAlreadyApplied, isInternalCall } from '../custom/ai-platform/loopback.js';
 import { prepareMcpTakeover, refreshMcpTakeoverMessages } from '../custom/ai-platform/mcp-client/admission.js';
-import { isPillarEnabled } from '../custom/ai-platform/flags.js';
+import { getFlags, isPillarEnabled } from '../custom/ai-platform/flags.js';
 import { listGrantedFlowsForProfile } from '../custom/ai-platform/orchestrator/definitions.js';
 import { extractRequestedModel, recordServerLocalAddress } from '../custom/ai-platform/orchestrator/engine.js';
+import {
+  createRequestTraceCollector,
+  extractInboundTraceIdentity,
+  recordCompletedSpan,
+  runWithLoopbackTraceIfInternal,
+  runWithTraceCollector,
+} from '../custom/ai-platform/tracing/collector.js';
 import { detectWire } from '../custom/ai-platform/wire/detect.js';
 
 /**
@@ -106,6 +113,7 @@ export function profileInferenceGate(req: Request, res: Response, next: NextFunc
   const reqModel = detectedWire ? extractRequestedModel(detectedWire.wire, req).trim() : '';
   const isFlowReq = reqModel.startsWith('flow:');
 
+  const executeGate = (): void => {
   // Restrictions first: a refused request costs the key neither a rate-limit slot nor an allowance.
   if (!isFlowReq && profile.allowedModels.length > 0) {
     const allowed = new Set(profile.allowedModels);
@@ -124,9 +132,25 @@ export function profileInferenceGate(req: Request, res: Response, next: NextFunc
   // work across both MCP takeover and normal gateway paths, and invalid X-Conversation-Id
   // is still rejected when MCP is enabled.
   if (!internalCall) {
+    const budgetStartedAt = Date.now();
     prepareContextBudget(req, profile.id);
     if (!applyConversation(req, res, profile.id, endUser, profile.conversations)) return;
-    if (!checkMandatoryBudget(req, res, detectedWire?.wire)) return;
+    if (!checkMandatoryBudget(req, res, detectedWire?.wire)) {
+      recordCompletedSpan({
+        kind: 'context_budget',
+        name: 'context_budget:gate',
+        durationMs: Date.now() - budgetStartedAt,
+        status: 'error',
+        errorSummary: 'mandatory_budget_exceeded',
+      });
+      return;
+    }
+    recordCompletedSpan({
+      kind: 'context_budget',
+      name: 'context_budget:gate',
+      durationMs: Date.now() - budgetStartedAt,
+      status: 'ok',
+    });
     conversationApplied = true;
   }
 
@@ -257,4 +281,35 @@ export function profileInferenceGate(req: Request, res: Response, next: NextFunc
     return;
   }
   if (quota()) proceed();
+  };
+
+  if (internalCall) {
+    runWithLoopbackTraceIfInternal(req, executeGate);
+    return;
+  }
+
+  if (detectedWire) {
+    const flags = getFlags();
+    const anyFlagOn =
+      flags.prompts ||
+      flags.retrieval ||
+      flags.promptCache ||
+      flags.mcpClient ||
+      flags.outputGuard ||
+      flags.orchestrator;
+    if (anyFlagOn || extractInboundTraceIdentity(req).explicit) {
+      const collector = createRequestTraceCollector({
+        req,
+        res,
+        scope: { kind: 'profile', id: String(profile.id) },
+        endUser,
+        wire: detectedWire.wire,
+        requestedModel: reqModel || 'auto',
+      });
+      runWithTraceCollector(collector, executeGate);
+      return;
+    }
+  }
+
+  executeGate();
 }

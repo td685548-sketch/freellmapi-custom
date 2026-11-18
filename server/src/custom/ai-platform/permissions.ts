@@ -18,7 +18,7 @@ export function aiPlatformPermission(method: string, path: string): Permission {
   const read = upper === 'GET' || upper === 'HEAD';
   const sub = normalizeSubPath(path);
 
-  // Foundation
+  // Foundation & Request Tracing
   if (sub === '/overview' && read) return 'view_ai_platform';
   if (sub === '/flags' && upper === 'PUT') return 'edit_ai_flags';
   if (sub === '/retention') {
@@ -26,6 +26,12 @@ export function aiPlatformPermission(method: string, path: string): Permission {
     if (upper === 'PUT') return 'edit_ai_flags';
     return 'manage_ai_platform';
   }
+  if (sub === '/traces') {
+    if (read) return 'view_ai_platform';
+    if (upper === 'DELETE') return 'edit_ai_flags';
+    return 'manage_ai_platform';
+  }
+  if (/^\/traces\/[^/]+$/.test(sub) && read) return 'view_ai_platform';
 
   // Prompts
   if (sub === '/prompts/variables' && read) return 'view_prompts';
@@ -74,6 +80,14 @@ export function aiPlatformPermission(method: string, path: string): Permission {
     return 'manage_ai_platform';
   }
   if (/^\/mcp\/servers\/\d+\/(?:test|sync)$/.test(sub) && upper === 'POST') return 'edit_mcp_servers';
+  if (/^\/mcp\/servers\/\d+\/oauth(?:\/status)?$/.test(sub) && read) return 'view_mcp_servers';
+  if (/^\/mcp\/servers\/\d+\/oauth$/.test(sub) && upper === 'DELETE') return 'edit_mcp_servers';
+  if (
+    /^\/mcp\/servers\/\d+\/oauth\/(?:config|discover|start|callback|refresh|revoke)$/.test(sub) &&
+    (upper === 'PUT' || upper === 'POST' || read)
+  ) {
+    return 'edit_mcp_servers';
+  }
   if (/^\/mcp\/servers\/\d+\/tools$/.test(sub) && read) return 'view_mcp_servers';
   if (/^\/mcp\/tools\/\d+$/.test(sub) && upper === 'PATCH') return 'review_mcp_tools';
   if (/^\/mcp\/bindings\/[^/]+\/[^/]+$/.test(sub)) {
@@ -122,11 +136,19 @@ export function aiPlatformPermission(method: string, path: string): Permission {
   }
   if (/^\/flows\/\d+\/publish$/.test(sub) && upper === 'POST') return 'publish_flows';
   if (/^\/flows\/\d+\/grants$/.test(sub) && upper === 'PUT') return 'publish_flows';
+  if (/^\/flows\/\d+\/runs\/async$/.test(sub) && upper === 'POST') return 'edit_flows';
+  if (/^\/flows\/\d+\/schedule$/.test(sub)) {
+    if (read) return 'view_flows';
+    if (upper === 'PUT' || upper === 'DELETE') return 'edit_flows';
+    return 'manage_ai_platform';
+  }
+  if (/^\/flows\/\d+\/schedule\/tick$/.test(sub) && upper === 'POST') return 'edit_flows';
   if (sub === '/runs' && read) return 'view_flow_runs';
   if (/^\/runs\/[^/]+$/.test(sub) && read) return 'view_flow_runs';
   if (/^\/runs\/[^/]+\/cancel$/.test(sub) && upper === 'POST') return 'cancel_flow_runs';
   if (sub === '/approvals' && read) return 'approve_ai_actions';
   if (/^\/approvals\/\d+\/(?:approve|reject)$/.test(sub) && upper === 'POST') return 'approve_ai_actions';
+  if (/^\/(?:mcp\/)?approvals\/\d+\/continuation$/.test(sub) && read) return 'approve_ai_actions';
 
   // Customer AI Hub (Admin Assistants Studio & Fleet Anomaly Radar)
   if (sub === '/customer-assistants') {

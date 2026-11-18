@@ -9,6 +9,7 @@ import { getDb } from '../../../db/index.js';
 import { getClientContext } from '../../../lib/client-context.js';
 import type { GateProfile } from '../../../services/profile-usage.js';
 import { isPillarEnabled } from '../flags.js';
+import { recordCompletedSpan } from '../tracing/collector.js';
 import {
   getPublishedPrompt,
   resolveActivePromptVariant,
@@ -218,7 +219,19 @@ export function renderPrompt(template: string | null | undefined): string | null
       }
     }
 
-    return renderWith(effectiveTemplate, values, declared).rendered;
+    const startedAt = Date.now();
+    const out = renderWith(effectiveTemplate, values, declared);
+    recordCompletedSpan({
+      kind: 'prompt_render',
+      name: `prompt_render:profile:${profileId ?? 'default'}`,
+      durationMs: Date.now() - startedAt,
+      status: 'ok',
+      attributes: {
+        variablesDeclared: declared.length,
+        variablesResolved: Object.keys(values).length,
+      },
+    });
+    return out.rendered;
   } catch (err) {
     console.warn('[prompts] renderPrompt failed:', err instanceof Error ? err.message : err);
     return template;
@@ -267,7 +280,19 @@ export function renderTenantSystemPrompt(
       typeof userContext.name === 'string' ? sanitizeVariableValue(userContext.name.trim()) : '';
     if (userName) values.end_user_name = userName;
 
-    return renderWith(activeTemplate, values, declared).rendered;
+    const startedAt = Date.now();
+    const out = renderWith(activeTemplate, values, declared);
+    recordCompletedSpan({
+      kind: 'prompt_render',
+      name: `prompt_render:support_tenant:${String(tenant.id)}`,
+      durationMs: Date.now() - startedAt,
+      status: 'ok',
+      attributes: {
+        variablesDeclared: declared.length,
+        variablesResolved: Object.keys(values).length,
+      },
+    });
+    return out.rendered;
   } catch (err) {
     console.warn(
       '[prompts] renderTenantSystemPrompt failed:',

@@ -25,8 +25,10 @@ import { Overview } from './pages/Overview';
 import { PromptCache } from './pages/PromptCache';
 import { Prompts } from './pages/Prompts';
 import { Runs } from './pages/Runs';
+import { TraceTimelinePage } from './pages/TraceTimelinePage';
 import { AdminCustomerAiPanel } from '../customer-ai/AdminCustomerAiPanel';
 import { KNOWLEDGE_NAV_HEADING } from './knowledge-strings';
+import { TRACES_NAV_HEADING } from './tracing-strings';
 import {
   NAV_AI_PLATFORM,
   PAGE_TITLE,
@@ -242,6 +244,11 @@ function AiPlatformShell({
                 {tc(RUNS_HEADING)}
               </NavLink>
             )}
+            {canOverview && (
+              <NavLink to={`${BASE}/traces`} data-testid="ai-platform-tab-traces" className={tabClass}>
+                {tc(TRACES_NAV_HEADING)}
+              </NavLink>
+            )}
             {canCustomerAi && (
               <NavLink to={`${BASE}/customer-ai`} className={tabClass}>
                 {tc('Customer AI')}
@@ -318,6 +325,18 @@ function AiPlatformShell({
             element={
               canRuns ? (
                 <Runs />
+              ) : (
+                <div>
+                  <p className="text-sm text-muted-foreground">{tc(NO_ACCESS)}</p>
+                </div>
+              )
+            }
+          />
+          <Route
+            path="traces"
+            element={
+              canOverview ? (
+                <TraceTimelinePage />
               ) : (
                 <div>
                   <p className="text-sm text-muted-foreground">{tc(NO_ACCESS)}</p>

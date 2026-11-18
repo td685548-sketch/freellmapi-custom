@@ -73,6 +73,7 @@ export interface FlowExecutionResult {
 }
 
 export interface StartRunInput {
+  runId?: string;
   flowSlug?: string;
   flowId?: number;
   profileId: number;
@@ -147,6 +148,10 @@ export function recordServerLocalAddress(req: Request): void {
       rawAddr.includes(':') && !rawAddr.startsWith('::ffff:') ? '::1' : '127.0.0.1';
     lastServerAddress = { localAddress, localPort: port };
   }
+}
+
+export function getServerSocketAddressForLoopback(req?: Request): { localAddress: string; localPort: number } {
+  return getRecordedServerAddress(req);
 }
 
 export function getRecordedServerAddress(req?: Request): { localAddress: string; localPort: number } {
@@ -1377,7 +1382,7 @@ export async function startRun(input: StartRunInput): Promise<FlowExecutionResul
         })();
 
   const flowVersion = isDryRun ? 0 : flow.publishedVersion;
-  const runId = `run_${crypto.randomUUID()}`;
+  const runId = input.runId ?? `run_${crypto.randomUUID()}`;
 
   const callerMessages = input.messages.filter((m) => m.role !== 'system');
   const userMessages = callerMessages.filter((m) => m.role === 'user');

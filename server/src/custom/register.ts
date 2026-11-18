@@ -62,6 +62,7 @@ import { isPillarEnabled } from './ai-platform/flags.js';
 import { extractRequestedModel, markInterruptedRuns, recordServerLocalAddress } from './ai-platform/orchestrator/engine.js';
 import { runsPublicRouter } from './ai-platform/orchestrator/runs-public.js';
 import { mcpApprovalsPublicRouter } from './ai-platform/mcp-client/approvals-public.js';
+import { startFlowScheduler } from './ai-platform/orchestrator/scheduler.js';
 import { detectWire } from './ai-platform/wire/detect.js';
 import { CLIENT_PROFILE_KEY_PREFIX, resolveAuth } from '../lib/system-prompt.js';
 import { extractInferenceToken } from '../middleware/user-rate-limit.js';
@@ -330,4 +331,6 @@ export function registerCustomRoutes(app: Express): void {
 
   // Start background semantic retrieval indexing worker (unref'd timer; idempotent).
   startIndexWorker();
+  // Start background orchestrator flow scheduler (off in tests unless explicitly ticked).
+  startFlowScheduler();
 }

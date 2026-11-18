@@ -34,6 +34,7 @@ import {
   MCP_CONTINUATION_NEXT_ID,
   MCP_CONTINUATION_PENDING,
   MCP_CONTINUATION_REJECTED,
+  MCP_CONTINUATION_REPLY,
   MCP_CONTINUATION_RUNNING,
   MCP_DECISION_NOTE,
   MCP_EXPIRES_AT,
@@ -240,29 +241,35 @@ export function ApprovalQueue({ canApprove }: ApprovalQueueProps) {
                   </div>
                 )}
 
-                {item.continuationStatus && (
+                {(item.continuationStatus || item.continuation?.assistantMessageMasked) && (
                   <div
                     className="rounded border bg-muted/20 p-2.5 text-xs space-y-1.5"
                     data-testid={`mcp-approval-continuation-${item.id}`}
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="font-medium text-muted-foreground">
-                        {tc(MCP_APPROVAL_CONTINUATION_LABEL)}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <span className="rounded bg-muted px-2 py-0.5 text-[11px]">
-                          {tc(CONTINUATION_STATUS_LABEL[item.continuationStatus])}
-                        </span>
-                        {item.continuationModel && (
-                          <span className="font-mono text-[11px] text-muted-foreground">
-                            {item.continuationModel}
-                          </span>
+                        {tc(
+                          item.continuationStatus
+                            ? MCP_APPROVAL_CONTINUATION_LABEL
+                            : MCP_CONTINUATION_REPLY,
                         )}
-                      </div>
+                      </span>
+                      {item.continuationStatus && (
+                        <div className="flex items-center gap-2">
+                          <span className="rounded bg-muted px-2 py-0.5 text-[11px]">
+                            {tc(CONTINUATION_STATUS_LABEL[item.continuationStatus])}
+                          </span>
+                          {item.continuationModel && (
+                            <span className="font-mono text-[11px] text-muted-foreground">
+                              {item.continuationModel}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    {item.continuationReplyMasked && (
+                    {(item.continuationReplyMasked ?? item.continuation?.assistantMessageMasked) && (
                       <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded bg-background/60 p-2 font-sans text-xs">
-                        {item.continuationReplyMasked}
+                        {item.continuationReplyMasked ?? item.continuation?.assistantMessageMasked}
                       </pre>
                     )}
                     {item.continuationNextApprovalId != null && (

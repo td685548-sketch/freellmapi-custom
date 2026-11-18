@@ -9,14 +9,22 @@ import { ScopeToolBindings } from '../components/ScopeToolBindings';
 import { ToolReviewTable } from '../components/ToolReviewTable';
 import {
   MCP_LIMITS,
+  completeMcpOAuthCallback,
   createMcpServer,
   deleteMcpServer,
+  fetchMcpOAuthStatus,
   fetchMcpServerTools,
   fetchMcpServers,
+  refreshMcpOAuth,
+  revokeMcpOAuth,
+  saveMcpOAuthConfig,
+  startMcpOAuthPkce,
   syncMcpServer,
   testMcpServer,
   updateMcpServer,
   type McpAuthKind,
+  type McpOAuthConnectionStatus,
+  type McpOAuthStatusView,
   type McpServerStatus,
   type McpServerView,
   type McpToolView,
@@ -27,6 +35,7 @@ import {
   MCP_AUTH_BEARER,
   MCP_AUTH_HEADER,
   MCP_AUTH_NONE,
+  MCP_AUTH_OAUTH2,
   MCP_CANCEL,
   MCP_DELETE_SERVER,
   MCP_DISABLE_SERVER,
@@ -49,6 +58,31 @@ import {
   MCP_LOAD_SERVERS_ERROR,
   MCP_NO_PERMISSION,
   MCP_NO_SERVERS,
+  MCP_OAUTH_AUTH_ENDPOINT,
+  MCP_OAUTH_AUTH_URL_READY,
+  MCP_OAUTH_CLIENT_ID,
+  MCP_OAUTH_CLIENT_SECRET,
+  MCP_OAUTH_CODE_INPUT,
+  MCP_OAUTH_CONNECTED_MSG,
+  MCP_OAUTH_EXCHANGE_CODE,
+  MCP_OAUTH_HEADING,
+  MCP_OAUTH_ISSUER_URL,
+  MCP_OAUTH_REDIRECT_URI,
+  MCP_OAUTH_REFRESH,
+  MCP_OAUTH_REFRESHED_MSG,
+  MCP_OAUTH_REVOCATION_ENDPOINT,
+  MCP_OAUTH_REVOKE,
+  MCP_OAUTH_REVOKED_MSG,
+  MCP_OAUTH_SAVED,
+  MCP_OAUTH_SAVE_CONFIG,
+  MCP_OAUTH_SCOPES,
+  MCP_OAUTH_START_PKCE,
+  MCP_OAUTH_STATE_INPUT,
+  MCP_OAUTH_STATUS_CONNECTED,
+  MCP_OAUTH_STATUS_EXPIRED,
+  MCP_OAUTH_STATUS_UNCONFIGURED,
+  MCP_OAUTH_SUBTITLE,
+  MCP_OAUTH_TOKEN_ENDPOINT,
   MCP_PAGE_SUBTITLE,
   MCP_PAGE_TITLE,
   MCP_PILLAR_DISABLED,
@@ -663,6 +697,7 @@ export function McpServers() {
                 <option value="none">{tc(MCP_AUTH_NONE)}</option>
                 <option value="bearer">{tc(MCP_AUTH_BEARER)}</option>
                 <option value="header">{tc(MCP_AUTH_HEADER)}</option>
+                <option value="oauth2">{tc(MCP_AUTH_OAUTH2)}</option>
               </select>
             </label>
 
@@ -680,25 +715,27 @@ export function McpServers() {
               </label>
             )}
 
-            <label className="space-y-1 text-xs sm:col-span-2">
-              <span className="font-medium block">{tc(MCP_FIELD_SECRET)}</span>
-              <input
-                type="password"
-                autoComplete="new-password"
-                data-testid="mcp-input-secret"
-                value={form.secret}
-                disabled={form.clearSecret}
-                onChange={(e) => setForm({ ...form, secret: e.target.value })}
-                className="w-full rounded border bg-background px-2 py-1.5 text-sm"
-              />
-              <span className="text-[11px] text-muted-foreground block">
-                {form.mode === 'create'
-                  ? tc(MCP_SECRET_WRITE_ONLY_CREATE)
-                  : tc(MCP_SECRET_WRITE_ONLY_EDIT)}
-              </span>
-            </label>
+            {form.authKind !== 'oauth2' && (
+              <label className="space-y-1 text-xs sm:col-span-2">
+                <span className="font-medium block">{tc(MCP_FIELD_SECRET)}</span>
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  data-testid="mcp-input-secret"
+                  value={form.secret}
+                  disabled={form.clearSecret}
+                  onChange={(e) => setForm({ ...form, secret: e.target.value })}
+                  className="w-full rounded border bg-background px-2 py-1.5 text-sm"
+                />
+                <span className="text-[11px] text-muted-foreground block">
+                  {form.mode === 'create'
+                    ? tc(MCP_SECRET_WRITE_ONLY_CREATE)
+                    : tc(MCP_SECRET_WRITE_ONLY_EDIT)}
+                </span>
+              </label>
+            )}
 
-            {form.mode === 'edit' && form.hasSecret && (
+            {form.authKind !== 'oauth2' && form.mode === 'edit' && form.hasSecret && (
               <label className="flex items-center gap-2 text-xs sm:col-span-2">
                 <input
                   type="checkbox"
@@ -815,7 +852,17 @@ export function McpServers() {
                           <td className="py-2 pr-3 text-xs">
                             <div>{srv.authKind}</div>
                             <div className="text-muted-foreground">
-                              {srv.hasSecret ? tc(MCP_SECRET_SET) : tc(MCP_SECRET_NONE)}
+                              {srv.authKind === 'oauth2'
+                                ? tc(
+                                    srv.oauthStatus === 'connected'
+                                      ? MCP_OAUTH_STATUS_CONNECTED
+                                      : srv.oauthStatus === 'expired'
+                                        ? MCP_OAUTH_STATUS_EXPIRED
+                                        : MCP_OAUTH_STATUS_UNCONFIGURED,
+                                  )
+                                : srv.hasSecret
+                                  ? tc(MCP_SECRET_SET)
+                                  : tc(MCP_SECRET_NONE)}
                             </div>
                           </td>
                           <td className="py-2 pr-3 text-xs">
@@ -885,6 +932,15 @@ export function McpServers() {
             )}
           </section>
 
+          {selectedServer?.authKind === 'oauth2' && (
+            <McpOAuthPanel
+              key={`oauth-${selectedServer.id}`}
+              server={selectedServer}
+              canEdit={canEditServers}
+              onChanged={loadServers}
+            />
+          )}
+
           <ToolReviewTable
             key={selectedServer?.id ?? 'none'}
             server={selectedServer}
@@ -915,5 +971,418 @@ export function McpServers() {
         <InternalOriginsEditor isPrimary={isPrimary} />
       )}
     </div>
+  );
+}
+
+const OAUTH_STATUS_LABELS: Record<McpOAuthConnectionStatus, string> = {
+  connected: MCP_OAUTH_STATUS_CONNECTED,
+  expired: MCP_OAUTH_STATUS_EXPIRED,
+  unconfigured: MCP_OAUTH_STATUS_UNCONFIGURED,
+};
+
+function McpOAuthPanel({
+  server,
+  canEdit,
+  onChanged,
+}: {
+  server: McpServerView;
+  canEdit: boolean;
+  onChanged: () => Promise<void>;
+}) {
+  const tc = useCustomT();
+  const [statusView, setStatusView] = useState<McpOAuthStatusView | null>(null);
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
+  const [issuerUrl, setIssuerUrl] = useState('');
+  const [authorizationEndpoint, setAuthorizationEndpoint] = useState('');
+  const [tokenEndpoint, setTokenEndpoint] = useState('');
+  const [revocationEndpoint, setRevocationEndpoint] = useState('');
+  const [redirectUri, setRedirectUri] = useState(
+    typeof window !== 'undefined' ? `${window.location.origin}/ai-platform/mcp` : 'https://localhost/ai-platform/mcp',
+  );
+  const [scopesInput, setScopesInput] = useState('');
+  const [authUrl, setAuthUrl] = useState<string | null>(null);
+  const [pkceState, setPkceState] = useState('');
+  const [authCode, setAuthCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState<{ kind: 'info' | 'error'; text: string } | null>(null);
+  const mountedRef = useRef(true);
+
+  const applyStatus = useCallback((view: McpOAuthStatusView) => {
+    setStatusView(view);
+    setClientId(view.clientId ?? '');
+    setIssuerUrl(view.issuerUrl ?? '');
+    setAuthorizationEndpoint(view.authorizationEndpoint ?? '');
+    setTokenEndpoint(view.tokenEndpoint ?? '');
+    setRevocationEndpoint(view.revocationEndpoint ?? '');
+    if (view.redirectUri) {
+      setRedirectUri(view.redirectUri);
+    }
+    setScopesInput(view.scopes.join(' '));
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    if (typeof fetchMcpOAuthStatus !== 'function') {
+      return () => {
+        mountedRef.current = false;
+      };
+    }
+    const ac = new AbortController();
+    fetchMcpOAuthStatus(server.id, ac.signal)
+      .then((res) => {
+        if (!mountedRef.current || ac.signal.aborted) return;
+        applyStatus(res.oauth);
+      })
+      .catch((err: unknown) => {
+        if (!mountedRef.current || (err as { name?: string })?.name === 'AbortError') return;
+        setFeedback({ kind: 'error', text: (err as Error)?.message ?? 'Failed to load OAuth status' });
+      });
+    return () => {
+      mountedRef.current = false;
+      ac.abort();
+    };
+  }, [applyStatus, server.id]);
+
+  const effectiveStatus: McpOAuthConnectionStatus =
+    statusView?.connectionStatus ?? server.oauthStatus ?? 'unconfigured';
+
+  async function handleSaveOAuth(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canEdit || busy || typeof saveMcpOAuthConfig !== 'function') return;
+    setBusy(true);
+    setFeedback(null);
+    try {
+      const scopes = scopesInput
+        .split(/\s+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const res = await saveMcpOAuthConfig(server.id, {
+        clientId: clientId.trim(),
+        clientSecret: clientSecret.trim() ? clientSecret : undefined,
+        issuerUrl: issuerUrl.trim() || null,
+        authorizationEndpoint: authorizationEndpoint.trim() || null,
+        tokenEndpoint: tokenEndpoint.trim() || null,
+        revocationEndpoint: revocationEndpoint.trim() || null,
+        redirectUri: redirectUri.trim(),
+        scopes,
+      });
+      if (!mountedRef.current) return;
+      applyStatus(res.oauth);
+      setClientSecret('');
+      setFeedback({ kind: 'info', text: tc(MCP_OAUTH_SAVED) });
+      await onChanged();
+    } catch (err: unknown) {
+      if (!mountedRef.current) return;
+      setFeedback({ kind: 'error', text: (err as Error)?.message ?? 'Failed to save OAuth config' });
+    } finally {
+      if (mountedRef.current) setBusy(false);
+    }
+  }
+
+  async function handleStartPkce() {
+    if (!canEdit || busy || typeof startMcpOAuthPkce !== 'function') return;
+    setBusy(true);
+    setFeedback(null);
+    try {
+      const res = await startMcpOAuthPkce(server.id, {
+        redirectUri: redirectUri.trim() || undefined,
+      });
+      if (!mountedRef.current) return;
+      setAuthUrl(res.authorizationUrl);
+      setPkceState(res.state);
+    } catch (err: unknown) {
+      if (!mountedRef.current) return;
+      setFeedback({ kind: 'error', text: (err as Error)?.message ?? 'Failed to start PKCE flow' });
+    } finally {
+      if (mountedRef.current) setBusy(false);
+    }
+  }
+
+  async function handleExchangeCode(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canEdit || busy || typeof completeMcpOAuthCallback !== 'function') return;
+    setBusy(true);
+    setFeedback(null);
+    try {
+      const res = await completeMcpOAuthCallback(server.id, {
+        code: authCode.trim(),
+        state: pkceState.trim(),
+        redirectUri: redirectUri.trim() || undefined,
+      });
+      if (!mountedRef.current) return;
+      applyStatus(res.oauth);
+      setAuthCode('');
+      setAuthUrl(null);
+      setFeedback({ kind: 'info', text: tc(MCP_OAUTH_CONNECTED_MSG) });
+      await onChanged();
+    } catch (err: unknown) {
+      if (!mountedRef.current) return;
+      setFeedback({ kind: 'error', text: (err as Error)?.message ?? 'PKCE callback failed' });
+    } finally {
+      if (mountedRef.current) setBusy(false);
+    }
+  }
+
+  async function handleRefreshToken() {
+    if (!canEdit || busy || typeof refreshMcpOAuth !== 'function') return;
+    setBusy(true);
+    setFeedback(null);
+    try {
+      const res = await refreshMcpOAuth(server.id);
+      if (!mountedRef.current) return;
+      applyStatus(res.oauth);
+      setFeedback({ kind: 'info', text: tc(MCP_OAUTH_REFRESHED_MSG) });
+      await onChanged();
+    } catch (err: unknown) {
+      if (!mountedRef.current) return;
+      setFeedback({ kind: 'error', text: (err as Error)?.message ?? 'Token refresh failed' });
+    } finally {
+      if (mountedRef.current) setBusy(false);
+    }
+  }
+
+  async function handleRevokeOAuth() {
+    if (!canEdit || busy || typeof revokeMcpOAuth !== 'function') return;
+    setBusy(true);
+    setFeedback(null);
+    try {
+      const res = await revokeMcpOAuth(server.id);
+      if (!mountedRef.current) return;
+      applyStatus(res.oauth);
+      setAuthUrl(null);
+      setFeedback({ kind: 'info', text: tc(MCP_OAUTH_REVOKED_MSG) });
+      await onChanged();
+    } catch (err: unknown) {
+      if (!mountedRef.current) return;
+      setFeedback({ kind: 'error', text: (err as Error)?.message ?? 'Revoke failed' });
+    } finally {
+      if (mountedRef.current) setBusy(false);
+    }
+  }
+
+  return (
+    <section className="rounded-lg border bg-card p-4 space-y-4" data-testid="mcp-oauth-panel">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-semibold">{tc(MCP_OAUTH_HEADING)}</h3>
+          <p className="text-xs text-muted-foreground">{tc(MCP_OAUTH_SUBTITLE)}</p>
+        </div>
+        <span
+          data-testid="mcp-oauth-status-badge"
+          className={`rounded px-2.5 py-0.5 text-xs font-medium ${
+            effectiveStatus === 'connected'
+              ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+              : effectiveStatus === 'expired'
+                ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                : 'bg-muted text-muted-foreground'
+          }`}
+        >
+          {tc(OAUTH_STATUS_LABELS[effectiveStatus])}
+        </span>
+      </div>
+
+      {feedback && (
+        <div
+          role={feedback.kind === 'error' ? 'alert' : 'status'}
+          data-testid="mcp-oauth-feedback"
+          className={`rounded border px-3 py-2 text-xs ${
+            feedback.kind === 'error'
+              ? 'border-destructive/40 bg-destructive/10 text-destructive'
+              : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+          }`}
+        >
+          {feedback.text}
+        </div>
+      )}
+
+      <form onSubmit={handleSaveOAuth} className="grid gap-3 sm:grid-cols-2" data-testid="mcp-oauth-config-form">
+        <label className="space-y-1 text-xs">
+          <span className="font-medium block">{tc(MCP_OAUTH_CLIENT_ID)}</span>
+          <input
+            type="text"
+            required
+            disabled={!canEdit || busy}
+            data-testid="mcp-oauth-client-id"
+            value={clientId}
+            onChange={(e) => setClientId(e.target.value)}
+            className="w-full rounded border bg-background px-2 py-1.5 text-sm font-mono"
+          />
+        </label>
+
+        <label className="space-y-1 text-xs">
+          <span className="font-medium block">{tc(MCP_OAUTH_CLIENT_SECRET)}</span>
+          <input
+            type="password"
+            autoComplete="new-password"
+            disabled={!canEdit || busy}
+            data-testid="mcp-oauth-client-secret"
+            value={clientSecret}
+            onChange={(e) => setClientSecret(e.target.value)}
+            className="w-full rounded border bg-background px-2 py-1.5 text-sm"
+          />
+        </label>
+
+        <label className="space-y-1 text-xs sm:col-span-2">
+          <span className="font-medium block">{tc(MCP_OAUTH_ISSUER_URL)}</span>
+          <input
+            type="url"
+            disabled={!canEdit || busy}
+            data-testid="mcp-oauth-issuer-url"
+            value={issuerUrl}
+            onChange={(e) => setIssuerUrl(e.target.value)}
+            className="w-full rounded border bg-background px-2 py-1.5 text-sm font-mono"
+          />
+        </label>
+
+        <label className="space-y-1 text-xs">
+          <span className="font-medium block">{tc(MCP_OAUTH_AUTH_ENDPOINT)}</span>
+          <input
+            type="url"
+            disabled={!canEdit || busy}
+            data-testid="mcp-oauth-auth-endpoint"
+            value={authorizationEndpoint}
+            onChange={(e) => setAuthorizationEndpoint(e.target.value)}
+            className="w-full rounded border bg-background px-2 py-1.5 text-sm font-mono"
+          />
+        </label>
+
+        <label className="space-y-1 text-xs">
+          <span className="font-medium block">{tc(MCP_OAUTH_TOKEN_ENDPOINT)}</span>
+          <input
+            type="url"
+            disabled={!canEdit || busy}
+            data-testid="mcp-oauth-token-endpoint"
+            value={tokenEndpoint}
+            onChange={(e) => setTokenEndpoint(e.target.value)}
+            className="w-full rounded border bg-background px-2 py-1.5 text-sm font-mono"
+          />
+        </label>
+
+        <label className="space-y-1 text-xs">
+          <span className="font-medium block">{tc(MCP_OAUTH_REVOCATION_ENDPOINT)}</span>
+          <input
+            type="url"
+            disabled={!canEdit || busy}
+            data-testid="mcp-oauth-revocation-endpoint"
+            value={revocationEndpoint}
+            onChange={(e) => setRevocationEndpoint(e.target.value)}
+            className="w-full rounded border bg-background px-2 py-1.5 text-sm font-mono"
+          />
+        </label>
+
+        <label className="space-y-1 text-xs">
+          <span className="font-medium block">{tc(MCP_OAUTH_REDIRECT_URI)}</span>
+          <input
+            type="url"
+            disabled={!canEdit || busy}
+            data-testid="mcp-oauth-redirect-uri"
+            value={redirectUri}
+            onChange={(e) => setRedirectUri(e.target.value)}
+            className="w-full rounded border bg-background px-2 py-1.5 text-sm font-mono"
+          />
+        </label>
+
+        <label className="space-y-1 text-xs sm:col-span-2">
+          <span className="font-medium block">{tc(MCP_OAUTH_SCOPES)}</span>
+          <input
+            type="text"
+            disabled={!canEdit || busy}
+            data-testid="mcp-oauth-scopes"
+            value={scopesInput}
+            onChange={(e) => setScopesInput(e.target.value)}
+            className="w-full rounded border bg-background px-2 py-1.5 text-sm font-mono"
+          />
+        </label>
+
+        <div className="flex flex-wrap gap-2 sm:col-span-2">
+          <button
+            type="submit"
+            disabled={!canEdit || busy}
+            data-testid="mcp-oauth-save-btn"
+            className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
+          >
+            {tc(MCP_OAUTH_SAVE_CONFIG)}
+          </button>
+          <button
+            type="button"
+            disabled={!canEdit || busy}
+            data-testid="mcp-oauth-start-btn"
+            onClick={() => void handleStartPkce()}
+            className="rounded border px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
+          >
+            {tc(MCP_OAUTH_START_PKCE)}
+          </button>
+          <button
+            type="button"
+            disabled={!canEdit || busy}
+            data-testid="mcp-oauth-refresh-btn"
+            onClick={() => void handleRefreshToken()}
+            className="rounded border px-3 py-1.5 text-xs hover:bg-muted disabled:opacity-50"
+          >
+            {tc(MCP_OAUTH_REFRESH)}
+          </button>
+          <button
+            type="button"
+            disabled={!canEdit || busy}
+            data-testid="mcp-oauth-revoke-btn"
+            onClick={() => void handleRevokeOAuth()}
+            className="rounded border px-3 py-1.5 text-xs text-destructive hover:bg-destructive/10 disabled:opacity-50"
+          >
+            {tc(MCP_OAUTH_REVOKE)}
+          </button>
+        </div>
+      </form>
+
+      {authUrl && (
+        <div className="rounded border bg-muted/40 p-3 space-y-1 text-xs" data-testid="mcp-oauth-auth-url-box">
+          <div className="font-medium">{tc(MCP_OAUTH_AUTH_URL_READY)}</div>
+          <a
+            href={authUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="mcp-oauth-auth-url-link"
+            className="font-mono break-all text-primary underline"
+          >
+            {authUrl}
+          </a>
+        </div>
+      )}
+
+      <form onSubmit={handleExchangeCode} className="grid gap-3 sm:grid-cols-3 items-end" data-testid="mcp-oauth-callback-form">
+        <label className="space-y-1 text-xs">
+          <span className="font-medium block">{tc(MCP_OAUTH_CODE_INPUT)}</span>
+          <input
+            type="text"
+            required
+            disabled={!canEdit || busy}
+            data-testid="mcp-oauth-code-input"
+            value={authCode}
+            onChange={(e) => setAuthCode(e.target.value)}
+            className="w-full rounded border bg-background px-2 py-1.5 text-sm font-mono"
+          />
+        </label>
+        <label className="space-y-1 text-xs">
+          <span className="font-medium block">{tc(MCP_OAUTH_STATE_INPUT)}</span>
+          <input
+            type="text"
+            required
+            disabled={!canEdit || busy}
+            data-testid="mcp-oauth-state-input"
+            value={pkceState}
+            onChange={(e) => setPkceState(e.target.value)}
+            className="w-full rounded border bg-background px-2 py-1.5 text-sm font-mono"
+          />
+        </label>
+        <button
+          type="submit"
+          disabled={!canEdit || busy || !authCode.trim() || !pkceState.trim()}
+          data-testid="mcp-oauth-callback-btn"
+          className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
+        >
+          {tc(MCP_OAUTH_EXCHANGE_CODE)}
+        </button>
+      </form>
+    </section>
   );
 }

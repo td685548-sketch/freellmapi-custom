@@ -11,25 +11,32 @@ import {
   createFlow,
   deleteAgent,
   deleteFlow,
+  deleteFlowSchedule,
   extractFlowErrorInfo,
   fetchAgents,
   fetchFlowDetail,
   fetchFlowModelOptions,
   fetchFlowProfileOptions,
+  fetchFlowSchedule,
   fetchFlowSupportTenantOptions,
   fetchFlows,
   publishFlow,
+  saveFlowSchedule,
   setFlowGrants,
+  triggerAsyncFlowRun,
   tryFlow,
   updateAgent,
   updateFlowDraft,
   type AgentInput,
   type AgentPatchInput,
   type AgentView,
+  type AsyncFlowRunResponse,
   type FlowDefinition,
   type FlowDetailView,
   type FlowKind,
   type FlowLimitsConfig,
+  type FlowScheduleKind,
+  type FlowScheduleView,
   type FlowTryResponse,
   type FlowValidationIssue,
   type FlowView,
@@ -113,6 +120,16 @@ import {
   FLOW_APPROVAL_TEXT_LABEL,
   FLOW_APPROVAL_TTL_HINT,
   FLOW_APPROVAL_TTL_LABEL,
+  FLOW_ASYNC_ACCEPTED,
+  FLOW_ASYNC_ERROR,
+  FLOW_ASYNC_MESSAGE_LABEL,
+  FLOW_ASYNC_MESSAGE_PLACEHOLDER,
+  FLOW_ASYNC_PROFILE_LABEL,
+  FLOW_ASYNC_PROFILE_NONE,
+  FLOW_ASYNC_SCHEDULE_HEADING,
+  FLOW_ASYNC_SCHEDULE_SUBTITLE,
+  FLOW_ASYNC_TRIGGERING_BTN,
+  FLOW_ASYNC_TRIGGER_BTN,
   FLOW_EDITOR_HEADING,
   FLOW_ENTRY_AGENT,
   FLOW_GRANTS_EMPTY,
@@ -144,6 +161,25 @@ import {
   FLOW_PUBLISH_BTN,
   FLOW_SAVE_DRAFT_BTN,
   FLOW_SAVING_DRAFT_BTN,
+  FLOW_SCHEDULE_CRON_LABEL,
+  FLOW_SCHEDULE_CRON_PLACEHOLDER,
+  FLOW_SCHEDULE_DELETED,
+  FLOW_SCHEDULE_DELETE_BTN,
+  FLOW_SCHEDULE_ENABLED,
+  FLOW_SCHEDULE_HEADING,
+  FLOW_SCHEDULE_INTERVAL_LABEL,
+  FLOW_SCHEDULE_KIND_CRON,
+  FLOW_SCHEDULE_KIND_INTERVAL,
+  FLOW_SCHEDULE_KIND_LABEL,
+  FLOW_SCHEDULE_LAST_RUN,
+  FLOW_SCHEDULE_LOAD_ERROR,
+  FLOW_SCHEDULE_MESSAGE_LABEL,
+  FLOW_SCHEDULE_MESSAGE_PLACEHOLDER,
+  FLOW_SCHEDULE_NEXT_RUN,
+  FLOW_SCHEDULE_SAVED,
+  FLOW_SCHEDULE_SAVE_BTN,
+  FLOW_SCHEDULE_SAVE_ERROR,
+  FLOW_SCHEDULE_SAVING_BTN,
   FLOW_SELECT_HINT,
   FLOW_TRYING_BTN,
   FLOW_TRY_BTN,
@@ -2030,8 +2066,373 @@ function FlowsContent({
               </div>
             )}
           </section>
+
+          <FlowAsyncScheduleSection
+            key={selectedFlow.id}
+            flow={selectedFlow}
+            profiles={profiles}
+            canView={canView}
+            canEdit={canEdit}
+            canPublish={canPublish}
+          />
         </div>
       )}
     </div>
+  );
+}
+
+function FlowAsyncScheduleSection({
+  flow,
+  profiles,
+  canView,
+  canEdit,
+  canPublish,
+}: {
+  flow: FlowView;
+  profiles: ProfileOption[];
+  canView: boolean;
+  canEdit: boolean;
+  canPublish: boolean;
+}) {
+  const tc = useCustomT();
+  const [asyncMessage, setAsyncMessage] = useState('');
+  const [asyncProfileId, setAsyncProfileId] = useState('');
+  const [triggeringAsync, setTriggeringAsync] = useState(false);
+  const [asyncAccepted, setAsyncAccepted] = useState<AsyncFlowRunResponse | null>(null);
+  const [asyncError, setAsyncError] = useState<string | null>(null);
+
+  const [schedule, setSchedule] = useState<FlowScheduleView | null>(null);
+  const [scheduleEnabled, setScheduleEnabled] = useState(false);
+  const [scheduleKind, setScheduleKind] = useState<FlowScheduleKind>('interval');
+  const [intervalSeconds, setIntervalSeconds] = useState(300);
+  const [cronExpression, setCronExpression] = useState('*/15 * * * *');
+  const [scheduleMessage, setScheduleMessage] = useState('');
+  const [scheduleProfileId, setScheduleProfileId] = useState('');
+  const [savingSchedule, setSavingSchedule] = useState(false);
+  const [scheduleBanner, setScheduleBanner] = useState<{ kind: 'info' | 'error'; text: string } | null>(null);
+
+  const mountedRef = useRef(true);
+
+  const applySchedule = useCallback((view: FlowScheduleView | null) => {
+    setSchedule(view);
+    if (!view) return;
+    setScheduleEnabled(view.enabled);
+    setScheduleKind(view.scheduleKind);
+    if (view.intervalSeconds !== null) {
+      setIntervalSeconds(view.intervalSeconds);
+    }
+    if (view.cronExpr) {
+      setCronExpression(view.cronExpr);
+    }
+    setScheduleMessage(view.inputMessage);
+    setScheduleProfileId(String(view.profileId));
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    if (!canView || typeof fetchFlowSchedule !== 'function') {
+      return () => {
+        mountedRef.current = false;
+      };
+    }
+    const ac = new AbortController();
+    fetchFlowSchedule(flow.id, ac.signal)
+      .then((res) => {
+        if (!mountedRef.current || ac.signal.aborted) return;
+        applySchedule(res.schedule);
+      })
+      .catch((err: unknown) => {
+        if (!mountedRef.current || isAbortError(err)) return;
+        setScheduleBanner({
+          kind: 'error',
+          text: (err as Error)?.message ?? tc(FLOW_SCHEDULE_LOAD_ERROR),
+        });
+      });
+    return () => {
+      mountedRef.current = false;
+      ac.abort();
+    };
+  }, [applySchedule, canView, flow.id, tc]);
+
+  const canManageSchedule = canPublish || canEdit;
+
+  async function handleTriggerAsync(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canManageSchedule || triggeringAsync || !asyncMessage.trim()) return;
+    if (typeof triggerAsyncFlowRun !== 'function') return;
+    setTriggeringAsync(true);
+    setAsyncError(null);
+    setAsyncAccepted(null);
+    try {
+      const parsedProfile = asyncProfileId ? Number(asyncProfileId) : undefined;
+      const res = await triggerAsyncFlowRun(flow.id, {
+        message: asyncMessage.trim(),
+        profileId: parsedProfile,
+        isDryRun: parsedProfile === undefined,
+      });
+      if (!mountedRef.current) return;
+      setAsyncAccepted(res);
+    } catch (err: unknown) {
+      if (!mountedRef.current) return;
+      setAsyncError((err as Error)?.message ?? tc(FLOW_ASYNC_ERROR));
+    } finally {
+      if (mountedRef.current) setTriggeringAsync(false);
+    }
+  }
+
+  async function handleSaveSchedule(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canPublish || savingSchedule || typeof saveFlowSchedule !== 'function') return;
+    setSavingSchedule(true);
+    setScheduleBanner(null);
+    try {
+      const parsedProfile = scheduleProfileId ? Number(scheduleProfileId) : undefined;
+      const res = await saveFlowSchedule(flow.id, {
+        enabled: scheduleEnabled,
+        scheduleKind,
+        intervalSeconds: scheduleKind === 'interval' ? intervalSeconds : null,
+        cronExpr: scheduleKind === 'cron' ? cronExpression.trim() : null,
+        inputMessage: scheduleMessage.trim(),
+        profileId: parsedProfile,
+      });
+      if (!mountedRef.current) return;
+      applySchedule(res.schedule);
+      setScheduleBanner({ kind: 'info', text: tc(FLOW_SCHEDULE_SAVED) });
+    } catch (err: unknown) {
+      if (!mountedRef.current) return;
+      setScheduleBanner({
+        kind: 'error',
+        text: (err as Error)?.message ?? tc(FLOW_SCHEDULE_SAVE_ERROR),
+      });
+    } finally {
+      if (mountedRef.current) setSavingSchedule(false);
+    }
+  }
+
+  async function handleDeleteSchedule() {
+    if (!canPublish || savingSchedule || typeof deleteFlowSchedule !== 'function') return;
+    setSavingSchedule(true);
+    setScheduleBanner(null);
+    try {
+      await deleteFlowSchedule(flow.id);
+      if (!mountedRef.current) return;
+      setSchedule(null);
+      setScheduleEnabled(false);
+      setScheduleBanner({ kind: 'info', text: tc(FLOW_SCHEDULE_DELETED) });
+    } catch (err: unknown) {
+      if (!mountedRef.current) return;
+      setScheduleBanner({
+        kind: 'error',
+        text: (err as Error)?.message ?? tc(FLOW_SCHEDULE_SAVE_ERROR),
+      });
+    } finally {
+      if (mountedRef.current) setSavingSchedule(false);
+    }
+  }
+
+  return (
+    <section
+      className="rounded-lg border bg-card p-4 space-y-5"
+      data-testid="flow-async-schedule-section"
+    >
+      <div>
+        <h3 className="text-sm font-semibold">{tc(FLOW_ASYNC_SCHEDULE_HEADING)}</h3>
+        <p className="text-xs text-muted-foreground">{tc(FLOW_ASYNC_SCHEDULE_SUBTITLE)}</p>
+      </div>
+
+      {/* Async trigger */}
+      <form onSubmit={handleTriggerAsync} className="space-y-3" data-testid="flow-async-form">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="space-y-1 text-xs sm:col-span-2">
+            <span className="font-medium block">{tc(FLOW_ASYNC_MESSAGE_LABEL)}</span>
+            <input
+              type="text"
+              disabled={!canManageSchedule || triggeringAsync}
+              data-testid="flow-async-message-input"
+              placeholder={tc(FLOW_ASYNC_MESSAGE_PLACEHOLDER)}
+              value={asyncMessage}
+              onChange={(e) => setAsyncMessage(e.target.value)}
+              className="w-full rounded border bg-background px-2 py-1.5 text-sm disabled:opacity-60"
+            />
+          </label>
+          <label className="space-y-1 text-xs">
+            <span className="font-medium block">{tc(FLOW_ASYNC_PROFILE_LABEL)}</span>
+            <select
+              disabled={!canManageSchedule || triggeringAsync}
+              data-testid="flow-async-profile-select"
+              value={asyncProfileId}
+              onChange={(e) => setAsyncProfileId(e.target.value)}
+              className="w-full rounded border bg-background px-2 py-1.5 text-sm disabled:opacity-60"
+            >
+              <option value="">{tc(FLOW_ASYNC_PROFILE_NONE)}</option>
+              {profiles.map((p) => (
+                <option key={p.id} value={String(p.id)}>
+                  {p.name} (#{p.id})
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <button
+          type="submit"
+          data-testid="flow-async-trigger-btn"
+          disabled={!canManageSchedule || triggeringAsync || !asyncMessage.trim()}
+          className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
+        >
+          {triggeringAsync ? tc(FLOW_ASYNC_TRIGGERING_BTN) : tc(FLOW_ASYNC_TRIGGER_BTN)}
+        </button>
+
+        {asyncError && (
+          <div
+            role="alert"
+            data-testid="flow-async-error"
+            className="rounded border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+          >
+            {asyncError}
+          </div>
+        )}
+
+        {asyncAccepted && (
+          <div
+            role="status"
+            data-testid="flow-async-accepted"
+            className="rounded border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300 font-mono"
+          >
+            {tc(FLOW_ASYNC_ACCEPTED, {
+              runId: asyncAccepted.runId,
+              statusUrl: asyncAccepted.statusUrl,
+            })}
+          </div>
+        )}
+      </form>
+
+      {/* Recurring schedule */}
+      <div className="border-t pt-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {tc(FLOW_SCHEDULE_HEADING)}
+          </h4>
+          {schedule && (
+            <div className="flex flex-wrap gap-3 text-[11px] font-mono text-muted-foreground" data-testid="flow-schedule-meta">
+              {schedule.nextRunAt && (
+                <span>{tc(FLOW_SCHEDULE_NEXT_RUN, { nextRunAt: schedule.nextRunAt })}</span>
+              )}
+              {schedule.lastRunId && (
+                <span>{tc(FLOW_SCHEDULE_LAST_RUN, { lastRunId: schedule.lastRunId })}</span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {scheduleBanner && (
+          <div
+            role={scheduleBanner.kind === 'error' ? 'alert' : 'status'}
+            data-testid="flow-schedule-banner"
+            className={`rounded border px-3 py-2 text-xs ${
+              scheduleBanner.kind === 'error'
+                ? 'border-destructive/40 bg-destructive/10 text-destructive'
+                : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+            }`}
+          >
+            {scheduleBanner.text}
+          </div>
+        )}
+
+        <form onSubmit={handleSaveSchedule} className="space-y-3" data-testid="flow-schedule-form">
+          <label className="inline-flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              disabled={!canPublish || savingSchedule}
+              data-testid="flow-schedule-enabled"
+              checked={scheduleEnabled}
+              onChange={(e) => setScheduleEnabled(e.target.checked)}
+            />
+            <span className="font-medium">{tc(FLOW_SCHEDULE_ENABLED)}</span>
+          </label>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="space-y-1 text-xs">
+              <span className="font-medium block">{tc(FLOW_SCHEDULE_KIND_LABEL)}</span>
+              <select
+                disabled={!canPublish || savingSchedule}
+                data-testid="flow-schedule-kind"
+                value={scheduleKind}
+                onChange={(e) => setScheduleKind(e.target.value as FlowScheduleKind)}
+                className="w-full rounded border bg-background px-2 py-1.5 text-sm disabled:opacity-60"
+              >
+                <option value="interval">{tc(FLOW_SCHEDULE_KIND_INTERVAL)}</option>
+                <option value="cron">{tc(FLOW_SCHEDULE_KIND_CRON)}</option>
+              </select>
+            </label>
+
+            {scheduleKind === 'interval' ? (
+              <label className="space-y-1 text-xs">
+                <span className="font-medium block">{tc(FLOW_SCHEDULE_INTERVAL_LABEL)}</span>
+                <input
+                  type="number"
+                  min={10}
+                  max={86400}
+                  disabled={!canPublish || savingSchedule}
+                  data-testid="flow-schedule-interval-input"
+                  value={intervalSeconds}
+                  onChange={(e) => setIntervalSeconds(Number(e.target.value))}
+                  className="w-full rounded border bg-background px-2 py-1.5 text-sm disabled:opacity-60"
+                />
+              </label>
+            ) : (
+              <label className="space-y-1 text-xs">
+                <span className="font-medium block">{tc(FLOW_SCHEDULE_CRON_LABEL)}</span>
+                <input
+                  type="text"
+                  disabled={!canPublish || savingSchedule}
+                  data-testid="flow-schedule-cron-input"
+                  placeholder={tc(FLOW_SCHEDULE_CRON_PLACEHOLDER)}
+                  value={cronExpression}
+                  onChange={(e) => setCronExpression(e.target.value)}
+                  className="w-full rounded border bg-background px-2 py-1.5 text-sm font-mono disabled:opacity-60"
+                />
+              </label>
+            )}
+
+            <label className="space-y-1 text-xs sm:col-span-2">
+              <span className="font-medium block">{tc(FLOW_SCHEDULE_MESSAGE_LABEL)}</span>
+              <input
+                type="text"
+                required
+                disabled={!canPublish || savingSchedule}
+                data-testid="flow-schedule-message-input"
+                placeholder={tc(FLOW_SCHEDULE_MESSAGE_PLACEHOLDER)}
+                value={scheduleMessage}
+                onChange={(e) => setScheduleMessage(e.target.value)}
+                className="w-full rounded border bg-background px-2 py-1.5 text-sm disabled:opacity-60"
+              />
+            </label>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="submit"
+              disabled={!canPublish || savingSchedule || !scheduleMessage.trim()}
+              data-testid="flow-schedule-save-btn"
+              className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
+            >
+              {savingSchedule ? tc(FLOW_SCHEDULE_SAVING_BTN) : tc(FLOW_SCHEDULE_SAVE_BTN)}
+            </button>
+            {schedule && (
+              <button
+                type="button"
+                disabled={!canPublish || savingSchedule}
+                data-testid="flow-schedule-delete-btn"
+                onClick={() => void handleDeleteSchedule()}
+                className="rounded border px-3 py-1.5 text-xs text-destructive hover:bg-destructive/10 disabled:opacity-50"
+              >
+                {tc(FLOW_SCHEDULE_DELETE_BTN)}
+              </button>
+            )}
+          </div>
+        </form>
+      </div>
+    </section>
   );
 }

@@ -132,6 +132,39 @@ export const FLOW_TRYING_BTN = 'Running test…';
 export const FLOW_TRY_ERROR = 'Dry-run test failed';
 export const FLOW_TRY_OUTPUT_LABEL = 'Final output';
 
+// ─── Async Trigger & Scheduled Execution (Spec 035) ───────────────────────────
+export const FLOW_ASYNC_SCHEDULE_HEADING = 'Background runs & schedule';
+export const FLOW_ASYNC_SCHEDULE_SUBTITLE =
+  'Trigger fire-and-track async executions (202 Accepted) or configure recurring interval/cron schedules';
+export const FLOW_ASYNC_MESSAGE_LABEL = 'Async run message';
+export const FLOW_ASYNC_MESSAGE_PLACEHOLDER = 'Enter a prompt for background execution…';
+export const FLOW_ASYNC_PROFILE_LABEL = 'Target client profile (optional)';
+export const FLOW_ASYNC_PROFILE_NONE = 'Operator dry-run (no profile)';
+export const FLOW_ASYNC_TRIGGER_BTN = 'Trigger async run';
+export const FLOW_ASYNC_TRIGGERING_BTN = 'Queueing…';
+export const FLOW_ASYNC_ACCEPTED = 'Accepted background run {runId} ({statusUrl})';
+export const FLOW_ASYNC_ERROR = 'Failed to queue async flow run';
+
+export const FLOW_SCHEDULE_HEADING = 'Recurring schedule';
+export const FLOW_SCHEDULE_ENABLED = 'Enable schedule';
+export const FLOW_SCHEDULE_KIND_LABEL = 'Schedule mode';
+export const FLOW_SCHEDULE_KIND_INTERVAL = 'Fixed interval';
+export const FLOW_SCHEDULE_KIND_CRON = '5-field UTC cron';
+export const FLOW_SCHEDULE_INTERVAL_LABEL = 'Interval (seconds)';
+export const FLOW_SCHEDULE_CRON_LABEL = 'Cron expression (UTC)';
+export const FLOW_SCHEDULE_CRON_PLACEHOLDER = '*/15 * * * *';
+export const FLOW_SCHEDULE_MESSAGE_LABEL = 'Scheduled user message';
+export const FLOW_SCHEDULE_MESSAGE_PLACEHOLDER = 'Run scheduled digest…';
+export const FLOW_SCHEDULE_SAVE_BTN = 'Save schedule';
+export const FLOW_SCHEDULE_SAVING_BTN = 'Saving schedule…';
+export const FLOW_SCHEDULE_DELETE_BTN = 'Remove schedule';
+export const FLOW_SCHEDULE_SAVED = 'Flow schedule saved';
+export const FLOW_SCHEDULE_DELETED = 'Flow schedule removed';
+export const FLOW_SCHEDULE_LOAD_ERROR = 'Failed to load flow schedule';
+export const FLOW_SCHEDULE_SAVE_ERROR = 'Failed to save flow schedule';
+export const FLOW_SCHEDULE_NEXT_RUN = 'Next run: {nextRunAt}';
+export const FLOW_SCHEDULE_LAST_RUN = 'Last run: {lastRunId}';
+
 // ─── Runs Page ────────────────────────────────────────────────────────────────
 export const RUNS_PAGE_TITLE = 'Flow runs';
 export const RUNS_PAGE_SUBTITLE = 'Inspect live execution traces, cancel active runs, and review pending tool approvals';

@@ -7,7 +7,9 @@ import {
   type McpTransportErrorCode,
 } from '@freellmapi/shared/ai-platform-mcp.js';
 import { SafeHttpError, safeFetch } from '../../x-gateway/support-safe-http.js';
+import { resolveMcpOAuthAccessToken } from './oauth.js';
 import {
+  McpServiceError,
   getAllowedInternalOrigins,
   type McpSession,
   type McpTransportConfig,
@@ -201,7 +203,7 @@ function createDeadlineSignal(
 
 function buildAuthHeaders(config: McpTransportConfig): Record<string, string> {
   const headers: Record<string, string> = {};
-  if (config.authKind === 'bearer' && config.secret) {
+  if ((config.authKind === 'bearer' || config.authKind === 'oauth2') && config.secret) {
     headers['Authorization'] = `Bearer ${config.secret}`;
   } else if (config.authKind === 'header' && config.authHeaderName && config.secret) {
     headers[config.authHeaderName] = config.secret;
@@ -459,12 +461,34 @@ async function dispatchJsonRpc(
   isDeadlineExpired: () => boolean,
   opts?: McpTransportOptions,
   isNotification = false,
+  retriedOAuth401 = false,
 ): Promise<{ rpc: JsonRpcResponse | null; responseSessionId: string | null }> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'application/json, text/event-stream',
     ...buildAuthHeaders(config),
   };
+  if (config.authKind === 'oauth2' && !config.secret) {
+    try {
+      const oauthBearer = await resolveMcpOAuthAccessToken(config.serverId, {
+        allowedInternalOrigins: resolveAllowedOrigins(opts),
+        dnsResolver: opts?.dnsResolver,
+        fetchFn: opts?.fetchFn,
+        signal,
+      });
+      headers['Authorization'] = `Bearer ${oauthBearer}`;
+    } catch (err) {
+      if (err instanceof McpServiceError) {
+        const isUnsafe = err.code === 'unsafe_url';
+        throw new McpTransportError(isUnsafe ? 'unsafe_url' : 'http', err.message, err.status);
+      }
+      throw new McpTransportError(
+        'http',
+        err instanceof Error ? err.message : 'Failed to resolve MCP OAuth access token.',
+        401,
+      );
+    }
+  }
   if (session?.protocolVersion) {
     headers['MCP-Protocol-Version'] = session.protocolVersion;
   }
@@ -539,6 +563,31 @@ async function dispatchJsonRpc(
   }
 
   const responseSessionId = res.headers.get('mcp-session-id');
+
+  if (res.status === 401 && config.authKind === 'oauth2' && !config.secret && !retriedOAuth401) {
+    await res.body?.cancel().catch(() => {});
+    try {
+      await resolveMcpOAuthAccessToken(config.serverId, {
+        allowedInternalOrigins: resolveAllowedOrigins(opts),
+        dnsResolver: opts?.dnsResolver,
+        fetchFn: opts?.fetchFn,
+        signal,
+        forceRefresh: true,
+      });
+      return await dispatchJsonRpc(
+        config,
+        payload,
+        session,
+        signal,
+        isDeadlineExpired,
+        opts,
+        isNotification,
+        true,
+      );
+    } catch {
+      throw new McpTransportError('http', 'MCP server returned HTTP 401.', 401);
+    }
+  }
 
   if (res.status < 200 || res.status >= 300) {
     await res.body?.cancel().catch(() => {});

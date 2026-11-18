@@ -14,6 +14,7 @@ import {
 } from '@freellmapi/shared/ai-platform-output-guard.js';
 import { isPillarEnabled } from '../flags.js';
 import { registerOutputFilterProvider } from '../pipeline.js';
+import { recordCompletedSpan } from '../tracing/collector.js';
 import type { OutputFilter } from '../wire/interceptor.js';
 import { readStoredProfileSystemPrompt } from './context.js';
 import {
@@ -313,8 +314,21 @@ export function outputFilterFor(scope: Scope, ctx: GuardEvalContext): OutputFilt
       evaluateIncrementalSync(scope, scanContext, policy, ctx.systemPrompt),
     evaluateFinal: buffering
       ? async (fullText) => {
+          const guardStartedAt = Date.now();
           const res = await evaluateWithPolicySnapshot(scope, policy, fullText, ctx, {
             recordEvents: true,
+          });
+          recordCompletedSpan({
+            kind: 'output_guard',
+            name: `output_guard:${scope.kind}:${scope.id}`,
+            durationMs: Date.now() - guardStartedAt,
+            status: res.action === 'blocked' ? 'error' : 'ok',
+            ...(res.reason ? { errorSummary: res.reason } : {}),
+            attributes: {
+              action: res.action,
+              mode: policy.mode,
+              ...(res.reason ? { reason: res.reason } : {}),
+            },
           });
           return {
             action: res.action,
@@ -374,7 +388,21 @@ export async function evaluateOutput(
     return { action: 'pass', text };
   }
 
-  return evaluateWithPolicySnapshot(scope, policy, text, ctx, { recordEvents: true });
+  const startedAt = Date.now();
+  const res = await evaluateWithPolicySnapshot(scope, policy, text, ctx, { recordEvents: true });
+  recordCompletedSpan({
+    kind: 'output_guard',
+    name: `output_guard:${scope.kind}:${scope.id}`,
+    durationMs: Date.now() - startedAt,
+    status: res.action === 'blocked' ? 'error' : 'ok',
+    ...(res.reason ? { errorSummary: res.reason } : {}),
+    attributes: {
+      action: res.action,
+      mode: policy.mode,
+      ...(res.reason ? { reason: res.reason } : {}),
+    },
+  });
+  return res;
 }
 
 /**
