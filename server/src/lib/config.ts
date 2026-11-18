@@ -119,6 +119,12 @@ function parseAllowedHosts(): string[] {
 // from the socket peer (so `TRUST_PROXY=1` means "one proxy in front", the
 // Express idiom, not "trust everything"); otherwise a comma-separated list of
 // proxy addresses/CIDRs → trust only those hops.
+//
+// Prefer `1` (or a CIDR list) over `true`: `true` trusts every hop, so a
+// client connecting directly can spoof X-Forwarded-For and dodge the per-IP
+// rate limits (and pollute Analytics with a fake client IP). Behind a single
+// reverse proxy on the same host (Caddy/nginx/Traefik), `TRUST_PROXY=1`
+// trusts exactly that proxy and nothing else.
 function parseTrustProxy(): boolean | number | string[] {
   const raw = process.env.TRUST_PROXY;
   if (raw === undefined || raw.trim() === '') return false;
