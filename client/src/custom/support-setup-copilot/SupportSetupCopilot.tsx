@@ -23,6 +23,7 @@ import {
   Minimize2,
   RotateCcw,
   ShieldCheck,
+  Sliders,
   Sparkles,
   Stethoscope,
   Wand2,
@@ -49,6 +50,7 @@ import type {
   SupportSetupStepDiagnostic,
   SupportSetupStepId,
   SupportSetupTone,
+  SupportSystemSettingId,
 } from '../../../../shared/support-setup-copilot';
 import {
   fetchCopilotUserDiagnostics,
@@ -78,6 +80,7 @@ interface ChatTurn {
   quickReplies?: string[];
   proposal?: SupportSetupProposal | null;
   applyResult?: SupportSetupApplyResponse | null;
+  modelUsed?: string;
   userDiagnostic?: CopilotUserDiagnosticReport | null;
   actionProposal?: CopilotActionProposal | null;
   actionResult?: CopilotExecuteActionResponse | null;
@@ -179,6 +182,7 @@ export function SupportSetupCopilot() {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [brief, setBrief] = useState<BriefDraft>(() => defaultBrief(uiLocale));
   const [selectedStepsMap, setSelectedStepsMap] = useState<Record<string, SupportSetupStepId[]>>({});
+  const [selectedSystemActionsMap, setSelectedSystemActionsMap] = useState<Record<string, SupportSystemSettingId[]>>({});
   const [proposalOverrides, setProposalOverrides] = useState<Record<string, SupportSetupProposal>>({});
   const [actionStatusMap, setActionStatusMap] = useState<
     Record<string, 'pending' | 'executed' | 'cancelled'>
@@ -257,6 +261,7 @@ export function SupportSetupCopilot() {
           content: res.reply,
           quickReplies: res.suggestedQuickReplies,
           proposal: res.proposal,
+          modelUsed: !res.usedFallback && res.modelUsed ? res.modelUsed : undefined,
           userDiagnostic: res.userDiagnostic ?? null,
           actionProposal: res.actionProposal ?? null,
         },
@@ -312,37 +317,60 @@ export function SupportSetupCopilot() {
   });
 
   const applyMutation = useMutation({
-    mutationFn: (args: { proposalId: string; selectedSteps: SupportSetupStepId[] }) =>
+    mutationFn: (args: {
+      proposalId: string;
+      selectedSteps?: SupportSetupStepId[];
+      selectedSystemActions?: SupportSystemSettingId[];
+    }) =>
       postSupportSetupApply(args.proposalId, {
         approved: true,
         selectedSteps: args.selectedSteps,
+        selectedSystemActions: args.selectedSystemActions,
       }),
     onSuccess: (res) => {
       setProposalOverrides((prev) => ({ ...prev, [res.proposal.id]: res.proposal }));
-      setTargetSelection(res.tenant.id);
+      if (res.tenant) {
+        setTargetSelection(res.tenant.id);
+      }
+      const isSystemSettings = res.proposal.targetMode === 'system_settings';
+      const replyContent = isSystemSettings
+        ? s.systemSettingsSuccessReply
+        : res.tenant && res.diagnostic
+          ? uiLocale === 'vi'
+            ? `Tuyệt vời! 🎉 Mình đã triển khai xong cấu hình cho **${res.tenant.name}** (${res.diagnostic.completedSteps}/${res.diagnostic.totalSteps} bước sẵn sàng). Bạn có thể bấm **Mở Live Test ngay** để chat thử hoặc sao chép mã nhúng widget bên dưới nhé!`
+            : `All set! 🎉 Deployment is complete for **${res.tenant.name}** (${res.diagnostic.completedSteps}/${res.diagnostic.totalSteps} steps ready). Open Live Test to try it out or copy the website embed snippet below!`
+          : uiLocale === 'vi'
+            ? 'Triển khai hoàn tất thành công!'
+            : 'Deployment completed successfully!';
+
       setTurns((prev) => [
         ...prev,
         {
           id: makeTurnId(),
           role: 'assistant',
-          content:
-            uiLocale === 'vi'
-              ? `Tuyệt vời! 🎉 Mình đã triển khai xong cấu hình cho **${res.tenant.name}** (${res.diagnostic.completedSteps}/${res.diagnostic.totalSteps} bước sẵn sàng). Bạn có thể bấm **Mở Live Test ngay** để chat thử hoặc sao chép mã nhúng widget bên dưới nhé!`
-              : `All set! 🎉 Deployment is complete for **${res.tenant.name}** (${res.diagnostic.completedSteps}/${res.diagnostic.totalSteps} steps ready). Open Live Test to try it out or copy the website embed snippet below!`,
+          content: replyContent,
           applyResult: res,
         },
       ]);
       void queryClient.invalidateQueries({ queryKey: ['support-setup-copilot-status'] });
+      if (isSystemSettings) {
+        void queryClient.invalidateQueries({ queryKey: ['settings'] });
+        void queryClient.invalidateQueries({ queryKey: ['cache'] });
+        void queryClient.invalidateQueries({ queryKey: ['thruline'] });
+      }
       void queryClient.invalidateQueries({
         predicate: (q) => {
           const head = q.queryKey[0];
           return (
             typeof head === 'string' &&
-            (head.startsWith('x-support') || head.startsWith('tenant-portal'))
+            (head.startsWith('x-support') ||
+              head.startsWith('tenant-portal') ||
+              (isSystemSettings &&
+                (head.startsWith('settings') || head.startsWith('cache') || head.startsWith('thruline'))))
           );
         },
       });
-      toast.success(s.deploySuccessTitle);
+      toast.success(isSystemSettings ? s.systemSettingsSuccessTitle : s.deploySuccessTitle);
     },
     onError: (err: Error) => {
       toast.error(err.message);
@@ -449,6 +477,30 @@ export function SupportSetupCopilot() {
       ...prev,
       [proposal.id]: proposal.steps
         .map((st) => st.stepId)
+        .filter((id) => current.has(id)),
+    }));
+  };
+
+  const getSelectedSystemActions = (proposal: SupportSetupProposal): SupportSystemSettingId[] =>
+    selectedSystemActionsMap[proposal.id] ??
+    (proposal.systemActions ?? [])
+      .filter((a) => a.canApply && a.enabledByDefault)
+      .map((a) => a.settingId);
+
+  const toggleProposalSystemAction = (
+    proposal: SupportSetupProposal,
+    settingId: SupportSystemSettingId,
+  ) => {
+    const current = new Set(getSelectedSystemActions(proposal));
+    if (current.has(settingId)) {
+      current.delete(settingId);
+    } else {
+      current.add(settingId);
+    }
+    setSelectedSystemActionsMap((prev) => ({
+      ...prev,
+      [proposal.id]: (proposal.systemActions ?? [])
+        .map((a) => a.settingId)
         .filter((id) => current.has(id)),
     }));
   };
@@ -875,13 +927,34 @@ export function SupportSetupCopilot() {
 
   const renderProposalCard = (rawProposal: SupportSetupProposal) => {
     const proposal = proposalOverrides[rawProposal.id] ?? rawProposal;
-    const selected = new Set(getSelectedSteps(proposal));
+    const isSystemSettings = proposal.targetMode === 'system_settings';
     const isPending = proposal.status === 'pending_consent';
-    const hasEditableStep = proposal.steps.some((st) => st.canApply);
-    const targetText = formatSetupString(
-      proposal.targetMode === 'create_tenant' ? s.consentTargetCreate : s.consentTargetUpdate,
-      { name: proposal.tenantName, slug: proposal.tenantSlug },
-    );
+
+    const selectedSteps = new Set(getSelectedSteps(proposal));
+    const selectedSystemActions = new Set(getSelectedSystemActions(proposal));
+
+    const hasEditableItem = isSystemSettings
+      ? (proposal.systemActions ?? []).some((a) => a.canApply)
+      : proposal.steps.some((st) => st.canApply);
+
+    const hasSelected = isSystemSettings ? selectedSystemActions.size > 0 : selectedSteps.size > 0;
+
+    const targetText = isSystemSettings
+      ? s.systemSettingsTarget
+      : formatSetupString(
+          proposal.targetMode === 'create_tenant' ? s.consentTargetCreate : s.consentTargetUpdate,
+          { name: proposal.tenantName, slug: proposal.tenantSlug },
+        );
+
+    const countText = isSystemSettings
+      ? formatSetupString(s.systemSettingsApplyCount, {
+          selected: selectedSystemActions.size,
+          total: (proposal.systemActions ?? []).length,
+        })
+      : formatSetupString(s.selectedStepsCount, {
+          selected: selectedSteps.size,
+          total: proposal.steps.length,
+        });
 
     const statusBadge =
       proposal.status === 'applied'
@@ -904,44 +977,88 @@ export function SupportSetupCopilot() {
               <ShieldCheck size={13} />
               <span>{s.consentBanner}</span>
             </span>
+            {proposal.isSurgical && !isSystemSettings && (
+              <span className="ssc-status-pill ssc-status-pill--surgical" data-testid="support-setup-surgical-badge">
+                <Sliders size={11} />
+                <span>{s.surgicalBadge}</span>
+              </span>
+            )}
             {statusBadge ? (
               <span className="ssc-status-pill ssc-status-pill--complete">{statusBadge}</span>
             ) : (
-              <span className="ssc-proposal-count">
-                {formatSetupString(s.selectedStepsCount, {
-                  selected: selected.size,
-                  total: proposal.steps.length,
-                })}
-              </span>
+              <span className="ssc-proposal-count">{countText}</span>
             )}
           </div>
           <div className="ssc-proposal-target">{targetText}</div>
         </div>
 
-        <div className="ssc-proposal-steps">
-          {proposal.steps.map((step) => {
-            const checked = selected.has(step.stepId);
-            const title = uiLocale === 'vi' ? step.titleVi : step.titleEn;
-            const summary = uiLocale === 'vi' ? step.summaryVi : step.summaryEn;
-            const disabled = !isPending || !step.canApply;
-            return (
-              <label className="ssc-proposal-step" key={step.stepId}>
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  disabled={disabled}
-                  onChange={() => toggleProposalStep(proposal, step.stepId)}
-                />
-                <div>
-                  <div className="ssc-proposal-step-title">{title}</div>
-                  <div className="ssc-proposal-step-summary">
-                    {step.canApply ? summary : `${summary} · ${s.consentNoPermission}`}
+        {isSystemSettings ? (
+          <div className="ssc-proposal-steps" data-testid="support-setup-system-actions">
+            {(proposal.systemActions ?? []).map((action) => {
+              const checked = selectedSystemActions.has(action.settingId);
+              const title = uiLocale === 'vi' ? action.titleVi : action.titleEn;
+              const summary = uiLocale === 'vi' ? action.summaryVi : action.summaryEn;
+              const curVal = uiLocale === 'vi' ? action.currentValueVi : action.currentValueEn;
+              const propVal = uiLocale === 'vi' ? action.proposedValueVi : action.proposedValueEn;
+              const disabled = !isPending || !action.canApply;
+              return (
+                <label className="ssc-proposal-step ssc-proposal-system-action" key={action.settingId}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={disabled}
+                    onChange={() => toggleProposalSystemAction(proposal, action.settingId)}
+                  />
+                  <div style={{ flex: 1 }}>
+                    <div
+                      className="ssc-proposal-step-title"
+                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}
+                    >
+                      <span>{title}</span>
+                      {!action.canApply && (
+                        <span className="ssc-status-pill ssc-status-pill--restricted">
+                          <Lock size={10} style={{ marginRight: 3, verticalAlign: 'middle' }} />
+                          {action.requiredPermission}
+                        </span>
+                      )}
+                    </div>
+                    <div className="ssc-proposal-step-summary">{summary}</div>
+                    <div className="ssc-action-diff-preview">
+                      <span className="ssc-action-diff-old">{curVal}</span>
+                      <span className="ssc-action-diff-arrow">➔</span>
+                      <span className="ssc-action-diff-new">{propVal}</span>
+                    </div>
                   </div>
-                </div>
-              </label>
-            );
-          })}
-        </div>
+                </label>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="ssc-proposal-steps">
+            {proposal.steps.map((step) => {
+              const checked = selectedSteps.has(step.stepId);
+              const title = uiLocale === 'vi' ? step.titleVi : step.titleEn;
+              const summary = uiLocale === 'vi' ? step.summaryVi : step.summaryEn;
+              const disabled = !isPending || !step.canApply;
+              return (
+                <label className="ssc-proposal-step" key={step.stepId}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={disabled}
+                    onChange={() => toggleProposalStep(proposal, step.stepId)}
+                  />
+                  <div>
+                    <div className="ssc-proposal-step-title">{title}</div>
+                    <div className="ssc-proposal-step-summary">
+                      {step.canApply ? summary : `${summary} · ${s.consentNoPermission}`}
+                    </div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        )}
 
         {isPending && (
           <div className="ssc-proposal-actions">
@@ -950,17 +1067,24 @@ export function SupportSetupCopilot() {
               className="ssc-btn ssc-btn--primary"
               data-testid="support-setup-approve-btn"
               disabled={
-                !hasEditableStep ||
-                selected.size === 0 ||
+                !hasEditableItem ||
+                !hasSelected ||
                 applyMutation.isPending ||
                 declineMutation.isPending
               }
-              onClick={() =>
-                applyMutation.mutate({
-                  proposalId: proposal.id,
-                  selectedSteps: [...selected],
-                })
-              }
+              onClick={() => {
+                if (isSystemSettings) {
+                  applyMutation.mutate({
+                    proposalId: proposal.id,
+                    selectedSystemActions: [...selectedSystemActions],
+                  });
+                } else {
+                  applyMutation.mutate({
+                    proposalId: proposal.id,
+                    selectedSteps: [...selectedSteps],
+                  });
+                }
+              }}
             >
               <Check size={13} />
               <span>{applyMutation.isPending ? s.deploying : s.approveAndDeploy}</span>
@@ -1486,6 +1610,11 @@ export function SupportSetupCopilot() {
                       <Sparkles size={11} />
                     </span>
                     <span>{s.assistantName}</span>
+                    {turn.modelUsed && (
+                      <span className="ssc-model-badge" title={`Model: ${turn.modelUsed}`}>
+                        ⚡ {turn.modelUsed}
+                      </span>
+                    )}
                   </div>
                 )}
 
@@ -1527,9 +1656,37 @@ export function SupportSetupCopilot() {
                   <div className="ssc-result-card" data-testid="support-setup-applied-card">
                     <div className="ssc-result-title">
                       <CheckCircle2 size={15} />
-                      <span>{s.deploySuccessTitle}</span>
+                      <span>
+                        {turn.applyResult.proposal.targetMode === 'system_settings'
+                          ? s.systemSettingsSuccessTitle
+                          : s.deploySuccessTitle}
+                      </span>
                     </div>
-                    {turn.applyResult.diagnostic.embedSnippet && (
+
+                    {turn.applyResult.systemResults && turn.applyResult.systemResults.length > 0 && (
+                      <div className="ssc-system-results" data-testid="support-setup-system-results">
+                        {turn.applyResult.systemResults.map((r) => (
+                          <div className="ssc-system-result-row" key={r.settingId}>
+                            <span
+                              className={`ssc-status-pill ssc-status-pill--${r.status === 'applied' ? 'complete' : 'restricted'}`}
+                            >
+                              {r.status === 'applied'
+                                ? uiLocale === 'vi'
+                                  ? 'Đã áp dụng'
+                                  : 'Applied'
+                                : uiLocale === 'vi'
+                                  ? 'Bỏ qua'
+                                  : 'Skipped'}
+                            </span>
+                            <span className="ssc-system-result-detail">
+                              {uiLocale === 'vi' ? r.detailVi : r.detailEn}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {turn.applyResult.diagnostic?.embedSnippet && (
                       <>
                         <div>
                           <strong>{s.embedLabel}:</strong>
@@ -1538,12 +1695,12 @@ export function SupportSetupCopilot() {
                       </>
                     )}
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                      {turn.applyResult.diagnostic.embedSnippet && (
+                      {turn.applyResult.diagnostic?.embedSnippet && (
                         <button
                           type="button"
                           className="ssc-btn"
                           onClick={() => {
-                            void copyText(turn.applyResult!.diagnostic.embedSnippet).then((ok) => {
+                            void copyText(turn.applyResult!.diagnostic!.embedSnippet).then((ok) => {
                               if (ok) {
                                 setCopiedId(turn.applyResult!.proposalId);
                                 setTimeout(() => setCopiedId(null), 1800);
@@ -1559,34 +1716,48 @@ export function SupportSetupCopilot() {
                           </span>
                         </button>
                       )}
-                      <button
-                        type="button"
-                        className="ssc-btn ssc-btn--primary"
-                        onClick={() =>
-                          navigate(
-                            session.hasPermission('use_x_gateway')
-                              ? '/thruline/support-desk'
-                              : '/tenant-portal',
-                          )
-                        }
-                      >
-                        <span>{s.openLiveTest}</span>
-                        <ArrowUpRight size={12} />
-                      </button>
-                      <button
-                        type="button"
-                        className="ssc-btn"
-                        onClick={() =>
-                          navigate(
-                            session.hasPermission('use_x_gateway')
-                              ? '/thruline/support-integration'
-                              : '/tenant-portal',
-                          )
-                        }
-                      >
-                        <span>{s.openIntegration}</span>
-                        <ArrowUpRight size={12} />
-                      </button>
+                      {turn.applyResult.tenant && (
+                        <button
+                          type="button"
+                          className="ssc-btn ssc-btn--primary"
+                          onClick={() =>
+                            navigate(
+                              session.hasPermission('use_x_gateway')
+                                ? '/thruline/support-desk'
+                                : '/tenant-portal',
+                            )
+                          }
+                        >
+                          <span>{s.openLiveTest}</span>
+                          <ArrowUpRight size={12} />
+                        </button>
+                      )}
+                      {turn.applyResult.tenant && (
+                        <button
+                          type="button"
+                          className="ssc-btn"
+                          onClick={() =>
+                            navigate(
+                              session.hasPermission('use_x_gateway')
+                                ? '/thruline/support-integration'
+                                : '/tenant-portal',
+                            )
+                          }
+                        >
+                          <span>{s.openIntegration}</span>
+                          <ArrowUpRight size={12} />
+                        </button>
+                      )}
+                      {turn.applyResult.proposal.targetMode === 'system_settings' && (
+                        <button
+                          type="button"
+                          className="ssc-btn ssc-btn--primary"
+                          onClick={() => navigate('/settings')}
+                        >
+                          <span>{s.openSettings}</span>
+                          <ArrowUpRight size={12} />
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}

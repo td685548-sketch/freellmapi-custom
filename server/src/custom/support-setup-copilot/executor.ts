@@ -11,6 +11,7 @@ import {
   type SupportSetupStepId,
   type SupportSetupTenantAiPayload,
   type SupportSetupWidgetPayload,
+  type SupportSystemSettingId,
 } from '@freellmapi/shared/support-setup-copilot.js';
 import type { SessionUser } from '../../services/auth.js';
 import {
@@ -55,6 +56,7 @@ import {
   markSetupProposalApplied,
   SupportSetupCopilotError,
 } from './store.js';
+import { applySystemSettingsActions } from './system-settings.js';
 
 async function syncEvidencePackBestEffort(
   tenant: SupportTenant,
@@ -123,9 +125,10 @@ export async function applySupportSetupProposal(params: {
   proposalId: string;
   approved: boolean;
   selectedSteps?: SupportSetupStepId[];
+  selectedSystemActions?: SupportSystemSettingId[];
   serverOrigin: string;
 }): Promise<SupportSetupApplyResponse> {
-  const { user, proposalId, approved, selectedSteps, serverOrigin } = params;
+  const { user, proposalId, approved, selectedSteps, selectedSystemActions, serverOrigin } = params;
 
   if (approved !== true) {
     throw new SupportSetupCopilotError(
@@ -161,6 +164,33 @@ export async function applySupportSetupProposal(params: {
   const scope = resolveCopilotUserScope(user);
   if (!scope.hasAccess) {
     throw new SupportSetupCopilotError(403, 'forbidden', 'Support setup access denied.');
+  }
+
+  if (proposal.targetMode === 'system_settings') {
+    const systemResults = applySystemSettingsActions({
+      user,
+      actions: proposal.systemActions ?? [],
+      selectedIds: selectedSystemActions,
+    });
+    const appliedSystemActions = systemResults
+      .filter((r) => r.status === 'applied')
+      .map((r) => r.settingId);
+    const savedProposal = markSetupProposalApplied(
+      proposal.id,
+      user.userId,
+      null,
+      proposal,
+      { appliedSystemActions, systemResults },
+    );
+    return {
+      ok: true,
+      proposalId: savedProposal.id,
+      proposal: savedProposal,
+      tenant: null,
+      stepResults: [],
+      systemResults,
+      diagnostic: null,
+    };
   }
 
   const actorIsOperator = isPlatformTenantOperator(user);
@@ -295,7 +325,7 @@ export async function applySupportSetupProposal(params: {
         defaultModel: requestedModel,
         systemPrompt: payload.systemPrompt,
         allowGuest: payload.allowGuest,
-        enabled: true,
+        enabled: typeof payload.enabled === 'boolean' ? payload.enabled : true,
       });
       stepResults.push({
         stepId: 'tenant_ai',

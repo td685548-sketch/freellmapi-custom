@@ -47,6 +47,15 @@ import {
 } from './llm-coach.js';
 import { matchPlatformKnowledgeQuestion } from './platform-guide.js';
 import { createSetupProposal, getSetupProposalForUser } from './store.js';
+import {
+  analyzeSurgicalSupportEdit,
+  applySurgicalStepScopingAndMerge,
+} from './surgical-steps.js';
+import {
+  evaluateSystemSettingsProposal,
+  hasAnySystemSettingPermission,
+  type EvaluateSystemSettingsProposalResult,
+} from './system-settings.js';
 
 export { parseLlmCoachResponse, type GatewayLoopbackContext, type LlmCoachOutput };
 
@@ -486,7 +495,7 @@ const VI_DIACRITIC_RE =
   /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i;
 
 const VI_UNACCENTED_PHRASE_RE =
-  /\b(?:xin\s+chao|chao\s+ban|toi\s+(?:dang|muon|can|co|chua|khong)|minh\s+(?:dang|muon|can|co|chua|khong|moi)|ben\s+(?:minh|toi|em)|va\s+muon|(?:muon|can)\s+(?:setup|thiet\s+lap|cai\s+dat|tu\s+van|lam)|ban\s+co\s+the|ban\s+lam\s+duoc|lam\s+gi\s+ma|la\s+(?:cai\s+)?gi|lam\s+gi|de\s+lam\s+gi|dung\s+de|dung\s+sao|dung\s+the\s+nao|day\s+la\s+(?:trang|web|website|he\s+thong|ung\s+dung|nen\s+tang|muc|man\s+hinh|cho|tab|cong\s+cu)|hoat\s+dong\s+(?:sao|ra\s+sao|kieu\s+gi|the\s+nao|nhu\s+the\s+nao)|ra\s+sao|kieu\s+gi|cho\s+nay|web\s+nay|trang\s+(?:web\s+)?nay|he\s+thong\s+nay|ung\s+dung\s+nay|nen\s+tang\s+nay|muc\s+nay|man\s+hinh\s+nay|gioi\s+thieu|lay\s+api\s*keys?|ket\s+noi|cau\s+hinh|o\s+dau|khac\s+nhau|khac\s+gi|tai\s+khoan|co\s+the\s+(?:lam|noi|giup)|tieng\s+viet|giup\s+toi|giup\s+minh|cho\s+toi|cho\s+minh|cua\s+toi|cua\s+minh|lam\s+sao|nhu\s+the\s+nao|thiet\s+lap|cai\s+dat|huong\s+dan|buoc\s*[1-7]|duoc\s+khong|tuy\s+ban|lam\s+luon|mac\s+dinh|chua\s+co|khong\s+co|sao\s+(?:tra\s+loi|cung\s+nhac|hoi|goi\s+api|bi\s+loi)|bi\s+loi|gap\s+loi|chan\s+doan|kiem\s+tra\s+(?:tai\s+khoan|loi|key)|tao\s+(?:personal\s*)?(?:api\s*)?key|chuyen\s+key|nguoi\s+moi|thanh\s+vien\s+moi|hoi\s+nhieu|nhu\s+may|cam\s+on|ban\s+la\s+ai|ban\s+oi|cung\s+nhac|tu\s+van|len\s+ke\s+hoach|len\s+ban\s+mau|trien\s+luon|ok\s+ban)\b/i;
+  /\b(?:xin\s+chao|chao\s+ban|toi\s+(?:dang|muon|can|co|chua|khong)|minh\s+(?:dang|muon|can|co|chua|khong|moi)|ben\s+(?:minh|toi|em)|va\s+muon|(?:muon|can)\s+(?:setup|thiet\s+lap|cai\s+dat|tu\s+van|lam)|ban\s+co\s+the|ban\s+lam\s+duoc|lam\s+gi\s+ma|la\s+(?:cai\s+)?gi|lam\s+gi|de\s+lam\s+gi|dung\s+de|dung\s+sao|dung\s+the\s+nao|day\s+la\s+(?:trang|web|website|he\s+thong|ung\s+dung|nen\s+tang|muc|man\s+hinh|cho|tab|cong\s+cu)|hoat\s+dong\s+(?:sao|ra\s+sao|kieu\s+gi|the\s+nao|nhu\s+the\s+nao)|ra\s+sao|kieu\s+gi|cho\s+nay|web\s+nay|trang\s+(?:web\s+)?nay|he\s+thong\s+nay|ung\s+dung\s+nay|nen\s+tang\s+nay|muc\s+nay|man\s+hinh\s+nay|gioi\s+thieu|lay\s+api\s*keys?|ket\s+noi|cau\s+hinh|o\s+dau|khac\s+nhau|khac\s+gi|tai\s+khoan|co\s+the\s+(?:lam|noi|giup)|tieng\s+viet|giup\s+toi|giup\s+minh|cho\s+toi|cho\s+minh|cua\s+toi|cua\s+minh|lam\s+sao|nhu\s+the\s+nao|thiet\s+lap|cai\s+dat|huong\s+dan|buoc\s*[1-7]|duoc\s+khong|tuy\s+ban|lam\s+luon|mac\s+dinh|chua\s+co|khong\s+co|sao\s+(?:tra\s+loi|cung\s+nhac|hoi|goi\s+api|bi\s+loi)|bi\s+loi|gap\s+loi|chan\s+doan|kiem\s+tra\s+(?:tai\s+khoan|loi|key)|tao\s+(?:personal\s*)?(?:api\s*)?key|chuyen\s+key|nguoi\s+moi|thanh\s+vien\s+moi|doi\s+mau|doi\s+mat\s+khau|xoa\s+api\s+keys?|(?:bat|tat)\s+(?:response\s+cache|cache|thruline|mcp|compression|unification|ollama|auto\s+update)|hoi\s+nhieu|nhu\s+may|cam\s+on|ban\s+la\s+ai|ban\s+oi|cung\s+nhac|tu\s+van|len\s+ke\s+hoach|len\s+ban\s+mau|trien\s+luon|ok\s+ban)\b/i;
 
 const EXPLICIT_SPEAK_VI_RE =
   /\b(?:speak|talk\s+in|reply\s+in|use|switch\s+to)\s+vietnamese\b|(?:nói|dùng|trả\s+lời|giao\s+tiếp|chat)\s*(?:bằng\s*)?tiếng\s*việt|tieng\s+viet\s+(?:khong|duoc\s+khong|nhe|di)/i;
@@ -1200,6 +1209,77 @@ export function buildSanitizedSetupProposal(params: {
 
 const STIFF_NUMBERED_FORM_RE = /(?:^|\n)\s*1[.)]\s+.+\n\s*2[.)]\s+/m;
 
+function resolveSystemSettingsTurnResponse(params: {
+  evalResult: EvaluateSystemSettingsProposalResult;
+  userId: number;
+  locale: 'vi' | 'en';
+  llmReply?: string;
+  modelUsed?: string | null;
+}): SupportSetupChatResponse | null {
+  const { evalResult, userId, locale, llmReply, modelUsed = null } = params;
+  if (evalResult.outcome === 'none') {
+    return null;
+  }
+
+  if (
+    evalResult.outcome === 'unsupported_sensitive' ||
+    evalResult.outcome === 'permission_denied'
+  ) {
+    return {
+      ok: true,
+      replyLocale: locale,
+      reply: locale === 'vi' ? evalResult.replyVi : evalResult.replyEn,
+      intent: 'guide',
+      missingQuestions: [],
+      suggestedQuickReplies: evalResult.suggestedQuickReplies,
+      proposal: null,
+      modelUsed,
+      usedFallback: !modelUsed,
+    };
+  }
+
+  const now = Date.now();
+  const createdAt = new Date(now).toISOString();
+  const expiresAt = new Date(now + SUPPORT_SETUP_PROPOSAL_TTL_SECONDS * 1000).toISOString();
+  const savedProposal = createSetupProposal({
+    id: `prop_${crypto.randomUUID()}`,
+    userId,
+    targetMode: 'system_settings',
+    tenantId: null,
+    tenantName: 'System Settings',
+    tenantSlug: 'system-settings',
+    status: 'pending_consent',
+    summary: locale === 'vi' ? evalResult.summaryVi : evalResult.summaryEn,
+    requirements: {},
+    steps: [],
+    systemActions: evalResult.actions,
+    createdAt,
+    expiresAt,
+  });
+
+  const useLlmReply = Boolean(
+    llmReply &&
+      !STIFF_NUMBERED_FORM_RE.test(llmReply) &&
+      evalResult.missingPermissions.length === 0,
+  );
+
+  return {
+    ok: true,
+    replyLocale: locale,
+    reply: useLlmReply
+      ? llmReply!
+      : locale === 'vi'
+        ? evalResult.replyVi
+        : evalResult.replyEn,
+    intent: 'propose_setup',
+    missingQuestions: [],
+    suggestedQuickReplies: evalResult.suggestedQuickReplies,
+    proposal: savedProposal,
+    modelUsed,
+    usedFallback: !modelUsed,
+  };
+}
+
 export async function runSupportSetupCopilotTurn(params: {
   user: SessionUser;
   scope: CopilotUserScope;
@@ -1240,7 +1320,9 @@ export async function runSupportSetupCopilotTurn(params: {
     try {
       const prior = getSetupProposalForUser(baseProposalId, user.userId);
       baseRequirements = prior.requirements;
-      priorTargetMode = prior.targetMode;
+      if (prior.targetMode === 'create_tenant' || prior.targetMode === 'update_tenant') {
+        priorTargetMode = prior.targetMode;
+      }
     } catch {
       baseRequirements = undefined;
     }
@@ -1262,6 +1344,32 @@ export async function runSupportSetupCopilotTurn(params: {
       latestUserMessage,
     );
   const latestPlatformMatch = matchPlatformKnowledgeQuestion(latestUserMessage, currentPath);
+
+  const explicitBriefSubmitted = Boolean(
+    requirementsHint &&
+      (requirementsHint.brandName?.trim() ||
+        requirementsHint.industry?.trim() ||
+        requirementsHint.faqSummaryOrPolicies?.trim()),
+  );
+
+  // System Settings first (BEFORE create_tenant / canEditSet.size === 0 gates so delegated
+  // edit_cache / edit_settings / manage_compression admins and sensitive-action guardrails
+  // work cleanly without wasting an LLM call).
+  if (!latestCreatePhrase && !explicitBriefSubmitted) {
+    const preSysEval = evaluateSystemSettingsProposal({
+      user,
+      messages,
+      locale,
+    });
+    const preSysResponse = resolveSystemSettingsTurnResponse({
+      evalResult: preSysEval,
+      userId: user.userId,
+      locale,
+    });
+    if (preSysResponse) {
+      return preSysResponse;
+    }
+  }
 
   // Strict RBAC boundary: if a non-operator explicitly asks to create a brand-new tenant,
   // refuse cleanly without creating a tenant OR silently mutating another tenant.
@@ -1327,8 +1435,48 @@ export async function runSupportSetupCopilotTurn(params: {
       : effectiveTargetEntry?.canEditSteps ?? new Set<SupportSetupStepId>();
 
   // Read-only accounts (0 editable steps and cannot create tenants) can receive coaching/diagnostics,
-  // but must NEVER be prompted for auto-deploy requirements or receive a pending_consent proposal.
+  // but must NEVER be prompted for auto-deploy requirements or receive a pending_consent tenant proposal.
   if (canEditSet.size === 0) {
+    if (effectiveTenant !== null) {
+      const readOnlySurgical = analyzeSurgicalSupportEdit({
+        messages,
+        locale,
+        hasExistingTenant: true,
+        explicitBriefSubmitted,
+      });
+      if (readOnlySurgical.isSurgical) {
+        const scopedDenied = applySurgicalStepScopingAndMerge({
+          existingTenant: effectiveTenant,
+          baselineSteps: [],
+          analysis: readOnlySurgical,
+          canEditSteps: canEditSet,
+          locale,
+        });
+        if (scopedDenied.outcome === 'permission_denied') {
+          return {
+            ok: true,
+            replyLocale: locale,
+            reply: scopedDenied.reply,
+            intent: 'guide',
+            missingQuestions: [],
+            suggestedQuickReplies:
+              locale === 'vi'
+                ? [
+                    'Kiểm tra trạng thái 7 bước của tenant này',
+                    'Hướng dẫn tôi 7 bước cấu hình AI Support',
+                  ]
+                : [
+                    'Check the 7-step diagnostics on this tenant',
+                    'Walk me through the 7 AI Support setup steps',
+                  ],
+            proposal: null,
+            modelUsed: null,
+            usedFallback: true,
+          };
+        }
+      }
+    }
+
     const readOnlyDialogue = buildHumanDialogueTurn({
       messages,
       locale,
@@ -1340,9 +1488,11 @@ export async function runSupportSetupCopilotTurn(params: {
       canEditAny: false,
       hasBaseProposal: false,
     });
+    const canProposeSystemSettings = hasAnySystemSettingPermission(user);
     const readOnlyLlm =
-      readOnlyDialogue.act === 'platform_guide'
+      readOnlyDialogue.act === 'platform_guide' || canProposeSystemSettings
         ? await runHumanLikeLlmCoach({
+            user,
             messages,
             locale,
             targetMode,
@@ -1354,6 +1504,27 @@ export async function runSupportSetupCopilotTurn(params: {
             gatewayLoopback,
           })
         : null;
+
+    if (readOnlyLlm?.output.systemActions?.length && !explicitBriefSubmitted) {
+      const postReadOnlySys = evaluateSystemSettingsProposal({
+        user,
+        messages,
+        locale,
+        llmSuggestedActions: readOnlyLlm.output.systemActions,
+      });
+      const sysResp = resolveSystemSettingsTurnResponse({
+        evalResult: postReadOnlySys,
+        userId: user.userId,
+        locale,
+        llmReply:
+          readOnlyLlm.output.intent === 'propose_setup' ? readOnlyLlm.output.reply : undefined,
+        modelUsed: readOnlyLlm.modelUsed,
+      });
+      if (sysResp) {
+        return sysResp;
+      }
+    }
+
     const useReadOnlyLlm = Boolean(
       readOnlyLlm?.output.reply &&
         (readOnlyLlm.output.intent === 'guide' || !readOnlyLlm.output.intent) &&
@@ -1384,6 +1555,7 @@ export async function runSupportSetupCopilotTurn(params: {
 
   // Attempt live human-like LLM coach (Thruline accounts first, then main FreeLLMAPI /v1/chat/completions router)
   const llm = await runHumanLikeLlmCoach({
+    user,
     messages,
     locale,
     targetMode,
@@ -1395,17 +1567,136 @@ export async function runSupportSetupCopilotTurn(params: {
     gatewayLoopback,
   });
 
+  if (llm?.output.systemActions?.length && !explicitBriefSubmitted) {
+    const postLlmSys = evaluateSystemSettingsProposal({
+      user,
+      messages,
+      locale,
+      llmSuggestedActions: llm.output.systemActions,
+    });
+    const sysResp = resolveSystemSettingsTurnResponse({
+      evalResult: postLlmSys,
+      userId: user.userId,
+      locale,
+      llmReply: llm.output.intent === 'propose_setup' ? llm.output.reply : undefined,
+      modelUsed: llm.modelUsed,
+    });
+    if (sysResp) {
+      return sysResp;
+    }
+  }
+
   const mergedRequirements =
     !latestPlatformMatch && llm?.output.extractedRequirements
       ? extractRequirementsFromMessages([], extracted, llm.output.extractedRequirements, locale)
       : extracted;
 
-  const explicitBriefSubmitted = Boolean(
-    requirementsHint &&
-      (requirementsHint.brandName?.trim() ||
-        requirementsHint.industry?.trim() ||
-        requirementsHint.faqSummaryOrPolicies?.trim()),
-  );
+  if (effectiveTenant !== null) {
+    const surgicalAnalysis = analyzeSurgicalSupportEdit({
+      messages,
+      locale,
+      hasExistingTenant: true,
+      explicitBriefSubmitted,
+      llmTargetSteps: llm?.output.targetSteps,
+    });
+
+    if (surgicalAnalysis.isSurgical) {
+      const baselineDraft = buildSanitizedSetupProposal({
+        userId: user.userId,
+        targetMode: 'update_tenant',
+        existingTenant: effectiveTenant,
+        requirements: mergedRequirements,
+        canEditSteps: canEditSet,
+        canViewSteps: effectiveTargetEntry?.canViewSteps,
+        canCreateTenant: scope.canCreateTenant,
+        isPlatformOperator: scope.isPlatformOperator,
+        locale,
+      });
+
+      const availableModelIds = scope.isPlatformOperator
+        ? undefined
+        : new Set<string>([
+            'auto',
+            ...listCopilotModelOptions().map((m) => m.id),
+            ...(effectiveTenant.defaultModel ? [effectiveTenant.defaultModel] : []),
+          ]);
+
+      const scoped = applySurgicalStepScopingAndMerge({
+        existingTenant: effectiveTenant,
+        baselineSteps: baselineDraft.steps,
+        analysis: surgicalAnalysis,
+        canEditSteps: canEditSet,
+        locale,
+        availableModelIds,
+      });
+
+      if (scoped.outcome === 'permission_denied') {
+        return {
+          ok: true,
+          replyLocale: locale,
+          reply: scoped.reply,
+          intent: 'guide',
+          missingQuestions: [],
+          suggestedQuickReplies:
+            locale === 'vi'
+              ? [
+                  'Cập nhật các mục tôi được phân quyền ở tenant này',
+                  'Kiểm tra trạng thái 7 bước của tenant hiện tại',
+                ]
+              : [
+                  'Update the steps I have permission for on this tenant',
+                  'Check the 7-step readiness of this tenant',
+                ],
+          proposal: null,
+          modelUsed: llm?.modelUsed ?? null,
+          usedFallback: !llm,
+        };
+      }
+
+      if (scoped.outcome === 'scoped') {
+        const savedSurgicalProposal = createSetupProposal({
+          ...baselineDraft,
+          isSurgical: true,
+          targetedSteps: scoped.targetedSteps,
+          summary: scoped.summary,
+          steps: scoped.steps,
+        });
+
+        const llmSurgicalStiff = Boolean(
+          llm?.output.reply && STIFF_NUMBERED_FORM_RE.test(llm.output.reply),
+        );
+        const useLlmSurgicalReply = Boolean(
+          llm?.output.intent === 'propose_setup' &&
+            llm.output.reply &&
+            !llmSurgicalStiff &&
+            scoped.deniedSteps.length === 0,
+        );
+
+        return {
+          ok: true,
+          replyLocale: locale,
+          reply: useLlmSurgicalReply ? llm!.output.reply : scoped.reply,
+          intent: 'propose_setup',
+          missingQuestions: [],
+          suggestedQuickReplies:
+            useLlmSurgicalReply && llm?.output.suggestedQuickReplies?.length
+              ? llm.output.suggestedQuickReplies.slice(0, 4)
+              : locale === 'vi'
+                ? [
+                    'Kiểm tra các bước cấu hình còn lại của tenant',
+                    'Hướng dẫn gắn mã nhúng widget lên website',
+                  ]
+                : [
+                    'Check the remaining steps on this tenant',
+                    'Show me how to embed the widget on my site',
+                  ],
+          proposal: savedSurgicalProposal,
+          modelUsed: llm?.modelUsed ?? null,
+          usedFallback: !llm,
+        };
+      }
+    }
+  }
 
   const isProposalRefinementTurn = Boolean(
     baseProposalId &&

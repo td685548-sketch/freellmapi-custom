@@ -34,6 +34,8 @@ export function isSupportSetupCopilotRoute(pathname: string): boolean {
     pathname.startsWith('/thruline/') ||
     pathname === '/tenant-portal' ||
     pathname.startsWith('/tenant-portal/') ||
+    pathname === '/settings' ||
+    pathname.startsWith('/settings/') ||
     isMemberPersonalCopilotRoute(pathname)
   );
 }
