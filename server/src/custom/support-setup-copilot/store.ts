@@ -26,7 +26,7 @@ export function ensureSupportSetupCopilotTables(targetDb?: Db): Db {
 interface ProposalRow {
   id: string;
   user_id: number;
-  target_mode: 'create_tenant' | 'update_tenant';
+  target_mode: SupportSetupProposal['targetMode'];
   tenant_id: number | null;
   status: SupportSetupProposal['status'];
   requirements_json: string;
@@ -149,7 +149,7 @@ export function listPendingProposalsForUser(
 export function markSetupProposalApplied(
   proposalId: string,
   userId: number,
-  tenantId: number,
+  tenantId: number | null,
   updatedProposal: SupportSetupProposal,
   executionResult: unknown,
 ): SupportSetupProposal {

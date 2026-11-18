@@ -28,6 +28,10 @@ import {
   markSetupProposalDeclined,
   SupportSetupCopilotError,
 } from './store.js';
+import {
+  reprojectSystemActionsForUser,
+  SYSTEM_SETTING_IDS,
+} from './system-settings.js';
 
 export const supportSetupCopilotRouter = Router();
 
@@ -113,15 +117,29 @@ const applyBodySchema = z
   .object({
     approved: z.boolean(),
     selectedSteps: z.array(z.enum(SUPPORT_SETUP_STEP_IDS)).optional(),
+    selectedSystemActions: z.array(z.enum(SYSTEM_SETTING_IDS)).optional(),
   })
   .strict();
 
 function reprojectPendingProposalsForScope(
   proposals: SupportSetupProposal[],
   scope: CopilotUserScope,
+  user: SessionUser,
 ): SupportSetupProposal[] {
   const projected: SupportSetupProposal[] = [];
   for (const proposal of proposals) {
+    if (proposal.targetMode === 'system_settings') {
+      const nextActions = reprojectSystemActionsForUser(proposal.systemActions ?? [], user);
+      if (nextActions.some((a) => a.canApply)) {
+        projected.push({
+          ...proposal,
+          steps: [],
+          systemActions: nextActions,
+        });
+      }
+      continue;
+    }
+
     let liveCanEdit: Set<SupportSetupStepId>;
     if (proposal.targetMode === 'create_tenant') {
       if (!scope.canCreateTenant) continue;
@@ -215,7 +233,7 @@ supportSetupCopilotRouter.get('/status', (req: Request, res: Response) => {
       };
     }),
     activeTenant,
-    pendingProposals: reprojectPendingProposalsForScope(rawPending, scope),
+    pendingProposals: reprojectPendingProposalsForScope(rawPending, scope, user),
   };
 
   res.json(payload);
@@ -343,6 +361,7 @@ supportSetupCopilotRouter.post(
         proposalId: paramStr(req.params.proposalId).trim(),
         approved: parsed.data.approved,
         selectedSteps: parsed.data.selectedSteps,
+        selectedSystemActions: parsed.data.selectedSystemActions,
         serverOrigin: resolvePublicServerOrigin(req),
       });
 

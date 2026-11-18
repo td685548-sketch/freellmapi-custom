@@ -74,6 +74,12 @@ export interface SupportSetupCopilotStrings {
   copiedSnippet: string;
   openLiveTest: string;
   openIntegration: string;
+  surgicalBadge: string;
+  systemSettingsTarget: string;
+  systemSettingsSuccessTitle: string;
+  systemSettingsSuccessReply: string;
+  systemSettingsApplyCount: string;
+  openSettings: string;
   stepTitles: Record<SupportSetupStepId, string>;
   toneOptions: { friendly: string; professional: string; empathetic: string; technical: string };
   languageOptions: { vi: string; en: string; bilingual: string };
@@ -153,6 +159,12 @@ const en: SupportSetupCopilotStrings = {
   copiedSnippet: 'Copied!',
   openLiveTest: 'Open Live Test',
   openIntegration: 'Integration Studio',
+  surgicalBadge: 'Targeted update · Other steps untouched',
+  systemSettingsTarget: 'System Settings (Platform & Thruline)',
+  systemSettingsSuccessTitle: 'System settings applied successfully',
+  systemSettingsSuccessReply: 'System settings have been successfully applied!',
+  systemSettingsApplyCount: '{selected}/{total} settings selected',
+  openSettings: 'Open Settings',
   stepTitles: {
     tenant_ai: '1. Tenant & AI Persona',
     knowledge_masking: '2. Knowledge Base & Masking',
@@ -249,6 +261,12 @@ const vi: SupportSetupCopilotStrings = {
   copiedSnippet: 'Đã chép!',
   openLiveTest: 'Mở Live Test ngay',
   openIntegration: 'Integration Studio',
+  surgicalBadge: 'Chỉnh sửa chọn lọc · Giữ nguyên các mục khác',
+  systemSettingsTarget: 'Cấu hình hệ thống (Platform & Thruline)',
+  systemSettingsSuccessTitle: 'Đã áp dụng cấu hình hệ thống thành công',
+  systemSettingsSuccessReply: 'Đã áp dụng các cấu hình hệ thống thành công!',
+  systemSettingsApplyCount: 'Đã chọn {selected}/{total} mục cấu hình',
+  openSettings: 'Xem Cài đặt',
   stepTitles: {
     tenant_ai: '1. Tenant & Nhân cách AI',
     knowledge_masking: '2. Tri thức FAQ & Che PII',

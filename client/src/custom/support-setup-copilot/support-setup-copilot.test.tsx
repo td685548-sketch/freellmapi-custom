@@ -617,4 +617,280 @@ describe('SupportSetupCopilot widget', () => {
     await flush();
     expect(sentMessages[1]).toBe(longTemplate);
   });
+
+  it('renders surgical proposal badge and defaults only targeted steps to checked', async () => {
+    const surgicalProposal: SupportSetupProposal = {
+      id: 'prop-surg-1',
+      userId: 1,
+      tenantId: 1,
+      tenantName: 'EXE',
+      tenantSlug: 'exe',
+      targetMode: 'update_tenant',
+      isSurgical: true,
+      targetedSteps: ['widget_appearance'],
+      status: 'pending_consent',
+      summary: 'Đổi màu widget',
+      createdAt: '2026-11-18T10:00:00Z',
+      expiresAt: '2026-11-18T11:00:00Z',
+      steps: [
+        {
+          stepId: 'tenant_ai',
+          canApply: true,
+          enabledByDefault: false,
+          titleVi: '1. Tenant & Nhân cách AI',
+          titleEn: '1. Tenant & AI Persona',
+          summaryVi: 'Giữ nguyên nhân cách hiện tại',
+          summaryEn: 'Keep current persona',
+          highlightsVi: [],
+          highlightsEn: [],
+          payload: {},
+        },
+        {
+          stepId: 'widget_appearance',
+          canApply: true,
+          enabledByDefault: true,
+          titleVi: '5. Widget & Thương hiệu',
+          titleEn: '5. Chat Widget & Branding',
+          summaryVi: 'Đổi màu nút chat sang #ec4899',
+          summaryEn: 'Change widget color to #ec4899',
+          highlightsVi: [],
+          highlightsEn: [],
+          payload: {},
+        },
+      ],
+      requirements: {},
+    };
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.endsWith('/api/user/session')) {
+          return json({ userId: 1, email: 'admin@example.com', role: 'admin', isPrimary: true, permissions: ['*'] });
+        }
+        if (url.includes('/api/support-setup-copilot/status')) {
+          const st = sampleStatus(true);
+          st.pendingProposals = [surgicalProposal];
+          return json(st);
+        }
+        return json({});
+      }),
+    );
+
+    mount('/thruline/support-branding', 'vi');
+    await flush();
+
+    const launcher = container.querySelector('[data-testid="support-setup-copilot-launcher"]') as HTMLButtonElement;
+    act(() => launcher.click());
+    await flush();
+
+    const badge = container.querySelector('[data-testid="support-setup-surgical-badge"]');
+    expect(badge).not.toBeNull();
+    expect(badge?.textContent).toContain('Chỉnh sửa chọn lọc');
+
+    const checkboxes = container.querySelectorAll<HTMLInputElement>('.ssc-proposal-step input[type="checkbox"]');
+    expect(checkboxes).toHaveLength(2);
+    expect(checkboxes[0].checked).toBe(false); // tenant_ai unchecked
+    expect(checkboxes[1].checked).toBe(true);  // widget_appearance checked
+  });
+
+  it('renders system settings proposal with action diff preview, locks unauthorized actions, and applies selected actions cleanly without crashing on null tenant', async () => {
+    let appliedPayload: { approved: boolean; selectedSystemActions?: string[] } | null = null;
+
+    const systemProposal: SupportSetupProposal = {
+      id: 'prop-sys-1',
+      userId: 1,
+      tenantId: null,
+      tenantName: 'System Settings',
+      tenantSlug: 'system-settings',
+      targetMode: 'system_settings',
+      status: 'pending_consent',
+      summary: 'Bật cache phản hồi',
+      createdAt: '2026-11-18T10:00:00Z',
+      expiresAt: '2026-11-18T11:00:00Z',
+      steps: [],
+      systemActions: [
+        {
+          settingId: 'response_cache',
+          requiredPermission: 'edit_cache',
+          canApply: true,
+          enabledByDefault: true,
+          titleVi: 'Response Cache',
+          titleEn: 'Response Cache',
+          summaryVi: 'Bật cache phản hồi',
+          summaryEn: 'Enable response cache',
+          currentValueVi: 'Tắt',
+          currentValueEn: 'Disabled',
+          proposedValueVi: 'Bật',
+          proposedValueEn: 'Enabled',
+          payload: { enabled: true },
+        },
+        {
+          settingId: 'model_unification',
+          requiredPermission: 'edit_settings',
+          canApply: false,
+          enabledByDefault: false,
+          titleVi: 'Hợp nhất Model Groups',
+          titleEn: 'Model Group Unification',
+          summaryVi: 'Bật hợp nhất tên model',
+          summaryEn: 'Enable unified model names',
+          currentValueVi: 'Tắt',
+          currentValueEn: 'Disabled',
+          proposedValueVi: 'Bật',
+          proposedValueEn: 'Enabled',
+          payload: { enabled: true },
+        },
+      ],
+      requirements: {},
+    };
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith('/api/user/session')) {
+          return json({ userId: 1, email: 'admin@example.com', role: 'admin', isPrimary: true, permissions: ['edit_cache'] });
+        }
+        if (url.includes('/api/support-setup-copilot/status')) {
+          const st = sampleStatus(true);
+          st.pendingProposals = [systemProposal];
+          return json(st);
+        }
+        if (url.endsWith('/api/support-setup-copilot/proposals/prop-sys-1/apply')) {
+          appliedPayload = JSON.parse(String(init?.body ?? '{}')) as {
+            approved: boolean;
+            selectedSystemActions?: string[];
+          };
+          const applyRes: SupportSetupApplyResponse = {
+            ok: true,
+            proposalId: 'prop-sys-1',
+            proposal: { ...systemProposal, status: 'applied' },
+            tenant: null,
+            stepResults: [],
+            systemResults: [
+              {
+                settingId: 'response_cache',
+                status: 'applied',
+                detailVi: 'Đã bật Response Cache thành công.',
+                detailEn: 'Response Cache enabled successfully.',
+              },
+            ],
+            diagnostic: null,
+          };
+          return json(applyRes);
+        }
+        return json({});
+      }),
+    );
+
+    mount('/settings', 'vi');
+    await flush();
+
+    const launcher = container.querySelector('[data-testid="support-setup-copilot-launcher"]') as HTMLButtonElement;
+    act(() => launcher.click());
+    await flush();
+
+    // Check system actions container & diff preview
+    const actionsContainer = container.querySelector('[data-testid="support-setup-system-actions"]');
+    expect(actionsContainer).not.toBeNull();
+    expect(actionsContainer?.textContent).toContain('Response Cache');
+    expect(actionsContainer?.textContent).toContain('Tắt');
+    expect(actionsContainer?.textContent).toContain('Bật');
+    expect(actionsContainer?.textContent).toContain('edit_settings'); // locked permission badge
+
+    const checkboxes = actionsContainer!.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+    expect(checkboxes).toHaveLength(2);
+    expect(checkboxes[0].checked).toBe(true);  // response_cache checked
+    expect(checkboxes[1].checked).toBe(false); // model_unification unchecked
+    expect(checkboxes[1].disabled).toBe(true);  // model_unification disabled
+
+    // Click Approve
+    const approveBtn = container.querySelector('[data-testid="support-setup-approve-btn"]') as HTMLButtonElement;
+    act(() => approveBtn.click());
+    await flush();
+
+    expect(appliedPayload).toEqual({
+      approved: true,
+      selectedSystemActions: ['response_cache'],
+    });
+
+    // Check applied card rendered with null tenant safety
+    const appliedCard = container.querySelector('[data-testid="support-setup-applied-card"]');
+    expect(appliedCard).not.toBeNull();
+    expect(appliedCard?.textContent).toContain('Đã áp dụng cấu hình hệ thống thành công');
+    expect(appliedCard?.textContent).toContain('Đã bật Response Cache thành công.');
+  });
+
+  it('renders model badge when modelUsed is returned and not fallback', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.endsWith('/api/user/session')) {
+          return json({ userId: 1, email: 'admin@example.com', role: 'admin', isPrimary: true, permissions: ['*'] });
+        }
+        if (url.includes('/api/support-setup-copilot/status')) {
+          return json(sampleStatus(true));
+        }
+        if (url.endsWith('/api/support-setup-copilot/chat')) {
+          const resp: SupportSetupChatResponse = {
+            ok: true,
+            replyLocale: 'vi',
+            reply: 'Chào bạn! Mình có thể tư vấn trực tiếp cho bạn.',
+            intent: 'guide',
+            missingQuestions: [],
+            suggestedQuickReplies: [],
+            proposal: null,
+            modelUsed: 'claude-3-7-sonnet',
+            usedFallback: false,
+          };
+          return json(resp);
+        }
+        return json({});
+      }),
+    );
+
+    mount('/thruline/support-guardrails', 'vi');
+    await flush();
+
+    const launcher = container.querySelector('[data-testid="support-setup-copilot-launcher"]') as HTMLButtonElement;
+    act(() => launcher.click());
+    await flush();
+
+    const starterBtn = container.querySelector('.ssc-starter-btn') as HTMLButtonElement;
+    act(() => starterBtn.click());
+    await flush();
+
+    const modelBadge = container.querySelector('.ssc-model-badge');
+    expect(modelBadge).not.toBeNull();
+    expect(modelBadge?.textContent).toContain('⚡ claude-3-7-sonnet');
+  });
+
+  it('respects route visibility: shows on /settings and /settings/*, hides on /models/chat and /thruline/playground', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.endsWith('/api/user/session')) {
+          return json({ userId: 1, email: 'admin@example.com', role: 'admin', isPrimary: true, permissions: ['*'] });
+        }
+        if (url.includes('/api/support-setup-copilot/status')) {
+          return json(sampleStatus(true));
+        }
+        return json({});
+      }),
+    );
+
+    mount('/settings', 'vi');
+    await flush();
+    expect(container.querySelector('[data-testid="support-setup-copilot-launcher"]')).not.toBeNull();
+
+    mount('/settings/providers', 'vi');
+    await flush();
+    expect(container.querySelector('[data-testid="support-setup-copilot-launcher"]')).not.toBeNull();
+
+    mount('/models/chat', 'vi');
+    await flush();
+    expect(container.querySelector('[data-testid="support-setup-copilot-launcher"]')).toBeNull();
+
+    mount('/thruline/playground', 'vi');
+    await flush();
+    expect(container.querySelector('[data-testid="support-setup-copilot-launcher"]')).toBeNull();
+  });
 });

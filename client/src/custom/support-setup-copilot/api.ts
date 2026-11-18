@@ -21,7 +21,9 @@ export function isSupportSetupCopilotRoute(pathname: string): boolean {
     pathname === '/tenant-portal' ||
     pathname.startsWith('/tenant-portal/') ||
     pathname === '/assistants' ||
-    pathname.startsWith('/assistants/')
+    pathname.startsWith('/assistants/') ||
+    pathname === '/settings' ||
+    pathname.startsWith('/settings/')
   );
 }
 

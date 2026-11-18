@@ -23,6 +23,7 @@ import {
   getSupportDeskWidgetConfig,
 } from '../x-gateway/support-service-desk-store.js';
 import { ensureSupportTables, listSupportTenants, type SupportTenant } from '../x-gateway/support-store.js';
+import { hasAnySystemSettingPermission } from './system-settings.js';
 
 export interface ScopedTenantEntry {
   tenant: SupportTenant;
@@ -164,6 +165,8 @@ export function resolveCopilotUserScope(user: SessionUser | undefined): CopilotU
     };
   }
 
+  const canEditSystemSettings = hasAnySystemSettingPermission(user);
+
   if (accessible.length > 0) {
     const byId = new Map(listSupportTenants().map((t) => [t.id, t]));
     const tenants: ScopedTenantEntry[] = [];
@@ -182,7 +185,7 @@ export function resolveCopilotUserScope(user: SessionUser | undefined): CopilotU
       });
     }
     return {
-      hasAccess: tenants.length > 0,
+      hasAccess: tenants.length > 0 || canEditSystemSettings,
       canCreateTenant: false,
       isPlatformOperator: false,
       tenants,
@@ -190,7 +193,7 @@ export function resolveCopilotUserScope(user: SessionUser | undefined): CopilotU
   }
 
   return {
-    hasAccess: false,
+    hasAccess: canEditSystemSettings,
     canCreateTenant: false,
     isPlatformOperator: false,
     tenants: [],

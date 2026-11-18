@@ -13,6 +13,44 @@ import type {
   SupportDeskWidgetAppearance,
   SupportTicketPriority,
 } from './support-service-desk.js';
+import type { Permission } from './user-access.js';
+
+export const SYSTEM_SETTING_IDS = [
+  'thruline_gateway_enabled',
+  'thruline_token_savers',
+  'thruline_route_health_ttl',
+  'response_cache',
+  'prompt_compression',
+  'model_unification',
+  'mcp_server',
+  'auto_update_check',
+  'ollama_emulation',
+] as const;
+
+export type SupportSystemSettingId = (typeof SYSTEM_SETTING_IDS)[number];
+
+export interface SupportSystemSettingAction {
+  settingId: SupportSystemSettingId;
+  requiredPermission: Permission;
+  canApply: boolean;
+  enabledByDefault: boolean;
+  titleVi: string;
+  titleEn: string;
+  summaryVi: string;
+  summaryEn: string;
+  currentValueVi: string;
+  currentValueEn: string;
+  proposedValueVi: string;
+  proposedValueEn: string;
+  payload: Record<string, unknown>;
+}
+
+export interface SupportSystemSettingApplyResult {
+  settingId: SupportSystemSettingId;
+  status: 'applied' | 'skipped';
+  detailVi: string;
+  detailEn: string;
+}
 
 export const SUPPORT_SETUP_STEP_IDS = [
   'tenant_ai',
@@ -182,7 +220,7 @@ export interface SupportSetupPlannedStep<K extends SupportSetupStepId = SupportS
 export interface SupportSetupProposal {
   id: string;
   userId: number;
-  targetMode: 'create_tenant' | 'update_tenant';
+  targetMode: 'create_tenant' | 'update_tenant' | 'system_settings';
   tenantId: number | null;
   tenantName: string;
   tenantSlug: string;
@@ -190,6 +228,9 @@ export interface SupportSetupProposal {
   summary: string;
   requirements: SupportSetupRequirements;
   steps: SupportSetupPlannedStep[];
+  isSurgical?: boolean;
+  targetedSteps?: SupportSetupStepId[];
+  systemActions?: SupportSystemSettingAction[];
   createdAt: string;
   expiresAt: string;
   appliedAt?: string | null;
@@ -248,6 +289,7 @@ export interface SupportSetupChatResponse {
 export interface SupportSetupApplyRequest {
   approved: boolean;
   selectedSteps?: SupportSetupStepId[];
+  selectedSystemActions?: SupportSystemSettingId[];
 }
 
 export interface SupportSetupStepApplyResult {
@@ -261,9 +303,10 @@ export interface SupportSetupApplyResponse {
   ok: true;
   proposalId: string;
   proposal: SupportSetupProposal;
-  tenant: { id: number; name: string; slug: string; publicKey: string };
+  tenant: { id: number; name: string; slug: string; publicKey: string } | null;
   stepResults: SupportSetupStepApplyResult[];
-  diagnostic: SupportSetupTenantDiagnostic;
+  systemResults?: SupportSystemSettingApplyResult[];
+  diagnostic: SupportSetupTenantDiagnostic | null;
 }
 
 export const SUPPORT_SETUP_DEPARTMENTS_SUPPORTED: readonly SupportDeskDepartment[] = [

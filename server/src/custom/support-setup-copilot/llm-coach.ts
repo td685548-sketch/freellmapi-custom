@@ -7,9 +7,11 @@ import {
   type SupportSetupStepId,
   type SupportSetupTenantDiagnostic,
   type SupportSetupTone,
+  type SupportSystemSettingId,
 } from '@freellmapi/shared/support-setup-copilot.js';
 import { getDb, getUnifiedApiKey } from '../../db/index.js';
 import { decrypt } from '../../lib/crypto.js';
+import type { SessionUser } from '../../services/auth.js';
 import { getRecordedServerAddress } from '../ai-platform/orchestrator/engine.js';
 import { PLAYGROUND_SESSION_HEADER } from '../playground-attribution.js';
 import { resolveAccountProvider } from '../provider-accounts/execution.js';
@@ -25,6 +27,11 @@ import {
   type CandidateRoute,
 } from '../x-gateway/router.js';
 import { buildPlatformPromptSection } from './platform-guide.js';
+import {
+  buildSystemSettingsPromptSection,
+  hasAnySystemSettingPermission,
+  isSupportSystemSettingId,
+} from './system-settings.js';
 
 export interface GatewayLoopbackContext {
   host: string;
@@ -37,15 +44,23 @@ export interface GatewayLoopbackContext {
   forceLoopback?: boolean;
 }
 
+export interface LlmCoachSystemActionSuggestion {
+  settingId: SupportSystemSettingId;
+  payload?: Record<string, unknown>;
+}
+
 export interface LlmCoachOutput {
   intent?: SupportSetupChatIntent;
   reply: string;
   missingQuestions?: string[];
   suggestedQuickReplies?: string[];
   extractedRequirements?: Partial<SupportSetupRequirements>;
+  targetSteps?: SupportSetupStepId[];
+  systemActions?: LlmCoachSystemActionSuggestion[];
 }
 
 export interface LlmCoachTurnInput {
+  user?: SessionUser;
   messages: SupportSetupChatMessage[];
   locale: 'vi' | 'en';
   targetMode: 'create_tenant' | 'update_tenant';
@@ -273,6 +288,46 @@ export function enforceReplySecurityInvariant(
   return cleaned;
 }
 
+const VALID_STEP_ID_SET = new Set<string>(SUPPORT_SETUP_STEP_IDS);
+
+function sanitizeTargetSteps(raw: unknown): SupportSetupStepId[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: SupportSetupStepId[] = [];
+  const seen = new Set<SupportSetupStepId>();
+  for (const item of raw) {
+    if (typeof item !== 'string') continue;
+    const trimmed = item.trim();
+    if (!VALID_STEP_ID_SET.has(trimmed)) continue;
+    const stepId = trimmed as SupportSetupStepId;
+    if (seen.has(stepId)) continue;
+    seen.add(stepId);
+    out.push(stepId);
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+function sanitizeSystemActions(raw: unknown): LlmCoachSystemActionSuggestion[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: LlmCoachSystemActionSuggestion[] = [];
+  const seen = new Set<SupportSystemSettingId>();
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const rec = item as Record<string, unknown>;
+    if (!isSupportSystemSettingId(rec.settingId)) continue;
+    if (seen.has(rec.settingId)) continue;
+    seen.add(rec.settingId);
+    const payload =
+      rec.payload && typeof rec.payload === 'object' && !Array.isArray(rec.payload)
+        ? (rec.payload as Record<string, unknown>)
+        : undefined;
+    out.push({
+      settingId: rec.settingId,
+      ...(payload ? { payload } : {}),
+    });
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 function tryParseJsonCandidate(candidate: string): LlmCoachOutput | null {
   const attempts = [candidate, candidate.replace(/,\s*([}\]])/g, '$1')];
   for (const jsonStr of attempts) {
@@ -302,6 +357,8 @@ function tryParseJsonCandidate(candidate: string): LlmCoachOutput | null {
       const missingQuestions = cleanStringArray(parsed.missingQuestions, 4, 240, true);
       const suggestedQuickReplies = cleanStringArray(parsed.suggestedQuickReplies, 4, 120, true);
       const extractedRequirements = sanitizeExtractedRequirements(parsed.extractedRequirements);
+      const targetSteps = sanitizeTargetSteps(parsed.targetSteps);
+      const systemActions = sanitizeSystemActions(parsed.systemActions);
 
       return {
         ...(intent ? { intent } : {}),
@@ -309,6 +366,8 @@ function tryParseJsonCandidate(candidate: string): LlmCoachOutput | null {
         ...(missingQuestions ? { missingQuestions } : {}),
         ...(suggestedQuickReplies ? { suggestedQuickReplies } : {}),
         ...(extractedRequirements ? { extractedRequirements } : {}),
+        ...(targetSteps ? { targetSteps } : {}),
+        ...(systemActions ? { systemActions } : {}),
       };
     } catch {
       // Try next candidate
@@ -446,6 +505,7 @@ export function matchesRequestedLocale(replyText: string, locale: 'vi' | 'en'): 
 }
 
 export function buildHumanCoachSystemPrompt(params: {
+  user?: SessionUser;
   messages: readonly SupportSetupChatMessage[];
   locale: 'vi' | 'en';
   targetMode: 'create_tenant' | 'update_tenant';
@@ -456,6 +516,7 @@ export function buildHumanCoachSystemPrompt(params: {
   canEditSteps?: ReadonlySet<SupportSetupStepId>;
 }): string {
   const {
+    user,
     messages,
     locale,
     targetMode,
@@ -528,7 +589,9 @@ export function buildHumanCoachSystemPrompt(params: {
     `- Requirements already captured from conversation: ${JSON.stringify(extracted)}`,
     '- **CONSENT INVARIANT**: You NEVER apply or save configuration directly during chat. NEVER claim that changes have already been saved, applied, or deployed. When `intent` is `"propose_setup"`, introduce your draft warmly like a teammate handing over a ready-to-review plan, and let them know nothing is changed until they review the Consent Card below and click Approve.',
     editableList.length === 0 && !canCreateTenant
-      ? '- **READ-ONLY SCOPE**: This user has read-only access (0 editable steps). Always use `intent: "guide"` and never promise to auto-deploy changes.'
+      ? hasAnySystemSettingPermission(user)
+        ? '- **DELEGATED SYSTEM SETTINGS SCOPE**: This user has 0 editable Tenant Support steps (cannot create/edit Support Tenants), so use `intent: "guide"` for Tenant Support topics, EXCEPT they CAN propose permitted Platform/Thruline system settings listed below.'
+        : '- **READ-ONLY SCOPE**: This user has read-only access (0 editable steps). Always use `intent: "guide"` and never promise to auto-deploy changes.'
       : '',
   ]
     .filter(Boolean)
@@ -549,11 +612,14 @@ export function buildHumanCoachSystemPrompt(params: {
     '    // "language": "vi" | "en" | "bilingual", "tone": "friendly" | "professional" | "empathetic" | "technical",',
     '    // "primaryColor": "#RRGGBB", "faqSummaryOrPolicies": string,',
     '    // "blockedTopics": string[], "competitorKeywords": string[], "requireContactIntake": boolean',
-    '  }',
+    '  },',
+    '  "targetSteps": ["Optional SupportSetupStepId[] ONLY when surgically editing specific step(s) on an existing tenant; omit for full setup"],',
+    '  "systemActions": [{"settingId": "response_cache", "payload": {"enabled": true}}] // Optional ONLY when proposing permitted Platform/Thruline system settings',
     '}',
   ].join('\n');
 
   const platformSection = buildPlatformPromptSection(currentPath, locale);
+  const systemSettingsSection = buildSystemSettingsPromptSection(user, locale);
 
   return [
     personaBlock,
@@ -561,6 +627,8 @@ export function buildHumanCoachSystemPrompt(params: {
     antiRepetitionBlock,
     '',
     securityAndContextBlock,
+    '',
+    systemSettingsSection,
     '',
     platformSection,
     '',

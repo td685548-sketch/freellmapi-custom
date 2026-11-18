@@ -1,4 +1,10 @@
 import { parseStoredPermissions } from '@freellmapi/shared/permissions.js';
+import {
+  SYSTEM_SETTING_IDS,
+  type SupportSystemSettingAction,
+  type SupportSystemSettingApplyResult,
+  type SupportSystemSettingId,
+} from '@freellmapi/shared/support-setup-copilot.js';
 import type { Permission } from '@freellmapi/shared/user-access.js';
 import { getDb, getSetting, setSetting } from '../../db/index.js';
 import { hasPermission } from '../../middleware/requirePermission.js';
@@ -24,19 +30,12 @@ import '../x-gateway/router.js';
 import { appendSupportAuditLog } from '../x-gateway/support-enterprise-router.js';
 import { SupportSetupCopilotError } from './store.js';
 
-export const SYSTEM_SETTING_IDS = [
-  'thruline_gateway_enabled',
-  'thruline_token_savers',
-  'thruline_route_health_ttl',
-  'response_cache',
-  'prompt_compression',
-  'model_unification',
-  'mcp_server',
-  'auto_update_check',
-  'ollama_emulation',
-] as const;
-
-export type SupportSystemSettingId = (typeof SYSTEM_SETTING_IDS)[number];
+export {
+  SYSTEM_SETTING_IDS,
+  type SupportSystemSettingAction,
+  type SupportSystemSettingApplyResult,
+  type SupportSystemSettingId,
+};
 
 export const SYSTEM_SETTING_PERMISSIONS = [
   'edit_x_settings',
@@ -58,29 +57,6 @@ export const REQUIRED_PERMISSION_BY_SETTING: Readonly<
   auto_update_check: 'edit_settings',
   ollama_emulation: 'edit_settings',
 };
-
-export interface SupportSystemSettingAction {
-  settingId: SupportSystemSettingId;
-  requiredPermission: Permission;
-  canApply: boolean;
-  enabledByDefault: boolean;
-  titleVi: string;
-  titleEn: string;
-  summaryVi: string;
-  summaryEn: string;
-  currentValueVi: string;
-  currentValueEn: string;
-  proposedValueVi: string;
-  proposedValueEn: string;
-  payload: Record<string, unknown>;
-}
-
-export interface SupportSystemSettingApplyResult {
-  settingId: SupportSystemSettingId;
-  status: 'applied' | 'skipped';
-  detailVi: string;
-  detailEn: string;
-}
 
 export interface SystemSettingChangeRequest {
   settingId: SupportSystemSettingId;
@@ -930,6 +906,9 @@ function normalizeActionPayload(
           : 'key-required';
       return { mode };
     }
+
+    default:
+      return rawPayload;
   }
 }
 
@@ -1541,6 +1520,13 @@ function executeSingleSystemSettingWrite(
         detailEn: `Set Ollama emulation mode to \`${rawMode}\`.`,
       };
     }
+
+    default:
+      throw new SupportSetupCopilotError(
+        400,
+        'invalid_input',
+        `Unsupported system setting '${String(settingId)}'.`,
+      );
   }
 }
 

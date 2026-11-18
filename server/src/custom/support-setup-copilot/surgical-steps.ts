@@ -392,7 +392,7 @@ const PURE_QUESTION_PREFIX_FOLDED_RE =
   /^(?:cho\s+(?:minh|toi|em)\s+hoi\s+)?(?:cach|lam\s+sao|lam\s+the\s+nao|huong\s+dan(?:\s+cach)?|chi\s+(?:minh|toi|em)\s+cach|how\s+(?:do\s+i|can\s+i|to|should\s+i)|where\s+(?:do\s+i|can\s+i|is|are|to)|what\s+(?:is|are|does)|explain|tell\s+me\s+about)\b/i;
 
 const PURE_QUESTION_CLAUSE_FOLDED_RE =
-  /\b(?:o\s+dau|cho\s+nao|muc\s+nao|tab\s+nao|trang\s+nao|la\s+(?:cai\s+)?gi|de\s+lam\s+gi|hoat\s+dong\s+(?:sao|ra\s+sao|the\s+nao|nhu\s+the\s+nao)|khac\s+nhau|khac\s+gi|where\s+(?:do\s+i|can\s+i|to)\s+(?:change|update|set|add|configure|enable|disable|edit)|hien\s+tai\s+la\s+gi|dang\s+la\s+(?:gi|bao\s+nhieu))\b/i;
+  /\b(?:o\s+dau|cho\s+nao|muc\s+nao|tab\s+nao|trang\s+nao|la\s+(?:cai\s+)?gi|de\s+lam\s+gi|hoat\s+dong\s+(?:sao|ra\s+sao|the\s+nao|nhu\s+the\s+nao)|khac\s+nhau|khac\s+gi|where\s+(?:do\s+i|can\s+i|to)\s+(?:change|update|set|add|configure|enable|disable|edit)|hien\s+tai\s+la\s+gi|dang\s+la\s+(?:gi|bao\s+nhieu)|lam\s+sao(?:\s+de)?|lam\s+the\s+nao(?:\s+de)?|nhu\s+the\s+nao|the\s+nao|how\s+(?:do\s+i|can\s+i|to|should\s+i))\b/i;
 
 function isPureGuideOrHowToQuestion(raw: string, folded: string): boolean {
   if (PURE_QUESTION_PREFIX_FOLDED_RE.test(folded)) {
@@ -694,9 +694,9 @@ export function analyzeSurgicalSupportEdit(
       }
     }
 
-    // Tone change (requires explicit tone/voice cue so general polite chat never triggers)
+    // Tone change (requires explicit tone action cue so general descriptive chat never triggers)
     if (
-      /\b(?:giong(?:\s+dieu|\s+ai|\s+van)?|phong\s+cach(?:\s+tra\s+loi)?|tone|persona\s+voice)\b/i.test(
+      /(?:(?:doi|thay|chuyen|dat|chinh|sua|cap\s+nhat|change|switch|set|update|make)\s+(?:the\s+)?(?:giong(?:\s+dieu|\s+ai|\s+van)?|phong\s+cach(?:\s+tra\s+loi)?|tone|persona\s+voice)|(?:giong(?:\s+dieu|\s+ai|\s+van)?|phong\s+cach(?:\s+tra\s+loi)?|tone|persona\s+voice)\s*(?:sang|thanh|la|to|as|:))/i.test(
         folded,
       )
     ) {
