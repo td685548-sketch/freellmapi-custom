@@ -421,11 +421,18 @@ export function updateUserKeyAiConfig(
   userId: number,
   callerRole: 'admin' | 'member',
   keyId: number,
-  patch: { routingMode?: KeyRoutingMode; assistantId?: number | null },
+  patch: {
+    routingMode?: KeyRoutingMode;
+    assistantId?: number | string | null;
+    userAssistantId?: number | null;
+    assistantRef?: string | null;
+  },
 ): {
   id: number;
   routingMode: KeyRoutingMode;
   assistantId: number | null;
+  userAssistantId: number | null;
+  assistantRef: string | null;
   assistantSlug: string | null;
   assistantName: string | null;
 } {
@@ -443,30 +450,123 @@ export function updateUserKeyAiConfig(
   const nextMode = patch.routingMode !== undefined
     ? normalizeRoutingMode(patch.routingMode, 'default')
     : normalizeRoutingMode(key.routing_mode, 'default');
-  const nextAssistantId = patch.assistantId !== undefined
-    ? assertBindableAssistant(patch.assistantId, callerRole)
-    : key.assistant_id;
 
-  db.prepare(`
-    UPDATE user_api_keys
-    SET routing_mode = ?, assistant_id = ?
-    WHERE id = ? AND user_id = ?
-  `).run(nextMode, nextAssistantId, keyId, userId);
+  const hasCustomBindingTable = Boolean(
+    db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'custom_user_key_assistant_bindings'").get(),
+  );
+
+  const existingCustomRow = hasCustomBindingTable
+    ? (db.prepare(`
+        SELECT ua.id, ua.slug, ua.name
+        FROM custom_user_key_assistant_bindings b
+        JOIN custom_user_assistants ua ON ua.id = b.user_assistant_id AND ua.user_id = b.user_id
+        WHERE b.key_id = ? AND b.user_id = ?
+      `).get(keyId, userId) as { id: number; slug: string; name: string } | undefined)
+    : undefined;
+
+  const hasAssistantMutation =
+    patch.assistantId !== undefined ||
+    patch.userAssistantId !== undefined ||
+    patch.assistantRef !== undefined;
+
+  let nextCatalogId: number | null = key.assistant_id;
+  let nextUserAssistantId: number | null = existingCustomRow?.id ?? null;
+
+  if (hasAssistantMutation) {
+    const rawTarget: number | string | null =
+      patch.userAssistantId !== undefined
+        ? (patch.userAssistantId === null ? null : `user:${patch.userAssistantId}`)
+        : patch.assistantRef !== undefined
+          ? patch.assistantRef
+          : (patch.assistantId ?? null);
+
+    if (rawTarget === null || (typeof rawTarget === 'string' && rawTarget.trim() === '')) {
+      nextCatalogId = null;
+      nextUserAssistantId = null;
+    } else if (typeof rawTarget === 'number') {
+      nextCatalogId = assertBindableAssistant(rawTarget, callerRole);
+      nextUserAssistantId = null;
+    } else {
+      const trimmed = rawTarget.trim();
+      if (/^user:/i.test(trimmed)) {
+        const token = trimmed.slice(5).trim();
+        const parsedId = /^\d+$/.test(token) ? Number.parseInt(token, 10) : null;
+        const customRow = parsedId !== null && parsedId > 0
+          ? (db.prepare('SELECT id FROM custom_user_assistants WHERE id = ? AND user_id = ?').get(parsedId, userId) as { id: number } | undefined)
+          : (db.prepare('SELECT id FROM custom_user_assistants WHERE slug = ? AND user_id = ?').get(token.toLowerCase(), userId) as { id: number } | undefined);
+        if (!customRow) {
+          throw new CustomerAiError(404, 'assistant_not_found', 'Custom assistant not found.');
+        }
+        nextCatalogId = null;
+        nextUserAssistantId = customRow.id;
+      } else {
+        const ownCustom = hasCustomBindingTable
+          ? (db.prepare('SELECT id FROM custom_user_assistants WHERE slug = ? AND user_id = ?').get(trimmed.toLowerCase(), userId) as { id: number } | undefined)
+          : undefined;
+        if (ownCustom) {
+          nextCatalogId = null;
+          nextUserAssistantId = ownCustom.id;
+        } else {
+          const catalog = getAssistantForRuntime(trimmed, callerRole);
+          if (!catalog) {
+            throw new CustomerAiError(400, 'invalid_assistant', 'Selected AI assistant is unavailable or restricted.');
+          }
+          nextCatalogId = catalog.id;
+          nextUserAssistantId = null;
+        }
+      }
+    }
+  }
+
+  db.transaction(() => {
+    db.prepare(`
+      UPDATE user_api_keys
+      SET routing_mode = ?, assistant_id = ?
+      WHERE id = ? AND user_id = ?
+    `).run(nextMode, nextCatalogId, keyId, userId);
+
+    if (hasCustomBindingTable && hasAssistantMutation) {
+      if (nextUserAssistantId === null) {
+        db.prepare('DELETE FROM custom_user_key_assistant_bindings WHERE key_id = ? AND user_id = ?').run(keyId, userId);
+      } else {
+        db.prepare(`
+          INSERT INTO custom_user_key_assistant_bindings (key_id, user_id, user_assistant_id, updated_at)
+          VALUES (?, ?, ?, datetime('now'))
+          ON CONFLICT(key_id) DO UPDATE SET
+            user_id = excluded.user_id,
+            user_assistant_id = excluded.user_assistant_id,
+            updated_at = datetime('now')
+        `).run(keyId, userId, nextUserAssistantId);
+      }
+    }
+  })();
 
   let assistantSlug: string | null = null;
   let assistantName: string | null = null;
-  if (nextAssistantId !== null) {
-    const a = db.prepare('SELECT slug, name FROM custom_ai_assistants WHERE id = ?').get(nextAssistantId) as
+  let assistantRef: string | null = null;
+
+  if (nextUserAssistantId !== null && hasCustomBindingTable) {
+    const ua = db
+      .prepare('SELECT id, slug, name FROM custom_user_assistants WHERE id = ? AND user_id = ?')
+      .get(nextUserAssistantId, userId) as { id: number; slug: string; name: string } | undefined;
+    assistantSlug = ua?.slug ?? null;
+    assistantName = ua?.name ?? null;
+    assistantRef = ua ? `user:${ua.id}` : null;
+  } else if (nextCatalogId !== null) {
+    const a = db.prepare('SELECT slug, name FROM custom_ai_assistants WHERE id = ?').get(nextCatalogId) as
       | { slug: string; name: string }
       | undefined;
     assistantSlug = a?.slug ?? null;
     assistantName = a?.name ?? null;
+    assistantRef = assistantSlug;
   }
 
   return {
     id: keyId,
     routingMode: nextMode,
-    assistantId: nextAssistantId,
+    assistantId: nextCatalogId,
+    userAssistantId: nextUserAssistantId,
+    assistantRef,
     assistantSlug,
     assistantName,
   };
