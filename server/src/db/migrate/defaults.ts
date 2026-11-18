@@ -105,6 +105,7 @@ import * as customMcpChatContinuation from '../migrations/20261118_090000_custom
 import * as customSupportSetupCopilot from '../migrations/20261118_093000_custom_support_setup_copilot.js';
 import * as customPromptEvalAndAb from '../migrations/20261118_100000_custom_prompt_eval_and_ab.js';
 import * as customSemanticCache from '../migrations/20261118_110000_custom_semantic_cache.js';
+import * as customLearnedCapsModelsDev from '../migrations/20261118_120000_custom_learned_caps_models_dev.js';
 
 export interface MigrationModule {
   up(db: Db): void;
@@ -302,4 +303,5 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: '20261118_093000_custom_support_setup_copilot.ts', module: customSupportSetupCopilot },
   { filename: '20261118_100000_custom_prompt_eval_and_ab.ts', module: customPromptEvalAndAb },
   { filename: '20261118_110000_custom_semantic_cache.ts', module: customSemanticCache },
+  { filename: '20261118_120000_custom_learned_caps_models_dev.ts', module: customLearnedCapsModelsDev },
 ];

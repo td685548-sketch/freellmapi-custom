@@ -20,6 +20,13 @@
 // endpoint_scope identity migration (#651): output ceilings are a property of
 // the model behind ONE relay, and sibling relays do not share it.
 import { modelStatsKey } from './endpoint-scope.js';
+import {
+  getLearnedMaxTokensCap,
+  parseLearnedMaxTokensCeiling,
+  recordLearnedMaxTokensCap,
+  resetLearnedModelCapsForTests,
+  unescapeJsonOperators,
+} from '../custom/x-gateway/learned-caps.js';
 
 const learned = new Map<string, number>();
 
@@ -49,12 +56,14 @@ function capKey(platform: string, modelId: string, endpointScope?: string | null
  *  a ceiling phrase must appear, so a context-window rejection that merely
  *  mentions "maximum output tokens" (Cloudflare) never matches. */
 export function parseMaxTokensCeiling(message: unknown): number | null {
-  const msg = String(message ?? '').toLowerCase();
+  const msg = unescapeJsonOperators(String(message ?? '')).toLowerCase();
   if (!MAX_TOKENS_PARAM.test(msg)) return null;
   const match = CEILING.exec(msg);
-  if (!match) return null;
-  const ceiling = Number(match[1]);
-  return Number.isFinite(ceiling) && ceiling > 0 ? ceiling : null;
+  if (match) {
+    const ceiling = Number(match[1]);
+    return Number.isFinite(ceiling) && ceiling > 0 ? ceiling : null;
+  }
+  return parseLearnedMaxTokensCeiling(message, 1);
 }
 
 /** Learn the ceiling from a max_tokens rejection. Returns it, or null when the
@@ -66,13 +75,17 @@ export function learnOutputCapFromError(route: { platform: string; modelId: stri
   const ceiling = parseMaxTokensCeiling(err?.message);
   if (ceiling == null || ceiling < MIN_LEARNED_OUTPUT_CAP) return null;
   const key = capKey(route.platform, route.modelId, route.endpointScope);
-  const current = learned.get(key);
-  learned.set(key, current == null ? ceiling : Math.min(current, ceiling));
+  const current = learned.get(key) ?? getLearnedMaxTokensCap(route.platform, route.modelId, route.endpointScope) ?? undefined;
+  const effective = current == null ? ceiling : Math.min(current, ceiling);
+  learned.set(key, effective);
+  recordLearnedMaxTokensCap(route.platform, route.modelId, effective, route.endpointScope, err?.message);
   return ceiling;
 }
 
 export function learnedOutputCap(platform: string, modelId: string, endpointScope?: string | null): number | undefined {
-  return learned.get(capKey(platform, modelId, endpointScope));
+  return learned.get(capKey(platform, modelId, endpointScope))
+    ?? getLearnedMaxTokensCap(platform, modelId, endpointScope)
+    ?? undefined;
 }
 
 /** The output budget for one route: what is left of its context window after
@@ -90,4 +103,5 @@ export function routeOutputBudget(
 
 export function resetLearnedOutputCaps(): void {
   learned.clear();
+  resetLearnedModelCapsForTests();
 }
