@@ -34,6 +34,93 @@ export interface PromptHead {
   publishedVersion: number | null;
   draftVersion: number | null;
   revision: number;
+  abDraftWeightPct: number;
+}
+
+export interface PromptAbUpdateRequest {
+  abDraftWeightPct: number;
+  revision: number;
+}
+
+export interface PromptEvalCase {
+  id: number;
+  scopeKind: ScopeKind;
+  scopeId: string;
+  name: string;
+  userMessage: string;
+  variables: Record<string, string>;
+  mustContain: string[];
+  mustNotContain: string[];
+  expectedRegex: string | null;
+  judgeRubric: string | null;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PromptEvalCaseInput {
+  name: string;
+  userMessage: string;
+  variables?: Record<string, string>;
+  mustContain?: string[];
+  mustNotContain?: string[];
+  expectedRegex?: string | null;
+  judgeRubric?: string | null;
+  enabled?: boolean;
+}
+
+export interface PromptEvaluateRequest {
+  model?: string;
+  useJudge?: boolean;
+  caseIds?: number[];
+  candidateBody?: string;
+  candidateVariables?: PromptVariable[];
+}
+
+export interface PromptEvalVariantOutcome {
+  version: number | null;
+  reply: string;
+  latencyMs: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  passed: boolean;
+  failures: string[];
+  judgeScore: number | null;
+  judgeReason: string | null;
+}
+
+export interface PromptEvalCaseComparison {
+  caseId: number;
+  name: string;
+  userMessage: string;
+  baseline: PromptEvalVariantOutcome | null;
+  candidate: PromptEvalVariantOutcome | null;
+}
+
+export interface PromptEvalVariantMetrics {
+  version: number | null;
+  totalCases: number;
+  passedCases: number;
+  passRatePct: number;
+  avgLatencyMs: number;
+  avgTokens: number;
+  avgJudgeScore: number | null;
+}
+
+export interface PromptEvalRun {
+  id: number;
+  scopeKind: ScopeKind;
+  scopeId: string;
+  baselineVersion: number | null;
+  candidateVersion: number | null;
+  model: string;
+  useJudge: boolean;
+  baselineMetrics: PromptEvalVariantMetrics | null;
+  candidateMetrics: PromptEvalVariantMetrics | null;
+  results: PromptEvalCaseComparison[];
+  createdBy: number | null;
+  createdAt: string;
 }
 
 export interface PromptScopeStateResponse {
@@ -176,6 +263,10 @@ export const PROMPT_LIMITS = {
   maxCallerVarsHeaderBytes: 2_048,
   maxCallerVarValueChars: 200,
   maxTryMessageChars: 8_000,
+  maxEvalCasesPerScope: 50,
+  maxEvalCasesPerRun: 20,
+  maxEvalRegexChars: 200,
+  maxEvalRubricChars: 1_000,
 } as const;
 
 export const PROMPT_VAR_NAME_REGEX = /^[a-z][a-z0-9_]{0,31}$/;

@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import {
   PROMPT_LIMITS,
   PROMPT_VAR_NAME_REGEX,
@@ -87,6 +88,7 @@ interface PromptHeadRow {
   published_version: number | null;
   draft_version: number | null;
   revision: number;
+  ab_draft_weight_pct?: number;
 }
 
 const MAX_LCS_CELLS = 2_000_000;
@@ -95,6 +97,18 @@ function hasTable(db: Db, table: string): boolean {
   return Boolean(
     db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table),
   );
+}
+
+function hasColumn(db: Db, table: string, column: string): boolean {
+  if (!hasTable(db, table)) return false;
+  return (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).some(
+    (c) => c.name === column,
+  );
+}
+
+function normalizeAbWeight(raw: unknown): number {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return 0;
+  return Math.max(0, Math.min(100, Math.trunc(raw)));
 }
 
 function tryNormalizeScope(scope: Scope): Scope {
@@ -200,10 +214,12 @@ function ensureScopeInitialized(db: Db, norm: Scope): void {
 }
 
 function readHeadRow(db: Db, norm: Scope): PromptHeadRow | undefined {
+  const hasAb = hasColumn(db, 'custom_ai_prompt_heads', 'ab_draft_weight_pct');
+  const cols = hasAb
+    ? 'scope_kind, scope_id, published_version, draft_version, revision, ab_draft_weight_pct'
+    : 'scope_kind, scope_id, published_version, draft_version, revision';
   return db
-    .prepare(
-      'SELECT scope_kind, scope_id, published_version, draft_version, revision FROM custom_ai_prompt_heads WHERE scope_kind = ? AND scope_id = ?',
-    )
+    .prepare(`SELECT ${cols} FROM custom_ai_prompt_heads WHERE scope_kind = ? AND scope_id = ?`)
     .get(norm.kind, norm.id) as PromptHeadRow | undefined;
 }
 
@@ -224,12 +240,14 @@ function buildScopeState(db: Db, norm: Scope): PromptScopeStateResponse {
       ? rows.find((r) => r.version === headRow.draft_version)
       : rows.find((r) => r.status === 'draft');
 
+  const draftVersion = headRow?.draft_version ?? draftRow?.version ?? null;
   const head: PromptHead = {
     scopeKind: norm.kind,
     scopeId: norm.id,
     publishedVersion: headRow?.published_version ?? publishedRow?.version ?? null,
-    draftVersion: headRow?.draft_version ?? draftRow?.version ?? null,
+    draftVersion,
     revision: headRow?.revision ?? 1,
+    abDraftWeightPct: draftVersion !== null ? normalizeAbWeight(headRow?.ab_draft_weight_pct) : 0,
   };
 
   // Version numbers are strictly monotonic per scope and pruning only deletes
@@ -662,26 +680,41 @@ export function discardDraft(scope: Scope, revision?: number): PromptHead {
       )
       .run(norm.kind, norm.id);
 
+    const hasAb = hasColumn(db, 'custom_ai_prompt_heads', 'ab_draft_weight_pct');
     const hasDraft = (headRow?.draft_version ?? null) !== null || updated.changes > 0;
-    if (!hasDraft) {
+    const hasActiveAb = normalizeAbWeight(headRow?.ab_draft_weight_pct) > 0;
+    if (!hasDraft && !hasActiveAb) {
       return {
         scopeKind: norm.kind,
         scopeId: norm.id,
         publishedVersion: headRow?.published_version ?? null,
         draftVersion: null,
         revision: currentRevision,
+        abDraftWeightPct: 0,
       };
     }
 
     const nextRevision = currentRevision + 1;
-    db.prepare(
-      `INSERT INTO custom_ai_prompt_heads
-         (scope_kind, scope_id, published_version, draft_version, revision)
-       VALUES (?, ?, ?, NULL, ?)
-       ON CONFLICT(scope_kind, scope_id) DO UPDATE SET
-         draft_version = NULL,
-         revision = excluded.revision`,
-    ).run(norm.kind, norm.id, headRow?.published_version ?? null, nextRevision);
+    if (hasAb) {
+      db.prepare(
+        `INSERT INTO custom_ai_prompt_heads
+           (scope_kind, scope_id, published_version, draft_version, revision, ab_draft_weight_pct)
+         VALUES (?, ?, ?, NULL, ?, 0)
+         ON CONFLICT(scope_kind, scope_id) DO UPDATE SET
+           draft_version = NULL,
+           revision = excluded.revision,
+           ab_draft_weight_pct = 0`,
+      ).run(norm.kind, norm.id, headRow?.published_version ?? null, nextRevision);
+    } else {
+      db.prepare(
+        `INSERT INTO custom_ai_prompt_heads
+           (scope_kind, scope_id, published_version, draft_version, revision)
+         VALUES (?, ?, ?, NULL, ?)
+         ON CONFLICT(scope_kind, scope_id) DO UPDATE SET
+           draft_version = NULL,
+           revision = excluded.revision`,
+      ).run(norm.kind, norm.id, headRow?.published_version ?? null, nextRevision);
+    }
 
     return {
       scopeKind: norm.kind,
@@ -689,6 +722,7 @@ export function discardDraft(scope: Scope, revision?: number): PromptHead {
       publishedVersion: headRow?.published_version ?? null,
       draftVersion: null,
       revision: nextRevision,
+      abDraftWeightPct: 0,
     };
   })();
 }
@@ -730,15 +764,29 @@ export function publish(scope: Scope, revision: number, _actorId: number | null)
     );
 
     const nextRevision = currentRevision + 1;
-    db.prepare(
-      `INSERT INTO custom_ai_prompt_heads
-         (scope_kind, scope_id, published_version, draft_version, revision)
-       VALUES (?, ?, ?, NULL, ?)
-       ON CONFLICT(scope_kind, scope_id) DO UPDATE SET
-         published_version = excluded.published_version,
-         draft_version = NULL,
-         revision = excluded.revision`,
-    ).run(norm.kind, norm.id, draftRow.version, nextRevision);
+    const hasAb = hasColumn(db, 'custom_ai_prompt_heads', 'ab_draft_weight_pct');
+    if (hasAb) {
+      db.prepare(
+        `INSERT INTO custom_ai_prompt_heads
+           (scope_kind, scope_id, published_version, draft_version, revision, ab_draft_weight_pct)
+         VALUES (?, ?, ?, NULL, ?, 0)
+         ON CONFLICT(scope_kind, scope_id) DO UPDATE SET
+           published_version = excluded.published_version,
+           draft_version = NULL,
+           revision = excluded.revision,
+           ab_draft_weight_pct = 0`,
+      ).run(norm.kind, norm.id, draftRow.version, nextRevision);
+    } else {
+      db.prepare(
+        `INSERT INTO custom_ai_prompt_heads
+           (scope_kind, scope_id, published_version, draft_version, revision)
+         VALUES (?, ?, ?, NULL, ?)
+         ON CONFLICT(scope_kind, scope_id) DO UPDATE SET
+           published_version = excluded.published_version,
+           draft_version = NULL,
+           revision = excluded.revision`,
+      ).run(norm.kind, norm.id, draftRow.version, nextRevision);
+    }
 
     syncUnderlyingSystemPrompt(db, norm, draftRow.body);
     pruneOldVersions(db, norm);
@@ -749,6 +797,7 @@ export function publish(scope: Scope, revision: number, _actorId: number | null)
       publishedVersion: draftRow.version,
       draftVersion: null,
       revision: nextRevision,
+      abDraftWeightPct: 0,
     };
   })();
 }
@@ -833,6 +882,8 @@ export function restore(
       publishedVersion: nextVersion,
       draftVersion,
       revision: nextRevision,
+      abDraftWeightPct:
+        draftVersion !== null ? normalizeAbWeight(headRow?.ab_draft_weight_pct) : 0,
     };
   })();
 }
@@ -876,5 +927,186 @@ export function diffPromptVersions(
     to: toSummary(toRow),
     hunks,
     stats,
+  };
+}
+
+export interface ActivePromptVariant {
+  variant: 'published' | 'draft';
+  version: number;
+  body: string;
+  variables: PromptVariable[];
+  abDraftWeightPct: number;
+}
+
+export function getDraftPrompt(
+  scope: Scope,
+): { version: number; body: string; variables: PromptVariable[] } | null {
+  const norm = tryNormalizeScope(scope);
+  const db = getDb();
+  if (!hasTable(db, 'custom_ai_prompt_versions')) return null;
+  ensureScopeInitialized(db, norm);
+
+  const row = db
+    .prepare(
+      `SELECT version, body, variables_json
+         FROM custom_ai_prompt_versions
+        WHERE scope_kind = ? AND scope_id = ? AND status = 'draft'
+        ORDER BY version DESC
+        LIMIT 1`,
+    )
+    .get(norm.kind, norm.id) as { version: number; body: string; variables_json: string } | undefined;
+
+  if (!row) return null;
+  return {
+    version: row.version,
+    body: row.body,
+    variables: parseVariablesJson(row.variables_json),
+  };
+}
+
+export function setPromptAbSplit(
+  scope: Scope,
+  abDraftWeightPct: number,
+  revision: number,
+): PromptHead {
+  const norm = tryNormalizeScope(scope);
+  if (typeof revision !== 'number' || !Number.isInteger(revision)) {
+    throw new PromptStoreError('Revision must be an integer.', 'invalid_revision', 400);
+  }
+  if (
+    typeof abDraftWeightPct !== 'number' ||
+    !Number.isInteger(abDraftWeightPct) ||
+    abDraftWeightPct < 0 ||
+    abDraftWeightPct > 100
+  ) {
+    throw new PromptStoreError(
+      'Draft traffic percentage must be an integer between 0 and 100.',
+      'invalid_ab_weight',
+      400,
+    );
+  }
+
+  const db = getDb();
+  if (!hasColumn(db, 'custom_ai_prompt_heads', 'ab_draft_weight_pct')) {
+    throw new PromptStoreError(
+      'Prompt A/B rollout requires database migration 20261118_100000.',
+      'migration_required',
+      500,
+    );
+  }
+
+  return db.transaction(() => {
+    ensureScopeInitialized(db, norm);
+    const headRow = readHeadRow(db, norm);
+    const currentRevision = headRow?.revision ?? 1;
+    assertRevisionMatches(db, norm, revision, currentRevision);
+
+    const draftRow = db
+      .prepare(
+        `SELECT version FROM custom_ai_prompt_versions
+          WHERE scope_kind = ? AND scope_id = ? AND status = 'draft'
+          ORDER BY version DESC
+          LIMIT 1`,
+      )
+      .get(norm.kind, norm.id) as { version: number } | undefined;
+
+    if (abDraftWeightPct > 0 && !draftRow) {
+      throw new PromptStoreError(
+        'Save a draft version before routing A/B traffic to it.',
+        'no_draft',
+        409,
+      );
+    }
+
+    const nextRevision = currentRevision + 1;
+    const draftVersion = draftRow?.version ?? headRow?.draft_version ?? null;
+    const publishedVersion = headRow?.published_version ?? null;
+
+    db.prepare(
+      `INSERT INTO custom_ai_prompt_heads
+         (scope_kind, scope_id, published_version, draft_version, revision, ab_draft_weight_pct)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(scope_kind, scope_id) DO UPDATE SET
+         ab_draft_weight_pct = excluded.ab_draft_weight_pct,
+         revision = excluded.revision`,
+    ).run(norm.kind, norm.id, publishedVersion, draftVersion, nextRevision, abDraftWeightPct);
+
+    return {
+      scopeKind: norm.kind,
+      scopeId: norm.id,
+      publishedVersion,
+      draftVersion,
+      revision: nextRevision,
+      abDraftWeightPct,
+    };
+  })();
+}
+
+function pickAbBucket(norm: Scope, stickySeed?: string | null): number {
+  const trimmed = stickySeed?.trim();
+  if (trimmed) {
+    const digest = crypto
+      .createHash('sha256')
+      .update(`${norm.kind}:${norm.id}:${trimmed}`)
+      .digest();
+    return digest.readUInt32BE(0) % 100;
+  }
+  return crypto.randomInt(0, 100);
+}
+
+export function resolveActivePromptVariant(
+  scope: Scope,
+  stickySeed?: string | null,
+): ActivePromptVariant | null {
+  const norm = tryNormalizeScope(scope);
+  const db = getDb();
+  if (!hasTable(db, 'custom_ai_prompt_versions')) return null;
+  ensureScopeInitialized(db, norm);
+
+  const headRow = readHeadRow(db, norm);
+  const abWeight = normalizeAbWeight(headRow?.ab_draft_weight_pct);
+
+  if (abWeight > 0) {
+    const draftRow = db
+      .prepare(
+        `SELECT version, body, variables_json
+           FROM custom_ai_prompt_versions
+          WHERE scope_kind = ? AND scope_id = ? AND status = 'draft'
+          ORDER BY version DESC
+          LIMIT 1`,
+      )
+      .get(norm.kind, norm.id) as
+      | { version: number; body: string; variables_json: string }
+      | undefined;
+
+    if (draftRow && (abWeight === 100 || pickAbBucket(norm, stickySeed) < abWeight)) {
+      return {
+        variant: 'draft',
+        version: draftRow.version,
+        body: draftRow.body,
+        variables: parseVariablesJson(draftRow.variables_json),
+        abDraftWeightPct: abWeight,
+      };
+    }
+  }
+
+  const publishedRow = db
+    .prepare(
+      `SELECT version, body, variables_json
+         FROM custom_ai_prompt_versions
+        WHERE scope_kind = ? AND scope_id = ? AND status = 'published'
+        LIMIT 1`,
+    )
+    .get(norm.kind, norm.id) as
+    | { version: number; body: string; variables_json: string }
+    | undefined;
+
+  if (!publishedRow) return null;
+  return {
+    variant: 'published',
+    version: publishedRow.version,
+    body: publishedRow.body,
+    variables: parseVariablesJson(publishedRow.variables_json),
+    abDraftWeightPct: abWeight,
   };
 }

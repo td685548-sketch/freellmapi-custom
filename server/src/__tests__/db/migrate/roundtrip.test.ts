@@ -234,6 +234,7 @@ describe('migration round trip', () => {
         '20261118_030000_custom_customer_ai_hub.ts',
         '20261118_043000_custom_tenant_rbac.ts',
         '20261118_090000_custom_mcp_chat_continuation.ts',
+        '20261118_100000_custom_prompt_eval_and_ab.ts',
       ]);
     } finally {
       db.close();

@@ -4,6 +4,8 @@ import { useSessionRevision } from '../../session-state';
 import { useAdministrativeAccess } from '../../use-administrative-access';
 import { useUserSession } from '../../use-session';
 import { DiffView } from '../components/DiffView';
+import { PromptAbRolloutCard } from '../components/PromptAbRolloutCard';
+import { PromptEvalSection } from '../components/PromptEvalSection';
 import { VariableEditor } from '../components/VariableEditor';
 import {
   PROMPT_LIMITS,
@@ -1435,6 +1437,30 @@ function PromptsContent({
           diff={diffData}
           loading={loadingDiff}
           error={diffError}
+        />
+      )}
+
+      {/* Section 5: A/B Draft Traffic Rollout */}
+      {canView && scope.id && scopeState && (
+        <PromptAbRolloutCard
+          key={`${scope.kind}:${scope.id}:${scopeState.head.revision}:${scopeState.head.abDraftWeightPct ?? 0}`}
+          scope={scope}
+          head={scopeState.head}
+          canPublish={canPublish}
+          disabled={anyMutating}
+          onUpdated={() => loadScopeState({ preserveFeedback: true })}
+        />
+      )}
+
+      {/* Section 6: Golden Evaluation Suite */}
+      {(canView || canEdit) && scope.id && (
+        <PromptEvalSection
+          key={`${scope.kind}:${scope.id}`}
+          scope={scope}
+          canView={canView}
+          canEdit={canEdit}
+          candidateBody={body}
+          candidateVariables={variables}
         />
       )}
     </div>
