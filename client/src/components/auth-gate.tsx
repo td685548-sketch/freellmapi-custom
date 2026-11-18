@@ -1,5 +1,4 @@
 import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
-import { useLocation } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, CheckCircle2 } from 'lucide-react'
 import { apiFetch, setToken, UNAUTHORIZED_EVENT, type ApiError } from '@/lib/api'
@@ -708,11 +707,13 @@ function SignedOut({ onAuthed }: { onAuthed: () => void }) {
 
 export function AuthGate({ children }: { children: ReactNode }) {
   const { t } = useI18n()
-  const location = useLocation()
   const queryClient = useQueryClient()
   const revision = useSessionBoundary()
   const { landing, finishLanding } = useExternalAuthLanding(revision)
-  const isPublicRoute = location.pathname === '/status' || location.pathname.startsWith('/status/')
+  const isPublicRoute = typeof window !== 'undefined' && (
+    window.location.pathname === '/status' ||
+    window.location.pathname.startsWith('/status/')
+  )
   const { data, isLoading, isError, refetch } = useQuery<AuthStatus>({
     queryKey: ['auth-status', revision],
     queryFn: () => apiFetch('/api/auth/status'),
