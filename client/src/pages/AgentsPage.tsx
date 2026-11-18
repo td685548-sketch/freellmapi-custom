@@ -79,6 +79,7 @@ export default function AgentsPage() {
   const { data: byClient = [] } = useQuery<ClientAnalytics[]>({
     queryKey: ['analytics', 'by-client', '30d'],
     queryFn: () => apiFetch('/api/analytics/by-client?range=30d'),
+    enabled: hasPermission('view_analytics'),
   })
   // "Seen recently" means traffic within the last 7 days, not merely any row
   // in the fetched 30-day window.

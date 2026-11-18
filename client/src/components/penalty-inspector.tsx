@@ -86,7 +86,7 @@ export function PenaltyInspector() {
   const { data } = useQuery<PenaltyInspectorData>({
     queryKey: ['fallback', 'penalty-inspector'],
     queryFn: () => apiFetch('/api/fallback/penalty-inspector'),
-    refetchInterval: 5_000,
+    refetchInterval: collapsed ? 30_000 : 5_000,
   })
   const queryClient = useQueryClient()
 

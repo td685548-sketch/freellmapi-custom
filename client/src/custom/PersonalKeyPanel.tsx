@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { CopyButton } from '@/components/copy-button'
 import { toast } from '@/lib/toast'
 import type { UserApiKey } from '../../../shared/user-access'
@@ -14,17 +15,19 @@ export function PersonalKeyPanel() {
   const tc = useCustomT()
   const queryClient = useQueryClient()
   const [created, setCreated] = useState<string | null>(null)
+  const [label, setLabel] = useState('')
   const { data, isLoading } = useQuery<{ keys: UserApiKey[] }>({
     queryKey: ['user-api-keys'],
     queryFn: () => apiFetch<{ keys: UserApiKey[] }>('/api/user/keys'),
   })
   const mint = useMutation({
-    mutationFn: () => apiFetch<{ key: { key: string } }>('/api/user/keys', {
+    mutationFn: (customName: string) => apiFetch<{ key: { key: string } }>('/api/user/keys', {
       method: 'POST',
-      body: JSON.stringify({ name: 'Agent key' }),
+      body: JSON.stringify({ name: customName.trim() || 'Agent key' }),
     }),
     onSuccess: (res) => {
       setCreated(res.key.key)
+      setLabel('')
       queryClient.invalidateQueries({ queryKey: ['user-api-keys'] })
     },
     onError: (err: unknown) => toast.error(err instanceof Error ? err.message : tc('Failed to generate key')),
@@ -40,11 +43,18 @@ export function PersonalKeyPanel() {
           <CopyButton text={created} label={tc('Copy API key')} className="size-7 shrink-0" />
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-muted-foreground">
         {isLoading ? <span>{tc('Loading keys…')}</span> : active.length === 0
           ? <span>{tc('You have no active key yet.')}</span>
           : active.map(key => <code key={key.id} className="font-mono">{key.name}: {key.keyPrefix}••••••••</code>)}
-        <Button size="sm" variant="outline" disabled={mint.isPending} onClick={() => mint.mutate()}>
+        <Input
+          value={label}
+          onChange={e => setLabel(e.target.value)}
+          placeholder={tc('Key label (optional)')}
+          maxLength={100}
+          className="h-8 w-44 text-xs"
+        />
+        <Button size="sm" variant="outline" disabled={mint.isPending} onClick={() => mint.mutate(label)}>
           {mint.isPending ? tc('Generating…') : active.length === 0 ? tc('Generate my API key') : tc('Generate another key')}
         </Button>
       </div>

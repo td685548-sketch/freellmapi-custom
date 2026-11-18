@@ -74,7 +74,7 @@ export function recordUserUsage(userId: number, tokens: number = 0): void {
 /**
  * Get monthly usage for a specific user.
  */
-export function getUserUsage(userId: number, month?: string): { requests: number; tokens: number; month: string } {
+export function getUserUsage(userId: number, month?: string): { requests: number; tokens: number; month: string; rpmLimit: number } {
   const db = getDb();
   const targetMonth = month || new Date().toISOString().slice(0, 7);
 
@@ -84,10 +84,17 @@ export function getUserUsage(userId: number, month?: string): { requests: number
     WHERE user_id = ? AND month = ?
   `).get(userId, targetMonth) as { requests: number; tokens: number } | undefined;
 
+  const rpmRow = db.prepare(`
+    SELECT COALESCE(MAX(rpm_limit), 60) AS rpmLimit
+    FROM user_api_keys
+    WHERE user_id = ? AND revoked = 0
+  `).get(userId) as { rpmLimit: number } | undefined;
+
   return {
     requests: row?.requests || 0,
     tokens: row?.tokens || 0,
     month: targetMonth,
+    rpmLimit: rpmRow?.rpmLimit ?? 60,
   };
 }
 

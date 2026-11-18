@@ -8,6 +8,7 @@ import { toast } from '@/lib/toast'
 import { apiBaseUrl } from '@/components/api-usage'
 import { Button } from '@/components/ui/button'
 import { useI18n } from '@/i18n'
+import { useUserSession } from '@/custom/use-session'
 
 const DISMISS_KEY = 'freellmapi.setup.dismissed'
 const CONNECT_KEY = 'freellmapi.setup.connected'
@@ -26,26 +27,34 @@ function writeFlag(key: string) {
 // when dismissed.
 export function GettingStarted() {
   const { t } = useI18n()
+  const { hasPermission } = useUserSession()
+  const canSetup =
+    hasPermission('view_keys') &&
+    hasPermission('view_analytics') &&
+    hasPermission('reveal_gateway_key')
   const [dismissed, setDismissed] = useState(() => readFlag(DISMISS_KEY))
   const [connected, setConnected] = useState(() => readFlag(CONNECT_KEY))
 
   const { data: keys } = useQuery<unknown[]>({
     queryKey: ['keys'],
     queryFn: () => apiFetch('/api/keys'),
+    enabled: !dismissed && canSetup,
   })
   const { data: summary } = useQuery<{ totalRequests?: number }>({
     queryKey: ['setup-summary'],
     queryFn: () => apiFetch('/api/analytics/summary?range=30d'),
     staleTime: 30_000,
+    enabled: !dismissed && canSetup,
   })
   const { data: keyData } = useQuery<{ apiKey: string }>({
     queryKey: ['unified-key'],
     queryFn: () => apiFetch('/api/settings/api-key'),
+    enabled: !dismissed && canSetup,
   })
 
   // Wait for real data before deciding: rendering on undefined would flash the
   // checklist at every established install for a moment on each visit.
-  if (dismissed || !keys || !summary) return null
+  if (!canSetup || dismissed || !keys || !summary) return null
 
   const hasKeys = keys.length > 0
   const hasRequest = (summary.totalRequests ?? 0) > 0

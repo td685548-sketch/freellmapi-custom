@@ -5,6 +5,7 @@ import { getDb } from '../db/index.js';
 import { createUser, createSession } from '../services/auth.js';
 import { validateInviteCode, claimInviteCode } from '../services/invites.js';
 import { mintUserApiKey } from '../services/user-keys.js';
+import { applyStarterQuotaToNewMember } from '../services/starter-quota.js';
 import { allowAuthRequest } from '../services/auth-security.js';
 import {
   createRegistrationRequest,
@@ -130,6 +131,7 @@ customAuthRouter.post('/register', (req: Request, res: Response) => {
         });
       }
       const initialKey = mintUserApiKey(user.userId, 'Default Key');
+      applyStarterQuotaToNewMember(user.userId);
       const token = createSession(user.userId);
       return { token, email: user.email, role: user.role, apiKey: initialKey.key };
     })();

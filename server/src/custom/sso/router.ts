@@ -6,6 +6,7 @@ import { allowAuthRequest, digest, purgeExpiredAuth, randomSecret, safeEqual, se
 import { consumeGoogleHandoff } from '../../services/google-auth.js';
 import { claimInviteCode } from '../../services/invites.js';
 import { mintUserApiKey } from '../../services/user-keys.js';
+import { applyStarterQuotaToNewMember } from '../../services/starter-quota.js';
 import { getExternalAuthConfig } from '../../services/external-auth-config.js';
 import {
   getSanitizedSsoConfig,
@@ -103,6 +104,7 @@ function finishSsoLogin(email: string, allowAutoProvision: boolean, inviteCode?:
       const created = createUser(normEmail, randomSecret(), 'member');
       user = { id: created.userId, email: created.email, role: 'member', is_primary: 0 };
       apiKey = mintUserApiKey(user.id, 'Default Key').key;
+      applyStarterQuotaToNewMember(user.id);
     }
     const payload = {
       token: createSession(user.id),

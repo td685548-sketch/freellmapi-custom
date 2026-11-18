@@ -35,6 +35,7 @@ import { LiquidComposer } from '@/components/playground/liquid-composer'
 import { SearchSources } from '@/components/playground/search-sources'
 import { searchContextMessage, searchProviderName, searchReadinessHint, type SearchResult } from '@/lib/search'
 import { useSearchReadiness } from '@/hooks/use-search-readiness'
+import { useUserSession } from '@/custom/use-session'
 import { ModelMakerIcon } from '@/components/model-maker-icon'
 import { composerHasContent } from '@/lib/composer-geometry'
 import {
@@ -314,9 +315,11 @@ export default function PlaygroundPage() {
     queryClient.invalidateQueries({ queryKey: ['playground-conversations'] })
   }
 
+  const { hasPermission } = useUserSession()
   const { data: keyData } = useQuery<{ apiKey: string }>({
     queryKey: ['unified-key'],
     queryFn: () => apiFetch('/api/settings/api-key'),
+    enabled: hasPermission('reveal_gateway_key'),
   })
 
   // Speech-to-text for the composer's mic: which transcription models can

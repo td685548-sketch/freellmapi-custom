@@ -28,6 +28,8 @@ import { COMMAND_PALETTE_EVENT } from '@/components/command-palette-state'
 import { useI18n } from '@/i18n'
 import type { FallbackEntry } from '@/lib/routing'
 import { useTheme } from '@/theme-context'
+import { useAdministrativeAccess } from '@/custom/use-administrative-access'
+import { useCustomT } from '@/custom/i18n/use-custom-t'
 
 interface Command {
   id: string
@@ -93,6 +95,10 @@ export function CommandPalette() {
     }
   }, [show, hide])
 
+  const { hasPermission, group, session } = useAdministrativeAccess()
+  const tc = useCustomT()
+  const canRevealGateway = hasPermission('reveal_gateway_key')
+
   // Model index + unified key load lazily, only while the palette is open.
   const { data: entries = [] } = useQuery<FallbackEntry[]>({
     queryKey: ['fallback'],
@@ -102,7 +108,7 @@ export function CommandPalette() {
   const { data: keyData } = useQuery<{ apiKey: string }>({
     queryKey: ['unified-key'],
     queryFn: () => apiFetch('/api/settings/api-key'),
-    enabled: open,
+    enabled: open && canRevealGateway,
   })
 
   const commands = useMemo<Command[]>(() => {
@@ -117,10 +123,17 @@ export function CommandPalette() {
       { id: 'p-search', group: 'pages', label: t('search.tab'), keywords: 'models search web tavily exa firecrawl linkup parallel keenable', icon: Globe, run: go('/models/search') },
       { id: 'p-fusion', group: 'pages', label: t('models.fusionTab'), keywords: 'models fusion synthesis panel judge', icon: Zap, run: go('/models/fusion') },
       { id: 'p-playground', group: 'pages', label: t('nav.playground'), keywords: 'playground test chat try', icon: SquareTerminal, run: go('/playground') },
-      { id: 'p-keys', group: 'pages', label: t('nav.keys'), keywords: 'keys providers api tokens', icon: KeyRound, run: go('/keys') },
+      { id: 'p-keys', group: 'pages', label: t('nav.keys'), keywords: 'keys providers api tokens personal', icon: KeyRound, run: go('/keys') },
+      { id: 'p-ai-hub', group: 'pages', label: tc('AI Hub'), keywords: 'assistants ai hub presets quota coach', icon: Sparkles, run: go('/assistants') },
       { id: 'p-agents', group: 'pages', label: t('nav.agents'), keywords: 'agents claude codex cline ollama gemini', icon: Bot, run: go('/agents') },
-      { id: 'p-analytics', group: 'pages', label: t('nav.analytics'), keywords: 'analytics usage stats savings latency', icon: ChartColumn, run: go('/analytics') },
-      { id: 'p-premium', group: 'pages', label: t('nav.premium'), keywords: 'premium catalog license subscription', icon: Sparkles, run: go('/premium') },
+      ...(hasPermission('view_analytics') ? [{ id: 'p-analytics', group: 'pages' as const, label: t('nav.analytics'), keywords: 'analytics usage stats savings latency', icon: ChartColumn, run: go('/analytics') }] : []),
+      ...(hasPermission('view_server_logs') ? [{ id: 'p-logs', group: 'pages' as const, label: t('nav.logs'), keywords: 'logs requests server', icon: SquareTerminal, run: go('/logs') }] : []),
+      ...(group('view_usage') ? [{ id: 'p-usage', group: 'pages' as const, label: tc('Usage'), keywords: 'usage ranking accounts quota', icon: ChartColumn, run: go('/usage') }] : []),
+      ...(group('manage_invites') ? [{ id: 'p-invites', group: 'pages' as const, label: tc('Invites'), keywords: 'invites codes registration', icon: KeyRound, run: go('/invites') }] : []),
+      ...(group('manage_users') || group('manage_requests') ? [{ id: 'p-users', group: 'pages' as const, label: tc('Users'), keywords: 'users members accounts requests Starter Quota', icon: Bot, run: go('/users') }] : []),
+      ...(group('manage_ai_platform') ? [{ id: 'p-ai-platform', group: 'pages' as const, label: tc('AI Platform'), keywords: 'ai platform prompts mcp rag flows semantic cache traces', icon: Layers, run: go('/ai-platform') }] : []),
+      ...((session?.tenantPortalAccess?.tenantCount ?? 0) > 0 ? [{ id: 'p-tenant-portal', group: 'pages' as const, label: tc('Tenant AI'), keywords: 'tenant portal support desk widget', icon: Boxes, run: go('/tenant-portal') }] : []),
+      ...(hasPermission('manage_routing') ? [{ id: 'p-premium', group: 'pages' as const, label: t('nav.premium'), keywords: 'premium catalog license subscription', icon: Sparkles, run: go('/premium') }] : []),
     ]
     const actions: Command[] = [
       {
@@ -133,9 +146,9 @@ export function CommandPalette() {
           setTheme(resolvedDark ? 'light' : 'dark')
         },
       },
-      {
+      ...(canRevealGateway ? [{
         id: 'a-copy-key',
-        group: 'actions',
+        group: 'actions' as const,
         label: t('setup.copyKey'),
         keywords: 'copy api key unified token',
         icon: Copy,
@@ -143,7 +156,7 @@ export function CommandPalette() {
           if (!keyData?.apiKey) return
           void copyAndToast(keyData.apiKey, t('setup.copiedKey'), t('common.copyFailed'))
         },
-      },
+      }] : []),
       {
         id: 'a-copy-url',
         group: 'actions',
@@ -174,7 +187,7 @@ export function CommandPalette() {
       })
     }
     return [...pages, ...actions, ...models]
-  }, [entries, keyData, navigate, resolvedDark, setTheme, t])
+  }, [canRevealGateway, entries, group, hasPermission, keyData, navigate, resolvedDark, session?.tenantPortalAccess?.tenantCount, setTheme, t, tc])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()

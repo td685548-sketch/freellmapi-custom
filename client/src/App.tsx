@@ -28,7 +28,7 @@ import { UpdateReminder } from '@/components/update-reminder'
 import { NewBuildPrompt } from '@/components/new-build-prompt'
 import { usePremium } from '@/hooks/use-premium'
 import { I18nProvider, useI18n } from '@/i18n'
-import { logout } from '@/lib/api'
+import { logout, type ApiError } from '@/lib/api'
 import { toast } from '@/lib/toast'
 import { ThemeProvider } from '@/theme'
 import { useAdministrativeAccess } from '@/custom/use-administrative-access'
@@ -60,7 +60,16 @@ const queryClient = new QueryClient({
   // whether a background refetch follows. Thirty seconds is shorter than any
   // poller here (refetchInterval still fires on its own clock), and mutations
   // invalidate explicitly, so nothing user-visible goes stale.
-  defaultOptions: { queries: { staleTime: 30_000 } },
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      retry: (failureCount, error) => {
+        const status = (error as ApiError | undefined)?.status
+        if (status === 401 || status === 403) return false
+        return failureCount < 3
+      },
+    },
+  },
   mutationCache: new MutationCache({
     onError: (error, _variables, _context, mutation) => {
       if (mutation.meta?.silenceToast) return
@@ -130,7 +139,7 @@ function NavItem({ to, children }: { to: string; children: React.ReactNode }) {
       onPointerEnter={() => preloadRoute(to)}
       onFocus={() => preloadRoute(to)}
       className={({ isActive }) =>
-        `relative text-sm px-1 py-4 transition-colors ${
+        `relative whitespace-nowrap text-sm px-1 py-4 transition-colors ${
           isActive
             ? 'text-foreground after:absolute after:inset-x-0 after:-bottom-px after:h-px after:bg-foreground'
             : 'text-muted-foreground hover:text-foreground'
@@ -215,17 +224,15 @@ function AccountMenuItems({
           {upgradeLabel}
         </DropdownMenuItem>
       )}
-      {canManageSettings && (
-        <>
-          <DropdownMenuItem onClick={onOpenSettings}>
-            <Settings />
-            {settingsLabel}
-          </DropdownMenuItem>
-          {canManageUpdates && <DropdownMenuItem onClick={onOpenUpdates}>
-            <RefreshCw />
-            {updatesLabel}
-          </DropdownMenuItem>}
-        </>
+      <DropdownMenuItem onClick={onOpenSettings}>
+        <Settings />
+        {settingsLabel}
+      </DropdownMenuItem>
+      {canManageSettings && canManageUpdates && (
+        <DropdownMenuItem onClick={onOpenUpdates}>
+          <RefreshCw />
+          {updatesLabel}
+        </DropdownMenuItem>
       )}
       {/* Desktop signs in with a hidden local account, so it has no credentials
           to change and no session to end. */}
@@ -255,7 +262,7 @@ export function Navbar() {
   const tc = useCustomT()
   const location = useLocation()
   const navigate = useNavigate()
-  const { isMember, isAdmin, hasPermission, group, session } = useAdministrativeAccess()
+  const { isAdmin, hasPermission, group, session } = useAdministrativeAccess()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [updatesOpen, setUpdatesOpen] = useState(false)
   // The update pill lives outside the navbar; it asks for this dialog by event.
@@ -272,31 +279,28 @@ export function Navbar() {
   const canManageUsers = typeof hasPermission === 'function' ? (group('manage_users') || group('manage_requests')) : isAdmin
   const canManageSettings = typeof hasPermission === 'function' ? group('manage_settings') : isAdmin
   const canViewUsage = typeof hasPermission === 'function' ? group('view_usage') : isAdmin
-  const canManageKeys = typeof hasPermission === 'function' ? (group('manage_keys') || group('manage_backups') || group('manage_settings')) : isAdmin
 
   const analyticsFolded = Boolean(group('view_logs')) && hasPermission('view_analytics')
   const analyticsMenuEntries = (items: typeof analyticsItems) => items.filter((e) =>
-    e.to === '/usage' ? canViewUsage : e.to === '/audit' ? hasPermission('view_audit_log') : true)
+    e.to === '/usage' ? canViewUsage : e.to === '/audit' ? hasPermission('view_audit_log') : true).map((e) =>
+    e.customLabel ? { ...e, customLabel: tc(e.customLabel) } : e)
 
   const visibleNavItems: Array<{ to: string; labelKey: string; customLabel?: string }> = [
     ...navItems.filter((i) => {
       if (i.to === '/analytics' && !group('view_logs')) return false
-      // The Keys page reads /api/health and /api/keys, both gated, so leaving
-      // the tab up for an account without manage_keys opens a wall of 403s.
-      if (i.to === '/keys' && isMember && !canManageKeys) return false
       if (i.to === '/premium' && !hasPermission('manage_routing')) return false
       return true
     }).map(i => i.to === '/analytics' && !hasPermission('view_analytics') ? { ...i, to: '/logs', labelKey: 'nav.logs' } : i),
-    ...(canManageInvites ? [{ to: '/invites', labelKey: 'nav.invites', customLabel: 'Invites' }] : []),
-    ...(canManageUsers ? [{ to: '/users', labelKey: 'nav.users', customLabel: 'Users' }] : []),
+    ...(canManageInvites ? [{ to: '/invites', labelKey: 'nav.invites', customLabel: tc('Invites') }] : []),
+    ...(canManageUsers ? [{ to: '/users', labelKey: 'nav.users', customLabel: tc('Users') }] : []),
     { to: '/assistants', labelKey: 'AI Hub', customLabel: tc('AI Hub') },
     ...((session?.tenantPortalAccess?.tenantCount ?? 0) > 0
       ? [{ to: '/tenant-portal', labelKey: 'Tenant AI', customLabel: tc('Tenant AI') }]
       : []),
     // Usage and History live in the Analytics dropdown; keep them as top-level
     // tabs only when the Analytics tab itself is hidden for this account.
-    ...(!analyticsFolded && canViewUsage ? [{ to: '/usage', labelKey: 'nav.usage', customLabel: 'Usage' }] : []),
-    ...(!analyticsFolded && hasPermission('view_audit_log') ? [{ to: '/audit', labelKey: 'nav.audit', customLabel: 'History' }] : []),
+    ...(!analyticsFolded && canViewUsage ? [{ to: '/usage', labelKey: 'nav.usage', customLabel: tc('Usage') }] : []),
+    ...(!analyticsFolded && hasPermission('view_audit_log') ? [{ to: '/audit', labelKey: 'nav.audit', customLabel: tc('History') }] : []),
     ...(group('manage_ai_platform') ? [{ to: '/ai-platform', labelKey: 'AI Platform', customLabel: tc('AI Platform') }] : []),
   ]
 

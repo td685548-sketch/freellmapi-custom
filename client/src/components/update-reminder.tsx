@@ -3,6 +3,7 @@ import { ArrowUpRight, Sparkles, X } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { openUpdates } from '@/lib/updates'
 import { useI18n } from '@/i18n'
+import { useUserSession } from '@/custom/use-session'
 
 /** How often this browser may ask the server, so a dashboard left open in a
  *  tab isn't re-checking on every navigation. The server caches the upstream
@@ -81,6 +82,8 @@ function writeStored(value: StoredCheck): void {
  */
 export function UpdateReminder() {
   const { t } = useI18n()
+  const { hasPermission } = useUserSession()
+  const canCheckUpdates = hasPermission('view_settings') || hasPermission('manage_updates')
   // Current version: the desktop shell states it outright, so it is read at
   // render rather than assigned from an effect; a browser or container install
   // asks the server. Both may be empty → no reminder.
@@ -103,18 +106,18 @@ export function UpdateReminder() {
   }, [])
 
   useEffect(() => {
-    if (shellVersion) return
+    if (shellVersion || !canCheckUpdates) return
     let cancelled = false
     apiFetch<{ version: string | null }>('/api/settings/version')
       .then(r => { if (!cancelled) setServerVersion(r.version ?? null) })
       .catch(() => { /* leave hidden */ })
     return () => { cancelled = true }
-  }, [shellVersion])
+  }, [shellVersion, canCheckUpdates])
 
   // Throttled automatic check. A dialog already open is left alone; otherwise
   // the pill appears only when a genuinely newer release exists.
   useEffect(() => {
-    if (!version) return
+    if (!version || !canCheckUpdates) return
     let cancelled = false
     const currentVersion = version
     const forced = refresh > 0

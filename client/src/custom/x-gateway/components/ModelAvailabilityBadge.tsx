@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
+import { useI18n } from '@/i18n';
 
 export interface AvailabilityEntry {
   accountId: number;
@@ -39,6 +40,8 @@ function remaining(entry: AvailabilityEntry, now: number, fetchedAt: number): nu
 }
 
 export default function ModelAvailabilityBadge() {
+  const { locale } = useI18n();
+  const isVi = locale === 'vi';
   const client = useQueryClient();
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(Date.now);
@@ -72,8 +75,15 @@ export default function ModelAvailabilityBadge() {
     const onDown = (event: MouseEvent) => {
       if (root.current && !root.current.contains(event.target as Node)) setOpen(false);
     };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
     document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
   }, [open]);
 
   const entries = query.data?.models ?? [];
@@ -81,7 +91,11 @@ export default function ModelAvailabilityBadge() {
   const fetchedAt = query.dataUpdatedAt || now;
   const healthy = !query.isError && count === 0;
 
-  const label = query.isError ? 'Availability unknown' : healthy ? 'All models available' : `${count} on cooldown`;
+  const label = query.isError
+    ? (isVi ? 'Không rõ trạng thái' : 'Availability unknown')
+    : healthy
+      ? (isVi ? 'Tất cả model sẵn sàng' : 'All models available')
+      : (isVi ? `${count} đang chờ hồi` : `${count} on cooldown`);
   // Quiet while everything works; colour is reserved for when something needs attention.
   const tone = query.isError || healthy ? 'x-availability' : 'x-availability x-availability-warn';
 
@@ -101,11 +115,13 @@ export default function ModelAvailabilityBadge() {
       {open && (
         <div
           role="dialog"
-          aria-label="Model availability"
+          aria-label={isVi ? 'Trạng thái sẵn sàng của model' : 'Model availability'}
           className="absolute right-0 z-50 mt-2 w-96 max-w-[90vw] rounded-lg border bg-popover p-3 text-popover-foreground shadow-lg"
         >
           <div className="mb-2 flex items-center justify-between">
-            <span className="text-sm font-semibold">Cooldowns &amp; exhausted quota</span>
+            <span className="text-sm font-semibold">
+              {isVi ? 'Đang chờ hồi & hết hạn mức' : 'Cooldowns & exhausted quota'}
+            </span>
             {entries.length > 0 && (
               <button
                 type="button"
@@ -113,13 +129,15 @@ export default function ModelAvailabilityBadge() {
                 onClick={() => clear.mutate({})}
                 className="rounded border px-2 py-0.5 text-xs hover:bg-accent disabled:opacity-50"
               >
-                Clear All
+                {isVi ? 'Xóa tất cả' : 'Clear All'}
               </button>
             )}
           </div>
 
           {entries.length === 0 ? (
-            <p className="py-3 text-center text-xs text-muted-foreground">Every account and model is available.</p>
+            <p className="py-3 text-center text-xs text-muted-foreground">
+              {isVi ? 'Mọi tài khoản và model đều đang sẵn sàng.' : 'Every account and model is available.'}
+            </p>
           ) : (
             <ul className="max-h-72 space-y-2 overflow-auto">
               {entries.map(entry => (
@@ -131,9 +149,11 @@ export default function ModelAvailabilityBadge() {
                     <div className="truncate font-medium">
                       {entry.accountLabel}{entry.provider ? ` · ${entry.provider}` : ''}
                     </div>
-                    <div className="truncate text-muted-foreground">{entry.model ?? 'All models'}</div>
+                    <div className="truncate text-muted-foreground">{entry.model ?? (isVi ? 'Tất cả model' : 'All models')}</div>
                     <div className="text-amber-600 dark:text-amber-400">
-                      {entry.status === 'quota_exhausted' ? 'Quota exhausted' : 'Cooldown'}
+                      {entry.status === 'quota_exhausted'
+                        ? (isVi ? 'Hết hạn mức' : 'Quota exhausted')
+                        : (isVi ? 'Đang chờ hồi' : 'Cooldown')}
                       {entry.until || entry.remainingMs ? ` · ${formatCountdown(remaining(entry, now, fetchedAt))}` : ''}
                     </div>
                   </div>
@@ -143,13 +163,17 @@ export default function ModelAvailabilityBadge() {
                     onClick={() => clear.mutate({ accountId: entry.accountId, ...(entry.model ? { model: entry.model } : {}) })}
                     className="shrink-0 rounded border px-2 py-0.5 hover:bg-accent disabled:opacity-50"
                   >
-                    Clear Cooldown
+                    {isVi ? 'Gỡ chờ hồi' : 'Clear Cooldown'}
                   </button>
                 </li>
               ))}
             </ul>
           )}
-          {clear.isError && <p className="mt-2 text-xs text-destructive">Could not clear cooldown. Try again.</p>}
+          {clear.isError && (
+            <p className="mt-2 text-xs text-destructive">
+              {isVi ? 'Không thể gỡ chờ hồi. Vui lòng thử lại.' : 'Could not clear cooldown. Try again.'}
+            </p>
+          )}
         </div>
       )}
     </div>

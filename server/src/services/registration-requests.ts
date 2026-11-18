@@ -1,6 +1,7 @@
 import { getDb } from '../db/index.js';
 import { hashPassword, verifyPassword } from '../lib/password.js';
 import { mintUserApiKey } from './user-keys.js';
+import { applyStarterQuotaToNewMember } from './starter-quota.js';
 import { notifyAdminNewRegistration, notifyUserRegistrationApproved } from './notification-mailer.js';
 import type { RegistrationRequest } from '@freellmapi/shared/user-access.js';
 
@@ -149,6 +150,7 @@ export function approveRegistrationRequest(
       .run(req.email, req.password_hash, 'member');
     const id = Number(insertUser.lastInsertRowid);
     mintUserApiKey(id, 'Default Key');
+    applyStarterQuotaToNewMember(id);
     db.prepare(`UPDATE registration_requests SET status = 'approved', reviewed_at = datetime('now'), reviewed_by = ? WHERE id = ?`)
       .run(adminUserId, req.id);
     return id;
