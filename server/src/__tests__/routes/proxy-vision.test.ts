@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 
 async function post(app: Express, path: string, body: any, key: string) {
   const server = app.listen(0, '127.0.0.1');
@@ -37,7 +37,7 @@ describe('Vision-aware routing (#118, #125)', () => {
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     initDb(':memory:');
     app = createApp();
-    key = getUnifiedApiKey();
+    key = regenerateUnifiedKey();
   });
 
   it('seeds supports_vision: true for vision models, false for text-only', () => {

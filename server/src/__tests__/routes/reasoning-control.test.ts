@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { mintDashboardToken } from '../helpers/auth.js';
 import { effortFromAnthropicThinking } from '../../routes/anthropic.js';
 
@@ -28,11 +28,11 @@ async function request(app: Express, path: string, body: any, extraHeaders: Reco
 }
 
 function openaiHeaders() {
-  return { Authorization: `Bearer ${getUnifiedApiKey()}` };
+  return { Authorization: `Bearer ${regenerateUnifiedKey()}` };
 }
 
 function anthropicHeaders() {
-  return { 'x-api-key': getUnifiedApiKey(), 'anthropic-version': '2023-06-01' };
+  return { 'x-api-key': regenerateUnifiedKey(), 'anthropic-version': '2023-06-01' };
 }
 
 // Mock Groq's upstream with a canned JSON response and capture the forwarded body.

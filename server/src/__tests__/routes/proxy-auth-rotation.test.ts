@@ -35,7 +35,7 @@ vi.mock('../../services/health.js', () => ({
 }));
 
 const { createApp } = await import('../../app.js');
-const { initDb, getDb, getUnifiedApiKey } = await import('../../db/index.js');
+const { initDb, getDb, regenerateUnifiedKey } = await import('../../db/index.js');
 const { encrypt } = await import('../../lib/crypto.js');
 const { setRoutingStrategy, getAllPenalties } = await import('../../services/router.js');
 
@@ -99,7 +99,7 @@ describe('upstream 401 rotates to the sibling key instead of 502 (item 1)', () =
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     initDb(':memory:');
     app = createApp();
-    key = getUnifiedApiKey();
+    key = regenerateUnifiedKey();
   });
 
   beforeEach(() => {
@@ -215,7 +215,7 @@ describe('exhaustion error quality: attempt trail + reset hint + header (item 2)
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     initDb(':memory:');
     app = createApp();
-    key = getUnifiedApiKey();
+    key = regenerateUnifiedKey();
   });
 
   beforeEach(() => {

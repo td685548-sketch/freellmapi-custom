@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { mintDashboardToken } from '../helpers/auth.js';
 
 // #1642: SSE keep-alive pings through the real proxy route. Upstreams here
@@ -16,7 +16,7 @@ async function streamRequest(app: Express, body: any, signal?: AbortSignal) {
   const addr = server.address() as any;
   const res = await fetch(`http://127.0.0.1:${addr.port}/v1/chat/completions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getUnifiedApiKey() },
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + regenerateUnifiedKey() },
     body: JSON.stringify(body),
     signal,
   });

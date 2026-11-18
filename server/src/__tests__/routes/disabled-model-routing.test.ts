@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
 import { resolveRoutingChain, setRoutingStrategy, getOrderedFusionChain } from '../../services/router.js';
 import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
@@ -30,7 +30,7 @@ async function request(method: string, path: string, body?: any, headers: Record
 }
 
 function authHeaders() {
-  return { Authorization: `Bearer ${getUnifiedApiKey()}` };
+  return { Authorization: `Bearer ${regenerateUnifiedKey()}` };
 }
 
 function activeProfileId(): number | null {

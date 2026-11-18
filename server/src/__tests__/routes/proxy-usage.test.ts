@@ -2,7 +2,7 @@ import { beforeAll, afterAll, describe, it, expect } from 'vitest';
 import { once } from 'node:events';
 import type { Server } from 'node:http';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
 import { hashClientProfileKey } from '../../lib/system-prompt.js';
 
@@ -32,7 +32,7 @@ beforeAll(async () => {
     VALUES ('groq', ?, ?, 'success', 7, 3, 1)`).run(model, keyId);
   db.prepare(`INSERT INTO requests (platform, model_id, key_id, status, input_tokens, output_tokens, latency_ms)
     VALUES ('groq', ?, ?, 'error', 9999, 9999, 1)`).run(model, keyId);
-  token = getUnifiedApiKey();
+  token = regenerateUnifiedKey();
   const profileSecret = encrypt(PROFILE_TOKEN);
   db.prepare(`INSERT INTO client_profiles (name, token_hash, encrypted_key, iv, auth_tag, enabled)
     VALUES ('downstream', ?, ?, ?, ?, 1)`).run(hashClientProfileKey(PROFILE_TOKEN), profileSecret.encrypted, profileSecret.iv, profileSecret.authTag);

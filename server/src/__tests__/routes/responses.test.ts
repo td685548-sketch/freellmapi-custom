@@ -10,7 +10,7 @@ vi.mock('../../services/router.js', async (importOriginal) => {
 
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { setStickyModel } from '../../routes/proxy.js';
 
 function fakeRoute(provider: any) {
@@ -39,7 +39,7 @@ describe('POST /v1/responses (#96)', () => {
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     initDb(':memory:');
     app = createApp();
-    key = getUnifiedApiKey();
+    key = regenerateUnifiedKey();
   });
 
   it('rejects requests without a valid unified key (401)', async () => {
@@ -578,7 +578,7 @@ describe('POST /v1/responses model routing priority (#579)', () => {
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     initDb(':memory:');
     app = createApp();
-    key = getUnifiedApiKey();
+    key = regenerateUnifiedKey();
     const db = getDb();
     db.prepare('DELETE FROM profile_models').run();
     db.prepare('DELETE FROM fallback_config').run();

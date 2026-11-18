@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import type { ChatMessage } from '@freellmapi/shared/types.js';
-import { getDb, getUnifiedApiKey } from '../db/index.js';
+import { getDb, validateUnifiedApiKey } from '../db/index.js';
 import { validateUserApiKey, USER_KEY_PREFIX } from '../services/user-keys.js';
 import { profileIdForPreviousKey } from '../services/profile-previous-keys.js';
 import { renderPrompt } from '../custom/ai-platform/prompts/render.js';
@@ -58,7 +58,7 @@ interface ProfileRow {
  */
 export function resolveAuth(token: string | undefined): ResolvedAuth | null {
   if (!token) return null;
-  if (timingSafeStringEqual(token, getUnifiedApiKey())) {
+  if (validateUnifiedApiKey(token)) {
     return { kind: 'unified', systemPrompt: null };
   }
   if (token.startsWith(USER_KEY_PREFIX)) {

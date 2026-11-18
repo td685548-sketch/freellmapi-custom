@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { getUnifiedApiKey, regenerateUnifiedKey, getSetting, setSetting, getDb } from '../db/index.js';
+import { getUnifiedApiKeyPrefix, regenerateUnifiedKey, unifiedKeyPrefix, getSetting, setSetting, getDb } from '../db/index.js';
 import { applyProxyUrl, applyProxyMode, applyProxyEnabled, applyProxyBypass, applyFetchRelayToken, encodeFetchRelayToken, isProxyActive, getProxyUrl, getProxyMode, getFetchRelayToken, isProxyEnabled, getProxyBypassPlatforms, probeProxyUrl, fetchRelayUrlError, DEFAULT_PROXY_PROBE_TARGET, PROXY_MODES, PROXY_SCHEMES } from '../lib/proxy.js';
 import { getProvider } from '../providers/index.js';
 import type { Platform } from '@freellmapi/shared/types.js';
@@ -476,15 +476,20 @@ settingsRouter.put('/guardrails', (req: Request, res: Response) => {
   });
 });
 
-// Get the unified API key
+// Get the unified API key's public metadata. The full key is never stored
+// (only its SHA-256 hash), so it cannot be returned here: `apiKey` is always
+// null. The dashboard shows the non-secret prefix and offers Regenerate,
+// which returns the fresh key exactly once in its response.
 settingsRouter.get('/api-key', (_req: Request, res: Response) => {
-  res.json({ apiKey: getUnifiedApiKey() });
+  const prefix = getUnifiedApiKeyPrefix();
+  res.json({ apiKey: null, apiKeyPrefix: prefix, hasKey: prefix !== null });
 });
 
-// Regenerate the unified API key
+// Regenerate the unified API key. The fresh key is returned exactly once,
+// here — after this response it exists only as a hash in the database.
 settingsRouter.post('/api-key/regenerate', (_req: Request, res: Response) => {
   const newKey = regenerateUnifiedKey();
-  res.json({ apiKey: newKey });
+  res.json({ apiKey: newKey, apiKeyPrefix: unifiedKeyPrefix(newKey), hasKey: true });
 });
 
 // Get the proxy settings

@@ -13,7 +13,7 @@ vi.mock('../../services/search.js', async (importOriginal) => {
 });
 
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey, setSetting } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey, setSetting } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
 import { mintDashboardToken } from '../helpers/auth.js';
 import { encodeHitContent, filterHitsByDomain } from '../../lib/web-search-tool.js';
@@ -52,8 +52,8 @@ function sseEvents(text: string): Array<{ event: string; data: any }> {
   return out;
 }
 
-const anthropicHeaders = () => ({ 'x-api-key': getUnifiedApiKey(), 'anthropic-version': '2023-06-01' });
-const bearer = () => ({ Authorization: `Bearer ${getUnifiedApiKey()}` });
+const anthropicHeaders = () => ({ 'x-api-key': regenerateUnifiedKey(), 'anthropic-version': '2023-06-01' });
+const bearer = () => ({ Authorization: `Bearer ${regenerateUnifiedKey()}` });
 
 const searchCall = (query: string, id = 'call_s1') => ({
   id: 'chatcmpl-s', object: 'chat.completion', created: 1, model: 'openai/gpt-oss-120b',

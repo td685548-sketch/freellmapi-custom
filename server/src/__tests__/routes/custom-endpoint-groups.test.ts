@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import http from 'node:http';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { getModelGroups, resolveRequestedIdToMembers } from '../../services/model-groups.js';
 import { groupHandle } from '../../lib/endpoint-scope.js';
 import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
@@ -232,7 +232,7 @@ describe('custom endpoint groups (#1176)', () => {
         const res = await request(app, 'POST', '/v1/chat/completions', {
           model: `custom:${SHARED_MODEL}#${group}`,
           messages: [{ role: 'user', content: 'hi' }],
-        }, getUnifiedApiKey());
+        }, regenerateUnifiedKey());
         expect(res.status).toBe(200);
         expect(res.body.choices[0].message.content).toBe(`from ${group}`);
         expect(relay.hits.length).toBeGreaterThan(0);

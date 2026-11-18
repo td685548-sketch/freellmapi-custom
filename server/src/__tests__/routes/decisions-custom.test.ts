@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, regenerateUnifiedKey } from '../../db/index.js';
 import { clearAllCooldowns } from '../../services/ratelimit.js';
 import { mintDashboardToken } from '../helpers/auth.js';
 import { seedDecisionModels } from '../helpers/decision-models.js';
@@ -32,7 +32,7 @@ async function call(app: Express, method: string, path: string, opts: { body?: u
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const auth = opts.auth === undefined ? (path.startsWith('/api') ? 'dash' : 'api') : opts.auth;
   if (auth === 'dash') headers.Authorization = `Bearer ${dashToken}`;
-  if (auth === 'api') headers.Authorization = `Bearer ${getUnifiedApiKey()}`;
+  if (auth === 'api') headers.Authorization = `Bearer ${regenerateUnifiedKey()}`;
   const res = await realFetch(`http://127.0.0.1:${addr.port}${path}`, {
     method,
     headers,

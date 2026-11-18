@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import Database from 'better-sqlite3';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getSetting, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getSetting, regenerateUnifiedKey } from '../../db/index.js';
 import { up as seedMcpDefault } from '../../db/migrations/20260903_000001_mcp_enabled_default.js';
 import { mintDashboardToken } from '../helpers/auth.js';
 
@@ -81,7 +81,7 @@ describe('/mcp lifecycle gate (#925)', () => {
     initDb(':memory:');
     app = createApp();
     token = mintDashboardToken();
-    unifiedKey = getUnifiedApiKey();
+    unifiedKey = regenerateUnifiedKey();
   });
 
   it('off by default: POST /mcp answers 403 without touching auth', async () => {

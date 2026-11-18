@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { getStickyModel, setStickyModel } from '../../routes/proxy.js';
 import { mintDashboardToken } from '../helpers/auth.js';
 
@@ -18,7 +18,7 @@ async function request(app: Express, path: string, body: any, extraHeaders: Reco
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${getUnifiedApiKey()}`,
+      Authorization: `Bearer ${regenerateUnifiedKey()}`,
       ...extraHeaders,
     },
     body: JSON.stringify(body),

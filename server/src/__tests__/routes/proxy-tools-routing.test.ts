@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { routeRequest, setRoutingStrategy } from '../../services/router.js';
 import { encrypt } from '../../lib/crypto.js';
 
@@ -63,7 +63,7 @@ describe('Tools-aware routing', () => {
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     initDb(':memory:');
     app = createApp();
-    key = getUnifiedApiKey();
+    key = regenerateUnifiedKey();
   });
 
   it('flags tool-capable families and leaves the known-bad ones unflagged', () => {

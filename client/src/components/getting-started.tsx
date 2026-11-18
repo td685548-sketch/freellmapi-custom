@@ -46,11 +46,9 @@ export function GettingStarted() {
     staleTime: 30_000,
     enabled: !dismissed && canSetup,
   })
-  const { data: keyData } = useQuery<{ apiKey: string }>({
-    queryKey: ['unified-key'],
-    queryFn: () => apiFetch('/api/settings/api-key'),
-    enabled: !dismissed && canSetup,
-  })
+  // The unified key is stored server-side as a hash only, so the dashboard
+  // can no longer fetch it to copy: step 3 sends the operator to the Keys
+  // page, where Regenerate returns a fresh key once for copying.
 
   // Wait for real data before deciding: rendering on undefined would flash the
   // checklist at every established install for a moment on each visit.
@@ -130,15 +128,12 @@ export function GettingStarted() {
           description={t('setup.step3Desc')}
           action={
             <div className="flex flex-wrap justify-end gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!keyData?.apiKey}
-                onClick={() => keyData?.apiKey && copyValue(keyData.apiKey, t('setup.copiedKey'))}
-              >
-                <Copy data-icon="inline-start" className="size-3.5" />
-                {t('setup.copyKey')}
-              </Button>
+              <Link to="/keys">
+                <Button variant="outline" size="sm">
+                  {t('nav.keys')}
+                  <ArrowRight data-icon="inline-end" className="size-3.5" />
+                </Button>
+              </Link>
               <Button
                 variant="outline"
                 size="sm"

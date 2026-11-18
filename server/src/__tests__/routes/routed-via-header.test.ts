@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { mintDashboardToken } from '../helpers/auth.js';
 
 // #619: relays hand out model ids that are not header-safe — Chinese names,
@@ -32,7 +32,7 @@ async function request(app: Express, method: string, path: string, body?: unknow
 }
 
 function authHeaders() {
-  return { Authorization: `Bearer ${getUnifiedApiKey()}` };
+  return { Authorization: `Bearer ${regenerateUnifiedKey()}` };
 }
 
 /** The header must be a valid RFC 7230 field value AND still name the route. */
@@ -173,7 +173,7 @@ describe('X-Routed-Via with a header-hostile model id (#619)', () => {
   });
 
   it('answers /v1/messages, streaming and not', async () => {
-    const anthropicAuth = { 'x-api-key': getUnifiedApiKey(), 'anthropic-version': '2023-06-01' };
+    const anthropicAuth = { 'x-api-key': regenerateUnifiedKey(), 'anthropic-version': '2023-06-01' };
 
     const plain = await request(app, 'POST', '/v1/messages', {
       model: HOSTILE_MODEL,
@@ -197,7 +197,7 @@ describe('X-Routed-Via with a header-hostile model id (#619)', () => {
     const { status, headers } = await request(
       app,
       'POST',
-      `/v1beta/models/gemini-2.5-flash:generateContent?key=${getUnifiedApiKey()}`,
+      `/v1beta/models/gemini-2.5-flash:generateContent?key=${regenerateUnifiedKey()}`,
       { contents: [{ role: 'user', parts: [{ text: 'hi' }] }] },
     );
     expect(status).toBe(200);

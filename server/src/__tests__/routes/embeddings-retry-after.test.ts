@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { once } from 'node:events';
 import type { Server } from 'node:http';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey, setSetting } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey, setSetting } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
 import { clearAllCooldowns } from '../../services/ratelimit.js';
 import { stubPublicDns } from '../helpers/dns.js';
@@ -33,7 +33,7 @@ beforeEach(async () => {
     .run(secret.encrypted, secret.iv, secret.authTag).lastInsertRowid);
   db.prepare(`INSERT INTO embedding_models (family, platform, model_id, display_name, dimensions, priority, enabled, quota_label, key_id)
     VALUES ('rate-embed', 'custom', 'rate-embed', 'Rate embed', 2, 1, 1, '', ?)`).run(keyId);
-  token = getUnifiedApiKey();
+  token = regenerateUnifiedKey();
   // Ollama emulation is opt-in; /api/embed 404s until it's on.
   setSetting('ollama_emulation', 'key-required');
   server = createApp().listen(0, '127.0.0.1');

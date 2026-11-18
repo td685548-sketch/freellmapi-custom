@@ -11,12 +11,20 @@ describe('loadConfig', () => {
   it('returns sensible defaults when no env vars are set', () => {
     const cfg = loadConfig();
     expect(cfg.port).toBe(3001);
-    expect(cfg.host).toBe('::');
+    // Loopback-only by default: a fresh install must not listen on every
+    // interface until the operator opts into a wide bind (HOST=:: / 0.0.0.0).
+    expect(cfg.host).toBe('127.0.0.1');
     expect(cfg.dbPath).toBeNull();
     expect(cfg.dashboardOrigins).toEqual([]);
     expect(cfg.clientDist).toBeNull();
     expect(cfg.proxyRateLimitRpm).toBe(120);
     expect(cfg.serveStaticAssets).toBe(true);
+  });
+
+  it('still honours an explicit wide bind', () => {
+    process.env.HOST = '::';
+    const cfg = loadConfig();
+    expect(cfg.host).toBe('::');
   });
 
   it('reads PORT and HOST from env', () => {

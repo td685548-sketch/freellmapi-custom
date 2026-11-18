@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
 
 // #1102 follow-up: `execution_id` must be on EVERY JSON body the chat
@@ -34,7 +34,7 @@ async function request(app: Express, method: string, path: string, body?: any, h
 }
 
 function authHeaders() {
-  return { Authorization: `Bearer ${getUnifiedApiKey()}` };
+  return { Authorization: `Bearer ${regenerateUnifiedKey()}` };
 }
 
 const sse = (...payloads: (object | string)[]) =>

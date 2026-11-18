@@ -18,7 +18,7 @@ vi.mock('../../lib/image-normalize.js', async (importOriginal) => {
 });
 
 const { createApp } = await import('../../app.js');
-const { getDb, getUnifiedApiKey, initDb, setSetting } = await import('../../db/index.js');
+const { getDb, regenerateUnifiedKey, initDb, setSetting } = await import('../../db/index.js');
 const { encrypt } = await import('../../lib/crypto.js');
 
 async function request(
@@ -78,7 +78,7 @@ describe('emulation surfaces forward handler rejections to the error handler', (
   it('answers 500 on the Gemini generateContent surface', async () => {
     const response = await request(
       app,
-      `/v1beta/models/gemini-2.5-flash:generateContent?key=${getUnifiedApiKey()}`,
+      `/v1beta/models/gemini-2.5-flash:generateContent?key=${regenerateUnifiedKey()}`,
       { contents: [{ role: 'user', parts: [{ text: 'hello' }] }] },
     );
     expect(response.status).toBe(500);
@@ -91,7 +91,7 @@ describe('emulation surfaces forward handler rejections to the error handler', (
       app,
       '/api/chat',
       { model: 'auto', messages: [{ role: 'user', content: 'hello' }], stream: false },
-      { Authorization: `Bearer ${getUnifiedApiKey()}` },
+      { Authorization: `Bearer ${regenerateUnifiedKey()}` },
     );
     expect(response.status).toBe(500);
     expect(response.body?.error).toBeTruthy();
@@ -103,7 +103,7 @@ describe('emulation surfaces forward handler rejections to the error handler', (
       app,
       '/api/generate',
       { model: 'auto', prompt: 'hello', stream: false },
-      { Authorization: `Bearer ${getUnifiedApiKey()}` },
+      { Authorization: `Bearer ${regenerateUnifiedKey()}` },
     );
     expect(response.status).toBe(500);
     expect(response.body?.error).toBeTruthy();

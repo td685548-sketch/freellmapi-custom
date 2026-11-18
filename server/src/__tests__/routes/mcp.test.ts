@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey, setSetting } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey, setSetting } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
 
 let app: Express;
@@ -14,7 +14,7 @@ async function rpc(message: unknown, opts: { auth?: boolean } = {}) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(opts.auth === false ? {} : { Authorization: `Bearer ${getUnifiedApiKey()}` }),
+      ...(opts.auth === false ? {} : { Authorization: `Bearer ${regenerateUnifiedKey()}` }),
     },
     body: JSON.stringify(message),
   });

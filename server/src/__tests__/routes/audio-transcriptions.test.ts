@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
 import { MAX_TRANSCRIPTION_BYTES } from '../../services/media.js';
 import { clearCooldownsForKey } from '../../services/ratelimit.js';
@@ -58,7 +58,7 @@ async function postTranscription(app: Express, opts: MultipartOpts) {
   }
   for (const [k, v] of Object.entries(opts.fields ?? {})) form.append(k, v);
   const headers: Record<string, string> = {};
-  if (opts.auth !== null) headers.Authorization = `Bearer ${opts.auth ?? getUnifiedApiKey()}`;
+  if (opts.auth !== null) headers.Authorization = `Bearer ${opts.auth ?? regenerateUnifiedKey()}`;
   const res = await realFetch(`http://127.0.0.1:${addr.port}/v1/audio/transcriptions`, {
     method: 'POST',
     headers,

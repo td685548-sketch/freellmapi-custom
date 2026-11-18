@@ -20,7 +20,7 @@ vi.mock('../../services/router.js', async (importOriginal) => {
 
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -68,7 +68,7 @@ describe('/v1/responses shared-loop convergence', () => {
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     initDb(':memory:');
     app = createApp();
-    key = getUnifiedApiKey();
+    key = regenerateUnifiedKey();
   });
 
   beforeEach(() => {

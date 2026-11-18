@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { mintDashboardToken } from '../helpers/auth.js';
 import { MAX_MESSAGES_BYTES } from '../../routes/conversations.js';
 
@@ -55,7 +55,7 @@ describe('playground conversations', () => {
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     initDb(':memory:');
     app = createApp();
-    unifiedKey = getUnifiedApiKey();
+    unifiedKey = regenerateUnifiedKey();
     dashToken = mintDashboardToken('conversations@example.com');
   });
 

@@ -1,6 +1,6 @@
 import { it, expect, vi } from 'vitest';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
 import { getProvider } from '../../providers/index.js';
 import { setRoutingStrategy } from '../../services/router.js';
@@ -27,7 +27,7 @@ it('chat completions skips a too-small fallback after a provider reports request
   if (!server.listening) await new Promise<void>(r => server.once('listening',r));
   try {
     const res = await fetch('http://127.0.0.1:'+(server.address() as {port:number}).port+'/v1/chat/completions', {
-      method:'POST', headers:{Authorization:'Bearer '+getUnifiedApiKey(),'Content-Type':'application/json'},
+      method:'POST', headers:{Authorization:'Bearer '+regenerateUnifiedKey(),'Content-Type':'application/json'},
       body:JSON.stringify({model:'auto',messages:[{role:'user',content:'hello'}],max_tokens:256}),
     });
     const body = await res.json();

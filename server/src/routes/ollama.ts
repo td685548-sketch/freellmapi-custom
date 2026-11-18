@@ -6,9 +6,9 @@ import type {
   ChatToolDefinition,
 } from '@freellmapi/shared/types.js';
 import { isLoopbackRequest } from '../lib/loopback.js';
-import { getSetting, getUnifiedApiKey } from '../db/index.js';
+import { getSetting, validateUnifiedApiKey } from '../db/index.js';
 import { buildModelListing } from '../services/model-listing.js';
-import { extractApiToken, timingSafeStringEqual } from './proxy.js';
+import { extractApiToken } from './proxy.js';
 import { runInboundChat, type InboundChatResult, type InboundChatWire } from '../lib/inbound-chat.js';
 import { runEmbeddings, embeddingsRetryAfterSec, EmbeddingsError } from '../services/embeddings.js';
 import { validateSession } from '../services/auth.js';
@@ -42,7 +42,7 @@ function authorize(req: Request, res: Response): boolean {
     return false;
   }
   const token = extractApiToken(req);
-  if (!token || !timingSafeStringEqual(token, getUnifiedApiKey())) {
+  if (!token || !validateUnifiedApiKey(token)) {
     res.status(401).json({ error: 'Invalid API key' });
     return false;
   }

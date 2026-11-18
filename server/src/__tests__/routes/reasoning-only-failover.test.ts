@@ -29,7 +29,7 @@ vi.mock('../../providers/index.js', async (importOriginal) => {
 });
 
 const { createApp } = await import('../../app.js');
-const { initDb, getDb, setSetting, getUnifiedApiKey } = await import('../../db/index.js');
+const { initDb, getDb, setSetting, regenerateUnifiedKey } = await import('../../db/index.js');
 const { encrypt } = await import('../../lib/crypto.js');
 const { setRoutingStrategy } = await import('../../services/router.js');
 const { TOOL_ARGUMENT_VALIDATION_SETTING } = await import('../../lib/tool-validate.js');
@@ -176,7 +176,7 @@ describe('reasoning-only turns fail over on the shared inbound-chat lane (#1184)
 describe('long reasoning commits and keeps the stream alive (#1642)', () => {
   let skew = 0;
   const realNow = Date.now.bind(Date);
-  const auth = () => ({ Authorization: `Bearer ${getUnifiedApiKey()}`, 'anthropic-version': '2023-06-01' });
+  const auth = () => ({ Authorization: `Bearer ${regenerateUnifiedKey()}`, 'anthropic-version': '2023-06-01' });
   const req = { model: 'auto', max_tokens: 100, stream: true, messages: [{ role: 'user', content: 'hi' }] };
 
   /** Reasoning that outlasts the hold window, then optionally an answer. */

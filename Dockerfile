@@ -41,6 +41,12 @@ RUN apt-get update \
 ENV NODE_ENV=production
 ENV PORT=3001
 ENV FREELLMAPI_INSTALL_METHOD=docker
+# The server defaults to loopback-only (HOST=127.0.0.1), but Docker forwards
+# published ports to the container IP, not its loopback — a loopback-only bind
+# inside the container would refuse every forwarded connection. Bind all
+# interfaces here; exposure is still governed by the publish interface
+# (docker-compose.yml publishes on 127.0.0.1 by default via HOST_BIND).
+ENV HOST=::
 
 COPY --from=build --chown=node:node /app/package.json /app/package-lock.json ./
 COPY --from=build --chown=node:node /app/node_modules ./node_modules

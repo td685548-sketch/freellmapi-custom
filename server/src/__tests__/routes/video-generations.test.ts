@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
 
 const realFetch = globalThis.fetch;
@@ -14,7 +14,7 @@ async function post(app: Express, body: unknown, authenticated = true) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(authenticated ? { Authorization: `Bearer ${getUnifiedApiKey()}` } : {}),
+      ...(authenticated ? { Authorization: `Bearer ${regenerateUnifiedKey()}` } : {}),
     },
     body: JSON.stringify(body),
   });

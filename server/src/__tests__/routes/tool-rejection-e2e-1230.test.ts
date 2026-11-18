@@ -3,7 +3,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { setRoutingStrategy, setExploreEnabled } from '../../services/router.js';
 import { resetToolCapability } from '../../lib/tool-capability.js';
 import { clearCooldownsForKey } from '../../services/ratelimit.js';
@@ -78,7 +78,7 @@ describe('a relay that rejects tool calls stops costing every tool request a hop
       model: 'auto',
       messages: [{ role: 'user', content: `question ${++turn}: what time is it?` }],
       ...(withTools ? { tools: TOOLS } : {}),
-    }, getUnifiedApiKey());
+    }, regenerateUnifiedKey());
   };
 
   beforeEach(async () => {

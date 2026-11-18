@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { addToActiveChain } from '../helpers/chain.js';
 import { encrypt } from '../../lib/crypto.js';
 import { setUnifyEnabled, setUnifyOverrides } from '../../services/model-groups.js';
@@ -49,7 +49,7 @@ async function send(app: Express, method: string, path: string, body?: any, extr
 }
 
 function anthropicHeaders() {
-  return { 'x-api-key': getUnifiedApiKey(), 'anthropic-version': '2023-06-01' };
+  return { 'x-api-key': regenerateUnifiedKey(), 'anthropic-version': '2023-06-01' };
 }
 
 /** Parse an SSE body into ordered {event, data} pairs. */
@@ -567,7 +567,7 @@ describe('Anthropic-compatible /v1/messages', () => {
   });
 
   it('GET /v1/models falls through to the OpenAI shape without anthropic-version', async () => {
-    const { status, body } = await send(app, 'GET', '/v1/models', undefined, { Authorization: `Bearer ${getUnifiedApiKey()}` });
+    const { status, body } = await send(app, 'GET', '/v1/models', undefined, { Authorization: `Bearer ${regenerateUnifiedKey()}` });
     expect(status).toBe(200);
     expect(body.object).toBe('list'); // OpenAI envelope, served by proxyRouter
     expect(body.data[0].id).toBe('auto');

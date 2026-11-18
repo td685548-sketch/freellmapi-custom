@@ -256,16 +256,116 @@ export function isKeyStoreDecryptable(): boolean | null {
   return keyStoreDecryptable;
 }
 
-export function getUnifiedApiKey(): string {
+/**
+ * Unified API key storage (hash-only).
+ *
+ * The unified key is the single credential that opens the whole /v1 surface,
+ * so it must never sit in the database as recoverable plaintext the way it
+ * used to (settings key `unified_api_key`). Like client-profile and user keys,
+ * only its SHA-256 digest is stored now, under `unified_api_key_hash`, plus a
+ * non-secret prefix (`unified_api_key_prefix`, e.g. `freellmapi-…ab12`) for
+ * masked display in the dashboard. The plaintext exists only in the return
+ * value of regenerateUnifiedKey() — shown once, then it is the operator's to
+ * keep. There is deliberately no getter that returns the current key: nothing
+ * in the server can recover it from the database, including the Keys page.
+ *
+ * Migration 20261118_210000_custom_unified_key_hash converts existing
+ * installs: it hashes the legacy plaintext row in place and deletes it.
+ * Databases that predate the migration (dev mode, which does not run
+ * migrations) keep working through the legacy fallback in
+ * validateUnifiedApiKey() until the migration runs.
+ */
+export const UNIFIED_KEY_HASH_SETTING = 'unified_api_key_hash';
+export const UNIFIED_KEY_PREFIX_SETTING = 'unified_api_key_prefix';
+export const LEGACY_UNIFIED_KEY_SETTING = 'unified_api_key';
+
+/** SHA-256 digest of a unified key, hex-encoded — the only form stored. */
+export function hashUnifiedApiKey(key: string): string {
+  return crypto.createHash('sha256').update(key).digest('hex');
+}
+
+/** Non-secret display prefix, e.g. `freellmapi-…ab12`. Safe to log and show. */
+export function unifiedKeyPrefix(key: string): string {
+  return key.length > 15 ? `${key.slice(0, 11)}…${key.slice(-4)}` : `${key.slice(0, 4)}…`;
+}
+
+/** Constant-time comparison of two strings via fixed-length HMAC digests,
+ *  mirroring timingSafeStringEqual in lib/system-prompt.ts without importing
+ *  it (that module imports this one). */
+function timingSafeEqualStrings(a: string, b: string): boolean {
+  const key = Buffer.alloc(32);
+  const digestA = crypto.createHmac('sha256', key).update(a).digest();
+  const digestB = crypto.createHmac('sha256', key).update(b).digest();
+  return crypto.timingSafeEqual(digestA, digestB);
+}
+
+/**
+ * Process-ephemeral credential for the server's own loopback calls. The
+ * unified key used to be readable so in-process callers (customer-AI hub,
+ * guest trials, MCP loopback, prompt evals, the orchestrator's synthetic
+ * requests) could present it as a Bearer <redacted> With hash-only storage that is
+ * impossible, so these callers use a random token that exists only in this
+ * process's memory: it is generated lazily, never persisted, never logged,
+ * never returned by any API, and dies with the process. validateUnifiedApiKey
+ * accepts it as the unified kind, exactly like the operator's key.
+ */
+let internalLoopbackToken: string | null = null;
+
+export function getInternalLoopbackToken(): string {
+  if (!internalLoopbackToken) {
+    internalLoopbackToken = `freellmapi-internal-${crypto.randomBytes(24).toString('hex')}`;
+  }
+  return internalLoopbackToken;
+}
+
+/** For tests only: drop the cached in-process token so a fresh one is minted. */
+export function resetInternalLoopbackTokenForTests(): void {
+  internalLoopbackToken = null;
+}
+
+/** The stored SHA-256 digest of the unified key, or null when no key exists. */
+export function getUnifiedApiKeyHash(): string | null {
   const db = getDb();
-  const row = db.prepare("SELECT value FROM settings WHERE key = 'unified_api_key'").get() as { value: string };
-  return row.value;
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(UNIFIED_KEY_HASH_SETTING) as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+/** The stored display prefix of the unified key, or null when no key exists. */
+export function getUnifiedApiKeyPrefix(): string | null {
+  const db = getDb();
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(UNIFIED_KEY_PREFIX_SETTING) as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+/**
+ * Whether `token` is the current unified key. Compares SHA-256 digests so the
+ * plaintext never has to be recovered. Also accepts the process-ephemeral
+ * internal loopback token, and — transitionally — a legacy plaintext row in
+ * databases the hash migration has not run on yet (dev mode); that row is
+ * deleted by regenerateUnifiedKey() and by the migration.
+ */
+export function validateUnifiedApiKey(token: string | undefined): boolean {
+  if (!token) return false;
+  if (internalLoopbackToken && timingSafeEqualStrings(token, internalLoopbackToken)) return true;
+  const hash = getUnifiedApiKeyHash();
+  if (hash) return timingSafeEqualStrings(hashUnifiedApiKey(token), hash);
+  const db = getDb();
+  const legacy = db.prepare('SELECT value FROM settings WHERE key = ?').get(LEGACY_UNIFIED_KEY_SETTING) as { value: string } | undefined;
+  if (legacy?.value) return timingSafeEqualStrings(token, legacy.value);
+  return false;
 }
 
 export function regenerateUnifiedKey(): string {
   const db = getDb();
   const key = `freellmapi-${crypto.randomBytes(24).toString('hex')}`;
-  db.prepare("UPDATE settings SET value = ? WHERE key = 'unified_api_key'").run(key);
+  const upsert = db.prepare(`
+    INSERT INTO settings (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `);
+  upsert.run(UNIFIED_KEY_HASH_SETTING, hashUnifiedApiKey(key));
+  upsert.run(UNIFIED_KEY_PREFIX_SETTING, unifiedKeyPrefix(key));
+  // Any legacy plaintext row is gone for good once a new key is minted.
+  db.prepare('DELETE FROM settings WHERE key = ?').run(LEGACY_UNIFIED_KEY_SETTING);
   return key;
 }
 

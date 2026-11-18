@@ -9,7 +9,7 @@ import {
   type SupportSetupTone,
   type SupportSystemSettingId,
 } from '@freellmapi/shared/support-setup-copilot.js';
-import { getDb, getUnifiedApiKey } from '../../db/index.js';
+import { getDb, getInternalLoopbackToken } from '../../db/index.js';
 import { decrypt } from '../../lib/crypto.js';
 import type { SessionUser } from '../../services/auth.js';
 import { getRecordedServerAddress } from '../ai-platform/orchestrator/engine.js';
@@ -617,9 +617,9 @@ function safeGetRecordedPort(): number {
   }
 }
 
-function safeGetUnifiedApiKey(): string {
+function safeGetInternalLoopbackToken(): string {
   try {
-    return getUnifiedApiKey();
+    return getInternalLoopbackToken();
   } catch {
     return '';
   }
@@ -898,7 +898,7 @@ export async function runHumanLikeLlmCoach(
   }
 
   const doFetch = params.fetchImpl ?? globalThis.fetch;
-  const unifiedKey = safeGetUnifiedApiKey();
+  const unifiedKey = safeGetInternalLoopbackToken();
   const baseHeaders: Record<string, string> = {
     'content-type': 'application/json',
     'user-agent': 'freellm-support-setup-copilot',

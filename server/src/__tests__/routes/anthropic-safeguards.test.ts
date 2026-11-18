@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { extractAnthropicCompat } from '../../routes/anthropic.js';
 import { mintDashboardToken } from '../helpers/auth.js';
 
@@ -36,7 +36,7 @@ async function request(app: Express, path: string, body: any, extraHeaders: Reco
 }
 
 function anthropicHeaders(extra: Record<string, string> = {}) {
-  return { 'x-api-key': getUnifiedApiKey(), 'anthropic-version': '2023-06-01', ...extra };
+  return { 'x-api-key': regenerateUnifiedKey(), 'anthropic-version': '2023-06-01', ...extra };
 }
 
 /** Parse an SSE body into ordered {event, data} pairs. */
