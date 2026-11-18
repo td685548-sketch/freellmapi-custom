@@ -1,5 +1,6 @@
 import { getDb } from '../../db/index.js';
 import { sanitizeProviderErrorMessage } from '../../lib/error-redaction.js';
+import { rememberUnavailableOpenCodeModel } from './opencode-unavailable.js';
 import {
   clearAccountCooldown,
   getAccountCooldown,
@@ -15,6 +16,7 @@ export const BACKOFF_MAX_LEVEL = 15;
 export const MAX_RATE_LIMIT_COOLDOWN_MS = 30 * 60_000;
 
 export type RouteErrorReason =
+  | 'model_unavailable'
   | 'rate_limit'
   | 'auth_or_config'
   | 'auth_or_not_found'
@@ -85,6 +87,11 @@ export function classifyRouteError(err: unknown): RouteErrorClassification {
   const status = extractErrorStatus(err);
   const message = err instanceof Error ? err.message : String(err ?? '');
 
+  if (status === 400 && /^OpenCode Free API error 400:/i.test(message)
+    && /\bmodel is unavailable\b/i.test(message)) {
+    return { shouldFallback: true, requestScoped: false, cooldownMs: TRANSIENT_COOLDOWN_MS, useBackoff: false, status, reason: 'model_unavailable' };
+  }
+
   if (RATE_LIMIT_RE.test(message)) {
     return { shouldFallback: true, requestScoped: false, cooldownMs: 0, useBackoff: true, status, reason: 'rate_limit' };
   }
@@ -127,6 +134,9 @@ export function recordCandidateFailure(
   err: unknown,
 ): RouteErrorClassification {
   const classification = classifyRouteError(err);
+  if (classification.reason === 'model_unavailable') {
+    try { rememberUnavailableOpenCodeModel(accountId, modelId); } catch { /* Keep the in-memory cooldown on storage failure. */ }
+  }
   if (classification.requestScoped) {
     return classification;
   }

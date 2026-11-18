@@ -6,6 +6,7 @@ import { requirePermission } from '../../middleware/requirePermission.js';
 import { clearCooldownsForKey } from '../../services/ratelimit.js';
 import { isQuotaWindowFresh } from '../x-gateway/quota/store.js';
 import type { XQuotaWindow } from '@freellmapi/shared/x-quota.js';
+import { clearUnavailableOpenCodeModels, listUnavailableOpenCodeModels } from '../x-gateway/opencode-unavailable.js';
 import { accountRow, resolveXGatewayAccountProxy, setAccountStatus } from './store.js';
 import { resolveAccountProvider } from './execution.js';
 import { resolveAccountCredential } from './oauth-lifecycle.js';
@@ -104,6 +105,13 @@ export function listCooldownEntries(): Array<{
       lastError: entry.lastError,
     });
   }
+  for (const entry of listUnavailableOpenCodeModels()) {
+    const existing = res.findIndex(e => e.accountId === entry.accountId && e.modelId === entry.modelId);
+    if (existing !== -1) res.splice(existing, 1);
+    const until = '9999-12-31T23:59:59.999Z';
+    res.push({ accountId: entry.accountId, modelId: entry.modelId, until,
+      remainingMs: Date.parse(until) - now, lastError: 'OpenCode model is unavailable; clear cooldown to retry.' });
+  }
   return res;
 }
 
@@ -133,8 +141,9 @@ export function getAccountCooldown(accountId: number, modelId?: string): {
 }
 
 /** Clears one model's cooldown when `modelId` is given, otherwise all of the account's. */
-export function clearAccountCooldown(accountId: number, modelId?: string): void {
+export function clearAccountCooldown(accountId: number, modelId?: string, forcePersistent = false): void {
   syncCooldownDb();
+  clearUnavailableOpenCodeModels(accountId, modelId, forcePersistent);
   if (modelId !== undefined) {
     cooldownMap.delete(cooldownKey(accountId, modelId));
     return;
@@ -501,10 +510,10 @@ export function clearCooldowns(filter: ClearCooldownFilter = {}): { accounts: nu
   for (const id of ids) {
     if (filter.model) {
       // An account-wide cooldown also blocks this model, so it is cleared with it.
-      clearAccountCooldown(id, filter.model);
+      clearAccountCooldown(id, filter.model, true);
       clearAccountCooldown(id, '');
     } else {
-      clearAccountCooldown(id);
+      clearAccountCooldown(id, undefined, true);
     }
     try { clearCooldownsForKey(id); } catch { /* DB-backed cooldown table is best effort */ }
 
