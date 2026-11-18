@@ -92,12 +92,14 @@ When asked to implement a new feature:
 
 To keep the `main` branch stable, ensure clean CI validation, and preserve full traceability:
 
-### Rule 1: One Dedicated Branch per Feature or Fix
-**Never commit or push features or fixes directly to `main`. Every new feature, bug fix, or independent maintenance task gets its own branch from the latest `origin/main`.** This applies to 9Router integration too; there is no shared integration-branch exception.
+### Rule 1: One Dedicated Branch/Worktree per Feature or Fix (Protect Root `main`)
+**Never commit or push features or fixes directly to `main`. Every new feature, bug fix, or independent maintenance task gets its own dedicated branch from the latest `origin/main` inside an isolated Git worktree.** This applies to 9Router integration too; there is no shared integration-branch exception.
+
+Because the primary root checkout (`D:\FreeLLMAPI`) serves as the **Live Local Production Server**, **NEVER switch the root checkout away from `main`**. Always create an isolated worktree for feature or fix branches:
 
 ```powershell
 git fetch origin
-git switch -c <type>/<short-description> origin/main
+git worktree add .worktrees/<short-slug> -b <type>/<short-description> origin/main
 # Examples: feat/support-service-desk, fix/kiro-client-version, chore/branch-policy
 # Codex-created branches use the codex/ prefix by default.
 ```
@@ -124,12 +126,20 @@ git push -u origin <branch-name>
 gh pr create --base main --head <branch-name> --title "<type>(<scope>): <summary>" --body "<description of changes>"
 ```
 
-### Rule 4: Merge PR and Sync Local Main
-Merge the Pull Request into `main` and sync your local repository:
+### Rule 4: Merge PR, Enforce Strict 1:1 Local `main` Parity & Deploy
+**Whatever is on GitHub `main` (`origin/main`) MUST be 100% identical on local `main` at all times so local production deployments stay clean and reliable:**
+- Local `main` in the root workspace (`D:\FreeLLMAPI`) must always match `origin/main` commit-for-commit (`HEAD == origin/main`) with a completely clean tracked working tree.
+- Never leave local-only commits, uncommitted tracked edits, stashes, or merge conflicts on local `main`.
+- Immediately after merging a Pull Request into `main` on GitHub, synchronize local `main` to match `origin/main` identically, rebuild/redeploy the local server, and clean up the feature worktree:
 ```powershell
 gh pr merge <pr-number-or-branch> --merge
-git checkout main
-git pull origin main
+git -C D:\FreeLLMAPI fetch origin
+git -C D:\FreeLLMAPI checkout main
+git -C D:\FreeLLMAPI reset --hard origin/main
+# Rebuild production bundle & reload local server (runs backup + npm run build + PM2 reload):
+flm deploy
+# Remove completed worktree if applicable:
+git worktree remove .worktrees/<short-slug>
 ```
 
 ---
