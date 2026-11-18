@@ -111,6 +111,7 @@ import * as customLearnedCapsModelsDev from '../migrations/20261118_120000_custo
 import * as customAccountWeightsCircuit from '../migrations/20261118_130000_custom_account_weights_circuit.js';
 import * as customPromptEvalCanary from '../migrations/20261118_140000_custom_prompt_eval_canary.js';
 import * as customTracingMcpOauthScheduler from '../migrations/20261118_150000_custom_tracing_mcp_oauth_scheduler.js';
+import * as customNotificationsAndTelegram from '../migrations/20261118_160000_custom_notifications_and_telegram.js';
 
 export interface MigrationModule {
   up(db: Db): void;
@@ -314,4 +315,5 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: '20261118_130000_custom_account_weights_circuit.ts', module: customAccountWeightsCircuit },
   { filename: '20261118_140000_custom_prompt_eval_canary.ts', module: customPromptEvalCanary },
   { filename: '20261118_150000_custom_tracing_mcp_oauth_scheduler.ts', module: customTracingMcpOauthScheduler },
+  { filename: '20261118_160000_custom_notifications_and_telegram.ts', module: customNotificationsAndTelegram },
 ];

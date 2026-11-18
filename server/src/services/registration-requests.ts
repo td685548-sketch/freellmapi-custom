@@ -3,6 +3,8 @@ import { hashPassword, verifyPassword } from '../lib/password.js';
 import { mintUserApiKey } from './user-keys.js';
 import { applyStarterQuotaToNewMember } from './starter-quota.js';
 import { notifyAdminNewRegistration, notifyUserRegistrationApproved } from './notification-mailer.js';
+import { createUserNotification } from './in-app-notifications.js';
+import { notifyNewRegistrationChannels } from '../custom/notifications/telegram-bot.js';
 import type { RegistrationRequest } from '@freellmapi/shared/user-access.js';
 
 function normalizeEmail(email: string): string {
@@ -61,6 +63,14 @@ export function createRegistrationRequest(
       WHERE id = ?
     `).run(hashed, note?.trim() || null, existingReq.id);
 
+    notifyAdminNewRegistration(normalized, note ?? null).catch(() => {});
+    notifyNewRegistrationChannels({
+      requestId: existingReq.id,
+      email: normalized,
+      note: note?.trim() || null,
+      resubmitted: true,
+    });
+
     return {
       id: existingReq.id,
       email: normalized,
@@ -76,11 +86,19 @@ export function createRegistrationRequest(
     VALUES (?, ?, ?, 'pending')
   `).run(normalized, hashed, note?.trim() || null);
 
+  const requestId = Number(result.lastInsertRowid);
+
   // Send admin notification asynchronously (non-blocking)
   notifyAdminNewRegistration(normalized, note ?? null).catch(() => {});
+  notifyNewRegistrationChannels({
+    requestId,
+    email: normalized,
+    note: note?.trim() || null,
+    resubmitted: false,
+  });
 
   return {
-    id: Number(result.lastInsertRowid),
+    id: requestId,
     email: normalized,
     status: 'pending',
     createdAt: new Date().toISOString(),
@@ -158,6 +176,15 @@ export function approveRegistrationRequest(
 
   // Send approval email notification asynchronously (non-blocking)
   notifyUserRegistrationApproved(req.email).catch(() => {});
+  createUserNotification({
+    userId,
+    category: 'registration',
+    severity: 'info',
+    title: 'Welcome to FreeLLMAPI',
+    body: 'Your account has been approved! Open Keys to view your personal API key and starter quota.',
+    actionUrl: '/keys',
+    dedupeKey: `welcome_approved:${userId}`,
+  });
 
   return { userId, email: req.email, role: 'member' };
 }

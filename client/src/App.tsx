@@ -33,6 +33,7 @@ import { toast } from '@/lib/toast'
 import { ThemeProvider } from '@/theme'
 import { useAdministrativeAccess } from '@/custom/use-administrative-access'
 import { UsersNavBadge } from '@/custom/UsersNavBadge'
+import { NotificationBell } from '@/custom/NotificationBell'
 import NotFoundPage from '@/pages/NotFoundPage'
 // Every routed page is downloaded on first use; see custom/route-splitting.
 import {
@@ -368,6 +369,7 @@ export function Navbar() {
               <Search className="size-3.5" />
               <kbd className="text-[10px] text-muted-foreground">{isMac ? '⌘K' : 'Ctrl K'}</kbd>
             </button>
+            <NotificationBell />
             <DropdownMenu>
               <DropdownMenuTrigger
                 className={buttonVariants({ variant: 'ghost', size: 'icon' })}
@@ -395,7 +397,8 @@ export function Navbar() {
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
-          <div className="ms-auto md:hidden">
+          <div className="ms-auto flex items-center gap-1 md:hidden">
+            <NotificationBell />
             <DropdownMenu>
               <DropdownMenuTrigger
                 className={buttonVariants({ variant: 'ghost', size: 'icon' })}

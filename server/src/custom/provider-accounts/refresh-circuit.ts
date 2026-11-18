@@ -9,6 +9,10 @@ import {
   defaultAccountResiliencePolicy,
   getAccountResiliencePolicy,
 } from './weights.js';
+import {
+  clearProviderAccountIssueDedupe,
+  notifyProviderAccountIssue,
+} from '../notifications/telegram-bot.js';
 
 export const REFRESH_CIRCUIT_BASE_MS = 60_000;
 export const REFRESH_CIRCUIT_MAX_MS = 4 * 60 * 60_000;
@@ -156,6 +160,14 @@ export function recordRefreshCircuitFailure(
         safeError,
         nowIso,
       );
+    if (nextFailures === 1 || nextFailures % 3 === 0) {
+      notifyProviderAccountIssue({
+        accountId,
+        reason: safeError || 'OAuth token refresh failed and entered circuit backoff.',
+        isRefreshCircuit: true,
+        nowMs,
+      });
+    }
     return getAccountResiliencePolicy(accountId);
   } catch {
     return {
@@ -188,5 +200,6 @@ export function clearRefreshCircuit(accountId: number): AccountResiliencePolicy 
   } catch {
     // Best effort if DB is not initialized or row does not exist yet.
   }
+  clearProviderAccountIssueDedupe(accountId);
   return getAccountResiliencePolicy(accountId);
 }
