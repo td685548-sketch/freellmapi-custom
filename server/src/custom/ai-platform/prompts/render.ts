@@ -9,7 +9,11 @@ import { getDb } from '../../../db/index.js';
 import { getClientContext } from '../../../lib/client-context.js';
 import type { GateProfile } from '../../../services/profile-usage.js';
 import { isPillarEnabled } from '../flags.js';
-import { getPublishedPrompt } from './store.js';
+import {
+  getPublishedPrompt,
+  resolveActivePromptVariant,
+  type ActivePromptVariant,
+} from './store.js';
 import { renderWith, sanitizeVariableValue } from './template.js';
 
 export interface PromptRequestContext {
@@ -19,12 +23,23 @@ export interface PromptRequestContext {
   endUserName: string;
   language: string;
   callerVars: Record<string, string>;
+  selectedPrompt: ActivePromptVariant | null;
 }
 
 const requestPromptContexts = new WeakMap<object, PromptRequestContext>();
 
 function firstHeaderValue(raw: string | string[] | undefined): string | undefined {
   return Array.isArray(raw) ? raw[0] : raw;
+}
+
+function extractAbStickySeed(req: Request, endUser: string | null): string | null {
+  const conv =
+    firstHeaderValue(req.headers['x-freellm-conversation-id']) ??
+    firstHeaderValue(req.headers['x-conversation-id']) ??
+    firstHeaderValue(req.headers['x-session-id']);
+  if (typeof conv === 'string' && conv.trim().length > 0) return conv.trim();
+  if (typeof endUser === 'string' && endUser.trim().length > 0) return endUser.trim();
+  return null;
 }
 
 function lookupProfileName(profileId: number): string {
@@ -116,6 +131,16 @@ export function capturePromptRequestContext(
       : lookupProfileName(profile.id);
   const resolvedEndUser = endUser ?? ctx.endUser ?? null;
 
+  let selectedPrompt: ActivePromptVariant | null = null;
+  try {
+    selectedPrompt = resolveActivePromptVariant(
+      { kind: 'profile', id: String(profile.id) },
+      extractAbStickySeed(req, resolvedEndUser),
+    );
+  } catch {
+    selectedPrompt = null;
+  }
+
   requestPromptContexts.set(ctx, {
     profileId: profile.id,
     profileName,
@@ -123,20 +148,41 @@ export function capturePromptRequestContext(
     endUserName: extractEndUserName(req),
     language: extractCallerLanguage(req),
     callerVars: parseCallerVarsHeader(req.headers['x-freellm-vars']),
+    selectedPrompt,
   });
 }
 
 /**
+ * Returns a concise header descriptor (`v<version>:<variant>`) for the active request's prompt variant.
+ */
+export function getCapturedPromptHeader(): string | null {
+  try {
+    const sel = requestPromptContexts.get(getClientContext())?.selectedPrompt;
+    if (!sel) return null;
+    return `v${sel.version}:${sel.variant}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Renders a profile system prompt template for the current request context.
- * Returns `template` by exact reference when nullish, without `{{`, or when `prompts` pillar is off.
+ * Applies A/B draft variant overrides captured in Slot 5 when configured.
+ * Returns `template` by exact reference when nullish, without `{{` (and not A/B-overridden), or when `prompts` pillar is off.
  */
 export function renderPrompt(template: string | null | undefined): string | null | undefined {
-  if (template == null || !template.includes('{{')) return template;
   if (!isPillarEnabled('prompts')) return template;
 
   try {
     const clientCtx = getClientContext();
     const captured = requestPromptContexts.get(clientCtx);
+    const abVariant = captured?.selectedPrompt ?? null;
+    const effectiveTemplate = abVariant?.variant === 'draft' ? abVariant.body : template;
+
+    if (effectiveTemplate == null || !effectiveTemplate.includes('{{')) {
+      return effectiveTemplate;
+    }
+
     const profileId = captured?.profileId ?? clientCtx.profileId;
     const profileName =
       captured?.profileName ?? (profileId !== undefined ? lookupProfileName(profileId) : '');
@@ -146,8 +192,8 @@ export function renderPrompt(template: string | null | undefined): string | null
     const language = captured?.language ?? '';
     const callerVars = captured?.callerVars ?? {};
 
-    let declared: PromptVariable[] = [];
-    if (profileId !== undefined) {
+    let declared: PromptVariable[] = abVariant?.variables ?? [];
+    if (!abVariant && profileId !== undefined) {
       try {
         declared = getPublishedPrompt({ kind: 'profile', id: String(profileId) })?.variables ?? [];
       } catch {
@@ -172,7 +218,7 @@ export function renderPrompt(template: string | null | undefined): string | null
       }
     }
 
-    return renderWith(template, values, declared).rendered;
+    return renderWith(effectiveTemplate, values, declared).rendered;
   } catch (err) {
     console.warn('[prompts] renderPrompt failed:', err instanceof Error ? err.message : err);
     return template;
@@ -187,17 +233,24 @@ export function renderTenantSystemPrompt(
   userContext: { userId: string; name?: string; role?: string },
 ): string {
   const template = tenant.systemPrompt;
-  if (!template || !template.includes('{{')) return template ?? '';
-  if (!isPillarEnabled('prompts')) return template;
+  if (!isPillarEnabled('prompts')) return template ?? '';
 
   try {
-    let declared: PromptVariable[] = [];
+    let selected: ActivePromptVariant | null = null;
     try {
-      declared =
-        getPublishedPrompt({ kind: 'support_tenant', id: String(tenant.id) })?.variables ?? [];
+      selected = resolveActivePromptVariant(
+        { kind: 'support_tenant', id: String(tenant.id) },
+        userContext.userId || null,
+      );
     } catch {
-      declared = [];
+      selected = null;
     }
+
+    const activeTemplate = selected?.variant === 'draft' ? selected.body : template;
+    if (!activeTemplate) return '';
+    if (!activeTemplate.includes('{{')) return activeTemplate;
+
+    const declared: PromptVariable[] = selected?.variables ?? [];
 
     const values: Record<string, string> = {
       date: new Date().toISOString().slice(0, 10),
@@ -214,12 +267,12 @@ export function renderTenantSystemPrompt(
       typeof userContext.name === 'string' ? sanitizeVariableValue(userContext.name.trim()) : '';
     if (userName) values.end_user_name = userName;
 
-    return renderWith(template, values, declared).rendered;
+    return renderWith(activeTemplate, values, declared).rendered;
   } catch (err) {
     console.warn(
       '[prompts] renderTenantSystemPrompt failed:',
       err instanceof Error ? err.message : err,
     );
-    return template;
+    return template ?? '';
   }
 }

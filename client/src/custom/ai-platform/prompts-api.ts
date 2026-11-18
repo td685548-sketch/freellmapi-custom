@@ -14,10 +14,18 @@ import {
   PROMPT_VAR_NAME_REGEX,
   SYSTEM_PROMPT_VARIABLES,
   SYSTEM_PROMPT_VARIABLE_NAMES,
+  type PromptAbUpdateRequest,
   type PromptDiffLine,
   type PromptDiffResponse,
   type PromptDiffStats,
   type PromptDraftInput,
+  type PromptEvalCase,
+  type PromptEvalCaseComparison,
+  type PromptEvalCaseInput,
+  type PromptEvalRun,
+  type PromptEvalVariantMetrics,
+  type PromptEvalVariantOutcome,
+  type PromptEvaluateRequest,
   type PromptHead,
   type PromptPreviewRequest,
   type PromptPreviewResponse,
@@ -36,10 +44,18 @@ import {
 } from '../../../../shared/ai-platform-prompts';
 
 export type {
+  PromptAbUpdateRequest,
   PromptDiffLine,
   PromptDiffResponse,
   PromptDiffStats,
   PromptDraftInput,
+  PromptEvalCase,
+  PromptEvalCaseComparison,
+  PromptEvalCaseInput,
+  PromptEvalRun,
+  PromptEvalVariantMetrics,
+  PromptEvalVariantOutcome,
+  PromptEvaluateRequest,
   PromptHead,
   PromptPreviewRequest,
   PromptPreviewResponse,
@@ -482,4 +498,96 @@ export async function fetchPromptSupportTenantOptions(
     id: String(t.id),
     name: t.name ?? t.slug ?? String(t.id),
   }));
+}
+
+export async function updatePromptAbSplit(
+  scope: Scope,
+  input: PromptAbUpdateRequest,
+  signal?: AbortSignal,
+): Promise<{ head: PromptHead }> {
+  return promptsFetch<{ head: PromptHead }>(`/api/ai-platform/prompts/${scopeToPath(scope)}/ab`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+    signal,
+  });
+}
+
+export async function fetchPromptEvalCases(
+  scope: Scope,
+  signal?: AbortSignal,
+): Promise<{ cases: PromptEvalCase[] }> {
+  return promptsFetch<{ cases: PromptEvalCase[] }>(
+    `/api/ai-platform/prompts/${scopeToPath(scope)}/eval-cases`,
+    { signal },
+  );
+}
+
+export async function createPromptEvalCase(
+  scope: Scope,
+  input: PromptEvalCaseInput,
+  signal?: AbortSignal,
+): Promise<{ case: PromptEvalCase }> {
+  return promptsFetch<{ case: PromptEvalCase }>(
+    `/api/ai-platform/prompts/${scopeToPath(scope)}/eval-cases`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+      signal,
+    },
+  );
+}
+
+export async function updatePromptEvalCase(
+  scope: Scope,
+  caseId: number,
+  input: Partial<PromptEvalCaseInput>,
+  signal?: AbortSignal,
+): Promise<{ case: PromptEvalCase }> {
+  return promptsFetch<{ case: PromptEvalCase }>(
+    `/api/ai-platform/prompts/${scopeToPath(scope)}/eval-cases/${encodeURIComponent(String(caseId))}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify(input),
+      signal,
+    },
+  );
+}
+
+export async function deletePromptEvalCase(
+  scope: Scope,
+  caseId: number,
+  signal?: AbortSignal,
+): Promise<{ deleted: boolean }> {
+  return promptsFetch<{ deleted: boolean }>(
+    `/api/ai-platform/prompts/${scopeToPath(scope)}/eval-cases/${encodeURIComponent(String(caseId))}`,
+    {
+      method: 'DELETE',
+      signal,
+    },
+  );
+}
+
+export async function fetchPromptEvalRuns(
+  scope: Scope,
+  signal?: AbortSignal,
+): Promise<{ runs: PromptEvalRun[] }> {
+  return promptsFetch<{ runs: PromptEvalRun[] }>(
+    `/api/ai-platform/prompts/${scopeToPath(scope)}/eval-runs`,
+    { signal },
+  );
+}
+
+export async function runPromptEvaluationApi(
+  scope: Scope,
+  input: PromptEvaluateRequest,
+  signal?: AbortSignal,
+): Promise<{ run: PromptEvalRun }> {
+  return promptsFetch<{ run: PromptEvalRun }>(
+    `/api/ai-platform/prompts/${scopeToPath(scope)}/evaluate`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+      signal,
+    },
+  );
 }

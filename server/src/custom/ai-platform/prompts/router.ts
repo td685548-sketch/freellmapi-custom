@@ -15,6 +15,15 @@ import { isPillarEnabled } from '../flags.js';
 import { GatewayCallError, callGateway } from '../loopback.js';
 import { parseScopeParam } from '../scope.js';
 import {
+  createEvalCase,
+  deleteEvalCase,
+  listEvalCases,
+  listEvalRuns,
+  runPromptEvaluation,
+  updateEvalCase,
+  type EvalCallResult,
+} from './eval.js';
+import {
   PromptNotFoundError,
   PromptStoreError,
   PromptValidationError,
@@ -26,6 +35,7 @@ import {
   publish,
   restore,
   saveDraft,
+  setPromptAbSplit,
 } from './store.js';
 import { renderWith, sanitizeVariableValue, validateTemplate } from './template.js';
 
@@ -341,6 +351,97 @@ const restoreBodySchema = z
   })
   .strict();
 
+const abBodySchema = z
+  .object({
+    abDraftWeightPct: z.number().int().min(0).max(100),
+    revision: z.number().int().min(0),
+  })
+  .strict();
+
+const evalCaseBodySchema = z
+  .object({
+    name: z.string().trim().min(1).max(120),
+    userMessage: z.string().trim().min(1).max(PROMPT_LIMITS.maxTryMessageChars),
+    variables: z.record(z.string(), z.string()).optional(),
+    mustContain: z.array(z.string()).max(20).optional(),
+    mustNotContain: z.array(z.string()).max(20).optional(),
+    expectedRegex: z.string().max(PROMPT_LIMITS.maxEvalRegexChars).nullable().optional(),
+    judgeRubric: z.string().max(PROMPT_LIMITS.maxEvalRubricChars).nullable().optional(),
+    enabled: z.boolean().optional(),
+  })
+  .strict();
+
+const evalCaseUpdateSchema = evalCaseBodySchema.partial().strict();
+
+const evaluateBodySchema = z
+  .object({
+    model: z.string().trim().min(1).max(200).optional(),
+    useJudge: z.boolean().optional(),
+    caseIds: z.array(z.number().int().positive()).max(PROMPT_LIMITS.maxEvalCasesPerRun).optional(),
+    candidateBody: z.string().max(PROMPT_LIMITS.maxBodyChars).optional(),
+    candidateVariables: z.array(promptVariableSchema).optional(),
+  })
+  .strict();
+
+function attachDisconnectAbort(res: Response): { signal: AbortSignal; cleanup: () => void } {
+  const ac = new AbortController();
+  const cleanup = () => {
+    res.off('close', onClose);
+    res.off('finish', cleanup);
+  };
+  const onClose = () => {
+    if (!res.writableFinished) ac.abort();
+    cleanup();
+  };
+  res.once('close', onClose);
+  res.once('finish', cleanup);
+  return { signal: ac.signal, cleanup };
+}
+
+async function callPromptModel(
+  req: Request,
+  args: {
+    messages: Array<{ role: 'system' | 'user'; content: string }>;
+    model?: string;
+    signal?: AbortSignal;
+  },
+): Promise<EvalCallResult> {
+  // Synthetic loopback request authenticated ONLY with unified key (never client profile key),
+  // so test/eval runs never touch client_profiles quotas or request/token usage tables.
+  const syntheticReq = {
+    headers: {
+      authorization: `Bearer ${getUnifiedApiKey()}`,
+    },
+    originalUrl: '/v1/chat/completions',
+    url: '/v1/chat/completions',
+    path: '/v1/chat/completions',
+    query: {},
+    body: {},
+    socket: {
+      localAddress: req.socket?.localAddress ?? '127.0.0.1',
+      localPort: req.socket?.localPort ?? 80,
+    },
+  } as unknown as Request;
+
+  const startedAt = Date.now();
+  const gwResult = await callGateway(syntheticReq, {
+    messages: args.messages,
+    model: args.model ?? 'auto',
+    skipEnrichment: false,
+    depth: 0,
+    signal: args.signal ?? new AbortController().signal,
+  });
+
+  return {
+    reply: extractReplyText(gwResult.message.content),
+    model: gwResult.servedModel,
+    promptTokens: gwResult.usage.prompt_tokens ?? 0,
+    completionTokens: gwResult.usage.completion_tokens ?? 0,
+    totalTokens: gwResult.usage.total_tokens ?? 0,
+    latencyMs: Math.max(0, Date.now() - startedAt),
+  };
+}
+
 function resolveTemplateTarget(
   scope: Scope,
   input: { version?: number; body?: string; variables?: PromptVariable[] },
@@ -493,17 +594,7 @@ promptsAdminRouter.post(
   '/prompts/:scopeKind/:scopeId/try',
   requirePerm('edit_prompts'),
   async (req, res) => {
-    const ac = new AbortController();
-    const cleanup = () => {
-      res.off('close', onClose);
-      res.off('finish', cleanup);
-    };
-    const onClose = () => {
-      if (!res.writableFinished) ac.abort();
-      cleanup();
-    };
-    res.once('close', onClose);
-    res.once('finish', cleanup);
+    const { signal, cleanup } = attachDisconnectAbort(res);
 
     try {
       const scope = parseRouteScope(req);
@@ -532,40 +623,21 @@ promptsAdminRouter.post(
             ]
           : [{ role: 'user' as const, content: parsed.data.message }];
 
-      // Synthetic loopback request authenticated ONLY with unified key (never client profile key),
-      // so test runs never touch any client_profiles quota or request/token usage tables.
-      const syntheticReq = {
-        headers: {
-          authorization: `Bearer ${getUnifiedApiKey()}`,
-        },
-        originalUrl: '/v1/chat/completions',
-        url: '/v1/chat/completions',
-        path: '/v1/chat/completions',
-        query: {},
-        body: {},
-        socket: {
-          localAddress: req.socket?.localAddress ?? '127.0.0.1',
-          localPort: req.socket?.localPort ?? 80,
-        },
-      } as unknown as Request;
-
-      const gwResult = await callGateway(syntheticReq, {
+      const callRes = await callPromptModel(req, {
         messages,
-        model: parsed.data.model ?? 'auto',
-        skipEnrichment: false,
-        depth: 0,
-        signal: ac.signal,
+        model: parsed.data.model,
+        signal,
       });
 
       const response: PromptTryResponse = {
-        reply: extractReplyText(gwResult.message.content),
+        reply: callRes.reply,
         rendered,
         missing,
-        model: gwResult.servedModel,
+        model: callRes.model,
         usage: {
-          prompt_tokens: gwResult.usage.prompt_tokens ?? 0,
-          completion_tokens: gwResult.usage.completion_tokens ?? 0,
-          total_tokens: gwResult.usage.total_tokens ?? 0,
+          prompt_tokens: callRes.promptTokens,
+          completion_tokens: callRes.completionTokens,
+          total_tokens: callRes.totalTokens,
         },
       };
       res.json(response);
@@ -619,6 +691,153 @@ promptsAdminRouter.post(
       res.json({ head });
     } catch (err) {
       sendPromptsError(res, err);
+    }
+  },
+);
+
+promptsAdminRouter.put(
+  '/prompts/:scopeKind/:scopeId/ab',
+  requirePerm('publish_prompts'),
+  (req, res) => {
+    try {
+      const scope = parseRouteScope(req);
+      const parsed = abBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        throw new RouterPromptError(
+          400,
+          'validation_error',
+          `Invalid A/B rollout payload: ${parsed.error.issues[0]?.message ?? 'validation failed'}`,
+        );
+      }
+      const head = setPromptAbSplit(scope, parsed.data.abDraftWeightPct, parsed.data.revision);
+      res.json({ head });
+    } catch (err) {
+      sendPromptsError(res, err);
+    }
+  },
+);
+
+promptsAdminRouter.get(
+  '/prompts/:scopeKind/:scopeId/eval-cases',
+  requirePerm('view_prompts'),
+  (req, res) => {
+    try {
+      const scope = parseRouteScope(req);
+      res.json({ cases: listEvalCases(scope) });
+    } catch (err) {
+      sendPromptsError(res, err);
+    }
+  },
+);
+
+promptsAdminRouter.post(
+  '/prompts/:scopeKind/:scopeId/eval-cases',
+  requirePerm('edit_prompts'),
+  async (req, res) => {
+    try {
+      const scope = parseRouteScope(req);
+      const parsed = evalCaseBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        throw new RouterPromptError(
+          400,
+          'validation_error',
+          `Invalid eval case payload: ${parsed.error.issues[0]?.message ?? 'validation failed'}`,
+        );
+      }
+      const created = await createEvalCase(scope, parsed.data);
+      res.status(201).json({ case: created });
+    } catch (err) {
+      sendPromptsError(res, err);
+    }
+  },
+);
+
+promptsAdminRouter.put(
+  '/prompts/:scopeKind/:scopeId/eval-cases/:caseId',
+  requirePerm('edit_prompts'),
+  async (req, res) => {
+    try {
+      const scope = parseRouteScope(req);
+      const caseId = parsePositiveInt(req.params.caseId, 'eval case id');
+      const parsed = evalCaseUpdateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        throw new RouterPromptError(
+          400,
+          'validation_error',
+          `Invalid eval case payload: ${parsed.error.issues[0]?.message ?? 'validation failed'}`,
+        );
+      }
+      const updated = await updateEvalCase(scope, caseId, parsed.data);
+      res.json({ case: updated });
+    } catch (err) {
+      sendPromptsError(res, err);
+    }
+  },
+);
+
+promptsAdminRouter.delete(
+  '/prompts/:scopeKind/:scopeId/eval-cases/:caseId',
+  requirePerm('edit_prompts'),
+  (req, res) => {
+    try {
+      const scope = parseRouteScope(req);
+      const caseId = parsePositiveInt(req.params.caseId, 'eval case id');
+      const deleted = deleteEvalCase(scope, caseId);
+      res.json({ deleted });
+    } catch (err) {
+      sendPromptsError(res, err);
+    }
+  },
+);
+
+promptsAdminRouter.get(
+  '/prompts/:scopeKind/:scopeId/eval-runs',
+  requirePerm('view_prompts'),
+  (req, res) => {
+    try {
+      const scope = parseRouteScope(req);
+      const limitRaw = req.query.limit;
+      const limit =
+        limitRaw !== undefined && limitRaw !== ''
+          ? parsePositiveInt(limitRaw, 'limit')
+          : undefined;
+      res.json({ runs: listEvalRuns(scope, limit) });
+    } catch (err) {
+      sendPromptsError(res, err);
+    }
+  },
+);
+
+promptsAdminRouter.post(
+  '/prompts/:scopeKind/:scopeId/evaluate',
+  requirePerm('edit_prompts'),
+  async (req, res) => {
+    const { signal, cleanup } = attachDisconnectAbort(res);
+    try {
+      const scope = parseRouteScope(req);
+      const parsed = evaluateBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        throw new RouterPromptError(
+          400,
+          'validation_error',
+          `Invalid evaluate payload: ${parsed.error.issues[0]?.message ?? 'validation failed'}`,
+        );
+      }
+      const user = getUser(req);
+      const baseValues = buildRenderValues(scope);
+      const run = await runPromptEvaluation(
+        scope,
+        parsed.data,
+        baseValues,
+        user?.userId ?? null,
+        (args) => callPromptModel(req, args),
+        signal,
+      );
+      res.json({ run });
+    } catch (err) {
+      sendPromptsError(res, err);
+    } finally {
+      cleanup();
     }
   },
 );

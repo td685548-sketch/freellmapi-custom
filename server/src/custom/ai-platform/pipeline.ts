@@ -23,7 +23,10 @@ import {
   type PassageCandidate,
   type SelectPassagesOptions,
 } from '../context-budget/gate.js';
-import { capturePromptRequestContext } from './prompts/render.js';
+import {
+  capturePromptRequestContext,
+  getCapturedPromptHeader,
+} from './prompts/render.js';
 import { getFlowBySlug, isFlowGrantedToProfile } from './orchestrator/definitions.js';
 import { executeFlowHttpRequest, extractRequestedModel, isFlowModel } from './orchestrator/engine.js';
 
@@ -189,9 +192,13 @@ export async function runPreRequest(
       }
     }
   }
-  // 5. SLOT: prompts (variable substitution)
+  // 5. SLOT: prompts (variable substitution & A/B rollout header)
   if (flags.prompts) {
     capturePromptRequestContext(req, _profile, _endUser);
+    const headerVal = getCapturedPromptHeader();
+    if (headerVal && !res.headersSent) {
+      res.setHeader('X-FreeLLM-Prompt-Version', headerVal);
+    }
   }
   // 6. SLOT: retrieval (semantic RAG injection)
   if (flags.promptCache) {

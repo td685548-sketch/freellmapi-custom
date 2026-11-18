@@ -32,9 +32,13 @@ export function aiPlatformPermission(method: string, path: string): Permission {
   if (/^\/prompts\/[^/]+\/[^/]+$/.test(sub) && read) return 'view_prompts';
   if (/^\/prompts\/[^/]+\/[^/]+\/versions\/\d+$/.test(sub) && read) return 'view_prompts';
   if (/^\/prompts\/[^/]+\/[^/]+\/diff$/.test(sub) && read) return 'view_prompts';
+  if (/^\/prompts\/[^/]+\/[^/]+\/eval-(?:cases|runs)$/.test(sub) && read) return 'view_prompts';
   if (/^\/prompts\/[^/]+\/[^/]+\/draft$/.test(sub) && (upper === 'PUT' || upper === 'DELETE')) return 'edit_prompts';
-  if (/^\/prompts\/[^/]+\/[^/]+\/(?:preview|try)$/.test(sub) && upper === 'POST') return 'edit_prompts';
+  if (/^\/prompts\/[^/]+\/[^/]+\/(?:preview|try|evaluate)$/.test(sub) && upper === 'POST') return 'edit_prompts';
+  if (/^\/prompts\/[^/]+\/[^/]+\/eval-cases$/.test(sub) && upper === 'POST') return 'edit_prompts';
+  if (/^\/prompts\/[^/]+\/[^/]+\/eval-cases\/\d+$/.test(sub) && (upper === 'PUT' || upper === 'DELETE')) return 'edit_prompts';
   if (/^\/prompts\/[^/]+\/[^/]+\/(?:publish|restore)$/.test(sub) && upper === 'POST') return 'publish_prompts';
+  if (/^\/prompts\/[^/]+\/[^/]+\/ab$/.test(sub) && upper === 'PUT') return 'publish_prompts';
 
   // Retrieval
   if (sub === '/retrieval/usage' && read) return 'view_retrieval';
