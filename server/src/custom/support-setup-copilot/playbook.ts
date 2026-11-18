@@ -32,10 +32,11 @@ import { decrypt } from '../../lib/crypto.js';
 import type { SessionUser } from '../../services/auth.js';
 import { resolveAccountProvider } from '../provider-accounts/execution.js';
 import { resolveXGatewayAccountProxy } from '../provider-accounts/store.js';
+import { getConfigSnapshot } from '../x-gateway/config.js';
 import { withQuotaTracking } from '../x-gateway/quota/tracking.js';
 import { resolveCandidateRoutes } from '../x-gateway/router.js';
 import { listSupportTenants, type SupportTenant } from '../x-gateway/support-store.js';
-import { type CopilotUserScope } from './diagnostics.js';
+import { listCopilotModelOptions, type CopilotUserScope } from './diagnostics.js';
 import { createSetupProposal, getSetupProposalForUser } from './store.js';
 
 const UNSAFE_WIDGET_TEXT_RE = /[<>]|https?:\/\/|javascript:|data:|vbscript:|url\s*\(|expression\s*\(/gi;
@@ -583,7 +584,9 @@ export function buildSanitizedSetupProposal(params: {
   existingTenant: SupportTenant | null;
   requirements: SupportSetupRequirements;
   canEditSteps: ReadonlySet<SupportSetupStepId>;
+  canViewSteps?: ReadonlySet<SupportSetupStepId>;
   canCreateTenant: boolean;
+  isPlatformOperator?: boolean;
   locale: 'vi' | 'en';
 }): SupportSetupProposal {
   const {
@@ -592,12 +595,16 @@ export function buildSanitizedSetupProposal(params: {
     existingTenant,
     requirements,
     canEditSteps,
+    canViewSteps,
     canCreateTenant,
+    isPlatformOperator = false,
     locale,
   } = params;
 
-  const existingTenants = listSupportTenants();
-  const existingSlugs = new Set(existingTenants.map((t) => t.slug.toLowerCase()));
+  const existingSlugs =
+    targetMode === 'create_tenant' && canCreateTenant
+      ? new Set(listSupportTenants().map((t) => t.slug.toLowerCase()))
+      : new Set<string>();
 
   const brandName = (
     requirements.brandName?.trim() ||
@@ -618,8 +625,28 @@ export function buildSanitizedSetupProposal(params: {
     (language === 'en' ? 'Customer Service & Digital Products' : 'Dịch vụ khách hàng');
   const primaryColor = normalizeHexColor(requirements.primaryColor);
   const secondaryColor = darkenHex(primaryColor);
-  const allowedOrigins = normalizeWebsiteOrigins(requirements.websiteOrigin);
-  const defaultModel = requirements.defaultModel?.trim() || existingTenant?.defaultModel || 'auto';
+
+  const canSeeOrigins =
+    isPlatformOperator ||
+    canEditSteps.has('runtime_policy') ||
+    Boolean(canViewSteps?.has('runtime_policy'));
+  const allowedOrigins = requirements.websiteOrigin?.trim()
+    ? normalizeWebsiteOrigins(requirements.websiteOrigin)
+    : targetMode === 'update_tenant' && existingTenant && canSeeOrigins
+      ? [...(existingTenant.allowedOrigins?.length ? existingTenant.allowedOrigins : ['*'])]
+      : ['*'];
+
+  const requestedModel = requirements.defaultModel?.trim() || existingTenant?.defaultModel || 'auto';
+  const safeModelIds = new Set<string>([
+    'auto',
+    ...listCopilotModelOptions().map((m) => m.id),
+    ...(existingTenant?.defaultModel ? [existingTenant.defaultModel] : []),
+  ]);
+  const defaultModel =
+    isPlatformOperator || safeModelIds.has(requestedModel)
+      ? requestedModel
+      : existingTenant?.defaultModel || 'auto';
+
   const faqSummary = requirements.faqSummaryOrPolicies?.trim() || '';
   const blockedTopics = normalizeStringList(requirements.blockedTopics, 20, 80);
   const competitorKeywords = normalizeStringList(requirements.competitorKeywords, 20, 80);
@@ -630,7 +657,7 @@ export function buildSanitizedSetupProposal(params: {
       ? allowedOrigins.find((o) => o !== '*')!.replace(/^https?:\/\//i, '')
       : '';
 
-  // 1. Tenant & AI Persona payload
+  // 1. Tenant & AI Persona payload (allowedOrigins is strictly scoped to runtime_policy / edit_tenant_integration)
   const tenantPayload: SupportSetupTenantAiPayload = {
     name: brandName,
     slug: tenantSlug,
@@ -642,7 +669,6 @@ export function buildSanitizedSetupProposal(params: {
       tone,
       faqSummary,
     }),
-    allowedOrigins,
     allowGuest: true,
     enabled: true,
   };
@@ -832,11 +858,12 @@ export function buildSanitizedSetupProposal(params: {
     ],
   };
 
-  // 7. Integration Runtime Policy payload
+  // 7. Integration Runtime Policy & CORS Origins payload
+  // Preserve existing toolPolicies on update_tenant so approval_required webhook gates are never cleared.
   const runtimePayload: SupportSetupRuntimePayload = {
-    ...DEFAULT_RUNTIME_POLICY,
+    allowedOrigins,
     allowedModels: defaultModel === 'auto' ? [] : [defaultModel],
-    toolPolicies: [],
+    ...(targetMode === 'create_tenant' ? { toolPolicies: DEFAULT_RUNTIME_POLICY.toolPolicies } : {}),
     maxCompletionTokens: 640,
     maxModelCalls: 3,
     maxToolCalls: 3,
@@ -976,6 +1003,19 @@ export function buildSanitizedSetupProposal(params: {
     },
   ];
 
+  // Scrub unpermitted step payloads so proposals never carry mutation payloads outside the user's RBAC grants
+  const sanitizedSteps: SupportSetupPlannedStep[] = steps.map((step) =>
+    step.canApply
+      ? step
+      : {
+          ...step,
+          enabledByDefault: false,
+          highlightsEn: [],
+          highlightsVi: [],
+          payload: {},
+        },
+  );
+
   const now = Date.now();
   const createdAt = new Date(now).toISOString();
   const expiresAt = new Date(now + SUPPORT_SETUP_PROPOSAL_TTL_SECONDS * 1000).toISOString();
@@ -990,8 +1030,8 @@ export function buildSanitizedSetupProposal(params: {
     status: 'pending_consent',
     summary:
       locale === 'vi'
-        ? `Kế hoạch triển khai hoàn chỉnh AI Support cho "${brandName}" (${industry}) gồm ${steps.filter((s) => s.canApply).length}/7 bước sẵn sàng.`
-        : `Complete AI Support setup plan for "${brandName}" (${industry}) with ${steps.filter((s) => s.canApply).length}/7 permitted steps ready.`,
+        ? `Kế hoạch triển khai hoàn chỉnh AI Support cho "${brandName}" (${industry}) gồm ${sanitizedSteps.filter((s) => s.canApply).length}/7 bước sẵn sàng.`
+        : `Complete AI Support setup plan for "${brandName}" (${industry}) with ${sanitizedSteps.filter((s) => s.canApply).length}/7 permitted steps ready.`,
     requirements: {
       ...requirements,
       brandName,
@@ -1000,13 +1040,15 @@ export function buildSanitizedSetupProposal(params: {
       language,
       tone,
       primaryColor,
-      websiteOrigin: allowedOrigins[0],
+      ...(canEditSteps.has('runtime_policy') || canCreateTenant
+        ? { websiteOrigin: allowedOrigins[0] }
+        : {}),
       blockedTopics,
       competitorKeywords,
       requireContactIntake,
       defaultModel,
     },
-    steps,
+    steps: sanitizedSteps,
     createdAt,
     expiresAt,
   };
@@ -1016,19 +1058,31 @@ function formatGuideReply(
   locale: 'vi' | 'en',
   diagnostic: SupportSetupTenantDiagnostic | null,
   canCreateTenant: boolean,
+  canEditAny = true,
 ): { reply: string; quickReplies: string[] } {
+  const stepIcon = (status: SupportSetupTenantDiagnostic['steps'][number]['status']) =>
+    status === 'complete'
+      ? '✅'
+      : status === 'partial'
+        ? '🟡'
+        : status === 'restricted'
+          ? '🔒'
+          : '⭕';
+
   if (locale === 'vi') {
     const statusHeader = diagnostic
       ? `Hiện tại tenant **${diagnostic.tenant.name}** đang hoàn thành **${diagnostic.completedSteps}/${diagnostic.totalSteps} bước**:\n` +
         diagnostic.steps
-          .map((st, idx) => {
-            const icon = st.status === 'complete' ? '✅' : st.status === 'partial' ? '🟡' : '⭕';
-            return `${idx + 1}. ${icon} ${st.summaryVi}`;
-          })
+          .map((st, idx) => `${idx + 1}. ${stepIcon(st.status)} ${st.summaryVi}`)
           .join('\n')
       : canCreateTenant
         ? 'Bạn chưa chọn hoặc chưa tạo Support Tenant nào. Tôi có thể hướng dẫn hoặc tự động tạo mới trọn bộ thay cho bạn!'
         : 'Hãy chọn tenant được phân quyền để xem tiến độ thiết lập chi tiết.';
+
+    const footerLine =
+      canEditAny || canCreateTenant
+        ? 'Nếu bạn thấy phức tạp, chỉ cần nói **"Setup giúp tôi"** — tôi sẽ hỏi bạn vài thông tin ngắn gọn rồi đề xuất kế hoạch để bạn duyệt và tự triển khai các bước trong phạm vi quyền của bạn!'
+        : 'Tài khoản hiện tại của bạn đang ở chế độ **Chỉ xem (Read-Only)** nên tôi có thể giải thích chi tiết từng bước, nhưng sẽ không tự động thay đổi cấu hình vượt quyền của bạn.';
 
     const reply = [
       'Để có **1 con AI Support hoàn chỉnh** chạy mượt trên website/app, hệ thống gồm **7 bước cốt lõi**:',
@@ -1043,29 +1097,35 @@ function formatGuideReply(
       '',
       statusHeader,
       '',
-      'Nếu bạn thấy phức tạp, chỉ cần nói **"Setup giúp tôi"** — tôi sẽ hỏi bạn vài thông tin ngắn gọn rồi đề xuất kế hoạch để bạn duyệt và tự triển khai hết các bước trên!',
+      footerLine,
     ].join('\n');
 
-    return {
-      reply,
-      quickReplies: diagnostic
-        ? [
-            'Hoàn thiện cấu hình tiêu chuẩn cho tenant hiện tại',
-            'Tạo mới 1 AI Support trọn gói thay cho tôi',
-          ]
-        : ['Thiết lập tự động trọn gói AI Support thay cho tôi'],
-    };
+    const quickReplies: string[] = [];
+    if (diagnostic && canEditAny) {
+      quickReplies.push('Hoàn thiện cấu hình tiêu chuẩn cho tenant hiện tại');
+    }
+    if (canCreateTenant) {
+      quickReplies.push(
+        diagnostic
+          ? 'Tạo mới 1 AI Support trọn gói thay cho tôi'
+          : 'Thiết lập tự động trọn gói AI Support thay cho tôi',
+      );
+    }
+
+    return { reply, quickReplies };
   }
 
   const statusHeader = diagnostic
     ? `Current tenant **${diagnostic.tenant.name}** readiness: **${diagnostic.completedSteps}/${diagnostic.totalSteps} steps complete**:\n` +
       diagnostic.steps
-        .map((st, idx) => {
-          const icon = st.status === 'complete' ? '✅' : st.status === 'partial' ? '🟡' : '⭕';
-          return `${idx + 1}. ${icon} ${st.summaryEn}`;
-        })
+        .map((st, idx) => `${idx + 1}. ${stepIcon(st.status)} ${st.summaryEn}`)
         .join('\n')
     : 'No Support Tenant selected yet. I can guide you or create and configure a complete tenant for you.';
+
+  const footerLine =
+    canEditAny || canCreateTenant
+      ? 'If you prefer, just say **"Set it up for me"** — I will ask a few reasonable questions, show you a transparent plan for consent, and deploy the steps permitted by your role once you approve.'
+      : 'Your current account has **Read-Only** access, so I can walk you through any step, without modifying settings beyond your permissions.';
 
   const reply = [
     'Building a production-ready **AI Support Assistant** takes **7 core steps**:',
@@ -1080,15 +1140,22 @@ function formatGuideReply(
     '',
     statusHeader,
     '',
-    'If you prefer, just say **"Set it up for me"** — I will ask a few reasonable questions, show you a transparent plan for consent, and deploy everything once you approve.',
+    footerLine,
   ].join('\n');
 
-  return {
-    reply,
-    quickReplies: diagnostic
-      ? ['Auto-complete current tenant with standard defaults', 'Create a brand-new AI Support setup for me']
-      : ['Set up a complete AI Support assistant for me'],
-  };
+  const quickReplies: string[] = [];
+  if (diagnostic && canEditAny) {
+    quickReplies.push('Auto-complete current tenant with standard defaults');
+  }
+  if (canCreateTenant) {
+    quickReplies.push(
+      diagnostic
+        ? 'Create a brand-new AI Support setup for me'
+        : 'Set up a complete AI Support assistant for me',
+    );
+  }
+
+  return { reply, quickReplies };
 }
 
 function buildGatherRequirementsReply(
@@ -1183,6 +1250,7 @@ async function tryLlmCoachTurn(params: {
   extracted: SupportSetupRequirements;
 }): Promise<{ output: LlmCoachOutput; modelUsed: string } | null> {
   try {
+    if (!getConfigSnapshot().enabled) return null;
     const { candidates } = resolveCandidateRoutes('auto', 'chat');
     if (!candidates || candidates.length === 0) return null;
 
@@ -1192,7 +1260,11 @@ async function tryLlmCoachTurn(params: {
       `Language preference: ${params.locale === 'vi' ? 'Vietnamese' : 'English'}.`,
       `Target mode: ${params.targetMode}.`,
       params.diagnostic
-        ? `Active tenant "${params.diagnostic.tenant.name}" (${params.diagnostic.completedSteps}/7 complete): ${JSON.stringify(params.diagnostic.steps.map((s) => ({ stepId: s.stepId, status: s.status })))}`
+        ? `Active tenant "${params.diagnostic.tenant.name}" (${params.diagnostic.completedSteps}/7 complete): ${JSON.stringify(
+            params.diagnostic.steps
+              .filter((s) => s.canView !== false)
+              .map((s) => ({ stepId: s.stepId, status: s.status })),
+          )}`
         : 'Active tenant: none selected (new tenant creation).',
       `Already extracted requirements: ${JSON.stringify(params.extracted)}`,
       '',
@@ -1302,38 +1374,106 @@ export async function runSupportSetupCopilotTurn(params: {
       allUserText,
     );
 
-  const targetMode: 'create_tenant' | 'update_tenant' =
-    params.targetMode === 'create_tenant' ||
-    (scope.canCreateTenant && (explicitCreatePhrase || priorTargetMode === 'create_tenant'))
-      ? 'create_tenant'
-      : targetEntry
-        ? 'update_tenant'
-        : scope.canCreateTenant
-          ? 'create_tenant'
-          : 'update_tenant';
+  const latestUserMessage =
+    [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+  const latestCreatePhrase =
+    /tạo\s*(?:mới|thêm)\s*(?:1\s*|một\s*)?(?:tenant|con\s*ai|ai\s*support)|create\s+(?:a\s+)?(?:brand-?new|new)\s+(?:tenant|ai\s+support)/i.test(
+      latestUserMessage,
+    );
 
-  if (targetMode === 'create_tenant' && !scope.canCreateTenant) {
-    // Non-platform operators cannot create brand-new tenants; restrict to their scoped tenant
-    const fallbackTenant = scope.tenants[0]?.tenant ?? null;
-    if (!fallbackTenant) {
+  // Strict RBAC boundary: if a non-operator explicitly asks to create a brand-new tenant,
+  // refuse cleanly without creating a tenant OR silently mutating another tenant.
+  if (!scope.canCreateTenant && (params.targetMode === 'create_tenant' || latestCreatePhrase)) {
+    const assignedHintVi =
+      scope.tenants.length > 0 && scope.tenants.some((t) => t.canEditSteps.size > 0)
+        ? ` Bạn có thể chọn tenant được phân quyền (**${scope.tenants[0]!.tenant.name}**) để cập nhật các bước trong phạm vi quyền của mình.`
+        : '';
+    const assignedHintEn =
+      scope.tenants.length > 0 && scope.tenants.some((t) => t.canEditSteps.size > 0)
+        ? ` You can select your assigned tenant (**${scope.tenants[0]!.tenant.name}**) to update the steps within your granted permissions.`
+        : '';
+    return {
+      ok: true,
+      reply:
+        locale === 'vi'
+          ? `Tài khoản của bạn không có quyền tạo Support Tenant mới (AI chỉ thực thi đúng trong phạm vi quyền của người dùng hiện tại).${assignedHintVi}`
+          : `Your account does not have permission to create new Support Tenants (the Copilot strictly operates within your user permissions).${assignedHintEn}`,
+      intent: 'guide',
+      missingQuestions: [],
+      suggestedQuickReplies:
+        scope.tenants.length > 0 && scope.tenants[0]!.canEditSteps.size > 0
+          ? [
+              locale === 'vi'
+                ? 'Hoàn thiện cấu hình tiêu chuẩn cho tenant hiện tại'
+                : 'Auto-complete current tenant with standard defaults',
+            ]
+          : [
+              locale === 'vi'
+                ? 'Hướng dẫn tôi chi tiết từng bước để có 1 con AI Support hoàn chỉnh'
+                : 'How do I set up a complete AI Support assistant step by step?',
+            ],
+      proposal: null,
+      modelUsed: null,
+      usedFallback: true,
+    };
+  }
+
+  const targetMode: 'create_tenant' | 'update_tenant' =
+    scope.canCreateTenant &&
+    (params.targetMode === 'create_tenant' ||
+      explicitCreatePhrase ||
+      priorTargetMode === 'create_tenant' ||
+      !targetEntry)
+      ? params.targetMode === 'update_tenant' && targetEntry
+        ? 'update_tenant'
+        : targetEntry && !explicitCreatePhrase && priorTargetMode !== 'create_tenant' && params.targetMode !== 'create_tenant'
+          ? 'update_tenant'
+          : 'create_tenant'
+      : 'update_tenant';
+
+  const effectiveTargetEntry =
+    targetMode === 'update_tenant' ? targetEntry ?? scope.tenants[0] ?? null : null;
+  const effectiveTenant = effectiveTargetEntry?.tenant ?? null;
+
+  const canEditSet =
+    targetMode === 'create_tenant'
+      ? new Set<SupportSetupStepId>(scope.canCreateTenant ? SUPPORT_SETUP_STEP_IDS : [])
+      : effectiveTargetEntry?.canEditSteps ?? new Set<SupportSetupStepId>();
+
+  // Read-only accounts (0 editable steps and cannot create tenants) can receive coaching/diagnostics,
+  // but must NEVER be prompted for auto-deploy requirements or receive a pending_consent proposal.
+  if (canEditSet.size === 0) {
+    if (isGuideQuestion(latestUserMessage)) {
+      const guide = formatGuideReply(locale, diagnostic, false, false);
       return {
         ok: true,
-        reply:
-          locale === 'vi'
-            ? 'Tài khoản của bạn chưa có quyền tạo Support Tenant mới. Hãy chọn tenant được phân quyền hoặc liên hệ quản trị viên.'
-            : 'Your account does not have permission to create new Support Tenants. Select an assigned tenant or ask your administrator.',
+        reply: guide.reply,
         intent: 'guide',
         missingQuestions: [],
-        suggestedQuickReplies: [],
+        suggestedQuickReplies: guide.quickReplies,
         proposal: null,
         modelUsed: null,
         usedFallback: true,
       };
     }
+    return {
+      ok: true,
+      reply:
+        locale === 'vi'
+          ? 'Tài khoản hiện tại của bạn đang ở chế độ **Chỉ xem (Read-Only)** trên tenant này (chưa có quyền chỉnh sửa cấu hình). AI tuân thủ nghiêm ngặt quyền người dùng nên sẽ không tạo bản đề xuất tự động triển khai — tuy nhiên tôi vẫn có thể giải thích chi tiết cách hoạt động của từng bước nếu bạn cần!'
+          : 'Your current account has **Read-Only** access on this tenant (no edit permissions granted). Because the Copilot strictly enforces your user permissions, it cannot generate or deploy configuration changes — however, I can still explain any of the 7 setup steps in detail!',
+      intent: 'guide',
+      missingQuestions: [],
+      suggestedQuickReplies: [
+        locale === 'vi'
+          ? 'Hướng dẫn tôi chi tiết từng bước để có 1 con AI Support hoàn chỉnh'
+          : 'How do I set up a complete AI Support assistant step by step?',
+      ],
+      proposal: null,
+      modelUsed: null,
+      usedFallback: true,
+    };
   }
-
-  const latestUserMessage =
-    [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
 
   const extracted = extractRequirementsFromMessages(
     messages,
@@ -1354,9 +1494,6 @@ export async function runSupportSetupCopilotTurn(params: {
   const mergedRequirements = llm?.output.extractedRequirements
     ? extractRequirementsFromMessages([], extracted, llm.output.extractedRequirements, locale)
     : extracted;
-
-  const effectiveTargetEntry = targetMode === 'update_tenant' ? targetEntry ?? scope.tenants[0] ?? null : null;
-  const effectiveTenant = effectiveTargetEntry?.tenant ?? null;
 
   const explicitBriefSubmitted = Boolean(
     requirementsHint &&
@@ -1385,7 +1522,7 @@ export async function runSupportSetupCopilotTurn(params: {
   }
 
   if (intent === 'guide') {
-    const guide = formatGuideReply(locale, diagnostic, scope.canCreateTenant);
+    const guide = formatGuideReply(locale, diagnostic, scope.canCreateTenant, canEditSet.size > 0);
     return {
       ok: true,
       reply: llm?.output.intent === 'guide' && llm.output.reply ? llm.output.reply : guide.reply,
@@ -1425,18 +1562,15 @@ export async function runSupportSetupCopilotTurn(params: {
   }
 
   // intent === 'propose_setup' -> build & persist pending_consent proposal (NO side effects on tenant!)
-  const canEditSet =
-    targetMode === 'create_tenant'
-      ? new Set<SupportSetupStepId>(scope.canCreateTenant ? SUPPORT_SETUP_STEP_IDS : [])
-      : effectiveTargetEntry?.canEditSteps ?? new Set<SupportSetupStepId>();
-
   const draft = buildSanitizedSetupProposal({
     userId: user.userId,
     targetMode: effectiveTenant ? 'update_tenant' : 'create_tenant',
     existingTenant: effectiveTenant,
     requirements: mergedRequirements,
     canEditSteps: canEditSet,
+    canViewSteps: effectiveTargetEntry?.canViewSteps,
     canCreateTenant: scope.canCreateTenant,
+    isPlatformOperator: scope.isPlatformOperator,
     locale,
   });
 
