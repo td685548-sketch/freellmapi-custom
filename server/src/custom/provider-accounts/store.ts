@@ -17,6 +17,7 @@ import {
   notifyProviderAccountIssue,
 } from '../notifications/telegram-bot.js';
 import { getOutboundProxyUrl } from '../x-gateway/config.js';
+import { clearUnavailableOpenCodeModels } from '../x-gateway/opencode-unavailable.js';
 import {
   getProxyPoolConfig,
   isAccountAutoRotatePool,
@@ -938,6 +939,7 @@ export function deleteAccount(id: number): void {
     clearCopilotToken(decrypt(row.encrypted_key, row.iv, row.auth_tag));
   }
   getDb().prepare('DELETE FROM x_gateway_keys WHERE id = ?').run(id);
+  clearUnavailableOpenCodeModels(id, undefined, true);
   invalidateXGatewayKeyCache();
   clearCooldownsForKey(id);
 }
