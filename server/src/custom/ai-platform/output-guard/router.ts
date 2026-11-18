@@ -10,6 +10,10 @@ import type { Permission } from '@freellmapi/shared/permissions.js';
 import { getDb } from '../../../db/index.js';
 import type { SessionUser } from '../../../services/auth.js';
 import { parseScopeParam } from '../scope.js';
+import {
+  getCredentialScrubSettings,
+  setCredentialScrubSettings,
+} from './credential-stream-scrubber.js';
 import { getGuardExcerpt, listGuardEvents } from './events.js';
 import { maybeRunGuardMaintenance } from './maintenance.js';
 import { getPolicy, setPolicy, testPolicy } from './policy.js';
@@ -272,6 +276,49 @@ outputGuardAdminRouter.post(
         canCallGateway: false,
       });
       res.json(result);
+    } catch (err) {
+      sendGuardError(res, err);
+    }
+  },
+);
+
+const credentialScrubSchema = z
+  .object({
+    credentialStreamScrubEnabled: z.boolean(),
+  })
+  .strict();
+
+outputGuardAdminRouter.get(
+  '/output-guard/:scopeKind/:scopeId/credential-scrub',
+  requirePerm('view_output_guard'),
+  (req, res) => {
+    try {
+      const scope = parseRouteScope(req);
+      const settings = getCredentialScrubSettings(scope);
+      res.json({ settings });
+    } catch (err) {
+      sendGuardError(res, err);
+    }
+  },
+);
+
+outputGuardAdminRouter.put(
+  '/output-guard/:scopeKind/:scopeId/credential-scrub',
+  requirePerm('edit_output_guard'),
+  (req, res) => {
+    try {
+      const scope = parseRouteScope(req);
+      const parsed = credentialScrubSchema.safeParse(req.body);
+      if (!parsed.success) {
+        throw new GuardStoreError(
+          `Invalid credential scrub payload: ${parsed.error.issues[0]?.message ?? 'validation failed'}`,
+          'validation_error',
+          422,
+        );
+      }
+      const user = getUser(req);
+      const settings = setCredentialScrubSettings(scope, parsed.data, user?.userId ?? null);
+      res.json({ settings });
     } catch (err) {
       sendGuardError(res, err);
     }

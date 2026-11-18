@@ -59,6 +59,10 @@ export function purgeScope(kind: ScopeKind, id: string): number {
     'custom_ai_chunk_embeddings',
     'custom_ai_index_jobs',
     'custom_ai_embedding_usage',
+    'custom_ai_prompt_golden_cases',
+    'custom_ai_prompt_golden_runs',
+    'custom_ai_prompt_canary',
+    'custom_ai_credential_scrub_settings',
   ] as const) {
     const exists = db
       .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")

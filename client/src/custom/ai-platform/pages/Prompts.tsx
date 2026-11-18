@@ -5,6 +5,7 @@ import { useAdministrativeAccess } from '../../use-administrative-access';
 import { useUserSession } from '../../use-session';
 import { DiffView } from '../components/DiffView';
 import { PromptAbRolloutCard } from '../components/PromptAbRolloutCard';
+import { PromptEvalCanarySection } from '../components/PromptEvalCanarySection';
 import { PromptEvalSection } from '../components/PromptEvalSection';
 import { VariableEditor } from '../components/VariableEditor';
 import {
@@ -1461,6 +1462,19 @@ function PromptsContent({
           canEdit={canEdit}
           candidateBody={body}
           candidateVariables={variables}
+        />
+      )}
+
+      {/* Section 7: Golden Assertion Eval Harness & Weighted Canary Rollout */}
+      {(canView || canEdit || canPublish) && (
+        <PromptEvalCanarySection
+          scope={scope}
+          sessionRevision={sessionRevision}
+          canView={canView}
+          canEdit={canEdit}
+          canPublish={canPublish}
+          scopeState={scopeState}
+          onScopeMutated={() => void loadScopeState({ preserveFeedback: true })}
         />
       )}
     </div>
