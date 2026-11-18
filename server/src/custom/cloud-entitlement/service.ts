@@ -76,6 +76,7 @@ interface EntitlementRuntimeConfig {
   baseUrl?: string;
   publicKeyPem?: string;
   fetchImpl?: typeof fetch;
+  activeLeaseRecord?: VerifiedLeaseRecord | null;
 }
 
 let activeLeaseRecord: VerifiedLeaseRecord | null = null;
@@ -260,6 +261,9 @@ function clearDiskLease(tokenHash: string): void {
 }
 
 function getHydratedMemoryLease(): VerifiedLeaseRecord | null {
+  if (runtimeOverrides.activeLeaseRecord !== undefined) {
+    return runtimeOverrides.activeLeaseRecord;
+  }
   const { token } = resolveConfiguredActivationToken();
   if (!token) {
     activeLeaseRecord = null;
@@ -477,6 +481,15 @@ export async function ensureCloudEntitlementActive(
   if (!fetched) return null;
   if (scope && !fetched.lease.scopes.includes(scope)) return null;
   return fetched;
+}
+
+/**
+ * Safe optional accessor for optional remote prompt/policy overrides.
+ * Returns null if entitlement is not active or pack is not loaded,
+ * allowing calling modules to gracefully fall back to their local defaults.
+ */
+export function getActiveVerifiedCloudRuntimePack(): CloudAiRuntimePack | null {
+  return getHydratedMemoryLease()?.runtimePack ?? null;
 }
 
 /**
@@ -807,7 +820,7 @@ export function configureCloudEntitlementForTesting(
   overrides: EntitlementRuntimeConfig | null,
 ): void {
   runtimeOverrides = overrides ?? {};
-  activeLeaseRecord = null;
+  activeLeaseRecord = overrides?.activeLeaseRecord ?? null;
   lastFailureState = null;
   inflightRefresh = null;
 }

@@ -1,4 +1,5 @@
 import type { ChatCompletionResponse, ChatMessage } from '@freellmapi/shared/types.js';
+import { getActiveVerifiedCloudRuntimePack } from '../cloud-entitlement/service.js';
 
 export const DEFAULT_SYSTEMONE_ROUTER_MODEL = 'oc/jev-1.13-free';
 export const DEFAULT_SYSTEMONE_TIMEOUT_MS = 8000;
@@ -213,10 +214,15 @@ export async function resolveSystemOneComboOrder<T>(opts: {
   }
 
   const criteria = buildChoiceCriteria(keys);
+  const cloudPack = getActiveVerifiedCloudRuntimePack();
+  const classifierInstruction =
+    cloudPack?.systemOneClassifierInstruction?.trim() ||
+    'You are a model routing classifier. Choose the single best model ID from the candidate map for the user prompt and reply with strict JSON: {"choice":"<model_id>","confidence":0.95,"probabilities":{"<model_id>":0.95}}.';
+
   const classifyMessages: ChatMessage[] = [
     {
       role: 'system',
-      content: 'You are a model routing classifier. Choose the single best model ID from the candidate map for the user prompt and reply with strict JSON: {"choice":"<model_id>","confidence":0.95,"probabilities":{"<model_id>":0.95}}.',
+      content: classifierInstruction,
     },
     {
       role: 'user',
