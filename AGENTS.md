@@ -165,3 +165,20 @@ git worktree remove .worktrees/<short-slug>
 - If an account is suspended or under manual review, **DO NOT** create alternate accounts and immediately push dozens of repositories from the same environment/IP. This triggers GitHub's automated abuse filters, secondary rate limits, and cascading suspensions.
 - Resolve account issues through official support channels with clear academic and educational context.
 
+---
+
+## 7. Environment-Specific Outbound Routing (Local Tunnel Server vs. Cloud Hosting)
+
+This repository runs across two distinct runtime topologies that share the same `main` branch but have different network routing characteristics:
+
+| Runtime Environment | Detection Signals | Outbound Provider Transport |
+| :--- | :--- | :--- |
+| **Cloud Hosting (`Render` + `Turso`)** | `RENDER=true`, `RENDER_SERVICE_ID`, `FREEAPI_DB_DRIVER=turso`, or `*.onrender.com` | Preserves `PROXY_MODE=fetch-relay` (`PROXY_URL` + `FETCH_RELAY_TOKEN`) exactly as configured in cloud environment variables. |
+| **Local Production Server (`SQLite` + Tunnel Ingress)** | Local SQLite (`!tursoEnabled`) with local tunnel ingress (`PUBLIC_APP_URL` on `*.ts.net` / loopback `TRUST_PROXY`) | Automatically uses **direct outbound routing** (`server/src/custom/local-tunnel-direct-outbound.ts`) to eliminate unnecessary extra-hop relay latency. |
+
+### Mandatory Rules for AI Agents:
+1. **Scoped exclusively to Local Tunnel Deployments**: Direct outbound optimization (`applyLocalTunnelDirectOutbound`) must **NEVER** disable or alter `PROXY_MODE=fetch-relay` on Render or Turso cloud deployments (`isCloudHostedEnvironment` always takes precedence and returns untouched).
+2. **Runtime Override Support**: Keep `FREEAPI_LOCAL_DIRECT_OUTBOUND` (`1` = force direct outbound locally, `0` = keep `fetch-relay` active locally as a fallback route during upstream ISP maintenance) functional and covered by unit tests (`server/src/__tests__/custom/local-tunnel-direct-outbound.test.ts`).
+3. **Zero-Conflict Placement**: Keep environment-specific transport policies isolated under `server/src/custom/` with only a single startup hook in `server/src/index.ts`; never rewrite upstream `server/src/lib/proxy.ts`.
+
+

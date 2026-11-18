@@ -4,3 +4,4 @@ Always adhere to the instructions and guidelines in `AGENTS.md` and `.specify/me
 2. When synchronizing with the official upstream repository, follow the Upstream Synchronization Workflow in `AGENTS.md`.
 3. Never expose or log API keys or secrets in plaintext.
 4. Strict Local `main` Parity: Keep the root `main` checkout 100% identical to GitHub `origin/main` (`HEAD == origin/main`, clean tracked tree) for reliable local server deployment; develop all features/fixes in isolated `.worktrees/<slug>` branches and run `flm deploy` after merging to `origin/main`.
+5. Environment-Specific Outbound Routing: Local SQLite tunnel servers automatically use low-latency direct outbound transport (`server/src/custom/local-tunnel-direct-outbound.ts`, toggleable via `FREEAPI_LOCAL_DIRECT_OUTBOUND=1|0`), while Render/Turso cloud deployments strictly preserve `PROXY_MODE=fetch-relay`.

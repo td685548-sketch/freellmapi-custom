@@ -29,6 +29,7 @@ import { installGracefulShutdown } from './lib/graceful-shutdown.js';
 import { startWorkerLifecycle } from './custom/x-gateway/support-runtime-router.js';
 import { rotateGeminiWebAccountsOnce, startGeminiWebKeepAlive } from './custom/provider-accounts/gemini-web-keepalive.js';
 import { createResourceAwareScheduler } from './custom/render-resource-saver.js';
+import { applyLocalTunnelDirectOutbound } from './custom/local-tunnel-direct-outbound.js';
 
 // Before any other statement runs, so no provider key can reach stdout — users
 // paste server output into bug reports. Module scope, not inside main(), so it
@@ -81,6 +82,7 @@ async function main() {
 
   // Load the persisted proxy settings from the DB (env var wins if set).
   // Must happen after initDb so the settings table is ready.
+  applyLocalTunnelDirectOutbound();
   restoreProxySettings();
 
   const app = createApp(config);
