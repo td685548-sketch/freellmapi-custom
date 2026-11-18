@@ -69,6 +69,10 @@ import {
 import { runInGatewayScope } from './context.js';
 import { xGatewayProtocolsRouter } from './protocols.js';
 import { preprocessGatewayMessages } from './token-savers-pipeline.js';
+import {
+  captureGatewayThinkingResponse,
+  prepareGatewayThinkingRequest,
+} from './thinking-normalize.js';
 import { xSupportPublicRouter } from './support-router.js';
 import { xSupportEnterprisePublicRouter } from './support-enterprise-router.js';
 import { xSupportGovernancePublicRouter } from './support-governance-router.js';
@@ -784,22 +788,37 @@ async function executeRouteChatCompletion(
   candidate: CandidateRoute,
   msgs: ChatMessage[],
   opts: CompletionOptions,
+  isFailover = false,
 ): Promise<{ candidate: CandidateRoute; completion: ChatCompletionResponse; latencyMs: number }> {
   const { account, modelId } = candidate;
   const provider = resolveAccountProvider(account);
   if (!provider) throw new Error(`Provider '${account.provider}' is not available.`);
   const credential = decrypt(account.encrypted_key, account.iv, account.auth_tag);
   const effectiveProxy = resolveXGatewayAccountProxy(account);
+  const prepared = prepareGatewayThinkingRequest({
+    messages: msgs,
+    options: opts,
+    provider: account.provider,
+    modelId,
+    accountId: account.id,
+    isFailover,
+  });
   const startedAt = Date.now();
   const completion = await withQuotaTracking(account, modelId, effectiveProxy, () =>
     provider.chatCompletion(
       credential,
-      msgs,
+      prepared.messages,
       modelId,
-      opts,
+      prepared.options,
       { platform: account.platform, keyId: account.id, modelId },
     ),
   );
+  captureGatewayThinkingResponse({
+    toolCalls: completion.choices?.[0]?.message?.tool_calls,
+    provider: account.provider,
+    modelId: completion.model || modelId,
+    accountId: account.id,
+  });
   return { candidate, completion, latencyMs: Date.now() - startedAt };
 }
 
@@ -1094,8 +1113,8 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
     }
 
     /** One non-streaming attempt, isolated so fusion can run in parallel. */
-    const attemptNonStream = (candidate: CandidateRoute, signal: AbortSignal) =>
-      executeRouteChatCompletion(candidate, messages, { ...options, signal });
+    const attemptNonStream = (candidate: CandidateRoute, signal: AbortSignal, isFailover = false) =>
+      executeRouteChatCompletion(candidate, messages, { ...options, signal }, isFailover);
 
     const succeedNonStream = (result: Awaited<ReturnType<typeof attemptNonStream>>) => {
       const { account, modelId } = result.candidate;
@@ -1314,7 +1333,7 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
       if (!isStream) {
         const activeToken = beginUsageRequest(account.provider, modelId, fromPlayground);
         try {
-          const result = await attemptNonStream(candidate, controller.signal);
+          const result = await attemptNonStream(candidate, controller.signal, candidateIdx > 0);
           recordRouteOutcome(healthKey(candidate), { latencyMs: result.latencyMs });
           recordCandidateSuccess(account.id, modelId);
           if (isAutoModel && autoSessionId) {
@@ -1390,11 +1409,19 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
 
       try {
         await withQuotaTracking(account, modelId, effectiveProxy, async () => {
+          const preparedStream = prepareGatewayThinkingRequest({
+            messages,
+            options: { ...options, signal: attemptSignal },
+            provider: account.provider,
+            modelId,
+            accountId: account.id,
+            isFailover: candidateIdx > 0,
+          });
           const stream = provider.streamChatCompletion(
             credential,
-            messages,
+            preparedStream.messages,
             modelId,
-            { ...options, signal: attemptSignal },
+            preparedStream.options,
             { platform: account.platform, keyId: account.id, modelId },
           );
           const peek = await peekStreamForContent(stream, {
@@ -1424,6 +1451,15 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
             if (controller.signal.aborted) return;
             if (chunk.usage?.prompt_tokens != null) promptTokens = chunk.usage.prompt_tokens;
             if (chunk.usage?.completion_tokens != null) completionTokens = chunk.usage.completion_tokens;
+            const deltaToolCalls = chunk.choices?.[0]?.delta?.tool_calls;
+            if (Array.isArray(deltaToolCalls) && deltaToolCalls.some(tc => tc?.thought_signature)) {
+              captureGatewayThinkingResponse({
+                toolCalls: deltaToolCalls,
+                provider: account.provider,
+                modelId: chunk.model || modelId,
+                accountId: account.id,
+              });
+            }
             res.write(`data: ${JSON.stringify(chunk)}\n\n`);
           }
           if (controller.signal.aborted) return;

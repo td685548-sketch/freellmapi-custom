@@ -168,13 +168,20 @@ function toAntigravityContents(messages: ChatMessage[]): {
             const parsed = JSON.parse(tc.function.arguments || '{}');
             if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) args = parsed;
           } catch { /* empty */ }
+          const restoredSig = typeof tc.thought_signature === 'string' && tc.thought_signature
+            ? tc.thought_signature
+            : undefined;
           parts.push({
             functionCall: {
               ...(tc.id ? { id: tc.id } : {}),
               name: sanitizeFunctionName(tc.function.name),
               args,
             },
-            ...(firstCall ? { thoughtSignature: DEFAULT_THOUGHT_SIG } : {}),
+            ...(restoredSig
+              ? { thoughtSignature: restoredSig }
+              : firstCall
+                ? { thoughtSignature: DEFAULT_THOUGHT_SIG }
+                : {}),
           });
           firstCall = false;
         }
@@ -466,7 +473,12 @@ export class AntigravityProvider extends BaseProvider {
     const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
     const texts: string[] = [];
     const thoughts: string[] = [];
-    const toolCalls: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }> = [];
+    const toolCalls: Array<{
+      id: string;
+      type: 'function';
+      function: { name: string; arguments: string };
+      thought_signature?: string;
+    }> = [];
 
     for (const p of parts) {
       if (!p || typeof p !== 'object') continue;
@@ -477,6 +489,9 @@ export class AntigravityProvider extends BaseProvider {
           id: String(p.functionCall.id || `call_${toolCalls.length}_${randomUUID().slice(0, 6)}`),
           type: 'function',
           function: { name: String(p.functionCall.name), arguments: JSON.stringify(p.functionCall.args ?? {}) },
+          ...(typeof p.thoughtSignature === 'string' && p.thoughtSignature
+            ? { thought_signature: p.thoughtSignature }
+            : {}),
         });
       }
     }
@@ -601,6 +616,9 @@ export class AntigravityProvider extends BaseProvider {
             id: String(p.functionCall.id || `call_${nextToolIndex}`),
             type: 'function',
             function: { name: String(p.functionCall.name), arguments: JSON.stringify(p.functionCall.args ?? {}) },
+            ...(typeof p.thoughtSignature === 'string' && p.thoughtSignature
+              ? { thought_signature: p.thoughtSignature }
+              : {}),
           });
         }
       }

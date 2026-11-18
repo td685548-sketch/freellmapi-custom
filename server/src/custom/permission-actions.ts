@@ -103,6 +103,9 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
     if (path === '/api/thruline/pricing' || path === '/api/thruline/config-backup' || path === '/api/thruline/routing-health' || path === '/api/thruline/routing-defaults') {
       return read ? 'use_x_gateway' : 'edit_x_settings';
     }
+    if (path.startsWith('/api/thruline/thinking-continuity')) {
+      return read ? 'use_x_gateway' : 'edit_x_settings';
+    }
     if (path === '/api/thruline/keys' || /^\/api\/thruline\/keys\/\d+(?:\/access)?$/.test(path)) {
       return 'use_x_gateway';
     }
