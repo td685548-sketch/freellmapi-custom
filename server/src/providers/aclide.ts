@@ -123,7 +123,7 @@ export class AclideProvider extends BaseProvider {
     options?: CompletionOptions, quotaContext?: QuotaObservationContext): Promise<ChatCompletionResponse> {
     const res = await this.fetchWithTimeout(`${BASE_URL}/responses`, {
       method: 'POST', headers: this.headers(apiKey), body: JSON.stringify(this.body(messages, modelId, options)),
-    }, options?.timeoutMs ?? providerTimeoutMs(this.platform, 120_000), { signal: options?.signal, timeoutBounds: 'request' });
+    }, options?.timeoutMs ?? providerTimeoutMs(this.platform), { signal: options?.signal, timeoutBounds: 'request' });
     this.record(res, 'responses', quotaContext, modelId);
     // Preserve HTTP status/backoff even for a non-JSON error page.
     if (!res.ok) {

@@ -460,7 +460,7 @@ export class BedrockProvider extends BaseProvider {
       url,
       { method: 'POST', headers, body: payload, redirect: 'error' },
       options?.timeoutMs ?? this.timeoutMs,
-      { signal: options?.signal },
+      { signal: options?.signal, timeoutBounds: 'headers' },
     );
 
     recordQuotaObservationsFromResponse(res, {

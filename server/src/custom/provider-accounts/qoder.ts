@@ -641,7 +641,7 @@ export class QoderProvider extends BaseProvider {
         body: encodedBody,
       },
       options?.timeoutMs ?? 120_000,
-      { signal: options?.signal },
+      { signal: options?.signal, timeoutBounds: 'headers' },
     );
 
     if (!res.ok) {

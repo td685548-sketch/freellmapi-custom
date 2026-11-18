@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  DEFAULT_CHAT_TIMEOUT_MS,
   DEFAULT_STREAM_STALL_TIMEOUT_MS,
+  defaultProviderTimeoutMs,
   providerTimeoutEnvName,
   providerTimeoutMs,
   resetTimeoutWarnings,
@@ -26,7 +28,40 @@ describe('providerTimeoutEnvName', () => {
   });
 });
 
+describe('defaultProviderTimeoutMs', () => {
+  it('is 60s for most platforms and unknown ones', () => {
+    expect(defaultProviderTimeoutMs('groq')).toBe(DEFAULT_CHAT_TIMEOUT_MS);
+    expect(defaultProviderTimeoutMs('google')).toBe(60_000);
+    expect(defaultProviderTimeoutMs('something-new')).toBe(60_000);
+  });
+
+  it('carries the per-platform table from .env.example', () => {
+    expect(defaultProviderTimeoutMs('nvidia')).toBe(180_000);
+    expect(defaultProviderTimeoutMs('ollama')).toBe(120_000);
+    expect(defaultProviderTimeoutMs('aihorde')).toBe(120_000);
+    expect(defaultProviderTimeoutMs('custom')).toBe(120_000);
+    expect(defaultProviderTimeoutMs('radeon')).toBe(600_000);
+    expect(defaultProviderTimeoutMs('sail')).toBe(600_000);
+    expect(defaultProviderTimeoutMs('llmtr')).toBe(30_000);
+    expect(defaultProviderTimeoutMs('speka')).toBe(30_000);
+    expect(defaultProviderTimeoutMs('typhoon')).toBe(30_000);
+  });
+
+  it('is case-insensitive', () => {
+    expect(defaultProviderTimeoutMs('NVIDIA')).toBe(180_000);
+  });
+});
+
 describe('providerTimeoutMs', () => {
+  it('returns the built-in per-platform default when called without one', () => {
+    expect(providerTimeoutMs('nvidia')).toBe(180_000);
+    expect(providerTimeoutMs('ollama')).toBe(120_000);
+    expect(providerTimeoutMs('custom')).toBe(120_000);
+    expect(providerTimeoutMs('google')).toBe(60_000);
+    expect(providerTimeoutMs('groq')).toBe(60_000);
+    expect(providerTimeoutMs('llmtr')).toBe(30_000);
+  });
+
   it('returns the built-in default when the env var is unset', () => {
     expect(providerTimeoutMs('nvidia', 90_000)).toBe(90_000);
   });

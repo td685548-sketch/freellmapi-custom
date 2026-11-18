@@ -14,6 +14,14 @@ const DEFAULT_MIN_SAMPLES = 5;
 // the allowance ratchets up by one buffer per refresh. Cap it at a multiple of
 // the operator's base budget, which stays the declared unit of patience.
 const MAX_BUDGET_MULTIPLIER = 3;
+// Absolute ceiling on the LEARNED widening, on top of the multiplier above:
+// with the 45s default base the multiplier alone would allow 135s, i.e. one
+// slow endpoint could hold the whole failover ladder for over two minutes.
+// The cap is 90s — deliberately below the 120s chat timeouts of the slow
+// platforms, so the ladder still has room for a second hop. An operator who
+// explicitly configured a larger base budget keeps it: the cap only trims
+// the learned widening, never the base itself (see getEndpointTimeBudgetMs).
+export const MAX_TTFB_BUDGET_MS = 90_000;
 // The buffer is absolute, so against a small operator budget (say 6s) it would
 // hand a 200ms endpoint 10s of patience. Only an endpoint whose P95 is itself a
 // large share of the base counts as slow; with the 45s default this changes
@@ -159,7 +167,11 @@ export function getEndpointTtfbStats(
   }
 }
 
-/** Give historically slow endpoints their P95 TTFB plus a safety buffer. */
+/** Give historically slow endpoints their P95 TTFB plus a safety buffer.
+ * The learned widening is capped twice: at MAX_BUDGET_MULTIPLIER × the base
+ * and at MAX_TTFB_BUDGET_MS absolute (90s) — whichever is smaller. The base
+ * itself is never trimmed: an operator who explicitly configured a larger
+ * fallback budget keeps it. */
 export function getEndpointTimeBudgetMs(
   baseBudgetMs: number,
   platform: string,
@@ -176,7 +188,8 @@ export function getEndpointTimeBudgetMs(
       || stats.p95Ms < baseBudgetMs * SLOW_P95_BASE_FRACTION) return baseBudgetMs;
     const adaptiveBudget = stats.p95Ms + config.bufferMs;
     if (!Number.isFinite(adaptiveBudget)) return baseBudgetMs;
-    return Math.max(baseBudgetMs, Math.min(adaptiveBudget, baseBudgetMs * MAX_BUDGET_MULTIPLIER));
+    const capped = Math.min(adaptiveBudget, baseBudgetMs * MAX_BUDGET_MULTIPLIER, MAX_TTFB_BUDGET_MS);
+    return Math.max(baseBudgetMs, capped);
   } catch {
     // Missing/locked DB or a bad log must not break the proxy hot path.
     invalidateTtfbBudgetCache();

@@ -944,6 +944,9 @@ export function formatAttemptDetail(records: AttemptTraceRecord[]): string {
       `key${r.keyOrdinal}=${r.outcome}`,
       `t=${r.startOffsetMs}+${r.durationMs}ms`,
     ];
+    if (r.ttfbMs != null) {
+      parts.push(`ttfb=${r.ttfbMs}ms`);
+    }
     if (r.errorSummary) {
       parts.push(`msg=${r.errorSummary.slice(0, DETAIL_SUMMARY_MAX_LENGTH).replace(/;/g, ',')}`);
     }
@@ -1641,6 +1644,12 @@ async function runFallbackLoopAttempts(hooks: FallbackHooks, trace: RequestTrace
     // the provider's actual words, which is exactly what the dashboard's
     // drill-down needs to answer "why did this hop fail".
     const attemptStartedAt = Date.now();
+    // Per-attempt TTFB: the first disarmHedge() call is the moment this
+    // attempt proved it was alive (first byte / headers flushed), so it
+    // timestamps the attempt's time-to-first-byte. Stays null when the
+    // attempt died before any first byte, or for non-streaming attempts,
+    // which never disarm the hedge.
+    let firstByteAtMs: number | null = null;
     const traceAttempt = (outcome: AttemptOutcome, err?: any): void => {
       trace.records.push({
         ordinal: trace.records.length,
@@ -1651,6 +1660,7 @@ async function runFallbackLoopAttempts(hooks: FallbackHooks, trace: RequestTrace
         outcome,
         startOffsetMs: attemptStartedAt - startedAt,
         durationMs: Date.now() - attemptStartedAt,
+        ttfbMs: firstByteAtMs === null ? null : firstByteAtMs - attemptStartedAt,
         errorSummary: err != null ? summarizeAttemptError(err?.message) : null,
       });
     };
@@ -1672,6 +1682,7 @@ async function runFallbackLoopAttempts(hooks: FallbackHooks, trace: RequestTrace
     // buy nothing: a committed stream can no longer fail over anyway. Slow is
     // not the same as stalled, and only stalled is worth killing.
     const disarmHedge = () => {
+      if (firstByteAtMs === null) firstByteAtMs = Date.now();
       if (hedgeTimer) {
         clearTimeout(hedgeTimer);
         hedgeTimer = undefined;

@@ -45,6 +45,14 @@ export interface AttemptTraceRecord {
   // Milliseconds this attempt ran (for 'ok' streams: until the response
   // finished, i.e. including streaming time).
   durationMs: number;
+  // Per-attempt time-to-first-byte: dispatch → the moment the attempt proved
+  // it was alive (first byte / headers flushed, i.e. the dispatch's
+  // disarmHedge call). Null when the attempt died before any first byte —
+  // a timeout, a 4xx/5xx, or a routing failure — so a null here means "never
+  // got going", not "unknown". Non-streaming attempts never disarm the hedge
+  // (they have nothing to disarm until they return), so theirs is null too;
+  // their TTFB lives on the `requests` row logRequest writes instead.
+  ttfbMs?: number | null;
   // Short, REDACTED summary of the error that ended this attempt (see
   // lib/error-redaction.ts summarizeAttemptError — secrets scrubbed, capped at
   // 200 chars). Null for successful hops ('ok'/'committed').
