@@ -19,7 +19,12 @@ export class ProtocolToolStream {
       if (!state) {
         if (!delta.id || !delta.function?.name) throw new Error('Upstream tool call omitted its identity.');
         state = { index, outputIndex: this.tools.size + 1, itemId: `fc_${randomBytes(12).toString('hex')}`,
-          call: { id: delta.id, type: 'function', function: { name: delta.function.name, arguments: '' } } };
+          call: {
+            id: delta.id,
+            type: 'function',
+            function: { name: delta.function.name, arguments: '' },
+            ...(delta.thought_signature ? { thought_signature: delta.thought_signature } : {}),
+          } };
         this.tools.set(index, state);
         if (this.protocol === 'messages') this.emit('content_block_start', { type: 'content_block_start', index: state.outputIndex,
           content_block: { type: 'tool_use', id: state.call.id, name: state.call.function.name, input: {} } });
