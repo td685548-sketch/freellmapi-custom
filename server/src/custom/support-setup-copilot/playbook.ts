@@ -423,14 +423,19 @@ export function extractRequirementsFromMessages(
       merged.requireContactIntake = true;
     }
 
-    // FAQ / Policy summary capture from informative business messages (never meta/pushback/hesitation)
+    // FAQ / Policy summary capture from informative business messages (never meta/pushback/hesitation/exploratory setup requests)
     const hasPolicyKeywords =
       /đổi trả|bảo hành|hoàn tiền|giao hàng|ship|freeship|giá|thanh toán|giờ làm việc|mở cửa|bảo lưu|chính sách|return|refund|shipping|warranty|pricing|hours|policy|sla/i.test(
         trimmed,
       );
+    const isExploratorySetupRequest =
+      /(?:muốn|cần|đang\s+muốn|nhờ|giúp|hộ|muon|can|nho|giup)\s*(?:mình\s+|tôi\s+|em\s+|bạn\s+)?(?:setup|thiết\s*lập|thiet\s*lap|cài\s*đặt|cai\s*dat|tạo|làm\s*(?:con\s*ai|bot|chatbot|ai\s*support)|tư\s*vấn|tu\s*van)|(?:setup|thiết\s*lập|thiet\s*lap|cài\s*đặt|cai\s*dat|tạo)\s*(?:giúp|giup|thay|cho|hộ)|\b(?:want|would\s+like|need|looking)\s+to\s+(?:set\s+up|configure|build|create)\b|\b(?:set\s+up|configure)\s+.*\bfor\s+(?:me|my|our)\b/i.test(
+        trimmed,
+      );
     if (
       act === 'business_context' &&
-      (hasPolicyKeywords || (!merged.faqSummaryOrPolicies && trimmed.length >= 60))
+      (hasPolicyKeywords ||
+        (!merged.faqSummaryOrPolicies && trimmed.length >= 60 && !isExploratorySetupRequest))
     ) {
       merged.faqSummaryOrPolicies = trimmed.slice(0, 2000);
     }
@@ -477,7 +482,7 @@ const VI_DIACRITIC_RE =
   /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i;
 
 const VI_UNACCENTED_PHRASE_RE =
-  /\b(?:xin\s+chao|chao\s+ban|ban\s+co\s+the|ban\s+lam\s+duoc|lam\s+gi\s+ma|co\s+the\s+noi|tieng\s+viet|giup\s+toi|giup\s+minh|cho\s+toi|cho\s+minh|cua\s+toi|cua\s+minh|lam\s+sao|nhu\s+the\s+nao|thiet\s+lap|cai\s+dat|huong\s+dan|buoc\s*[1-7]|duoc\s+khong|tuy\s+ban|lam\s+luon|mac\s+dinh|chua\s+co\s+web|cam\s+on|ban\s+la\s+ai|cung\s+nhac|tu\s+van|len\s+ke\s+hoach|len\s+ban\s+mau|trien\s+luon|ok\s+ban)\b/i;
+  /\b(?:xin\s+chao|chao\s+ban|toi\s+(?:dang|muon|can|co|chua|khong)|minh\s+(?:dang|muon|can|co|chua|khong|moi)|ben\s+(?:minh|toi|em)|va\s+muon|(?:muon|can)\s+(?:setup|thiet\s+lap|cai\s+dat|tu\s+van|lam)|ban\s+co\s+the|ban\s+lam\s+duoc|lam\s+gi\s+ma|co\s+the\s+(?:lam|noi|giup)|tieng\s+viet|giup\s+toi|giup\s+minh|cho\s+toi|cho\s+minh|cua\s+toi|cua\s+minh|lam\s+sao|nhu\s+the\s+nao|thiet\s+lap|cai\s+dat|huong\s+dan|buoc\s*[1-7]|duoc\s+khong|tuy\s+ban|lam\s+luon|mac\s+dinh|chua\s+co|khong\s+co|sao\s+(?:tra\s+loi|cung\s+nhac|hoi)|hoi\s+nhieu|nhu\s+may|cam\s+on|ban\s+la\s+ai|ban\s+oi|cung\s+nhac|tu\s+van|len\s+ke\s+hoach|len\s+ban\s+mau|trien\s+luon|ok\s+ban)\b/i;
 
 const EXPLICIT_SPEAK_VI_RE =
   /\b(?:speak|talk\s+in|reply\s+in|use|switch\s+to)\s+vietnamese\b|(?:nói|dùng|trả\s+lời|giao\s+tiếp|chat)\s*(?:bằng\s*)?tiếng\s*việt|tieng\s+viet\s+(?:khong|duoc\s+khong|nhe|di)/i;
@@ -1387,22 +1392,35 @@ export async function runSupportSetupCopilotTurn(params: {
   });
 
   const finalRequirements = humanTurn.extractedRequirements;
+  const canSatisfyLlmProposal =
+    effectiveTenant !== null ||
+    Boolean(finalRequirements.brandName || finalRequirements.industry || humanTurn.topic);
+
+  const llmWantsImmediateProposalOnPushback =
+    llm?.output.intent === 'propose_setup' &&
+    canSatisfyLlmProposal &&
+    (humanTurn.act === 'frustration_pushback' || humanTurn.act === 'hesitation_or_advice');
 
   let intent: SupportSetupChatIntent;
   if (explicitBriefSubmitted || isProposalRefinementTurn) {
     intent = 'propose_setup';
+  } else if (llmWantsImmediateProposalOnPushback) {
+    intent = 'propose_setup';
   } else if (humanTurn.intent === 'guide') {
+    intent = 'guide';
+  } else if (humanTurn.act === 'affirmation_proceed') {
+    intent = 'propose_setup';
+  } else if (llm?.output.intent === 'gather_requirements') {
+    intent = 'gather_requirements';
+  } else if (llm?.output.intent === 'guide') {
     intent = 'guide';
   } else if (
     humanTurn.shouldProposeNow ||
     (llm?.output.intent === 'propose_setup' &&
       humanTurn.act !== 'no_website_reassurance' &&
-      (effectiveTenant !== null ||
-        Boolean(finalRequirements.brandName || finalRequirements.industry || humanTurn.topic)))
+      canSatisfyLlmProposal)
   ) {
     intent = 'propose_setup';
-  } else if (llm?.output.intent === 'guide') {
-    intent = 'guide';
   } else {
     intent = 'gather_requirements';
   }
@@ -1412,7 +1430,11 @@ export async function runSupportSetupCopilotTurn(params: {
     humanTurn.act !== 'roadmap_guide';
 
   if (intent === 'guide') {
-    const useLlmGuideReply = Boolean(llm?.output.reply && !llmReplyHasStiffNumberedForm);
+    const useLlmGuideReply = Boolean(
+      llm?.output.reply &&
+        llm.output.intent !== 'propose_setup' &&
+        !llmReplyHasStiffNumberedForm,
+    );
     return {
       ok: true,
       replyLocale: locale,

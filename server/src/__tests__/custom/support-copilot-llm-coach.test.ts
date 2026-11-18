@@ -486,4 +486,59 @@ describe('Support Setup Copilot — Human-Like LLM Coach & Resilient Gateway Bri
     expect(promptEn).toContain('[Prior reply #1]: "Hi! Tell me about your store."');
     expect(promptEn).toContain('STRICT ANTI-FORM RULE');
   });
+
+  it('fails over from model="auto" (HTTP 503 no_providers_configured) to model="auto:balanced" when Default profile contains only unkeyed built-in models while a custom model is enabled outside profile_models', async () => {
+    const db = getDb();
+    const enc = encrypt('no-key');
+    const baseUrl = `http://127.0.0.1:${mockUpstreamPort}/v1`;
+    const keyId = Number(
+      db
+        .prepare(
+          `INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, base_url)
+           VALUES ('custom', 'Outside-Profile Custom Endpoint', ?, ?, ?, 'healthy', 1, ?)`,
+        )
+        .run(enc.encrypted, enc.iv, enc.authTag, baseUrl).lastInsertRowid,
+    );
+    const customModelDbId = Number(
+      db
+        .prepare(
+          `INSERT INTO models (
+             platform, model_id, display_name, intelligence_rank, speed_rank,
+             size_label, monthly_token_budget, supports_vision, supports_tools,
+             context_window, enabled, key_id, endpoint_scope
+           ) VALUES ('custom', 'outside-profile-coach', 'Outside Profile Coach', 95, 95, '70B', 'unlimited', 0, 1, 64000, 1, ?, ?)`,
+        )
+        .run(keyId, baseUrl).lastInsertRowid,
+    );
+    db.prepare('INSERT INTO fallback_config (model_db_id, priority, enabled) VALUES (?, 1, 1)').run(
+      customModelDbId,
+    );
+
+    // Seed Default profile pointing ONLY at an unkeyed built-in catalog model (so `model: "auto"` hits 503!)
+    const seededBuiltin = db
+      .prepare("SELECT id FROM models WHERE platform != 'custom' AND enabled = 1 LIMIT 1")
+      .get() as { id: number };
+    const defaultProfileId = Number(
+      db.prepare("INSERT INTO profiles (name) VALUES ('Default')").run().lastInsertRowid,
+    );
+    db.prepare(
+      'INSERT INTO profile_models (profile_id, model_db_id, priority, enabled) VALUES (?, ?, 1, 1)',
+    ).run(defaultProfileId, seededBuiltin.id);
+    setSetting('active_profile_id', String(defaultProfileId));
+    invalidateKeyCache();
+
+    const coachRes = await runHumanLikeLlmCoach({
+      messages: [{ role: 'user', content: 'tôi đang có web boardgame, và muốn setup' }],
+      locale: 'vi',
+      targetMode: 'update_tenant',
+      diagnostic: null,
+      extracted: {},
+      gatewayLoopback: { host: '127.0.0.1', port: gatewayPort },
+    });
+
+    expect(coachRes).not.toBeNull();
+    expect(coachRes?.routeSource).toBe('main_gateway_loopback');
+    expect(coachRes?.modelUsed).toContain('outside-profile-coach');
+    expect(upstreamCalls).toHaveLength(1);
+  });
 });

@@ -1,4 +1,4 @@
-import type { Server } from 'node:http';
+import http, { type Server } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../../app.js';
 import {
@@ -28,7 +28,9 @@ import {
   listSupportTenants,
 } from '../../custom/x-gateway/support-store.js';
 import { getDb, initDb } from '../../db/index.js';
+import { encrypt } from '../../lib/crypto.js';
 import { createSession, createUser } from '../../services/auth.js';
+import { invalidateKeyCache } from '../../services/key-cache.js';
 import { setUserPermissions } from '../../services/users.js';
 
 let server: Server;
@@ -1146,5 +1148,236 @@ describe('AI Support Setup Copilot (Guided Onboarding & Consent-Gated Auto-Deplo
     );
     expect(ceramicsPrompt).toMatch(/Gốm Mộc/);
     expect(ceramicsPrompt).toMatch(/gốm thủ công/i);
+
+    // Polite >= 60-char exploratory setup request must NOT be stuffed into faqSummaryOrPolicies or trigger premature Turn-1 propose_setup
+    const politeLongOpen =
+      'chào bạn, hiện tại bên mình đang có một trang web bán boardgame và muốn setup';
+    expect(politeLongOpen.length).toBeGreaterThanOrEqual(60);
+    const politeTurn1 = await hit(
+      '/api/support-setup-copilot/chat',
+      'POST',
+      {
+        tenantId: existingTenantId,
+        locale: 'vi',
+        messages: [{ role: 'user', content: politeLongOpen }],
+      },
+      humanAdminToken,
+    );
+    expect(politeTurn1.status).toBe(200);
+    expect(politeTurn1.body?.intent).toBe('gather_requirements');
+    expect(politeTurn1.body?.proposal).toBeNull();
+
+    const politeTurn2 = await hit(
+      '/api/support-setup-copilot/chat',
+      'POST',
+      {
+        tenantId: existingTenantId,
+        locale: 'vi',
+        messages: [
+          { role: 'user', content: politeLongOpen },
+          { role: 'assistant', content: String(politeTurn1.body?.reply ?? '') },
+          { role: 'user', content: 'ok lên bản mẫu luôn đi' },
+        ],
+      },
+      humanAdminToken,
+    );
+    expect(politeTurn2.status).toBe(200);
+    expect(politeTurn2.body?.intent).toBe('propose_setup');
+    const politeKbDocs =
+      ((politeTurn2.body?.proposal?.steps as Array<Record<string, any>>).find(
+        (s) => s.stepId === 'knowledge_masking',
+      )?.payload?.docs as Array<{ content: string }>) ?? [];
+    expect(politeKbDocs.map((d) => d.content).join('\n')).not.toContain(politeLongOpen);
+
+    // Unaccented Vietnamese under English UI locale ("toi dang co web boardgame, va muon setup" -> "ban co the lam gi ma")
+    const unaccented1 = await hit(
+      '/api/support-setup-copilot/chat',
+      'POST',
+      {
+        tenantId: existingTenantId,
+        locale: 'en',
+        messages: [{ role: 'user', content: 'toi dang co web boardgame, va muon setup' }],
+      },
+      humanAdminToken,
+    );
+    expect(unaccented1.status).toBe(200);
+    expect(unaccented1.body?.replyLocale).toBe('vi');
+    expect(unaccented1.body?.intent).toBe('gather_requirements');
+
+    const unaccented2 = await hit(
+      '/api/support-setup-copilot/chat',
+      'POST',
+      {
+        tenantId: existingTenantId,
+        locale: 'en',
+        messages: [
+          { role: 'user', content: 'toi dang co web boardgame, va muon setup' },
+          { role: 'assistant', content: String(unaccented1.body?.reply ?? '') },
+          { role: 'user', content: 'ban co the lam gi ma' },
+        ],
+      },
+      humanAdminToken,
+    );
+    expect(unaccented2.status).toBe(200);
+    expect(unaccented2.body?.replyLocale).toBe('vi');
+    expect(unaccented2.body?.intent).toBe('guide');
+    expect(
+      (unaccented2.body?.suggestedQuickReplies as string[]).some((q) =>
+        /bạn có thể làm được những gì/i.test(q),
+      ),
+    ).toBe(false);
+  });
+
+  it('preserves live LLM gather_requirements replies when tone/language are extracted and syncs propose_setup cards on pushback without ghost claims', async () => {
+    const llmAdmin = createUser('live-llm-sync-admin@example.com', 'AdminPass123!');
+    setUserPermissions(llmAdmin.userId, ['*'], primaryAdminId);
+    const llmAdminToken = createSession(llmAdmin.userId);
+
+    const scriptedOutputs: string[] = [];
+    const mockUpstream = http.createServer((req, res) => {
+      req.resume();
+      req.on('end', () => {
+        const content = scriptedOutputs.shift() ?? '{}';
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            id: `chatcmpl_live_${Date.now()}`,
+            object: 'chat.completion',
+            created: Math.floor(Date.now() / 1000),
+            model: 'live-boardgame-specialist',
+            choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
+          }),
+        );
+      });
+    });
+    mockUpstream.listen(0, '127.0.0.1');
+    await new Promise<void>((resolve) => mockUpstream.once('listening', () => resolve()));
+    const upstreamPort = (mockUpstream.address() as { port: number }).port;
+
+    const db = getDb();
+    const enc = encrypt('no-key');
+    const baseUrl = `http://127.0.0.1:${upstreamPort}/v1`;
+    const keyId = Number(
+      db
+        .prepare(
+          `INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, base_url)
+           VALUES ('custom', 'Live Test Upstream', ?, ?, ?, 'healthy', 1, ?)`,
+        )
+        .run(enc.encrypted, enc.iv, enc.authTag, baseUrl).lastInsertRowid,
+    );
+    const modelDbId = Number(
+      db
+        .prepare(
+          `INSERT INTO models (
+             platform, model_id, display_name, intelligence_rank, speed_rank,
+             size_label, monthly_token_budget, supports_vision, supports_tools,
+             context_window, enabled, key_id, endpoint_scope
+           ) VALUES ('custom', 'live-boardgame-specialist', 'Live Specialist', 95, 95, '70B', 'unlimited', 0, 1, 64000, 1, ?, ?)`,
+        )
+        .run(keyId, baseUrl).lastInsertRowid,
+    );
+    db.prepare('INSERT INTO fallback_config (model_db_id, priority, enabled) VALUES (?, 1, 1)').run(
+      modelDbId,
+    );
+    invalidateKeyCache();
+
+    try {
+      // 1. Live LLM returns gather_requirements + extracted industry + tone + language on active tenant:
+      // must keep gather_requirements AND preserve the live LLM's exact reply!
+      scriptedOutputs.push(
+        JSON.stringify({
+          intent: 'gather_requirements',
+          reply:
+            'Chào bạn! Mở web boardgame cực thú vị luôn — mình có thể giúp tư vấn game theo số người chơi và luật chơi ngay. Bạn muốn cho mình biết tên shop trước hay lên bản mẫu luôn nhé?',
+          missingQuestions: ['Tên shop boardgame'],
+          suggestedQuickReplies: ['Lên bản mẫu luôn đi'],
+          extractedRequirements: {
+            industry: 'Boardgame & Trò chơi bàn',
+            tone: 'friendly',
+            language: 'vi',
+          },
+        }),
+      );
+
+      const liveTurn1 = await hit(
+        '/api/support-setup-copilot/chat',
+        'POST',
+        {
+          tenantId: existingTenantId,
+          locale: 'vi',
+          messages: [{ role: 'user', content: 'tôi đang có web boardgame, và muốn setup' }],
+        },
+        llmAdminToken,
+      );
+      expect(liveTurn1.status).toBe(200);
+      expect(liveTurn1.body?.usedFallback).toBe(false);
+      expect(liveTurn1.body?.intent).toBe('gather_requirements');
+      expect(liveTurn1.body?.proposal).toBeNull();
+      expect(liveTurn1.body?.reply).toContain('Mở web boardgame cực thú vị luôn');
+
+      // 2. User complains "sao trả lời cứng nhắc vậy", live LLM returns intent="propose_setup" promising a draft card below:
+      // must honor propose_setup and attach the real pending_consent proposal card!
+      scriptedOutputs.push(
+        JSON.stringify({
+          intent: 'propose_setup',
+          reply:
+            'Cho mình xin lỗi nhé! Mình vừa soạn sẵn luôn bản nháp cấu hình cho web boardgame ở thẻ bên dưới (chưa thay đổi hệ thống cho tới khi bạn bấm duyệt) để bạn xem ngay nha!',
+          extractedRequirements: {
+            industry: 'Boardgame & Trò chơi bàn',
+          },
+        }),
+      );
+
+      const liveTurn2 = await hit(
+        '/api/support-setup-copilot/chat',
+        'POST',
+        {
+          tenantId: existingTenantId,
+          locale: 'vi',
+          messages: [
+            { role: 'user', content: 'tôi đang có web boardgame, và muốn setup' },
+            { role: 'assistant', content: String(liveTurn1.body?.reply ?? '') },
+            { role: 'user', content: 'sao trả lời cứng nhắc vậy' },
+          ],
+        },
+        llmAdminToken,
+      );
+      expect(liveTurn2.status).toBe(200);
+      expect(liveTurn2.body?.usedFallback).toBe(false);
+      expect(liveTurn2.body?.intent).toBe('propose_setup');
+      expect(liveTurn2.body?.proposal).toBeTruthy();
+      expect(liveTurn2.body?.proposal?.status).toBe('pending_consent');
+      expect(liveTurn2.body?.reply).toContain('bản nháp cấu hình cho web boardgame');
+
+      // 3. On a pure capability question ("bạn có thể làm gì mà"), if a rogue model returns intent="propose_setup" claiming a card below,
+      // intent stays 'guide' and the ghost-card reply is suppressed!
+      scriptedOutputs.push(
+        JSON.stringify({
+          intent: 'propose_setup',
+          reply: 'Mình vừa tạo sẵn thẻ đề xuất ở bên dưới cho bạn bấm duyệt ngay nhé (chưa lưu gì đâu)!',
+        }),
+      );
+
+      const liveTurn3 = await hit(
+        '/api/support-setup-copilot/chat',
+        'POST',
+        {
+          tenantId: existingTenantId,
+          locale: 'vi',
+          messages: [{ role: 'user', content: 'bạn có thể làm gì mà' }],
+        },
+        llmAdminToken,
+      );
+      expect(liveTurn3.status).toBe(200);
+      expect(liveTurn3.body?.intent).toBe('guide');
+      expect(liveTurn3.body?.proposal).toBeNull();
+      expect(String(liveTurn3.body?.reply ?? '')).not.toContain('thẻ đề xuất ở bên dưới');
+    } finally {
+      db.prepare('DELETE FROM fallback_config WHERE model_db_id = ?').run(modelDbId);
+      db.prepare('DELETE FROM models WHERE id = ?').run(modelDbId);
+      db.prepare('DELETE FROM api_keys WHERE id = ?').run(keyId);
+      invalidateKeyCache();
+      await new Promise<void>((resolve) => mockUpstream.close(() => resolve()));
+    }
   });
 });

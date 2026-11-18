@@ -413,5 +413,41 @@ describe('AI Support Setup Copilot — Human-Like Dialogue & Open-Domain Underst
       expect(enIntro.reply).toContain('Consent Required');
       expect(enIntro.reply).toContain('Board Games & Tabletop');
     });
+
+    it('avoids nested broken Markdown bold, handles unaccented Vietnamese capability/topic turns, and omits self-echoing capability chips', () => {
+      // 1. Turn-1 boardgame reply must have clean balanced `**` markers (no nested `**...**...**...**`)
+      const turnA = buildHumanDialogueTurn({
+        locale: 'vi',
+        activeTenantName: 'EXE',
+        targetMode: 'update_tenant',
+        messages: [{ role: 'user', content: 'tôi đang có web boardgame, và muốn setup' }],
+      });
+      expect(turnA.reply).not.toContain('**dựng luôn bản mẫu trợ lý AI cho **');
+      const boldTokenCount = (turnA.reply.match(/\*\*/g) ?? []).length;
+      expect(boldTokenCount % 2).toBe(0);
+
+      // 2. Unaccented Vietnamese topic + capability pushback ("toi dang co web boardgame va muon setup" -> "ban co the lam gi ma")
+      const unaccentedTopic = extractOpenDomainTopic('toi dang co web boardgame va muon setup', 'vi');
+      expect(unaccentedTopic?.industryVi).toBe('Boardgame / Trò chơi bàn');
+      expect(unaccentedTopic?.shortLabelVi.toLowerCase()).toBe('web boardgame');
+
+      expect(classifyHumanConversationalAct('ban co the lam gi ma')).toBe('capability_or_pushback');
+
+      // 3. After answering "ban co the lam gi ma", suggestedQuickReplies must NOT self-echo "Bạn có thể làm được những gì cho web của mình?"
+      const capTurn = buildHumanDialogueTurn({
+        locale: 'vi',
+        activeTenantName: 'EXE',
+        targetMode: 'update_tenant',
+        messages: [
+          { role: 'user', content: 'toi dang co web boardgame, va muon setup' },
+          { role: 'assistant', content: turnA.reply },
+          { role: 'user', content: 'ban co the lam gi ma' },
+        ],
+      });
+      expect(capTurn.intent).toBe('guide');
+      expect(
+        capTurn.suggestedQuickReplies.some((q) => /bạn có thể làm được những gì/i.test(q)),
+      ).toBe(false);
+    });
   });
 });

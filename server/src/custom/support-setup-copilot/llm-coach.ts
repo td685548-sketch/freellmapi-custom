@@ -82,7 +82,7 @@ const VI_DIACRITIC_RE =
   /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i;
 
 const VI_UNACCENTED_CONVERSATIONAL_RE =
-  /\b(?:xin\s+chao|chao\s+ban|minh|ban\s+co\s+the|tieng\s+viet|giup\s+(?:toi|minh|ban)|cho\s+(?:toi|minh|ban)|cua\s+(?:toi|minh|ban)|lam\s+sao|nhu\s+the\s+nao|thiet\s+lap|cai\s+dat|huong\s+dan|duoc\s+khong|tuy\s+ban|lam\s+luon|mac\s+dinh|cam\s+on|nhe|nha|luon\s+di|ke\s+hoach)\b/i;
+  /\b(?:xin\s+chao|chao\s+ban|minh|toi\s+(?:dang|muon|can|co|chua|khong)|minh\s+(?:dang|muon|can|co|chua|khong|moi)|ben\s+(?:minh|toi|em)|va\s+muon|(?:muon|can)\s+(?:setup|thiet\s+lap|cai\s+dat|tu\s+van|lam)|ban\s+(?:co\s+the|lam\s+duoc|biết|biet|oi)|co\s+the\s+(?:lam|noi|giup)|lam\s+gi\s+ma|tieng\s+viet|giup\s+(?:toi|minh|ban)|cho\s+(?:toi|minh|ban)|cua\s+(?:toi|minh|ban)|lam\s+sao|nhu\s+the\s+nao|thiet\s+lap|cai\s+dat|huong\s+dan|duoc\s+khong|tuy\s+ban|lam\s+luon|mac\s+dinh|chua\s+co|khong\s+co|sao\s+(?:tra\s+loi|cung\s+nhac|hoi)|cam\s+on|nhe|nha|luon\s+di|ke\s+hoach)\b/i;
 
 const TOOL_MARKUP_RE =
   /<support_tool_call[\s\S]*?<\/support_tool_call>|<support_tool_result[\s\S]*?<\/support_tool_result>|<\/?support_tool_(?:call|result)[^>]*>/gi;
@@ -914,16 +914,23 @@ export async function runHumanLikeLlmCoach(
     }
   };
 
-  // Try `'auto'` first; if an active routing profile has 0 enabled models (`activeChainOrThrow` -> 400),
-  // automatically fall over to `'auto:balanced'` which spans all enabled catalog models.
+  // Try `'auto'` first; if the active routing profile chain has 0 enabled models (`400`/`404`) OR
+  // its seeded models have no active provider keys while another custom/catalog key is configured
+  // outside `profile_models` (`503 no_providers_configured` / `429 routing_exhausted`),
+  // automatically fail over to `'auto:balanced'` which spans all enabled catalog/custom models.
   const modelsToTry = ['auto', 'auto:balanced'];
   for (let i = 0; i < modelsToTry.length; i += 1) {
     const modelCandidate = modelsToTry[i]!;
     try {
       const upstream = await postLoopback(modelCandidate, baseTurnMessages, 0.45, false);
       if (!upstream.ok) {
-        // Retry with `auto:balanced` only when `auto` failed due to profile/model routing config (400/404)
-        if (i === 0 && (upstream.status === 400 || upstream.status === 404)) {
+        if (
+          i === 0 &&
+          (upstream.status === 400 ||
+            upstream.status === 404 ||
+            upstream.status === 503 ||
+            upstream.status === 429)
+        ) {
           continue;
         }
         return null;

@@ -727,7 +727,7 @@ const GENERIC_NON_DOMAIN_PHRASE_RE =
   /^(?:của\s+(?:tôi|mình|em|anh|chị|chúng\s+tôi|chúng\s+mình|bạn)|cho\s+(?:tôi|mình|em|doanh\s+nghiệp|shop|công\s+ty)|hiện\s+tại|mới|này|đó|kia|đâu|nào|gì|sao|thế\s+nào|một\s+con\s+ai|1\s+con\s+ai|con\s+ai|ai\s+support|support\s+ai|chatbot|bot|trợ\s+lý(?:\s+ai)?|tenant(?:\s+hiện\s+tại|\s+mới|\s+tên.*)?|tiêu\s+chuẩn|mặc\s+định|tự\s+động|trọn\s+gói|hoàn\s+chỉnh|my\s+(?:own|current|new)?\s*(?:business|shop|store|company|website|site|tenant|ai|assistant|bot)?|a\s+(?:new\s+|brand-?new\s+)?(?:tenant|ai\s+support|chatbot|support\s+assistant|setup)|current\s+tenant|standard\s+defaults|for\s+me|right\s+now|yet)$/i;
 
 const META_OR_PUSHBACK_TURN_RE =
-  /^(?:bạn\s+có\s+thể\s+(?:làm|nói|giúp)|bạn\s+làm\s+được|mày\s+biết\s+làm|em\s+giúp\s+được|sao\s+(?:trả\s+lời\s+)?cứng\s+nhắc|hỏi\s+nhiều\s+quá|nói\s+chuyện\s+như\s+máy|đừng\s+lặp\s+lại|tư\s+vấn\s+(?:cho\s+mình|giúp\s+mình)|tôi\s+chưa\s+biết\s+bắt\s+đầu|chưa\s+có\s+website|không\s+có\s+website|xin\s+chào|chào\s+bạn|cảm\s+ơn|ok\b|ừ\b|được\s+đó|làm\s+đi|triển\s+luôn|lên\s+(?:luôn\s+)?(?:kế\s+hoạch|bản\s+mẫu|bản\s+nháp)|what\s+can\s+you|who\s+are\s+you|why\s+are\s+you\s+so|how\s+do\s+i|explain\s+step)/i;
+  /^(?:bạn\s+có\s+thể\s+(?:làm|nói|giúp)|ban\s+co\s+the\s+(?:lam|noi|giup)|bạn\s+làm\s+được|ban\s+lam\s+duoc|mày\s+biết\s+làm|may\s+biet\s+lam|em\s+giúp\s+được|em\s+giup\s+duoc|sao\s+(?:trả\s+lời\s+|tra\s+loi\s+)?(?:cứng\s+nhắc|cung\s+nhac)|hỏi\s+nhiều\s+quá|hoi\s+nhieu\s+qua|nói\s+chuyện\s+như\s+máy|noi\s+chuyen\s+nhu\s+may|đừng\s+lặp\s+lại|dung\s+lap\s+lai|tư\s+vấn\s+(?:cho\s+mình|giúp\s+mình)|tu\s+van\s+(?:cho\s+minh|giup\s+minh)|tôi\s+chưa\s+biết\s+bắt\s+đầu|toi\s+chua\s+biet\s+bat\s+dau|chưa\s+có\s+website|chua\s+co\s+web|không\s+có\s+website|khong\s+co\s+web|xin\s+chào|xin\s+chao|chào\s+bạn|chao\s+ban|cảm\s+ơn|cam\s+on|ok\b|ừ\b|được\s+đó|duoc\s+do|làm\s+đi|lam\s+di|triển\s+luôn|trien\s+luon|lên\s+(?:luôn\s+)?(?:kế\s+hoạch|bản\s+mẫu|bản\s+nháp)|len\s+(?:luon\s+)?(?:ke\s+hoach|ban\s+mau|ban\s+nhap)|what\s+can\s+you|who\s+are\s+you|why\s+are\s+you\s+so|how\s+do\s+i|explain\s+step)/i;
 
 function capitalizeFirst(input: string): string {
   const trimmed = input.trim();
@@ -738,7 +738,7 @@ function capitalizeFirst(input: string): string {
 function cleanExtractedTopicPhrase(raw: string): string {
   return raw
     .replace(
-      /\s*(?:,|;|\bvà\s+(?:muốn|cần|đang\s+muốn|nhờ|tư\s+vấn|setup|thiết\s+lập|cài\s+đặt|làm\s+chatbot|làm\s+ai|tạo\s+ai)|\bđang\s+muốn\s+(?:setup|thiết\s+lập|cài\s+đặt|làm|tạo)|\bmuốn\s+(?:setup|thiết\s+lập|cài\s+đặt|tích\s+hợp|nhúng|làm\s+ai|làm\s+bot|tạo\s+bot|tạo\s+ai|nhờ)|\bcần\s+(?:setup|thiết\s+lập|cài\s+đặt|tư\s+vấn|làm\s+bot|hỗ\s+trợ)|\bđể\s+(?:setup|hỗ\s+trợ|tư\s+vấn|trả\s+lời\s+khách)|\bnhờ\s+(?:bạn|mình|ad|em|ai)|\bgiúp\s+(?:tôi|mình|em)\b|\bmột\s+con\s+ai\b|\b1\s+con\s+ai\b|\bcon\s+ai\s+support\b|\bmàu\s+(?:chủ\s+đạo|#|[a-zà-ỹ]+)|\bgiọng\s+(?:điệu\s+)?(?:thân\s+thiện|chuyên\s+nghiệp|kỹ\s+thuật|đồng\s+cảm)|\bwebsite\s+https?:\/\/|\bđổi\s+trả\s+\d+|\bfreeship\b|\band\s+(?:i\s+)?(?:want|need|would\s+like)\s+to\b|\bto\s+set\s+up\b|\bfor\s+my\s+customers\b).*$/i,
+      /\s*(?:,|;|\b(?:và|va)\s+(?:muốn|muon|cần|can|đang\s+muốn|dang\s+muon|nhờ|nho|tư\s+vấn|tu\s+van|setup|thiết\s+lập|thiet\s+lap|cài\s+đặt|cai\s+dat|làm\s+chatbot|làm\s+ai|tạo\s+ai)|\b(?:đang|dang)\s+(?:muốn|muon)\s+(?:setup|thiết\s+lập|thiet\s+lap|cài\s+đặt|cai\s+dat|làm|lam|tạo|tao)|\b(?:muốn|muon)\s+(?:setup|thiết\s+lập|thiet\s+lap|cài\s+đặt|cai\s+dat|tích\s+hợp|nhúng|làm\s+ai|làm\s+bot|tạo\s+bot|tạo\s+ai|nhờ)|\b(?:cần|can)\s+(?:setup|thiết\s+lập|thiet\s+lap|cài\s+đặt|cai\s+dat|tư\s+vấn|tu\s+van|làm\s+bot|hỗ\s+trợ)|\b(?:để|de)\s+(?:setup|hỗ\s+trợ|ho\s+tro|tư\s+vấn|tu\s+van|trả\s+lời\s+khách)|\bnhờ\s+(?:bạn|mình|ad|em|ai)|\bgiúp\s+(?:tôi|mình|em)\b|\bgiup\s+(?:toi|minh|em)\b|\bmột\s+con\s+ai\b|\b1\s+con\s+ai\b|\bcon\s+ai\s+support\b|\bmàu\s+(?:chủ\s+đạo|#|[a-zà-ỹ]+)|\bgiọng\s+(?:điệu\s+)?(?:thân\s+thiện|chuyên\s+nghiệp|kỹ\s+thuật|đồng\s+cảm)|\bwebsite\s+https?:\/\/|\bđổi\s+trả\s+\d+|\bfreeship\b|\band\s+(?:i\s+)?(?:want|need|would\s+like)\s+to\b|\bto\s+set\s+up\b|\bfor\s+my\s+customers\b).*$/i,
       '',
     )
     .replace(/\s+(?:ở|tại)\s+[A-ZÀ-Ỹ][\wÀ-ỹ\s]{1,25}$/u, '')
@@ -1250,7 +1250,7 @@ const BUSINESS_COURSE_EXCLUSION_RE =
   /khóa\s+học|trung\s+tâm|học\s+viện|lớp\s+học|dạy\s+(?:giao\s+tiếp|tiếng)|bán\s+khóa|\bcourse\b|\bschool\b|\bacademy\b/i;
 
 const CAPABILITY_PUSHBACK_RE =
-  /(?:bạn|ban|mày|may|em|anh|ai|cậu|ad)\s+(?:thực\s+sự\s+|thật\s+sự\s+|rốt\s+cuộc\s+)?(?:có\s+thể|co\s+the|biết|biet|làm\s+được|lam\s+duoc|giúp\s+được|giup\s+duoc|hỗ\s+trợ\s+được)\s*(?:những\s+|cái\s+)?(?:làm\s+|giúp\s+)?(?:gì|những\s+gì)|(?:bạn|ban|mày|em)\s+(?:là\s+ai|la\s+ai|giúp\s+gì\s+được|làm\s+gì\s+được)|chức\s+năng\s+của\s+(?:bạn|em)|tác\s+dụng\s+gì|\b(?:who\s+are\s+you|what\s+can\s+you\s+(?:actually\s+)?do|how\s+can\s+you\s+help|what\s+do\s+you\s+do|what\s+are\s+your\s+capabilities)\b/i;
+  /(?:bạn|ban|mày|may|em|anh|ai|cậu|cau|ad)\s+(?:thực\s+sự\s+|thật\s+sự\s+|rốt\s+cuộc\s+|thuc\s+su\s+|that\s+su\s+|rot\s+cuoc\s+)?(?:có\s+thể|co\s+the|biết|biet|làm\s+được|lam\s+duoc|giúp\s+được|giup\s+duoc|hỗ\s+trợ\s+được|ho\s+tro\s+duoc)\s*(?:những\s+|nhung\s+|cái\s+|cai\s+)?(?:làm\s+|lam\s+|giúp\s+|giup\s+)?(?:gì|gi|những\s+gì|nhung\s+gi)|(?:bạn|ban|mày|may|em)\s+(?:là\s+ai|la\s+ai|giúp\s+gì\s+được|giup\s+gi\s+duoc|làm\s+gì\s+được|lam\s+gi\s+duoc)|chức\s+năng\s+của\s+(?:bạn|ban|em)|chuc\s+nang\s+cua\s+(?:ban|em)|tác\s+dụng\s+gì|tac\s+dung\s+gi|\b(?:who\s+are\s+you|what\s+can\s+you\s+(?:actually\s+)?do|how\s+can\s+you\s+help|what\s+do\s+you\s+do|what\s+are\s+your\s+capabilities)\b/i;
 
 const HESITATION_OR_ADVICE_RE =
   /chưa\s+biết\s+bắt\s+đầu|chua\s+biet\s+bat\s+dau|không\s+biết\s+bắt\s+đầu|bắt\s+đầu\s+từ\s+đâu|tư\s+vấn\s+(?:cho\s+|giúp\s+|giùm\s+)?(?:mình|tôi|em)|tu\s+van\s+(?:cho\s+|giup\s+)?(?:minh|toi|em)|gợi\s+ý\s+(?:cho\s+|giúp\s+)?(?:mình|tôi|em)|goi\s+y\s+(?:cho\s+|giup\s+)?(?:minh|toi|em)|không\s+rành\s+kỹ\s+thuật|khong\s+ranh\s+ky\s+thuat|mù\s+công\s+nghệ|không\s+biết\s+code|mới\s+dùng\s+lần\s+đầu|khó\s+hiểu\s+quá|rối\s+quá|nên\s+bắt\s+đầu\s+sao|\b(?:don'?t\s+know\s+where\s+to\s+start|not\s+sure\s+where\s+to\s+(?:start|begin)|not\s+technical|advise\s+me|give\s+me\s+(?:some\s+)?advice|what\s+do\s+you\s+recommend|guide\s+me\s+gently)\b/i;
@@ -1659,12 +1659,16 @@ export function buildHumanDialogueTurn(
         ? [
             topic.draftChipVi,
             topic.detailExampleChipVi,
-            'Bạn có thể làm được những gì cho web của mình?',
+            act === 'capability_or_pushback'
+              ? 'Chưa có website đâu, cứ lên bản mẫu mặc định trước nhé'
+              : 'Bạn có thể làm được những gì cho web của mình?',
           ]
         : [
             topic.draftChipEn,
             topic.detailExampleChipEn,
-            'What can you actually set up for my site?',
+            act === 'capability_or_pushback'
+              ? 'No website yet — draft smart defaults first'
+              : 'What can you actually set up for my site?',
           ];
     }
 
@@ -2110,13 +2114,14 @@ export function buildHumanDialogueTurn(
 
   const hasRichMultiFieldContext =
     targetMode === 'update_tenant' && activeTenantName
-      ? concreteSignals >= 2 &&
-        Boolean(
-          extractedRequirements.faqSummaryOrPolicies ||
-            extractedRequirements.websiteOrigin ||
-            extractedRequirements.primaryColor ||
-            extractedRequirements.tone,
-        )
+      ? concreteSignals >= 3 ||
+        (concreteSignals >= 2 &&
+          Boolean(
+            extractedRequirements.faqSummaryOrPolicies ||
+              extractedRequirements.websiteOrigin ||
+              extractedRequirements.brandName ||
+              extractedRequirements.primaryColor,
+          ))
       : Boolean(
           extractedRequirements.brandName &&
             concreteSignals >= 2 &&
@@ -2208,7 +2213,7 @@ export function buildHumanDialogueTurn(
         '',
         extractedRequirements.brandName
           ? `Bạn muốn dặn thêm **quy định ship / đổi trả cơ bản** (hoặc tông màu khung chat bạn thích) để mình đưa thẳng vào bài FAQ ${brandNoteVi}, hay để mình **lên luôn một bản mẫu hoàn chỉnh** ngay bây giờ cho bạn xem thử trước?`
-          : `Bạn muốn nhắn thêm cho mình **tên thương hiệu/shop** cùng **chính sách ship hoặc đổi trả cơ bản** để mình đưa vào tài liệu cho thật sát, hay muốn mình **dựng luôn bản mẫu trợ lý AI ${brandNoteVi}** ngay bây giờ để bạn xem trực quan trước?`,
+          : `Bạn muốn nhắn thêm cho mình **tên thương hiệu/shop** cùng **chính sách ship hoặc đổi trả cơ bản** để mình đưa vào tài liệu cho thật sát, hay muốn mình **dựng luôn bản mẫu trợ lý AI** ${brandNoteVi} ngay bây giờ để bạn xem trực quan trước?`,
       ].join('\n'),
       [
         `Nghe tới **${topic.shortLabelVi}** là mình hình dung ra ngay mấy câu khách hay nhắn hỏi nhất rồi — từ chuyện ${sc1Vi} cho tới ${sc3Vi}.`,
