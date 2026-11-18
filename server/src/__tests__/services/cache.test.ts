@@ -219,6 +219,20 @@ describe('response cache', () => {
       expect(computeCacheKey({ model: 'auto', messages, seed: undefined }))
         .toBe(computeCacheKey({ model: 'auto', messages }));
     });
+
+    it('changes when the system prompt or saver level changes', () => {
+      const messages = [msg('user', 'same prompt')];
+      expect(computeCacheKey({ model: 'auto', messages, systemPrompt: 'prompt A' }))
+        .not.toBe(computeCacheKey({ model: 'auto', messages, systemPrompt: 'prompt B' }));
+      expect(computeCacheKey({ model: 'auto', messages, systemPrompt: 'prompt A' }))
+        .toBe(computeCacheKey({ model: 'auto', messages, systemPrompt: 'prompt A' }));
+      expect(computeCacheKey({ model: 'auto', messages }))
+        .toBe(computeCacheKey({ model: 'auto', messages, systemPrompt: undefined }));
+      expect(computeCacheKey({ model: 'auto', messages, saver: 'lite' }))
+        .not.toBe(computeCacheKey({ model: 'auto', messages, saver: 'full' }));
+      expect(computeCacheKey({ model: 'auto', messages, saver: 'lite' }))
+        .not.toBe(computeCacheKey({ model: 'auto', messages }));
+    });
   });
 
   describe('store / get round-trip', () => {
@@ -368,11 +382,14 @@ describe('response cache', () => {
   });
 
   describe('cacheActive (env switch)', () => {
-    it('off directive always wins; on directive forces; default follows env', () => {
+    it('off directive always wins; on directive forces; default follows the master switch (on by default)', () => {
       delete process.env.RESPONSE_CACHE;
-      expect(isCacheEnabled()).toBe(false);
+      expect(isCacheEnabled()).toBe(true);
       expect(cacheActive('off')).toBe(false);
       expect(cacheActive('on')).toBe(true);
+      expect(cacheActive('default')).toBe(true);
+      process.env.RESPONSE_CACHE = '0';
+      expect(isCacheEnabled()).toBe(false);
       expect(cacheActive('default')).toBe(false);
       process.env.RESPONSE_CACHE = 'on';
       expect(cacheActive('default')).toBe(true);
@@ -505,8 +522,8 @@ describe('response cache', () => {
   });
 
   describe('settings-backed toggle (no restart)', () => {
-    it('the stored setting enables the cache even with the env var unset', () => {
-      delete process.env.RESPONSE_CACHE;
+    it('the stored setting enables the cache even when the env var turns it off', () => {
+      process.env.RESPONSE_CACHE = '0';
       expect(isCacheEnabled()).toBe(false);
       setSetting(CACHE_ENABLED_SETTING, '1');
       expect(isCacheEnabled()).toBe(true);

@@ -29,14 +29,14 @@ const engineDefaults: Record<string, CompressionEngineConfig> = {
 };
 
 export const DEFAULT_COMPRESSION_CONFIG: CompressionConfig = {
-  mode: 'off',
+  mode: 'standard',
   engines: engineDefaults,
   trustProjectFilters: false,
   prefixFreeze: true,
 };
 
 const storedConfigSchema = z.object({
-  mode: z.enum(COMPRESSION_MODES).default('off'),
+  mode: z.enum(COMPRESSION_MODES).default('standard'),
   engines: z.record(z.string(), enabledSchema).default({}),
   autoTriggerEstTokens: z.number().int().positive().optional(),
   targetTokens: z.number().int().positive().optional(),
@@ -65,7 +65,7 @@ function envMode(): CompressionMode {
   const raw = process.env.FREELLMAPI_COMPRESSION?.trim().toLowerCase();
   return (COMPRESSION_MODES as readonly string[]).includes(raw ?? '')
     ? raw as CompressionMode
-    : 'off';
+    : 'standard';
 }
 
 function mergeDefaults(value: Partial<CompressionConfig>): CompressionConfig {
