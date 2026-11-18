@@ -72,6 +72,7 @@ import { xSupportEvidenceConsoleRouter } from './support-evidence-router.js';
 import { xSupportServiceDeskConsoleRouter } from './support-service-desk-router.js';
 import { xSupportServiceDeskLiveTestRouter } from './support-service-desk-live-test-router.js';
 import { xSupportOutputConsoleRouter } from './support-output-router.js';
+import { xSmartRoutingRouter } from './smart-routing-router.js';
 
 /** Console API for the gateway switch, outbound proxy, dedicated API keys, and default savers.
  *
@@ -512,6 +513,7 @@ xGatewayConsoleRouter.use(xGatewayManagementRouter);
 xGatewayConsoleRouter.use(xGatewayMediaRouter);
 xGatewayConsoleRouter.use(xQuotaRouter);
 xGatewayConsoleRouter.use(xRoutingDefaultsRouter);
+xGatewayConsoleRouter.use('/smart-routing', xSmartRoutingRouter);
 xGatewayConsoleRouter.use('/proxy-pool', xProxyPoolRouter);
 xGatewayConsoleRouter.use('/tools', xCliToolsRouter);
 xGatewayConsoleRouter.use('/translator', xTranslatorRouter);

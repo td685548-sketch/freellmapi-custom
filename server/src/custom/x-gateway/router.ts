@@ -77,6 +77,11 @@ import { xSupportPublicRouter } from './support-router.js';
 import { xSupportEnterprisePublicRouter } from './support-enterprise-router.js';
 import { xSupportGovernancePublicRouter } from './support-governance-router.js';
 import { xSupportServiceDeskPublicRouter } from './support-service-desk-router.js';
+import { evaluateGatewaySmartRoute } from './intent-router.js';
+import {
+  applyLearnedCapsToDispatch,
+  learnCapsFromUpstreamError,
+} from './learned-caps.js';
 
 export const xGatewayRouter = Router();
 
@@ -788,6 +793,7 @@ async function executeRouteChatCompletion(
   candidate: CandidateRoute,
   msgs: ChatMessage[],
   opts: CompletionOptions,
+  rawBody?: Record<string, unknown>,
   isFailover = false,
 ): Promise<{ candidate: CandidateRoute; completion: ChatCompletionResponse; latencyMs: number }> {
   const { account, modelId } = candidate;
@@ -803,23 +809,48 @@ async function executeRouteChatCompletion(
     accountId: account.id,
     isFailover,
   });
+  const capTarget = { provider: account.provider, modelId, endpointScope: account.base_url };
+  const initialDispatch = applyLearnedCapsToDispatch(capTarget, prepared.options, rawBody);
   const startedAt = Date.now();
-  const completion = await withQuotaTracking(account, modelId, effectiveProxy, () =>
-    provider.chatCompletion(
-      credential,
-      prepared.messages,
-      modelId,
-      prepared.options,
-      { platform: account.platform, keyId: account.id, modelId },
-    ),
-  );
-  captureGatewayThinkingResponse({
-    toolCalls: completion.choices?.[0]?.message?.tool_calls,
-    provider: account.provider,
-    modelId: completion.model || modelId,
-    accountId: account.id,
-  });
-  return { candidate, completion, latencyMs: Date.now() - startedAt };
+  try {
+    const completion = await withQuotaTracking(account, modelId, effectiveProxy, () =>
+      provider.chatCompletion(
+        credential,
+        prepared.messages,
+        modelId,
+        initialDispatch.options,
+        { platform: account.platform, keyId: account.id, modelId },
+      ),
+    );
+    captureGatewayThinkingResponse({
+      toolCalls: completion.choices?.[0]?.message?.tool_calls,
+      provider: account.provider,
+      modelId: completion.model || modelId,
+      accountId: account.id,
+    });
+    return { candidate, completion, latencyMs: Date.now() - startedAt };
+  } catch (err) {
+    const learned = learnCapsFromUpstreamError(capTarget, err);
+    if (!learned.learned || opts.signal?.aborted) throw err;
+    const retriedDispatch = applyLearnedCapsToDispatch(capTarget, initialDispatch.options, rawBody);
+    const retryStartedAt = Date.now();
+    const completion = await withQuotaTracking(account, modelId, effectiveProxy, () =>
+      provider.chatCompletion(
+        credential,
+        prepared.messages,
+        modelId,
+        retriedDispatch.options,
+        { platform: account.platform, keyId: account.id, modelId },
+      ),
+    );
+    captureGatewayThinkingResponse({
+      toolCalls: completion.choices?.[0]?.message?.tool_calls,
+      provider: account.provider,
+      modelId: completion.model || modelId,
+      accountId: account.id,
+    });
+    return { candidate, completion, latencyMs: Date.now() - retryStartedAt };
+  }
 }
 
 export function applyGatewaySavers(req: Request, messages: ChatMessage[]): {
@@ -920,7 +951,26 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
       return false;
     });
     const modality: CandidateModality = hasImage ? 'vision' : 'chat';
-    const resolvedAliasLower = resolveXGatewayModelAlias(requestedModel).toLowerCase();
+    const rawSubagentHdr = req.headers['x-agent-scenario'] ?? req.headers['x-claude-code-subagent'];
+    const subagentHint = typeof rawSubagentHdr === 'string'
+      ? rawSubagentHdr
+      : Array.isArray(rawSubagentHdr) && typeof rawSubagentHdr[0] === 'string'
+        ? rawSubagentHdr[0]
+        : null;
+    const resolvedAlias = resolveXGatewayModelAlias(requestedModel);
+    const smartRoute = evaluateGatewaySmartRoute({
+      requestedModel: resolvedAlias,
+      messages,
+      rawBody: body,
+      thinkingEffort,
+      subagentHint,
+    });
+    if (smartRoute) {
+      res.setHeader('X-Smart-Route-Intent', smartRoute.classification.intent);
+      res.setHeader('X-Smart-Route-Scenario', smartRoute.classification.scenario);
+    }
+    const effectiveModelForRouting = smartRoute?.overridden ? smartRoute.effectiveModel : requestedModel;
+    const resolvedAliasLower = resolveXGatewayModelAlias(effectiveModelForRouting).toLowerCase();
     const isAutoModel = resolvedAliasLower === 'auto' || resolvedAliasLower.startsWith('auto:');
     const rawHeaderSession = req.headers['x-session-id'];
     const headerSession = typeof rawHeaderSession === 'string'
@@ -977,13 +1027,17 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
       allRateLimited?: boolean;
       retryAfterMs?: number;
     } => {
+      let primary = resolveCandidateRoutes(effectiveModelForRouting, modality);
+      if (smartRoute?.overridden && (primary.notFoundError || primary.candidates.length === 0)) {
+        primary = resolveCandidateRoutes(requestedModel, modality);
+      }
       const {
         candidates: rawCandidates,
         notFoundError,
         combo: resolvedCombo,
         allRateLimited: resolvedAllRateLimited,
         retryAfterMs: resolvedRetryAfterMs,
-      } = resolveCandidateRoutes(requestedModel, modality);
+      } = primary;
       if (notFoundError) {
         return { resolved: [], notFoundError, combo: resolvedCombo };
       }
@@ -1114,7 +1168,7 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
 
     /** One non-streaming attempt, isolated so fusion can run in parallel. */
     const attemptNonStream = (candidate: CandidateRoute, signal: AbortSignal, isFailover = false) =>
-      executeRouteChatCompletion(candidate, messages, { ...options, signal }, isFailover);
+      executeRouteChatCompletion(candidate, messages, { ...options, signal }, body, isFailover);
 
     const succeedNonStream = (result: Awaited<ReturnType<typeof attemptNonStream>>) => {
       const { account, modelId } = result.candidate;
@@ -1407,6 +1461,7 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
       const attemptController = new AbortController();
       const attemptSignal = AbortSignal.any([controller.signal, attemptController.signal]);
 
+      const capTarget = { provider: account.provider, modelId, endpointScope: account.base_url };
       try {
         await withQuotaTracking(account, modelId, effectiveProxy, async () => {
           const preparedStream = prepareGatewayThinkingRequest({
@@ -1417,19 +1472,34 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
             accountId: account.id,
             isFailover: candidateIdx > 0,
           });
-          const stream = provider.streamChatCompletion(
-            credential,
-            preparedStream.messages,
-            modelId,
-            preparedStream.options,
-            { platform: account.platform, keyId: account.id, modelId },
-          );
-          const peek = await peekStreamForContent(stream, {
-            signal: controller.signal,
-            timeoutMs: peekTimeoutMs,
-            allowReasoningOnlyOnClose: !hasFallback,
-            onTimeout: () => attemptController.abort(new Error('Stream first-content peek timeout')),
-          });
+          const openPeekedStream = async () => {
+            const dispatched = applyLearnedCapsToDispatch(
+              capTarget,
+              preparedStream.options,
+              body,
+            );
+            const stream = provider.streamChatCompletion(
+              credential,
+              preparedStream.messages,
+              modelId,
+              dispatched.options,
+              { platform: account.platform, keyId: account.id, modelId },
+            );
+            return peekStreamForContent(stream, {
+              signal: controller.signal,
+              timeoutMs: peekTimeoutMs,
+              allowReasoningOnlyOnClose: !hasFallback,
+              onTimeout: () => attemptController.abort(new Error('Stream first-content peek timeout')),
+            });
+          };
+          let peek;
+          try {
+            peek = await openPeekedStream();
+          } catch (streamOpenErr) {
+            const learned = learnCapsFromUpstreamError(capTarget, streamOpenErr);
+            if (!learned.learned || controller.signal.aborted) throw streamOpenErr;
+            peek = await openPeekedStream();
+          }
           if (controller.signal.aborted) return;
 
           res.setHeader('Content-Type', 'text/event-stream');

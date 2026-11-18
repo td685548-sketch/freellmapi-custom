@@ -106,6 +106,10 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
     if (path.startsWith('/api/thruline/thinking-continuity')) {
       return read ? 'use_x_gateway' : 'edit_x_settings';
     }
+    if (path === '/api/thruline/smart-routing/classify-preview') return 'use_x_gateway';
+    if (path.startsWith('/api/thruline/smart-routing')) {
+      return read ? 'use_x_gateway' : 'edit_x_settings';
+    }
     if (path === '/api/thruline/keys' || /^\/api\/thruline\/keys\/\d+(?:\/access)?$/.test(path)) {
       return 'use_x_gateway';
     }

@@ -239,6 +239,7 @@ describe('migration round trip', () => {
         '20261118_100000_custom_semantic_cache.ts',
         '20261118_110000_custom_semantic_cache.ts',
         '20261118_110000_custom_thought_signatures.ts',
+        '20261118_120000_custom_learned_caps_models_dev.ts',
       ]);
     } finally {
       db.close();

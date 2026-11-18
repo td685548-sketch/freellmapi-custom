@@ -107,6 +107,7 @@ import * as customPromptEvalAndAb from '../migrations/20261118_100000_custom_pro
 import * as customAiSemanticCache from '../migrations/20261118_100000_custom_semantic_cache.js';
 import * as customSemanticCache from '../migrations/20261118_110000_custom_semantic_cache.js';
 import * as customThoughtSignatures from '../migrations/20261118_110000_custom_thought_signatures.js';
+import * as customLearnedCapsModelsDev from '../migrations/20261118_120000_custom_learned_caps_models_dev.js';
 
 export interface MigrationModule {
   up(db: Db): void;
@@ -306,4 +307,5 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: '20261118_100000_custom_semantic_cache.ts', module: customAiSemanticCache },
   { filename: '20261118_110000_custom_semantic_cache.ts', module: customSemanticCache },
   { filename: '20261118_110000_custom_thought_signatures.ts', module: customThoughtSignatures },
+  { filename: '20261118_120000_custom_learned_caps_models_dev.ts', module: customLearnedCapsModelsDev },
 ];
