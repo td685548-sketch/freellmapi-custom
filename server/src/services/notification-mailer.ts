@@ -64,7 +64,7 @@ export async function notifyAdminNewRegistration(requestEmail: string, note: str
   const adminEmail = adminRow?.email || config.gmail?.sender;
   if (!adminEmail) return;
 
-  const appUrl = config.publicUrl || 'https://freellm-thanhdo.onrender.com';
+  const appUrl = config.publicUrl || 'http://localhost:3001';
   const subject = `[FreeLLMAPI] Yêu cầu đăng ký mới: ${requestEmail}`;
   const body = [
     `Xin chào Admin,`,
@@ -89,7 +89,7 @@ export async function notifyAdminNewRegistration(requestEmail: string, note: str
  */
 export async function notifyUserRegistrationApproved(userEmail: string): Promise<void> {
   const config = getExternalAuthConfig();
-  const appUrl = config.publicUrl || 'https://freellm-thanhdo.onrender.com';
+  const appUrl = config.publicUrl || 'http://localhost:3001';
   const subject = `[FreeLLMAPI] Tài khoản của bạn đã được kích hoạt thành công`;
   const body = [
     `Xin chào,`,

@@ -58,9 +58,10 @@ export default function CLITools() {
   const [selectedToolId, setSelectedToolId] = useState<string>('claude');
   const [selectedKeyId, setSelectedKeyId] = useState<string>('auto');
   const [newKeyMaterial, setNewKeyMaterial] = useState<string | null>(null);
-  const [urlMode, setUrlMode] = useState<'origin' | 'custom'>('origin');
+  const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+  const [urlMode, setUrlMode] = useState<'origin' | 'local' | 'custom'>(isLocalHost ? 'local' : 'origin');
   const [customUrlInput, setCustomUrlInput] = useState<string>(
-    typeof window !== 'undefined' ? `${window.location.origin}/thruline/v1` : 'https://your-domain.onrender.com/thruline/v1'
+    typeof window !== 'undefined' ? `${window.location.origin}/thruline/v1` : 'http://127.0.0.1:3001/thruline/v1'
   );
   const [shellTab, setShellTab] = useState<ShellTab>('bash');
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'cli' | 'ide' | 'agent'>('all');
@@ -99,11 +100,12 @@ export default function CLITools() {
 
   // Resolve active Base URL
   const activeBaseUrl = useMemo(() => {
-    if (urlMode === 'custom') return customUrlInput.trim() || 'https://your-domain.onrender.com/thruline/v1';
+    if (urlMode === 'local') return 'http://127.0.0.1:3001/thruline/v1';
+    if (urlMode === 'custom') return customUrlInput.trim() || 'http://127.0.0.1:3001/thruline/v1';
     if (typeof window !== 'undefined') {
       return `${window.location.origin}/thruline/v1`;
     }
-    return 'http://localhost:3001/thruline/v1';
+    return 'http://127.0.0.1:3001/thruline/v1';
   }, [urlMode, customUrlInput]);
 
   // Resolve active API Key
@@ -341,7 +343,7 @@ export default function CLITools() {
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <select
                 value={urlMode}
-                onChange={(e) => setUrlMode(e.target.value as 'origin' | 'custom')}
+                onChange={(e) => setUrlMode(e.target.value as 'origin' | 'local' | 'custom')}
                 style={{
                   padding: '7px 10px',
                   borderRadius: 6,
@@ -351,6 +353,7 @@ export default function CLITools() {
                   fontSize: '0.85rem',
                 }}
               >
+                <option value="local">Local Direct (127.0.0.1:3001)</option>
                 <option value="origin">{s.originUrl}</option>
                 <option value="custom">{s.customUrl}</option>
               </select>
