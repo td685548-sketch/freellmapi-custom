@@ -4,7 +4,7 @@ import os from 'os';
 import path from 'path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { backupDbNow, parseHuggingFaceTarget, restoreDbBackupIfNeeded } from '../../lib/db-backup.js';
+import { backupDbNow, checkDbIntegrity, getBackupRetention, getTestRestoreEvery, parseHuggingFaceTarget, resetBackupTestRestoreCounterForTests, restoreDbBackupIfNeeded, testRestoreBackup, verifyBackupPayload } from '../../lib/db-backup.js';
 import { aclEntries } from '../helpers/acl.js';
 
 const ORIGINAL_BACKUP_PATH = process.env.FREEAPI_DB_BACKUP_PATH;
@@ -343,5 +343,193 @@ describe('Hugging Face backup target', () => {
     expect(init.method).toBe('PUT');
     expect((init.headers as Record<string, string>)['Content-Type']).toBe('application/octet-stream');
     expect(Buffer.isBuffer(init.body)).toBe(true);
+  });
+});
+
+describe('backup generations, integrity and test-restore', () => {
+  const ORIGINAL_RETENTION = process.env.FREEAPI_DB_BACKUP_RETENTION;
+  const ORIGINAL_TEST_RESTORE_EVERY = process.env.FREEAPI_DB_BACKUP_TEST_RESTORE_EVERY;
+
+  afterEach(() => {
+    restoreEnv();
+    if (ORIGINAL_RETENTION === undefined) delete process.env.FREEAPI_DB_BACKUP_RETENTION;
+    else process.env.FREEAPI_DB_BACKUP_RETENTION = ORIGINAL_RETENTION;
+    if (ORIGINAL_TEST_RESTORE_EVERY === undefined) delete process.env.FREEAPI_DB_BACKUP_TEST_RESTORE_EVERY;
+    else process.env.FREEAPI_DB_BACKUP_TEST_RESTORE_EVERY = ORIGINAL_TEST_RESTORE_EVERY;
+    resetBackupTestRestoreCounterForTests();
+  });
+
+  function seedDb(dir: string, label: string): { dbPath: string; db: Database.Database } {
+    const dbPath = path.join(dir, 'freeapi.db');
+    const db = new Database(dbPath);
+    db.exec('CREATE TABLE items (name TEXT NOT NULL)');
+    db.prepare('INSERT INTO items (name) VALUES (?)').run(label);
+    return { dbPath, db };
+  }
+
+  async function backupLabel(dir: string, dbPath: string, db: Database.Database, label: string) {
+    db.prepare('UPDATE items SET name = ?').run(label);
+    return backupDbNow(db, dbPath);
+  }
+
+  it('keeps N generations and prunes older ones', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'freeapi-backup-generations-'));
+    const backupPath = path.join(dir, 'backup.bin');
+    process.env.ENCRYPTION_KEY = 'a'.repeat(64);
+    process.env.FREEAPI_DB_BACKUP_PATH = backupPath;
+    process.env.FREEAPI_DB_BACKUP_RETENTION = '3';
+    const { dbPath, db } = seedDb(dir, 'v1');
+    try {
+      expect((await backupLabel(dir, dbPath, db, 'v1')).ok).toBe(true);
+      expect((await backupLabel(dir, dbPath, db, 'v2')).ok).toBe(true);
+      expect((await backupLabel(dir, dbPath, db, 'v3')).ok).toBe(true);
+      expect((await backupLabel(dir, dbPath, db, 'v4')).ok).toBe(true);
+      // 4 backups, retention 3: live + .1 + .2, nothing older.
+      expect(fs.existsSync(backupPath)).toBe(true);
+      expect(fs.existsSync(`${backupPath}.1`)).toBe(true);
+      expect(fs.existsSync(`${backupPath}.2`)).toBe(true);
+      expect(fs.existsSync(`${backupPath}.3`)).toBe(false);
+      // No tmp files left behind by the atomic writes.
+      expect(fs.readdirSync(dir).filter(name => name.includes('.tmp-'))).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('restores the previous generation when the live target is gone', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'freeapi-backup-fallback-'));
+    const backupPath = path.join(dir, 'backup.bin');
+    process.env.ENCRYPTION_KEY = 'a'.repeat(64);
+    process.env.FREEAPI_DB_BACKUP_PATH = backupPath;
+    const { dbPath, db } = seedDb(dir, 'v1');
+    try {
+      expect((await backupLabel(dir, dbPath, db, 'v1')).ok).toBe(true);
+      expect((await backupLabel(dir, dbPath, db, 'v2')).ok).toBe(true);
+    } finally {
+      db.close();
+    }
+    fs.rmSync(backupPath);
+    fs.rmSync(dbPath);
+    const restore = await restoreDbBackupIfNeeded(dbPath);
+    expect(restore.restored).toBe(true);
+    expect(restore.target).toBe(`${backupPath}.1`);
+    const restored = new Database(dbPath);
+    expect((restored.prepare('SELECT name FROM items').get() as { name: string }).name).toBe('v1');
+    restored.close();
+  });
+
+  it('restores the previous generation when the live target is corrupt', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'freeapi-backup-corrupt-'));
+    const backupPath = path.join(dir, 'backup.bin');
+    process.env.ENCRYPTION_KEY = 'a'.repeat(64);
+    process.env.FREEAPI_DB_BACKUP_PATH = backupPath;
+    const { dbPath, db } = seedDb(dir, 'v1');
+    try {
+      expect((await backupLabel(dir, dbPath, db, 'v1')).ok).toBe(true);
+      expect((await backupLabel(dir, dbPath, db, 'v2')).ok).toBe(true);
+    } finally {
+      db.close();
+    }
+    fs.writeFileSync(backupPath, 'not a backup at all');
+    fs.rmSync(dbPath);
+    const restore = await restoreDbBackupIfNeeded(dbPath);
+    expect(restore.restored).toBe(true);
+    const restored = new Database(dbPath);
+    expect((restored.prepare('SELECT name FROM items').get() as { name: string }).name).toBe('v1');
+    restored.close();
+  });
+
+  it('refuses to back up a corrupt database and leaves the last good backup alone', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'freeapi-backup-integrity-'));
+    const backupPath = path.join(dir, 'backup.bin');
+    process.env.ENCRYPTION_KEY = 'a'.repeat(64);
+    process.env.FREEAPI_DB_BACKUP_PATH = backupPath;
+    const { dbPath, db } = seedDb(dir, 'v1');
+    // Grow the file past a few pages so a flipped byte lands in a data page.
+    const insert = db.prepare('INSERT INTO items (name) VALUES (?)');
+    db.transaction(() => { for (let i = 0; i < 200; i++) insert.run(`filler-${i}-`.repeat(20)); })();
+    expect((await backupDbNow(db, dbPath)).ok).toBe(true);
+    const goodBackup = fs.readFileSync(backupPath);
+    db.close();
+
+    // Corrupt a data page in place (zero its header); the file still opens,
+    // but integrity_check fails.
+    const bytes = fs.readFileSync(dbPath);
+    bytes.fill(0, 8192, 8192 + 256);
+    fs.writeFileSync(dbPath, bytes);
+    const corrupt = new Database(dbPath);
+    try {
+      expect(checkDbIntegrity(corrupt)).not.toBeNull();
+      const result = await backupDbNow(corrupt, dbPath);
+      expect(result.ok).toBe(false);
+      expect(result.skipped).toBe('integrity_check_failed');
+      expect(fs.readFileSync(backupPath)).toEqual(goodBackup);
+      expect(fs.existsSync(`${backupPath}.1`)).toBe(false);
+    } finally {
+      corrupt.close();
+    }
+  });
+
+  it('verifies payloads and test-restores round-tripped bytes', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'freeapi-backup-verify-'));
+    const backupPath = path.join(dir, 'backup.bin');
+    process.env.ENCRYPTION_KEY = 'a'.repeat(64);
+    process.env.FREEAPI_DB_BACKUP_PATH = backupPath;
+    const { dbPath, db } = seedDb(dir, 'v1');
+    const insert = db.prepare('INSERT INTO items (name) VALUES (?)');
+    db.transaction(() => { for (let i = 0; i < 200; i++) insert.run(`filler-${i}-`.repeat(20)); })();
+    try {
+      expect((await backupDbNow(db, dbPath)).ok).toBe(true);
+    } finally {
+      db.close();
+    }
+    const payload = fs.readFileSync(backupPath);
+    expect(verifyBackupPayload(payload).ok).toBe(true);
+    expect(verifyBackupPayload(Buffer.from('garbage')).ok).toBe(false);
+
+    const restored = new Database(dbPath);
+    const plain = fs.readFileSync(dbPath);
+    restored.close();
+    expect(testRestoreBackup(plain).ok).toBe(true);
+
+    // Corrupt a data page (past the header the magic check reads).
+    const damaged = Buffer.from(plain);
+    damaged.fill(0, 8192, 8192 + 256);
+    const verdict = testRestoreBackup(damaged);
+    expect(verdict.ok).toBe(false);
+  });
+
+  it('runs a periodic test-restore every Nth backup and reports it', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'freeapi-backup-testrestore-'));
+    const backupPath = path.join(dir, 'backup.bin');
+    process.env.ENCRYPTION_KEY = 'a'.repeat(64);
+    process.env.FREEAPI_DB_BACKUP_PATH = backupPath;
+    process.env.FREEAPI_DB_BACKUP_TEST_RESTORE_EVERY = '1';
+    const { dbPath, db } = seedDb(dir, 'v1');
+    try {
+      const result = await backupDbNow(db, dbPath);
+      expect(result.ok).toBe(true);
+      expect(result.testRestored).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('parses retention and test-restore cadence from env', () => {
+    delete process.env.FREEAPI_DB_BACKUP_RETENTION;
+    expect(getBackupRetention()).toBe(7);
+    process.env.FREEAPI_DB_BACKUP_RETENTION = '3';
+    expect(getBackupRetention()).toBe(3);
+    process.env.FREEAPI_DB_BACKUP_RETENTION = '0';
+    expect(getBackupRetention()).toBe(0);
+    process.env.FREEAPI_DB_BACKUP_RETENTION = 'nope';
+    expect(getBackupRetention()).toBe(7);
+
+    delete process.env.FREEAPI_DB_BACKUP_TEST_RESTORE_EVERY;
+    expect(getTestRestoreEvery()).toBe(12);
+    process.env.FREEAPI_DB_BACKUP_TEST_RESTORE_EVERY = '0';
+    expect(getTestRestoreEvery()).toBe(0);
+    process.env.FREEAPI_DB_BACKUP_TEST_RESTORE_EVERY = 'bogus';
+    expect(getTestRestoreEvery()).toBe(12);
   });
 });
