@@ -5,23 +5,27 @@ on:
     workflows: ["CI", "Docker"]
     types: [completed]
     branches: [main]
+  schedule:
+    # Flush any green main commits deferred during the 4-hour batching cooldown
+    - cron: '15 */4 * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
   actions: read
 
-# Serialize production deployments so simultaneous CI + Docker completions
-# never race or consume duplicate SnapDeploy deploy-cap units.
+# Serialize production deployments so simultaneous events never race
+# or consume duplicate free-tier deploy quota.
 concurrency:
   group: snapdeploy-deploy-main
   cancel-in-progress: false
 
 jobs:
   deploy:
-    name: Deploy to SnapDeploy
+    name: Deploy to SnapDeploy and Render
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
       (
         github.event.workflow_run.conclusion == 'success' &&
         github.event.workflow_run.event == 'push' &&
@@ -30,23 +34,31 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Verify main CI and Docker workflows are both green
+      - name: Check green CI, runtime file changes, and 4h batch cooldown
         id: gate
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
           WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          SNAPDEPLOY_API_KEY: ${{ secrets.SNAPDEPLOY_API_KEY }}
+          SNAPDEPLOY_CONTAINER_ID: ${{ secrets.SNAPDEPLOY_CONTAINER_ID }}
+          # 3h45m (13500s) aligns cleanly with the 4-hour cron ('15 */4 * * *')
+          # even when the previous deploy took 2-3 minutes, capping auto-deploys
+          # at <= 3 per 12h rolling window (well within SnapDeploy's 5/12h free cap).
+          COOLDOWN_SECONDS: "13500"
         run: |
           set -euo pipefail
 
           MAIN_SHA="$(gh api "repos/${REPO}/git/ref/heads/main" --jq '.object.sha')"
-          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
-            TARGET_SHA="${MAIN_SHA}"
-          else
+          if [ "${EVENT_NAME}" = "workflow_run" ] && [ -n "${WORKFLOW_RUN_SHA}" ]; then
             TARGET_SHA="${WORKFLOW_RUN_SHA}"
+          else
+            TARGET_SHA="${MAIN_SHA}"
           fi
 
+          echo "Trigger event: ${EVENT_NAME}"
           echo "Target commit: ${TARGET_SHA}"
           echo "Current main:  ${MAIN_SHA}"
 
@@ -56,6 +68,7 @@ jobs:
             exit 0
           fi
 
+          # 1. Verify both CI and Docker workflows succeeded on main for TARGET_SHA
           RUNS_JSON="$(gh api "repos/${REPO}/actions/runs?head_sha=${TARGET_SHA}&event=push&per_page=100")"
 
           CI_SUMMARY="$(jq -r '
@@ -79,41 +92,139 @@ jobs:
           echo "Docker workflow: status=${DOCKER_STATUS}, conclusion=${DOCKER_CONCLUSION}, updated=${DOCKER_UPDATED}"
 
           if [ "${CI_STATUS}" != "completed" ] || [ "${CI_CONCLUSION}" != "success" ]; then
-            echo "Waiting for CI workflow to complete with success on ${TARGET_SHA}; skipping deploy for now."
+            echo "CI is not yet completed+success for ${TARGET_SHA}; skipping deploy."
             echo "should_deploy=false" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
 
           if [ "${DOCKER_STATUS}" != "completed" ] || [ "${DOCKER_CONCLUSION}" != "success" ]; then
-            echo "Waiting for Docker workflow to complete with success on ${TARGET_SHA}; skipping deploy for now."
+            echo "Docker image push is not yet completed+success for ${TARGET_SHA}; skipping deploy."
             echo "should_deploy=false" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
 
-          CI_EPOCH="$(date -d "${CI_UPDATED}" +%s)"
-          DOCKER_EPOCH="$(date -d "${DOCKER_UPDATED}" +%s)"
-          if [ "${CI_EPOCH}" -gt "${DOCKER_EPOCH}" ]; then
-            GATE_EPOCH="${CI_EPOCH}"
-          else
-            GATE_EPOCH="${DOCKER_EPOCH}"
+          # Manual workflow_dispatch always deploys once green CI + Docker are confirmed
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            echo "Manual workflow_dispatch requested; bypassing cooldown and path filters."
+            echo "should_deploy=true" >> "${GITHUB_OUTPUT}"
+            echo "target_sha=${TARGET_SHA}" >> "${GITHUB_OUTPUT}"
+            exit 0
           fi
 
-          echo "Both CI and Docker are green for ${TARGET_SHA}."
+          # 2. Determine last deployed commit SHA and timestamp
+          LAST_DEPLOYED_AT=""
+          LAST_DEPLOYED_EPOCH=0
+          if [ -n "${SNAPDEPLOY_API_KEY}" ] && [ -n "${SNAPDEPLOY_CONTAINER_ID}" ]; then
+            if CONTAINER_META="$(curl -fsS \
+              -H "X-API-Key: ${SNAPDEPLOY_API_KEY}" \
+              -H "Accept: application/json" \
+              "https://snapdeploy.dev/api/mobile/containers/${SNAPDEPLOY_CONTAINER_ID}" 2>/dev/null)"; then
+              LAST_DEPLOYED_AT="$(jq -r '.lastDeployedAt // ""' <<< "${CONTAINER_META}")"
+              if [ -n "${LAST_DEPLOYED_AT}" ] && [ "${LAST_DEPLOYED_AT}" != "null" ]; then
+                LAST_DEPLOYED_EPOCH="$(date -d "${LAST_DEPLOYED_AT}" +%s || echo 0)"
+              fi
+            fi
+          fi
+
+          LAST_DEPLOYED_SHA=""
+          WF_RUNS="$(gh api "repos/${REPO}/actions/workflows/snapdeploy-deploy.yml/runs?status=completed&per_page=20" || echo '{"workflow_runs":[]}')"
+          for CAND in $(jq -r --arg cur "${CURRENT_RUN_ID}" '
+            .workflow_runs[]
+            | select((.id | tostring) != $cur and .conclusion == "success")
+            | "\(.id)|\(.head_sha)|\(.updated_at)"
+          ' <<< "${WF_RUNS}"); do
+            IFS='|' read -r CAND_ID CAND_SHA CAND_UPDATED <<< "${CAND}"
+            JOBS_JSON="$(gh api "repos/${REPO}/actions/runs/${CAND_ID}/jobs" || echo '{"jobs":[]}')"
+            STEP_RAN="$(jq -r '
+              [.jobs[].steps[]?
+               | select((.name == "Deploy to SnapDeploy and Render" or .name == "Trigger SnapDeploy redeploy and verify health")
+                        and .conclusion == "success")]
+              | length
+            ' <<< "${JOBS_JSON}")"
+            if [ "${STEP_RAN}" -gt 0 ]; then
+              CAND_EPOCH="$(date -d "${CAND_UPDATED}" +%s || echo 0)"
+              if [ "${LAST_DEPLOYED_EPOCH}" -le $(( CAND_EPOCH + 300 )) ]; then
+                LAST_DEPLOYED_SHA="${CAND_SHA}"
+              fi
+              if [ "${CAND_EPOCH}" -gt "${LAST_DEPLOYED_EPOCH}" ]; then
+                LAST_DEPLOYED_EPOCH="${CAND_EPOCH}"
+              fi
+              break
+            fi
+          done
+
+          if [ -z "${LAST_DEPLOYED_SHA}" ] && [ -n "${LAST_DEPLOYED_AT}" ] && [ "${LAST_DEPLOYED_AT}" != "null" ]; then
+            LAST_DEPLOYED_SHA="$(gh api "repos/${REPO}/commits?sha=main&until=${LAST_DEPLOYED_AT}&per_page=1" --jq '.[0].sha // ""' || echo "")"
+          fi
+
+          echo "Last deployed SHA: ${LAST_DEPLOYED_SHA:-unknown} (epoch=${LAST_DEPLOYED_EPOCH}, at=${LAST_DEPLOYED_AT:-n/a})"
+
+          # 3. Skip if no new commits since last deployment
+          if [ -n "${LAST_DEPLOYED_SHA}" ] && [ "${LAST_DEPLOYED_SHA}" = "${TARGET_SHA}" ]; then
+            echo "No new commits on main since last deployment (${LAST_DEPLOYED_SHA}); skipping."
+            echo "should_deploy=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          # 4. Path filter across all commits accumulated since LAST_DEPLOYED_SHA
+          if [ -n "${LAST_DEPLOYED_SHA}" ]; then
+            if COMPARE_JSON="$(gh api "repos/${REPO}/compare/${LAST_DEPLOYED_SHA}...${TARGET_SHA}" 2>/dev/null)"; then
+              RUNTIME_FILES="$(jq -r '
+                [.files[]?.filename
+                 | select(test("^(Dockerfile|docker-entrypoint\\.sh|package(-lock)?\\.json|shared/|server/|client/|cli/package\\.json|desktop/package\\.json)"))
+                 | select((test("\\.md$") or test("\\.(test|spec)\\.[cm]?[jt]sx?$")) | not)
+                ] | length
+              ' <<< "${COMPARE_JSON}")"
+              echo "Runtime-relevant files changed since ${LAST_DEPLOYED_SHA:0:8}: ${RUNTIME_FILES}"
+              if [ "${RUNTIME_FILES}" -eq 0 ]; then
+                echo "Only non-runtime files (docs, tests, CLI/desktop, or CI configs) changed; skipping deploy to save quota."
+                echo "should_deploy=false" >> "${GITHUB_OUTPUT}"
+                exit 0
+              fi
+            fi
+          fi
+
+          # 5. Enforce 4-hour batching cooldown
+          NOW_EPOCH="$(date +%s)"
+          if [ "${LAST_DEPLOYED_EPOCH}" -gt 0 ]; then
+            AGE_SECONDS=$(( NOW_EPOCH - LAST_DEPLOYED_EPOCH ))
+            if [ "${AGE_SECONDS}" -lt "${COOLDOWN_SECONDS}" ]; then
+              REMAINING_MIN=$(( (COOLDOWN_SECONDS - AGE_SECONDS + 59) / 60 ))
+              echo "4h batch cooldown active: last deployed $(( AGE_SECONDS / 60 ))m ago (~${REMAINING_MIN}m left)."
+              echo "Deferring ${TARGET_SHA:0:8} to the next 4h scheduled batch."
+              echo "should_deploy=false" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+          fi
+
+          echo "All checks passed (green CI+Docker, runtime changes present, cooldown elapsed). Proceeding with deploy."
           echo "should_deploy=true" >> "${GITHUB_OUTPUT}"
           echo "target_sha=${TARGET_SHA}" >> "${GITHUB_OUTPUT}"
-          echo "gate_epoch=${GATE_EPOCH}" >> "${GITHUB_OUTPUT}"
 
-      - name: Trigger SnapDeploy redeploy and verify health
+      - name: Deploy to SnapDeploy and Render
         if: steps.gate.outputs.should_deploy == 'true'
         env:
           SNAPDEPLOY_API_KEY: ${{ secrets.SNAPDEPLOY_API_KEY }}
           SNAPDEPLOY_CONTAINER_ID: ${{ secrets.SNAPDEPLOY_CONTAINER_ID }}
-          EVENT_NAME: ${{ github.event_name }}
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
           TARGET_SHA: ${{ steps.gate.outputs.target_sha }}
-          GATE_EPOCH: ${{ steps.gate.outputs.gate_epoch }}
         run: |
           set -euo pipefail
 
+          # 1. Trigger Render Deploy Hook automatically if configured
+          if [ -n "${RENDER_DEPLOY_HOOK_URL}" ]; then
+            echo "Triggering Render deploy hook for ${TARGET_SHA}..."
+            RENDER_CODE="$(curl -sS -o /dev/null -w "%{http_code}" -X POST "${RENDER_DEPLOY_HOOK_URL}")"
+            if [ "${RENDER_CODE}" = "200" ] || [ "${RENDER_CODE}" = "202" ]; then
+              echo "Render deploy triggered cleanly (HTTP ${RENDER_CODE})."
+            else
+              echo "::warning::Render deploy hook returned HTTP ${RENDER_CODE}."
+            fi
+          else
+            echo "RENDER_DEPLOY_HOOK_URL secret is not set; skipping Render trigger."
+          fi
+
+          # 2. Trigger SnapDeploy redeploy and verify health
           if [ -z "${SNAPDEPLOY_API_KEY}" ] || [ -z "${SNAPDEPLOY_CONTAINER_ID}" ]; then
             echo "SNAPDEPLOY_API_KEY or SNAPDEPLOY_CONTAINER_ID is not configured; skipping SnapDeploy deployment."
             exit 0
@@ -155,20 +266,11 @@ jobs:
           STATUS="$(jq -r '.status // "UNKNOWN"' <<< "${CONTAINER_JSON}")"
           PREV_COUNT="$(jq -r '.deploymentCount // 0' <<< "${CONTAINER_JSON}")"
           IN_PROGRESS="$(jq -r '.actionLocks.deploymentInProgress // false' <<< "${CONTAINER_JSON}")"
-          LAST_DEPLOYED_AT="$(jq -r '.lastDeployedAt // ""' <<< "${CONTAINER_JSON}")"
           APP_URL="$(jq -r '.url // ""' <<< "${CONTAINER_JSON}")"
           INIT_DEPS_JSON="$(sd_get "/containers/${SNAPDEPLOY_CONTAINER_ID}/deployments?limit=1" || echo '[]')"
           PREV_DEP_ID="$(jq -r '(if type == "array" then .[0] else (.deployments[0] // null) end) | .deploymentId // ""' <<< "${INIT_DEPS_JSON}")"
 
-          echo "Container status=${STATUS}, deploymentCount=${PREV_COUNT}, inProgress=${IN_PROGRESS}, prevDeployment=${PREV_DEP_ID}, url=${APP_URL}"
-
-          if [ "${EVENT_NAME}" = "workflow_run" ] && [ -n "${LAST_DEPLOYED_AT}" ] && [ "${LAST_DEPLOYED_AT}" != "null" ]; then
-            LAST_DEPLOYED_EPOCH="$(date -d "${LAST_DEPLOYED_AT}" +%s || echo 0)"
-            if [ "${LAST_DEPLOYED_EPOCH}" -ge "${GATE_EPOCH}" ]; then
-              echo "Container was already deployed at ${LAST_DEPLOYED_AT} after CI & Docker finished; skipping duplicate trigger."
-              exit 0
-            fi
-          fi
+          echo "SnapDeploy status=${STATUS}, deploymentCount=${PREV_COUNT}, inProgress=${IN_PROGRESS}, url=${APP_URL}"
 
           if CAP_JSON="$(sd_get "/deploy-cap" 2>/dev/null)"; then
             echo "SnapDeploy quota: $(jq -c '{remaining: .remaining, dailyLimit: .dailyLimit, capped: .capped}' <<< "${CAP_JSON}")"
@@ -210,8 +312,6 @@ jobs:
                 exit 1
               fi
 
-              # If /start performed a fast wake without pulling a fresh deployment,
-              # trigger /restart once RUNNING so the new :main image from GHCR is pulled.
               for _ in $(seq 1 15); do
                 sleep 4
                 WAKE_JSON="$(sd_get "/containers/${SNAPDEPLOY_CONTAINER_ID}")"
@@ -244,6 +344,7 @@ jobs:
           DEADLINE=$(( START_POLL + 300 ))
           OBSERVED_ROLLOUT="false"
           FINAL_OK="false"
+          CONSECUTIVE_FAILS=0
 
           while [ "$(date +%s)" -lt "${DEADLINE}" ]; do
             sleep 6
@@ -263,9 +364,17 @@ jobs:
 
             echo "  container=${CUR_STATUS}, inProgress=${CUR_IN_PROG}, rolling=${CUR_ROLLING}, dep=${DEP_ID} ${DEP_STATUS} (${DEP_STEP})"
 
-            if [ "${DEP_ID}" != "${PREV_DEP_ID}" ] && { [ "${DEP_STATUS}" = "FAILED" ] || [ "${DEP_STATUS}" = "CANCELLED" ] || [ "${DEP_STATUS}" = "ROLLED_BACK" ]; }; then
-              echo "::error::SnapDeploy deployment ${DEP_ID} ended with status ${DEP_STATUS}."
-              exit 1
+            # During /restart ECS service replacement, SnapDeploy can transiently report
+            # FAILED for a single poll tick before completing cleanly; require 4 consecutive
+            # failed polls (~24s) with no active rollout before declaring failure.
+            if [ "${DEP_ID}" != "${PREV_DEP_ID}" ] && { [ "${DEP_STATUS}" = "FAILED" ] || [ "${DEP_STATUS}" = "CANCELLED" ] || [ "${DEP_STATUS}" = "ROLLED_BACK" ]; } && [ "${CUR_IN_PROG}" = "false" ] && [ "${CUR_STATUS}" != "STARTING" ]; then
+              CONSECUTIVE_FAILS=$(( CONSECUTIVE_FAILS + 1 ))
+              if [ "${CONSECUTIVE_FAILS}" -ge 4 ]; then
+                echo "::error::SnapDeploy deployment ${DEP_ID} ended with status ${DEP_STATUS}."
+                exit 1
+              fi
+            else
+              CONSECUTIVE_FAILS=0
             fi
 
             ELAPSED=$(( $(date +%s) - START_POLL ))
@@ -285,6 +394,6 @@ jobs:
 
           if [ -n "${APP_URL}" ] && [ "${APP_URL}" != "null" ]; then
             echo "Verifying ${APP_URL}/api/ping..."
-            PING_RESP="$(curl -fsS --retry 5 --retry-delay 3 "${APP_URL}/api/ping")"
+            PING_RESP="$(curl -fsS --retry 8 --retry-delay 4 "${APP_URL}/api/ping")"
             echo "Health check OK: ${PING_RESP}"
           fi
