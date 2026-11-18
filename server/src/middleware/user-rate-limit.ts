@@ -1,7 +1,8 @@
 import type { Request, Response, NextFunction } from 'express';
 import { validateUserApiKey, withUserKeyMemo, type ValidatedUserKey } from '../services/user-keys.js';
 import { isXGatewayClientKey, validateXGatewayClientKey } from '../custom/x-gateway/client-keys.js';
-import { setRequestUser } from '../lib/client-context.js';
+import { setRequestKeyRoutingPreset, setRequestUser } from '../lib/client-context.js';
+import { routingModeToPreset } from '../custom/customer-ai/store.js';
 import { enforceUsageQuota } from '../custom/quota-gate.js';
 import { checkUserRateLimit, recordUserUsage } from '../services/user-quotas.js';
 
@@ -16,13 +17,21 @@ export function extractInferenceToken(req: Request): string | undefined {
     const x = (Array.isArray(v) ? v[0] : v)?.trim();
     return x || undefined;
   };
-  let token = req.headers.authorization?.replace(/^Bearer\s+/i, '').trim()
-    || first(req.headers['x-api-key'])
-    || first(req.headers['x-goog-api-key']);
-  if (!token && req.originalUrl.startsWith('/v1beta') && typeof req.query.key === 'string') {
-    token = req.query.key.trim() || undefined;
+  const pathLower = (req.originalUrl || req.url || '').split('?')[0].toLowerCase();
+  const isGeminiPath = pathLower.startsWith('/v1beta') || pathLower.startsWith('/thruline/v1beta');
+  const bearer = req.headers.authorization?.replace(/^Bearer\s+/i, '').trim() || undefined;
+  const xApiKey = first(req.headers['x-api-key']);
+  const xGoogKey = first(req.headers['x-goog-api-key']);
+  const queryKey =
+    isGeminiPath && typeof req.query.key === 'string'
+      ? req.query.key.trim() || undefined
+      : undefined;
+
+  if (isGeminiPath) {
+    // Match Gemini routers: x-goog-api-key -> ?key= -> Authorization Bearer -> x-api-key
+    return xGoogKey || queryKey || bearer || xApiKey || undefined;
   }
-  return token || undefined;
+  return bearer || xApiKey || xGoogKey || undefined;
 }
 
 function extractUserKey(req: Request): string | undefined {
@@ -48,11 +57,13 @@ export function userInferenceGate(req: Request, res: Response, next: NextFunctio
 }
 
 function gate(token: string, req: Request, res: Response, next: NextFunction): void {
+  const origLower = (req.originalUrl || '').toLowerCase();
+  const baseLower = (req.baseUrl || '').toLowerCase();
   const isXGateway =
-    req.originalUrl?.startsWith('/thruline/') ||
-    req.baseUrl?.startsWith('/thruline') ||
-    req.originalUrl?.startsWith('/v1beta') ||
-    req.baseUrl === '/v1beta';
+    origLower.startsWith('/thruline/') ||
+    baseLower.startsWith('/thruline') ||
+    origLower.startsWith('/v1beta') ||
+    baseLower === '/v1beta';
   if (isXGatewayClientKey(token) && !isXGateway) {
     res.status(401).json({
       error: {
@@ -101,6 +112,9 @@ function gate(token: string, req: Request, res: Response, next: NextFunction): v
   // Every row logged while serving this request is attributed to the account, and
   // the tokens of the successful ones ride along with the request count below.
   const context = setRequestUser(userKey.userId);
+  if (!isXGatewayClientKey(token)) {
+    setRequestKeyRoutingPreset(routingModeToPreset(userKey.routingMode));
+  }
 
   // Daily / monthly allowance (no-op for an account without one).
   if (!enforceUsageQuota('user', userKey.userId, res, () => context?.userTokens ?? 0)) return;

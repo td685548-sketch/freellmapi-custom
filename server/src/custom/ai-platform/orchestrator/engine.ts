@@ -552,7 +552,11 @@ async function buildIsolatedAgentContext(params: {
       const retrievalRes = await deps.retrieve(
         { kind: agent.knowledgeScopeKind, id: agent.knowledgeScopeId },
         userQuery,
-        { signal, respectPillarFlag: true },
+        {
+          ...(agent.knowledgeScopeKind === 'support_tenant' ? { roles: [] } : {}),
+          signal,
+          respectPillarFlag: true,
+        },
       );
       if (retrievalRes.hits.length > 0) {
         const blocks = retrievalRes.hits.map((h) => `### ${h.title}\n${h.text}`).join('\n\n');

@@ -9,7 +9,7 @@ import { validateSession, type SessionUser } from '../../services/auth.js';
 import { decrypt } from '../../lib/crypto.js';
 import { KEY_PROXY_URL_MAX } from '../../lib/key-proxy.js';
 import { proxyFetch, withKeyProxy } from '../../lib/proxy.js';
-import { assessProviderUrl } from '../../lib/url-guard.js';
+import { assessProviderUrl, assertProviderUrlAllowedWithPin } from '../../lib/url-guard.js';
 import { AccountError } from './http.js';
 import { getXGatewayProvider, normalizeXGatewayProviderId } from './catalog.js';
 import { fetchOpenCodeFreeModels } from './opencode.js';
@@ -182,10 +182,16 @@ providerAccountsRouter.get('/', requirePermission('view_keys'), (req: SessionReq
   } });
 });
 
-providerAccountsRouter.post('/', requirePermission('add_keys'), (req: SessionRequest, res) => {
+providerAccountsRouter.post('/', requirePermission('add_keys'), async (req: SessionRequest, res) => {
   const body = parse(createSchema, req.body);
   if ((body.provider === 'custom' || body.baseUrl || (body.models && body.models.length > 0)) && !hasPermission(req.user, 'manage_key_models')) {
     throw new AccountError(403, 'Permission denied.');
+  }
+  if (body.baseUrl) {
+    const verdict = await assessProviderUrl(body.baseUrl);
+    if (!verdict.allowed) {
+      throw new AccountError(400, verdict.reason || 'Base URL is blocked by security policy.');
+    }
   }
   const accountId = createApiKeyAccount({
     provider: body.provider,
@@ -206,7 +212,7 @@ const connectFreeSchema = z.object({
   label: z.string().trim().max(120).optional(),
   baseUrl: z.string().trim().max(500).optional(),
   proxyUrl: z.string().trim().max(KEY_PROXY_URL_MAX).nullable().optional(),
-  proxyPoolId: z.number().int().nullable().optional(),
+  proxyPoolId: z.union([z.literal(-1), z.number().int().positive().safe()]).nullable().optional(),
   skipModelFetch: z.boolean().optional(),
 });
 
@@ -220,6 +226,12 @@ providerAccountsRouter.post('/connect-free', requirePermission('add_keys'), asyn
   }
   if (body.baseUrl && !hasPermission(req.user, 'manage_key_models')) {
     throw new AccountError(403, 'Permission denied.');
+  }
+  if (body.baseUrl) {
+    const verdict = await assessProviderUrl(body.baseUrl);
+    if (!verdict.allowed) {
+      throw new AccountError(400, verdict.reason || 'Base URL is blocked by security policy.');
+    }
   }
   const catalogEntry = getXGatewayProvider(normalized);
   const label = body.label?.trim() || `${catalogEntry?.name ?? normalized} (Free)`;
@@ -251,10 +263,16 @@ providerAccountsRouter.post('/connect-free', requirePermission('add_keys'), asyn
   res.status(201).json({ id: accountId, provider: normalized, modelsCount });
 });
 
-providerAccountsRouter.post('/bulk', requirePermission('add_keys'), (req: SessionRequest, res) => {
+providerAccountsRouter.post('/bulk', requirePermission('add_keys'), async (req: SessionRequest, res) => {
   const body = parse(bulkCreateSchema, req.body);
   if ((body.provider === 'custom' || body.baseUrl) && !hasPermission(req.user, 'manage_key_models')) {
     throw new AccountError(403, 'Permission denied.');
+  }
+  if (body.baseUrl) {
+    const verdict = await assessProviderUrl(body.baseUrl);
+    if (!verdict.allowed) {
+      throw new AccountError(400, verdict.reason || 'Base URL is blocked by security policy.');
+    }
   }
   const ids: number[] = [];
   for (let i = 0; i < body.entries.length; i++) {
@@ -368,6 +386,26 @@ providerAccountsRouter.post('/nodes/validate', requirePermission('view_keys'), a
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
+  const isMockFetch = typeof (globalThis.fetch as unknown as { mock?: unknown })?.mock === 'object';
+  const pinnedNodeFetch = async (targetUrl: string, init: RequestInit): Promise<globalThis.Response> => {
+    const checked = await assertProviderUrlAllowedWithPin(targetUrl, { blockPrivate: true });
+    const dispatcher = isMockFetch ? undefined : await checked.createDispatcher();
+    try {
+      const response = await fetch(targetUrl, {
+        ...init,
+        redirect: 'manual',
+        ...(dispatcher ? { dispatcher } : {}),
+      } as unknown as RequestInit);
+      if (response.status >= 300 && response.status < 400) {
+        await response.body?.cancel().catch(() => {});
+        throw new Error(`Endpoint redirected (${response.status}); redirects are not allowed during validation.`);
+      }
+      return response;
+    } finally {
+      await dispatcher?.close().catch(() => {});
+    }
+  };
+
   let valid = false;
   let models: string[] = [];
   let message: string | undefined;
@@ -379,7 +417,7 @@ providerAccountsRouter.post('/nodes/validate', requirePermission('view_keys'), a
         sanitizedBase = sanitizedBase.slice(0, -'/embeddings'.length);
       }
       try {
-        const mRes = await fetch(`${sanitizedBase}/models`, {
+        const mRes = await pinnedNodeFetch(`${sanitizedBase}/models`, {
           headers,
           signal: controller.signal,
         });
@@ -395,7 +433,7 @@ providerAccountsRouter.post('/nodes/validate', requirePermission('view_keys'), a
       } catch {}
 
       if (!valid && body.modelId) {
-        const eRes = await fetch(`${sanitizedBase}/embeddings`, {
+        const eRes = await pinnedNodeFetch(`${sanitizedBase}/embeddings`, {
           method: 'POST',
           headers: { ...headers, 'Content-Type': 'application/json' },
           body: JSON.stringify({ model: body.modelId, input: 'ping' }),
@@ -423,7 +461,7 @@ providerAccountsRouter.post('/nodes/validate', requirePermission('view_keys'), a
       if (body.apiKey) anthropicHeaders['x-api-key'] = body.apiKey;
 
       try {
-        const mRes = await fetch(`${sanitizedBase}/models`, {
+        const mRes = await pinnedNodeFetch(`${sanitizedBase}/models`, {
           headers: anthropicHeaders,
           signal: controller.signal,
         });
@@ -439,7 +477,7 @@ providerAccountsRouter.post('/nodes/validate', requirePermission('view_keys'), a
       } catch {}
 
       if (!valid && body.modelId) {
-        const cRes = await fetch(`${sanitizedBase}/messages`, {
+        const cRes = await pinnedNodeFetch(`${sanitizedBase}/messages`, {
           method: 'POST',
           headers: { ...anthropicHeaders, 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -463,7 +501,7 @@ providerAccountsRouter.post('/nodes/validate', requirePermission('view_keys'), a
       // openai-compatible
       const sanitizedBase = body.baseUrl.trim().replace(/\/+$/, '');
       try {
-        const mRes = await fetch(`${sanitizedBase}/models`, {
+        const mRes = await pinnedNodeFetch(`${sanitizedBase}/models`, {
           headers,
           signal: controller.signal,
         });
@@ -479,7 +517,7 @@ providerAccountsRouter.post('/nodes/validate', requirePermission('view_keys'), a
       } catch {}
 
       if (!valid && body.modelId) {
-        const cRes = await fetch(`${sanitizedBase}/chat/completions`, {
+        const cRes = await pinnedNodeFetch(`${sanitizedBase}/chat/completions`, {
           method: 'POST',
           headers: { ...headers, 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -671,7 +709,7 @@ providerAccountsRouter.post('/providers/:providerId/fetch-models', requirePermis
 
   try {
     const upstreamRes = await withKeyProxy(proxyUrl, () =>
-      proxyFetch(`${baseUrl}/models`, { method: 'GET', headers }, account.platform, 'unknown', 15_000),
+      proxyFetch(`${baseUrl}/models`, { method: 'GET', headers }, account.base_url?.trim() ? 'custom' : account.platform, 'unknown', 15_000),
     );
     if (!upstreamRes.ok) {
       throw new AccountError(502, `Upstream /models returned HTTP ${upstreamRes.status}.`);

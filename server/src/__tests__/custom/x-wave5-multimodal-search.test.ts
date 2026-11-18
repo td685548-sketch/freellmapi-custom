@@ -238,7 +238,7 @@ describe('Wave 5 Multimodal Parity, Search Adapters, and Cookie Normalization', 
       provider: 'searxng',
       key: 'no-auth',
       label: 'SearXNG Local',
-      baseUrl: 'https://searx.example.com',
+      baseUrl: 'https://93.184.216.34',
       models: [{ id: 'default', name: 'Default' }],
     });
 
@@ -289,7 +289,7 @@ describe('Wave 5 Multimodal Parity, Search Adapters, and Cookie Normalization', 
       if (url === 'https://api.z.ai/api/mcp/web_search_prime/mcp') {
         return new Response(JSON.stringify({ result: { content: [{ type: 'text', text: JSON.stringify([{ title: 'GLM Hit', link: 'https://glm.test', content: 'glm snippet' }]) }] } }), { status: 200 });
       }
-      if (url.startsWith('https://searx.example.com/search')) {
+      if (url.startsWith('https://93.184.216.34/search')) {
         expect(new Headers(init?.headers).get('authorization')).toBeNull();
         return new Response(JSON.stringify({ results: [{ title: 'SX Hit', url: 'https://sx.test', content: 'sx snippet' }] }), { status: 200 });
       }

@@ -21,6 +21,12 @@ function getTriggerNames(db: TestDb): string[] {
   return (db.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger'").all() as Array<{ name: string }>).map(r => r.name);
 }
 
+async function rollDownThroughTarget(db: TestDb): Promise<void> {
+  while (db.prepare('SELECT 1 FROM migrations WHERE filename = ?').get(FILENAME)) {
+    await runMigrations(db, 'down');
+  }
+}
+
 describe(`migration ${FILENAME}`, () => {
   it('creates custom_context_policies, custom_context_reports, index, and custom_conversations.context_window_start_id without adding triggers', async () => {
     const db = connectDb(':memory:');
@@ -81,7 +87,7 @@ describe(`migration ${FILENAME}`, () => {
       expect(() => mod.up(db)).not.toThrow();
 
       // Zero new SQLite triggers added by this migration.
-      await runMigrations(db, 'down');
+      await rollDownThroughTarget(db);
       expect(getTriggerNames(db)).toEqual(triggersBeforeDown);
     } finally {
       db.close();
@@ -94,7 +100,7 @@ describe(`migration ${FILENAME}`, () => {
       await runMigrations(db, 'up');
 
       // Roll back just this migration first to seed pre-migration conversation data, then up -> down -> up.
-      await runMigrations(db, 'down');
+      await rollDownThroughTarget(db);
       expect(hasTable(db, 'custom_context_policies')).toBe(false);
       expect(hasTable(db, 'custom_context_reports')).toBe(false);
       expect(hasIndex(db, 'idx_custom_context_reports_profile')).toBe(false);
@@ -144,7 +150,7 @@ describe(`migration ${FILENAME}`, () => {
          ) VALUES (99, 7, 'user-a', 'conv-1', 'openai:gpt-4o', 128000, 16000, 500, 0, 0, 1000, 1500, 1400, 2, 0, 0, 0, 0, 0, 0, '2026-11-17T00:00:00Z')`,
       ).run();
 
-      await runMigrations(db, 'down');
+      await rollDownThroughTarget(db);
       expect(hasTable(db, 'custom_context_policies')).toBe(false);
       expect(hasTable(db, 'custom_context_reports')).toBe(false);
       expect(hasIndex(db, 'idx_custom_context_reports_profile')).toBe(false);

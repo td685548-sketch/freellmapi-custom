@@ -36,6 +36,13 @@ export function enforceEndUserQuota(profileId: number, endUser: string | null, q
   const end = (finished: boolean) => {
     if (ended) return;
     ended = true;
+    const committed = finished || (res.headersSent && res.statusCode < 400);
+    if (!finished && committed) {
+      setImmediate(() => {
+        admission.settle(true, tokensUsed());
+      });
+      return;
+    }
     admission.settle(finished && res.statusCode < 400, finished ? tokensUsed() : 0);
   };
   res.on('finish', () => end(true));

@@ -8,9 +8,11 @@ import {
   type SupportTenant,
   type SupportUserContext,
   listSupportTools,
-  createSupportTool,
 } from './support-store.js';
-import { invokeSupportRuntimeWebhook } from './support-action-executor.js';
+import {
+  SupportActionExecutionError,
+  invokeSupportRuntimeWebhook,
+} from './support-action-executor.js';
 import {
   listSupportKnowledgeDocs,
   upsertSupportKnowledgeDoc,
@@ -37,11 +39,11 @@ import {
   createSupportEscalationTicket,
   updateSupportEscalationTicket,
   listSupportPendingActions,
-  proposeSupportPendingAction,
   getSupportAnalyticsSummary,
 } from './support-workflows.js';
 import { resolveTenant, validateSupportPublicAuth } from './support-router.js';
 import { dispatchActionReview, dispatchPartnerEvent } from './support-runtime-router.js';
+import { handleKnowledgeDocumentConvert } from '../../routes/knowledge-document-upload.js';
 
 // ---------------------------------------------------------------------------
 // Audit Log Persistence
@@ -157,6 +159,23 @@ xSupportEnterpriseConsoleRouter.get(
     const tid = resolveTenantIdParam(req.params.tenantId);
     const docs = listSupportKnowledgeDocs(tid);
     res.json({ ok: true, docs });
+  },
+);
+
+// POST /tenants/:tenantId/knowledge/convert
+xSupportEnterpriseConsoleRouter.post(
+  '/tenants/:tenantId/knowledge/convert',
+  (req: Request, res: Response): void => {
+    try {
+      resolveTenantIdParam(req.params.tenantId);
+    } catch (err) {
+      const status = err instanceof SupportStoreError ? err.status : 404;
+      res.status(status === 400 ? 400 : 404).json({
+        error: { message: err instanceof Error ? err.message : 'Support tenant not found.', status: status === 400 ? 400 : 404 },
+      });
+      return;
+    }
+    handleKnowledgeDocumentConvert(req, res, { maxRecommendedChars: 64_000 });
   },
 );
 
@@ -526,9 +545,11 @@ xSupportEnterprisePublicRouter.get(
       : userContext.userId;
     const status = req.query.status as SupportConversationStatus | undefined;
 
-    const conversations = listSupportConversations(String(tenant.id), { userId, status });
+    const conversations = listSupportConversations(String(tenant.id), { userId, status }, userContext.role);
     const maskedConversations = conversations.map((c) => ({
       ...c,
+      ...(c.userEmail ? { userEmail: maskSupportSensitiveText(String(tenant.id), c.userEmail, userContext.role).masked } : {}),
+      ...(c.userName ? { userName: maskSupportSensitiveText(String(tenant.id), c.userName, userContext.role).masked } : {}),
       messages: c.messages.map((m) => ({
         ...m,
         content: maskSupportSensitiveText(String(tenant.id), m.content, userContext.role).masked,
@@ -595,7 +616,15 @@ xSupportEnterprisePublicRouter.get(
       ...m,
       content: maskSupportSensitiveText(String(tenant.id), m.content, userContext.role).masked,
     }));
-    res.json({ ok: true, conversation: { ...conversation, messages: maskedMessages } });
+    res.json({
+      ok: true,
+      conversation: {
+        ...conversation,
+        ...(conversation.userEmail ? { userEmail: maskSupportSensitiveText(String(tenant.id), conversation.userEmail, userContext.role).masked } : {}),
+        ...(conversation.userName ? { userName: maskSupportSensitiveText(String(tenant.id), conversation.userName, userContext.role).masked } : {}),
+        messages: maskedMessages,
+      },
+    });
   },
 );
 
@@ -605,22 +634,47 @@ xSupportEnterprisePublicRouter.post(
   partnerAuthMiddleware,
   (req: Request, res: Response): void => {
     const { tenant, userContext } = req as AuthenticatedPartnerRequest;
-    const subject = req.body?.subject ? String(req.body.subject).trim() : '';
+    const rawSubject = req.body?.subject ? String(req.body.subject).trim() : '';
     const reason = req.body?.reason ? String(req.body.reason).trim() : '';
-    if (!subject || !reason) {
+    if (!reason) {
       res.status(400).json({ error: { message: 'Subject and reason are required.', status: 400 } });
       return;
     }
 
-    if (req.body?.conversationId) {
-      getSupportConversationForUser(String(tenant.id), String(req.body.conversationId), {
+    let conversationId = req.body?.conversationId ? String(req.body.conversationId).trim() : undefined;
+    let subject = rawSubject;
+
+    if (conversationId) {
+      const conv = getSupportConversationForUser(String(tenant.id), conversationId, {
         userId: userContext.userId,
         role: userContext.role,
       });
+      if (!subject) {
+        subject = conv.subject || 'Human agent escalation request';
+      }
+    } else {
+      if (!subject) {
+        subject = 'Human agent escalation request';
+      }
+      const createdConv = createOrAppendSupportConversation(String(tenant.id), {
+        userId: userContext.userId,
+        userName: userContext.name,
+        userEmail: userContext.email,
+        userRole: userContext.role,
+        subject,
+        message: {
+          senderType: 'customer',
+          senderId: userContext.userId,
+          senderName: userContext.name,
+          senderRole: userContext.role,
+          content: reason,
+        },
+      });
+      conversationId = createdConv.id;
     }
 
     const ticket = createSupportEscalationTicket(String(tenant.id), {
-      conversationId: req.body?.conversationId ? String(req.body.conversationId) : undefined,
+      conversationId,
       userId: userContext.userId,
       userName: userContext.name,
       userRole: userContext.role,
@@ -636,7 +690,7 @@ xSupportEnterprisePublicRouter.post(
       dedupKey: `ticket_${ticket.id}`,
     });
 
-    res.status(201).json({ ok: true, ticket });
+    res.status(201).json({ ok: true, ticket, conversationId: ticket.conversationId });
   },
 );
 
@@ -646,6 +700,11 @@ xSupportEnterprisePublicRouter.post(
   partnerAuthMiddleware,
   async (req: Request, res: Response): Promise<void> => {
     const { tenant, userContext } = req as AuthenticatedPartnerRequest;
+    if (String(userContext.role ?? '').toLowerCase() === 'guest') {
+      res.status(403).json({ error: { message: 'Guests cannot propose actions.', status: 403 } });
+      return;
+    }
+
     const toolName = req.body?.toolName ? String(req.body.toolName).trim() : '';
     const actionSummary = req.body?.actionSummary ? String(req.body.actionSummary).trim() : '';
     if (!toolName || !actionSummary) {
@@ -661,16 +720,10 @@ xSupportEnterprisePublicRouter.post(
     }
 
     const tools = listSupportTools(Number(tenant.id));
-    let tool = tools.find((t) => t.name.toLowerCase() === toolName.toLowerCase());
+    const tool = tools.find((t) => t.name.toLowerCase() === toolName.toLowerCase());
     if (!tool) {
-      tool = createSupportTool(Number(tenant.id), {
-        name: toolName,
-        description: actionSummary,
-        method: 'POST',
-        endpointUrl: 'https://example.com/api/actions',
-        allowedRoles: ['customer', 'admin', 'staff', 'guest'],
-        enabled: true,
-      });
+      res.status(404).json({ error: { message: `Tool "${toolName}" is not configured for this tenant.`, status: 404 } });
+      return;
     }
 
     try {
@@ -681,27 +734,25 @@ xSupportEnterprisePublicRouter.post(
         args: (req.body?.payload as Record<string, unknown>) ?? {},
         requestId: `req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         conversationId: req.body?.conversationId ? String(req.body.conversationId) : undefined,
+        forceApproval: true,
+        actionSummary,
       });
       const pendingActionId = (resExec.data as any)?.pendingActionId;
       const allActions = listSupportPendingActions(String(tenant.id));
       const action = allActions.find((a) => a.id === pendingActionId);
+      if (!action) {
+        res.status(500).json({ error: { message: 'Pending action was not recorded.', status: 500 } });
+        return;
+      }
       res.status(201).json({ ok: true, action });
-      return;
-    } catch {
-      // Fallback proposal if action executor is unavailable
+    } catch (err) {
+      if (err instanceof SupportActionExecutionError || err instanceof SupportWorkflowError || err instanceof SupportStoreError) {
+        res.status(err.status).json({ error: { message: err.message, status: err.status } });
+        return;
+      }
+      const message = err instanceof Error ? err.message : 'Failed to propose action.';
+      res.status(500).json({ error: { message, status: 500 } });
     }
-
-    const action = proposeSupportPendingAction(String(tenant.id), {
-      conversationId: req.body?.conversationId ? String(req.body.conversationId) : undefined,
-      userId: userContext.userId,
-      userName: userContext.name,
-      userRole: userContext.role,
-      toolName,
-      actionSummary,
-      payload: (req.body?.payload as Record<string, unknown>) ?? {},
-    });
-
-    res.status(201).json({ ok: true, action });
   },
 );
 

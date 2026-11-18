@@ -25,6 +25,7 @@ import { Overview } from './pages/Overview';
 import { PromptCache } from './pages/PromptCache';
 import { Prompts } from './pages/Prompts';
 import { Runs } from './pages/Runs';
+import { AdminCustomerAiPanel } from '../customer-ai/AdminCustomerAiPanel';
 import { KNOWLEDGE_NAV_HEADING } from './knowledge-strings';
 import {
   NAV_AI_PLATFORM,
@@ -87,6 +88,13 @@ export function AiPlatformApp() {
     can('view_flow_runs') ||
     can('cancel_flow_runs') ||
     can('approve_ai_actions');
+  const canCustomerAi =
+    isPrimary ||
+    can('view_prompts') ||
+    can('edit_prompts') ||
+    can('view_ai_platform') ||
+    can('edit_ai_flags') ||
+    can('manage_ai_platform');
 
   // Guard: no sensitive query when user lacks access.
   if (
@@ -97,7 +105,8 @@ export function AiPlatformApp() {
     !canKnowledge &&
     !canPromptCache &&
     !canFlows &&
-    !canRuns
+    !canRuns &&
+    !canCustomerAi
   ) {
     return (
       <div>
@@ -117,6 +126,7 @@ export function AiPlatformApp() {
       canPromptCache={canPromptCache}
       canFlows={canFlows}
       canRuns={canRuns}
+      canCustomerAi={canCustomerAi}
     />
   );
 }
@@ -131,6 +141,7 @@ function AiPlatformShell({
   canPromptCache,
   canFlows,
   canRuns,
+  canCustomerAi,
 }: {
   canOverview: boolean;
   canPrompts: boolean;
@@ -141,6 +152,7 @@ function AiPlatformShell({
   canPromptCache: boolean;
   canFlows: boolean;
   canRuns: boolean;
+  canCustomerAi: boolean;
 }) {
   const tc = useCustomT();
   const canKnowledge = canViewKnowledge || canEditKnowledge;
@@ -153,7 +165,8 @@ function AiPlatformShell({
     : canKnowledge ? 'knowledge'
     : canPromptCache ? 'prompt-cache'
     : canFlows ? 'flows'
-    : 'runs';
+    : canRuns ? 'runs'
+    : 'customer-ai';
   const defaultElement = canOverview ? (
     <Overview />
   ) : canPrompts ? (
@@ -173,8 +186,10 @@ function AiPlatformShell({
     <PromptCache />
   ) : canFlows ? (
     <Flows />
-  ) : (
+  ) : canRuns ? (
     <Runs />
+  ) : (
+    <AdminCustomerAiPanel />
   );
 
   return (
@@ -225,6 +240,11 @@ function AiPlatformShell({
             {canRuns && (
               <NavLink to={`${BASE}/runs`} className={tabClass}>
                 {tc(RUNS_HEADING)}
+              </NavLink>
+            )}
+            {canCustomerAi && (
+              <NavLink to={`${BASE}/customer-ai`} className={tabClass}>
+                {tc('Customer AI')}
               </NavLink>
             )}
           </nav>
@@ -298,6 +318,18 @@ function AiPlatformShell({
             element={
               canRuns ? (
                 <Runs />
+              ) : (
+                <div>
+                  <p className="text-sm text-muted-foreground">{tc(NO_ACCESS)}</p>
+                </div>
+              )
+            }
+          />
+          <Route
+            path="customer-ai"
+            element={
+              canCustomerAi ? (
+                <AdminCustomerAiPanel />
               ) : (
                 <div>
                   <p className="text-sm text-muted-foreground">{tc(NO_ACCESS)}</p>

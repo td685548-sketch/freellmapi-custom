@@ -33,6 +33,11 @@ Cách xác định trạng thái: đếm checkbox trong `tasks.md`, rồi đối
 | 020-azure-document-storage | Lưu archive tài liệu tenant lên Azure Blob | 5/5 | PR #41 | Code xong; chưa bật trên production (mục 2) |
 | 018-ai-platform-upgrade | 6 trụ cột AI: prompts, retrieval, prompt cache, MCP, output guard, orchestrator | 140/140 | PR #48, #52, #69, #74, #77; Phase Polish trên nhánh `chore/ai-platform-polish` | Tài liệu vận hành: [`docs/ai-platform.md`](../docs/ai-platform.md); nghiệm thu: [`acceptance.md`](018-ai-platform-upgrade/acceptance.md) |
 | 021-context-engineering | Lắp ráp ngữ cảnh có ngân sách token (Context Engineering) | 64/64 | PR #90, #92, #94 và nhánh `feat/021-stage5-polish`; `server/src/custom/context-budget/`, `server/src/routes/context-policy.ts`, `ContextPolicyCard.tsx` | Tài liệu vận hành: [`docs/context-budget.md`](../docs/context-budget.md); nghiệm thu: [`acceptance.md`](021-context-engineering/acceptance.md) |
+| 023-service-desk-live-test | Thử nghiệm trực tiếp Widget người dùng cuối theo Tenant trong Service Desk Studio | 7/7 | `support-service-desk-live-test-router.ts`, `SupportWidgetLiveTest.tsx`, `x-support-service-desk-live-test.test.ts`, `support-service-desk-live-test.test.tsx` | |
+| 025-live-test-cleanup | Tách số liệu Sandbox & dọn dữ liệu thử nghiệm trực tiếp theo Tenant | 6/6 | `support-live-test-sandbox.ts`, `x-support-live-test-sandbox.test.ts`, `SupportWidgetLiveTest.tsx` | |
+| 026-rag-office-markdown | Tự động chuyển đổi tài liệu Word & Excel sang Markdown (.md) khi tải lên RAG | 5/5 | `document-markdown.ts`, `knowledge-document-upload.ts`, `KnowledgeCard.tsx`, `SupportKnowledgeStudio.tsx`, `SupportEnterprise.tsx` | |
+| 027-live-test-inline-approvals | Duyệt hành động chờ trực tiếp trong Live Test & đồng bộ Widget | 6/6 | `support-service-desk-live-test-router.ts`, `SupportWidgetLiveTest.tsx`, `x-support-live-test-approvals.test.ts` | |
+| 028-tenant-regression-playbooks | Bộ kiểm thử hồi quy theo Tenant trong Service Desk Studio | 6/6 | `support-live-test-playbook.ts`, `x-support-live-test-playbook.test.ts`, `SupportWidgetLiveTest.tsx` | |
 
 ## 2. Việc vận hành (không cần spec)
 

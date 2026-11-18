@@ -12,6 +12,9 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions:
+  contents: read
+
 jobs:
   # Independent jobs run in parallel, so the pipeline takes as long as the
   # slowest one instead of the sum of all steps.
@@ -34,6 +37,9 @@ jobs:
       # and is brought in under a separate change.
       - name: Lint
         run: npm run lint
+
+      - name: Lint AI Platform and Support client extensions
+        run: npm run lint:support-ai -w client
 
   build:
     name: Build (Node ${{ matrix.node-version }})

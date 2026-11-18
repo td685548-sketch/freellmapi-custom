@@ -62,6 +62,8 @@ import { runsPublicRouter } from './ai-platform/orchestrator/runs-public.js';
 import { detectWire } from './ai-platform/wire/detect.js';
 import { CLIENT_PROFILE_KEY_PREFIX, resolveAuth } from '../lib/system-prompt.js';
 import { extractInferenceToken } from '../middleware/user-rate-limit.js';
+import { customerAiUserRouter } from './customer-ai/router.js';
+import { customerAiSessionRoutingMiddleware } from './customer-ai/runtime.js';
 
 // Everything this fork adds to the HTTP surface is wired here, so upstream's
 // app.ts keeps a handful of added lines instead of edited mount statements.
@@ -172,7 +174,7 @@ export function registerCustomRoutes(app: Express): void {
   app.use(['/v1', '/thruline/v1'], (_req, _res, next) => withRoutingSettingsScope(next));
   // When the X Gateway is off, answer 404 immediately before any auth checks
   // so an inactive gateway leaks nothing about its existence.
-  app.use('/thruline/v1', (_req, res, next) => {
+  app.use(['/thruline/v1', '/thruline/v1beta'], (_req, res, next) => {
     if (!getConfigSnapshot().enabled) {
       res.status(404).json({ error: { message: 'Not found', type: 'not_found' } });
       return;
@@ -225,10 +227,11 @@ export function registerCustomRoutes(app: Express): void {
       },
     });
   });
-  // Rate-limiting and usage tracking gate for member personal API keys (/v1, /v1beta and /thruline/v1 inference)
-  app.use(['/v1', '/v1beta', '/thruline/v1'], userInferenceGate);
+  // Rate-limiting and usage tracking gate for member personal API keys (/v1, /v1beta, /thruline/v1, /thruline/v1beta)
+  app.use(['/v1', '/v1beta', '/thruline/v1', '/thruline/v1beta'], userInferenceGate);
   // Playground chats (unified key + the dashboard session) are attributed to the signed-in account.
   app.use('/v1', playgroundAttribution);
+  app.use('/v1', customerAiSessionRoutingMiddleware);
   // Roll finished days of the request log into the long-term daily table, after an inference
   // response has gone out (a time check per request; the work itself at most once a day).
   app.use(['/v1', '/v1beta'], (_req, res, next) => { res.once('finish', () => { maybeRollUp(); maybeSendWeeklyReport(); }); next(); });
@@ -303,6 +306,7 @@ export function registerCustomRoutes(app: Express): void {
   app.use('/api/admin/guest-access', requireAuth, requireActionPermission('manage_users'), guestAccessAdminRouter);
   app.use('/api/admin/users', requireAuth, requireActionPermission('manage_users'), adminUsersRouter, adminUserAnalyticsRouter, adminUserQuotaRouter, adminUserRequestsRouter);
   app.use('/api/admin/registration-requests', requireAuth, requireActionPermission('manage_requests'), adminRegistrationRequestsRouter);
+  app.use('/api/user/ai-hub', requireAuth, customerAiUserRouter);
   app.use('/api/user', requireAuth, userKeysRouter, selfAnalyticsRouter, selfQuotaRouter, selfRequestsRouter);
 
   // AI Platform admin API — mounted after auth/permission gates (gate is in PERMISSION_GATES above).

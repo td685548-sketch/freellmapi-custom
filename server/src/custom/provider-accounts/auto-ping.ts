@@ -396,7 +396,7 @@ export function stopAutoPingWorker(): void {
 
 export const autoPingRouter = Router();
 
-autoPingRouter.use(requireAuth, requirePermission('use_x_gateway'));
+autoPingRouter.use(requireAuth);
 
 
 // ---------------------------------------------------------------------
@@ -555,7 +555,7 @@ const scheduleUpdateSchema = z.object({
   timezone: z.string().max(100).optional(),
 }).strict();
 
-autoPingRouter.get('/auto-ping', (_req: Request, res: Response) => {
+autoPingRouter.get('/auto-ping', requirePermission('use_x_gateway'), (_req: Request, res: Response) => {
   const schedules = listAutoPingSchedules();
   const active = schedules.filter(s => s.schedule.enabled && s.schedule.mode !== 'off');
   const lastRunAt = schedules
@@ -566,15 +566,15 @@ autoPingRouter.get('/auto-ping', (_req: Request, res: Response) => {
   res.json({ enabled: active.length > 0, activeSchedules: active.length, lastRunAt, schedules });
 });
 
-autoPingRouter.post('/auto-ping/run', async (_req: Request, res: Response) => {
+autoPingRouter.post('/auto-ping/run', requirePermission('use_x_gateway'), requirePermission('test_keys'), async (_req: Request, res: Response) => {
   res.json(await runAutoPingAll());
 });
 
-autoPingRouter.get('/availability', (_req: Request, res: Response) => {
+autoPingRouter.get('/availability', requirePermission('use_x_gateway'), (_req: Request, res: Response) => {
   res.json(getAvailability());
 });
 
-autoPingRouter.post('/cooldowns/clear', (req: Request, res: Response) => {
+autoPingRouter.post('/cooldowns/clear', requirePermission('use_x_gateway'), requirePermission('edit_keys'), (req: Request, res: Response) => {
   const parsed = clearCooldownSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid clear parameters', issues: parsed.error.issues });
@@ -583,11 +583,11 @@ autoPingRouter.post('/cooldowns/clear', (req: Request, res: Response) => {
   res.json({ cleared: clearCooldowns(parsed.data), ...getAvailability() });
 });
 
-autoPingRouter.get('/cooldowns', (_req: Request, res: Response) => {
+autoPingRouter.get('/cooldowns', requirePermission('use_x_gateway'), (_req: Request, res: Response) => {
   res.json({ cooldowns: getAllCooldowns() });
 });
 
-autoPingRouter.get('/:id/auto-ping', (req: Request, res: Response) => {
+autoPingRouter.get('/:id/auto-ping', requirePermission('use_x_gateway'), (req: Request, res: Response) => {
   const accountId = Number(req.params.id);
   if (!Number.isSafeInteger(accountId) || accountId <= 0) {
     res.status(400).json({ error: 'Invalid account ID' });
@@ -598,7 +598,7 @@ autoPingRouter.get('/:id/auto-ping', (req: Request, res: Response) => {
   res.json({ schedule, cooldown });
 });
 
-autoPingRouter.put('/:id/auto-ping', (req: Request, res: Response) => {
+autoPingRouter.put('/:id/auto-ping', requirePermission('use_x_gateway'), requirePermission('edit_keys'), (req: Request, res: Response) => {
   const accountId = Number(req.params.id);
   if (!Number.isSafeInteger(accountId) || accountId <= 0) {
     res.status(400).json({ error: 'Invalid account ID' });
@@ -613,7 +613,7 @@ autoPingRouter.put('/:id/auto-ping', (req: Request, res: Response) => {
   res.json({ schedule: updated });
 });
 
-autoPingRouter.post('/:id/ping', async (req: Request, res: Response) => {
+autoPingRouter.post('/:id/ping', requirePermission('use_x_gateway'), requirePermission('test_keys'), async (req: Request, res: Response) => {
   const accountId = Number(req.params.id);
   if (!Number.isSafeInteger(accountId) || accountId <= 0) {
     res.status(400).json({ error: 'Invalid account ID' });

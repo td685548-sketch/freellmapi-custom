@@ -288,6 +288,42 @@ describe('ContextPolicyCard', () => {
     })
   })
 
+  it('switches statistics range between 7d, 30d, and 90d and shows daily breakdown', async () => {
+    vi.mocked(apiFetch).mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.includes('/context-stats?days=30')) {
+        return makeStats({
+          days: 30,
+          requests: 4200,
+          byDay: [
+            { day: '2026-11-16', requests: 190, avgInputTokens: 5800, trimmedRate: 0.4 },
+            { day: '2026-11-17', requests: 210, avgInputTokens: 6100, trimmedRate: 0.45 },
+          ],
+        }) as never
+      }
+      if (url.includes('/context-stats?days=90')) {
+        return makeStats({ days: 90, requests: 9100 }) as never
+      }
+      if (url.endsWith('/context-stats?days=7')) return statsState as never
+      if (url.endsWith('/context-policy') && init?.method === 'PUT') return policyState as never
+      if (url.endsWith('/context-policy')) return policyState as never
+      return {} as never
+    })
+
+    await render()
+    expect(apiFetch).toHaveBeenCalledWith('/api/client-profiles/5/context-stats?days=7')
+
+    await click(tab('30d'))
+    expect(apiFetch).toHaveBeenCalledWith('/api/client-profiles/5/context-stats?days=30')
+    expect(container.textContent).toContain('Last 30 days')
+    expect(container.textContent).toContain('Daily breakdown (2)')
+    expect(container.querySelector('[aria-label="Daily context statistics"]')?.textContent).toContain('2026-11-16')
+
+    await click(tab('90d'))
+    expect(apiFetch).toHaveBeenCalledWith('/api/client-profiles/5/context-stats?days=90')
+    expect(container.textContent).toContain('Last 90 days')
+    expect(container.textContent).toContain('9,100 requests')
+  })
+
   it('saves dirty valid draft preset together with toggle when flipping the enable switch', async () => {
     await render()
     await click(tab('Saver'))
@@ -389,6 +425,20 @@ describe('ContextPreviewDialog & ConversationsCard integration', () => {
     expect(dialogText).toContain('Older question')
     expect(dialogText).toContain('Budget')
     expect(dialogText).toContain('Summarized through message #9 · 2 messages pending fold')
+    expect(document.body.querySelector('[aria-label="Token budget allocation"]')?.textContent).toContain('570 / 14,400 tokens')
+
+    // Simulate a smaller target model via ?model=
+    const simInput = document.body.querySelector<HTMLInputElement>('#ctx-preview-model')!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(simInput, 'cerebras:small-8k')
+      simInput.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await flush()
+    const simBtn = [...document.body.querySelectorAll('button')].find(b => b.textContent === 'Simulate')
+    await click(simBtn)
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/api/client-profiles/5/conversations/chat-9/context-preview?endUser=alice&model=cerebras%3Asmall-8k',
+    )
   })
 
   it('refreshes ContextPolicyCard suggested banner when Stored Conversations settings change', async () => {

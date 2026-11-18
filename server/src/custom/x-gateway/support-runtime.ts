@@ -49,6 +49,7 @@ import { getRetrievalSettingsInternal } from '../ai-platform/retrieval/settings.
 import {
   getSupportConversationForUser,
   createOrAppendSupportConversation,
+  linkPendingActionsToConversation,
   type SupportConversation,
 } from './support-workflows.js';
 import {
@@ -1113,6 +1114,13 @@ export async function executeSupportTurn(options: {
         ...(internalIntake ? { internalIntake } : {}),
       });
       conversationId = conv.id;
+      if (conversationId && pendingActions.length > 0) {
+        linkPendingActionsToConversation(
+          String(tenant.id),
+          pendingActions.map((p) => p.id),
+          conversationId,
+        );
+      }
       const customerMessageId = conv.messages[conv.messages.length - 1]?.id ?? '';
       let assistantMessageId: string | null = null;
 

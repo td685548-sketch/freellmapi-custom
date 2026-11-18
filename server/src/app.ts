@@ -260,6 +260,7 @@ export function createApp(config?: Config) {
   // Custom fork surface (admin/member gating, /api/invites, /api/user, invite
   // registration). Registered below the limiter so it shares the same throttle.
   app.use('/api', modelListCacheInvalidation);
+  app.use(['/v1beta', '/thruline/v1beta'], createProxyRateLimiter(cfg.proxyRateLimitRpm));
   registerCustomRoutes(app);
 
   // Dashboard auth (#35): /api/auth/{status,setup,login} bootstrap without a
@@ -354,8 +355,7 @@ export function createApp(config?: Config) {
   // OpenAI Responses API shim (Codex CLI requires wire_api="responses"; see #96)
   app.use('/v1', responsesRouter);
 
-  // Native Gemini wire surface for Gemini CLI and Gemini-lineage agents.
-  app.use('/v1beta', createProxyRateLimiter(cfg.proxyRateLimitRpm));
+  // Native Gemini wire surface for Gemini CLI and Gemini-lineage agents (rate limiter registered ahead of registerCustomRoutes).
   app.use('/v1beta', geminiRouter);
 
   // MCP server (Model Context Protocol over stateless Streamable HTTP):

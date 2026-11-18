@@ -53,8 +53,9 @@ feedbackIngestRouter.post('/', (req: Request, res: Response) => {
 export const profileFeedbackRouter = Router();
 
 const profileId = (req: Request, res: Response): number | null => {
-  const n = Number(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
-  if (!Number.isInteger(n) || n <= 0) { res.status(400).json({ error: { message: 'Invalid profile id' } }); return null; }
+  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const n = typeof raw === 'string' && /^[1-9]\d*$/.test(raw) ? Number(raw) : NaN;
+  if (!Number.isSafeInteger(n) || n <= 0) { res.status(400).json({ error: { message: 'Invalid profile id' } }); return null; }
   return n;
 };
 

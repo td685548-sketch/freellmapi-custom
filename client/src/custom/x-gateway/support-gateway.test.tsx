@@ -11,7 +11,7 @@ vi.mock('@/lib/api', () => ({ apiFetch: vi.fn() }))
 vi.mock('@/i18n', () => ({ useI18n: () => ({ locale: 'en', setLocale: vi.fn() }) }))
 vi.mock('../use-session', () => ({
   useUserSession: () => ({
-    hasPermission: (_p: string) => true,
+    hasPermission: () => true,
     session: { userId: 1, email: 'admin@example.com' },
   }),
 }))

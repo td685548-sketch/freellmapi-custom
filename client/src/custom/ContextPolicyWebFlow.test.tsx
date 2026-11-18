@@ -4,16 +4,19 @@ import { createRoot, type Root } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  CONTEXT_POLICY_DEFAULT,
   CONTEXT_POLICY_LIMITS,
   CONTEXT_PRESETS,
   type ContextAssemblySummary,
   type ContextPolicy,
+  type ContextPolicyDefault,
   type ContextPolicyResponse,
   type ContextPreview,
   type ContextStats,
 } from '@freellmapi/shared/context-budget.js'
 import { clearToken, setToken } from '@/lib/api'
 import { I18nProvider, useI18n } from '@/i18n'
+import { ContextPolicyDefaultSection } from './ContextPolicyDefaultSection'
 import { ConversationsCard } from './ConversationsCard'
 import { ContextPolicyCard } from './ContextPolicyCard'
 import { RecentRequestsCard } from './RecentRequestsCard'
@@ -50,6 +53,7 @@ function Harness() {
   return (
     <div>
       <LocaleSwitchButton />
+      <ContextPolicyDefaultSection />
       <ConversationsCard profileId={1} canEdit={true} />
       <ContextPolicyCard profileId={1} canEdit={true} />
       <RecentRequestsCard endpoint="/api/client-profiles/1/requests" />
@@ -62,6 +66,7 @@ let root: Root
 let client: QueryClient
 let previewFetchCount: number
 let policyState: ContextPolicy
+let defaultPolicyState: ContextPolicyDefault
 let convSettings: {
   enabled: boolean
   ttlHours: number
@@ -135,6 +140,7 @@ beforeEach(() => {
     summarize: true,
   }
   policyState = makeInheritedPolicy()
+  defaultPolicyState = { ...CONTEXT_POLICY_DEFAULT }
 
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input)
@@ -144,6 +150,32 @@ beforeEach(() => {
     )
     if (authHeader !== 'Bearer web-e2e-token') {
       return jsonResponse({ error: { message: 'Unauthorized', type: 'authentication_error' } }, 401)
+    }
+
+    if (url.endsWith('/api/user/session') && method === 'GET') {
+      return jsonResponse({
+        userId: 1,
+        email: 'admin@local.test',
+        role: 'admin',
+        isPrimary: true,
+        permissions: ['*'],
+      })
+    }
+
+    if (url.endsWith('/api/models') && method === 'GET') {
+      return jsonResponse([
+        { platform: 'custom', modelId: 'mock-web-128k', enabled: true, contextWindow: 131072 },
+        { platform: 'custom', modelId: 'mock-web-8k', enabled: true, contextWindow: 8192 },
+      ])
+    }
+
+    if (url.endsWith('/api/settings/context-policy')) {
+      if (method === 'GET') return jsonResponse(defaultPolicyState)
+      if (method === 'PUT') {
+        const patch = JSON.parse(String(init?.body)) as Partial<ContextPolicyDefault>
+        defaultPolicyState = { ...defaultPolicyState, ...patch }
+        return jsonResponse(defaultPolicyState)
+      }
     }
 
     if (url.endsWith('/api/client-profiles/1/conversations') && method === 'GET') {
@@ -189,15 +221,33 @@ beforeEach(() => {
       }
     }
 
-    if (url.endsWith('/api/client-profiles/1/context-stats?days=7')) {
-      return jsonResponse(statsData)
+    if (url.includes('/api/client-profiles/1/context-stats')) {
+      const parsedDays = Number(new URL(url, 'http://localhost').searchParams.get('days') ?? '7')
+      return jsonResponse({
+        ...statsData,
+        days: parsedDays,
+        requests: parsedDays === 30 ? 180 : parsedDays === 90 ? 420 : statsData.requests,
+        byDay:
+          parsedDays === 30
+            ? [
+                { day: '2026-11-17', requests: 90, avgInputTokens: 3650, trimmedRate: 0.7 },
+                { day: '2026-11-18', requests: 90, avgInputTokens: 3790, trimmedRate: 0.76 },
+              ]
+            : statsData.byDay,
+      })
     }
 
     if (url.includes('/api/client-profiles/1/conversations/conv-demo-01/context-preview')) {
       previewFetchCount += 1
-      const effective = policyState.maxInputTokens ?? 16000
+      const reqModel = new URL(url, 'http://localhost').searchParams.get('model')
+      const simulated8k = reqModel === 'custom:mock-web-8k'
+      const effective = simulated8k
+        ? Math.min(policyState.maxInputTokens ?? 16000, 6451)
+        : (policyState.maxInputTokens ?? 16000)
       const preview: ContextPreview = {
-        model: { key: 'custom:mock-web-128k', contextWindow: 131072 },
+        model: simulated8k
+          ? { key: 'custom:mock-web-8k', contextWindow: 8192 }
+          : { key: 'custom:mock-web-128k', contextWindow: 131072 },
         budget: {
           effective,
           mandatory: 240,
@@ -338,13 +388,22 @@ describe('Spec 021 real-apiFetch full-stack web flow', () => {
     const previewBtn = findBtn(container, 'Preview context')
     expect(previewBtn).not.toBeNull()
 
-    // 3. Open Preview context -> real apiFetch + scrollable wrapper + segments + summary coverage
+    // 3. Open Preview context -> real apiFetch + allocation bar + model simulator + scrollable table
     await click(previewBtn)
     expect(previewFetchCount).toBe(1)
     expect(document.body.textContent).toContain('custom:mock-web-128k')
     expect(document.body.textContent).toContain('8,000 tokens')
     expect(document.body.textContent).toContain('Summarized through message #48')
+    expect(document.body.querySelector('[aria-label="Token budget allocation"]')?.textContent).toContain('470 / 8,000 tokens')
     expect(document.body.querySelector('.max-h-\\[50vh\\].overflow-auto')).not.toBeNull()
+
+    await setInput(document.body.querySelector<HTMLInputElement>('#ctx-preview-model'), 'custom:mock-web-8k')
+    await click(findBtn(document.body, 'Simulate'))
+    expect(previewFetchCount).toBe(2)
+    expect(document.body.textContent).toContain('custom:mock-web-8k')
+    expect(document.body.textContent).toContain('6,451 tokens')
+    await click(findBtn(document.body, 'Auto'))
+    expect(document.body.textContent).toContain('8,000 tokens')
 
     await click(document.querySelector('[aria-label="Close"]'))
 
@@ -354,31 +413,44 @@ describe('Spec 021 real-apiFetch full-stack web flow', () => {
     await click(findBtn(container, 'Save'))
     expect(policyState.maxInputTokens).toBe(12000)
 
+    const countBeforeReopen = previewFetchCount
     await click(findBtn(container, 'Preview context'))
-    expect(previewFetchCount).toBe(2)
+    expect(previewFetchCount).toBe(countBeforeReopen + 1)
     expect(document.body.textContent).toContain('12,000 tokens')
     await click(document.querySelector('[aria-label="Close"]'))
 
-    // 5. Validation + Discard + Enforce budget warning
-    await setInput(container.querySelector<HTMLInputElement>('#ctx-maxInputTokens'), '500')
-    expect(container.querySelector('[role="alert"]')).not.toBeNull()
-    expect(findBtn(container, 'Save')?.disabled).toBe(true)
-    await click(findBtn(container, 'Discard'))
-    expect(container.querySelector('[role="alert"]')).toBeNull()
+    // 4b. System default policy section updates /api/settings/context-policy
+    const defaultSection = container.querySelector('[aria-labelledby="default-context-policy-title"]')!
+    await setInput(defaultSection.querySelector<HTMLInputElement>('#ctx-default-fallbackWindow'), '16384')
+    await click(findBtn(defaultSection, 'Save'))
+    expect(defaultPolicyState.fallbackWindowTokens).toBe(16384)
 
-    await click(findBtn(container, 'Enforce budget'))
-    expect(container.textContent).toContain('without creating server summaries')
-    await click(findBtn(container, 'Discard'))
+    // 4c. Statistics window toggles 7d -> 30d + shows Daily breakdown
+    await click(findBtn(container, '30d'))
+    expect(container.textContent).toContain('Last 30 days')
+    expect(container.textContent).toContain('Daily breakdown (2)')
+
+    // 5. Validation + Discard + Enforce budget warning
+    const policySection = container.querySelector('[aria-label="Context budget policy"]')!
+    await setInput(policySection.querySelector<HTMLInputElement>('#ctx-maxInputTokens'), '500')
+    expect(policySection.querySelector('[role="alert"]')).not.toBeNull()
+    expect(findBtn(policySection, 'Save')?.disabled).toBe(true)
+    await click(findBtn(policySection, 'Discard'))
+    expect(policySection.querySelector('[role="alert"]')).toBeNull()
+
+    await click(findBtn(policySection, 'Enforce budget'))
+    expect(policySection.textContent).toContain('without creating server summaries')
+    await click(findBtn(policySection, 'Discard'))
 
     // 6. Reset to default -> DELETE 204 -> Inherited + Suggested restored + Preview button hidden
-    await click(findBtn(container, 'Reset to default'))
-    expect(container.textContent).toContain('Inherited from system default')
-    expect(container.querySelector('[aria-label="Suggested policy values"]')).not.toBeNull()
+    await click(findBtn(policySection, 'Reset to default'))
+    expect(policySection.textContent).toContain('Inherited from system default')
+    expect(policySection.querySelector('[aria-label="Suggested policy values"]')).not.toBeNull()
     expect(findBtn(container, 'Preview context')).toBeNull()
 
     // 7. One-click Saver preset + Enable context policy switch saves both together
-    await click(findBtn(container, 'Saver'))
-    const enableSwitch = container.querySelector('[aria-label="Enable context policy"]')
+    await click(findBtn(policySection, 'Saver'))
+    const enableSwitch = policySection.querySelector('[aria-label="Enable context policy"]')
     await click(enableSwitch)
     const lastPut = recordedPuts[recordedPuts.length - 1]
     expect(lastPut?.enabled).toBe(true)
@@ -407,8 +479,10 @@ describe('Spec 021 real-apiFetch full-stack web flow', () => {
     // Dynamic locale import needs an extra microtask/timer flush
     await flush(50)
 
+    expect(container.textContent).toContain('Chính sách ngân sách ngữ cảnh mặc định')
     expect(container.textContent).toContain('Hội thoại được lưu')
     expect(container.textContent).toContain('Chính sách ngân sách ngữ cảnh')
+    expect(container.textContent).toContain('30 ngày')
     expect(container.textContent).toContain('Xem trước ngữ cảnh')
     expect(container.textContent).toContain('Lắp ráp ngữ cảnh')
   })

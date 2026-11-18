@@ -1,15 +1,14 @@
 // Built to build/preload.cjs (CommonJS — the reliable preload format).
-// Runs in the renderer before any page script: seeds the dashboard session
-// token into localStorage so AuthGate's very first /api/auth/status call is
-// authenticated. The token arrives via additionalArguments (process.argv),
-// which avoids templating strings into executeJavaScript.
+// Runs in the renderer before any page script: fetches the dashboard session
+// token via origin-verified synchronous IPC and seeds localStorage so AuthGate's
+// first /api/auth/status call is authenticated without exposing tokens in argv.
 import { contextBridge, ipcRenderer } from 'electron';
 
 const TOKEN_KEY = 'freellmapi_dashboard_token';
-const arg = process.argv.find((a) => a.startsWith('--freeapi-token='));
-if (arg) {
+const initialToken = ipcRenderer.sendSync('freeapi:session-token-sync') as unknown;
+if (typeof initialToken === 'string' && initialToken.length > 0) {
   try {
-    window.localStorage.setItem(TOKEN_KEY, arg.slice('--freeapi-token='.length));
+    window.localStorage.setItem(TOKEN_KEY, initialToken);
   } catch {
     // localStorage unavailable — the dashboard will show its login screen.
   }

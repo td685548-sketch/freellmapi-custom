@@ -151,7 +151,7 @@ export async function executeProviderEmbedding(params: {
         },
         body: JSON.stringify({ ...body, model: modelId }),
       },
-      account.platform,
+      'custom',
       'embedding',
       60_000,
     );
@@ -371,7 +371,7 @@ export async function executeProviderSpeech(params: {
           response_format: responseFormat || 'mp3',
         }),
       },
-      account.platform,
+      'custom',
       'audio',
       120_000,
     );

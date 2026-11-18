@@ -14,6 +14,7 @@ import {
   onTicketCreatedLifecycle,
   onTicketUpdatedLifecycle,
 } from './support-service-desk-lifecycle.js';
+import { isInLiveTestContext } from './support-live-test-sandbox.js';
 
 const CONVERSATIONS_KEY = 'x_gateway_support_conversations_v1';
 const TICKETS_KEY = 'x_gateway_support_tickets_v1';
@@ -71,6 +72,7 @@ export interface SupportConversation {
   messages: SupportConversationMessage[];
   assignedAgent?: string;
   intake?: SupportDeskConversationIntake;
+  isLiveTest?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -91,6 +93,7 @@ export interface SupportEscalationTicket {
   status: SupportTicketStatus;
   assignedTo?: string;
   resolutionNotes?: string;
+  isLiveTest?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -111,6 +114,7 @@ export interface SupportPendingAction {
   reviewedBy?: string;
   reviewNote?: string;
   executionResult?: unknown;
+  isLiveTest?: boolean;
   createdAt: string;
   reviewedAt?: string;
 }
@@ -171,28 +175,29 @@ function writeStore<T>(key: string, store: Record<string, T>): void {
 
 /**
  * Applies current 017 sensitive-text masking read-only to AI assistant messages
- * using the conversation's original userRole, leaving human/customer messages untouched.
+ * using the requester's role, leaving human/customer messages untouched.
  */
-function maskConversationAiMessagesForOriginalRole(
+function maskConversationAiMessagesForRole(
   tenantId: string,
   conv: SupportConversation,
+  viewerRole: string,
 ): SupportConversation {
   const hasAiMessages = conv.messages.some((m) => m.senderType === 'ai_assistant');
   if (!hasAiMessages) {
     return conv;
   }
 
-  const originalRole = conv.userRole || 'customer';
+  const effectiveRole = viewerRole || 'guest';
   const maskedMessages = conv.messages.map((msg): SupportConversationMessage => {
     if (msg.senderType !== 'ai_assistant') {
       return msg;
     }
 
-    const maskedContent = maskSupportSensitiveText(tenantId, msg.content, originalRole).masked;
+    const maskedContent = maskSupportSensitiveText(tenantId, msg.content, effectiveRole).masked;
     const maskedToolTrace = msg.toolTrace
       ? msg.toolTrace.map((trace) => ({
           ...trace,
-          toolName: maskSupportSensitiveText(tenantId, trace.toolName, originalRole).masked,
+          toolName: maskSupportSensitiveText(tenantId, trace.toolName, effectiveRole).masked,
         }))
       : undefined;
     const maskedEvidence = msg.evidence
@@ -200,8 +205,8 @@ function maskConversationAiMessagesForOriginalRole(
           ...msg.evidence,
           citations: msg.evidence.citations.map((c) => ({
             ...c,
-            title: maskSupportSensitiveText(tenantId, c.title, originalRole).masked,
-            excerpt: maskSupportSensitiveText(tenantId, c.excerpt, originalRole).masked,
+            title: maskSupportSensitiveText(tenantId, c.title, effectiveRole).masked,
+            excerpt: maskSupportSensitiveText(tenantId, c.excerpt, effectiveRole).masked,
           })),
         }
       : undefined;
@@ -220,31 +225,55 @@ function maskConversationAiMessagesForOriginalRole(
   };
 }
 
+const SUPPORT_ROLE_RANK: Record<string, number> = {
+  guest: 0,
+  customer: 1,
+  staff: 2,
+  admin: 3,
+};
+
+function resolveLeastPrivilegeSupportRole(
+  ownerRoleRaw: string | undefined,
+  viewerRoleRaw: string | undefined,
+): string {
+  const viewer = String(viewerRoleRaw || 'guest').trim().toLowerCase();
+  if (!(viewer in SUPPORT_ROLE_RANK)) {
+    return viewer || 'guest';
+  }
+  const owner = String(ownerRoleRaw || 'customer').trim().toLowerCase();
+  if (!(owner in SUPPORT_ROLE_RANK)) {
+    return viewer;
+  }
+  return SUPPORT_ROLE_RANK[viewer] <= SUPPORT_ROLE_RANK[owner] ? viewer : owner;
+}
+
 /**
  * Composes canonical read-only sanitization: 018 evidence -> 019 intake hydration
- * -> 017 AI masking under original conversation role -> 020 output policy.
+ * -> 017 AI masking under least-privilege role -> 020 output policy.
  */
 function sanitizeConversationRead(
   tenantId: string,
   conv: SupportConversation,
-  intakeViewerRole: string,
+  viewerRole: string,
 ): SupportConversation {
   const numericTenantId = Number(tenantId);
   if (!Number.isInteger(numericTenantId) || numericTenantId <= 0) {
     return conv;
   }
 
+  const effectiveViewerRole = String(viewerRole || 'guest').trim().toLowerCase() || 'guest';
+  const leastPrivilegeRole = resolveLeastPrivilegeSupportRole(conv.userRole, effectiveViewerRole);
   const evidenceSanitized = sanitizeSupportEvidenceConversation({
     tenantId: numericTenantId,
     conversation: conv,
-    viewerRole: conv.userRole || intakeViewerRole,
+    viewerRole: leastPrivilegeRole,
   });
   const intakeHydrated = hydrateSupportConversationIntake({
     tenantId: numericTenantId,
     conversation: evidenceSanitized,
-    viewerRole: intakeViewerRole,
+    viewerRole: effectiveViewerRole,
   });
-  const maskedAiHistory = maskConversationAiMessagesForOriginalRole(tenantId, intakeHydrated);
+  const maskedAiHistory = maskConversationAiMessagesForRole(tenantId, intakeHydrated, leastPrivilegeRole);
   return sanitizeSupportConversationOutput({
     tenantId: numericTenantId,
     conversation: maskedAiHistory,
@@ -254,6 +283,7 @@ function sanitizeConversationRead(
 export function listSupportConversations(
   tenantId: string,
   filter?: { userId?: string; status?: SupportConversationStatus },
+  viewerRole = 'admin',
 ): SupportConversation[] {
   const tid = String(tenantId);
   const store = readStore<SupportConversation[]>(CONVERSATIONS_KEY);
@@ -265,7 +295,7 @@ export function listSupportConversations(
       if (filter?.status && conv.status !== filter.status) return false;
       return true;
     })
-    .map((conv) => sanitizeConversationRead(tid, conv, conv.userRole));
+    .map((conv) => sanitizeConversationRead(tid, conv, viewerRole));
 }
 
 export function getSupportConversationForUser(
@@ -384,6 +414,7 @@ export function createOrAppendSupportConversation(
       subject: (input.subject ?? 'Support Conversation').trim(),
       status: 'active',
       ...(persistedIntake ? { intake: persistedIntake } : {}),
+      ...(isInLiveTestContext() ? { isLiveTest: true } : {}),
       messages: [newMsg],
       createdAt: now,
       updatedAt: now,
@@ -481,6 +512,15 @@ export function createSupportEscalationTicket(
     const store = readStore<SupportEscalationTicket[]>(TICKETS_KEY);
     const list = Array.isArray(store[tid]) ? store[tid] : [];
     const now = new Date().toISOString();
+    const convStoreForCheck = input.conversationId
+      ? readStore<SupportConversation[]>(CONVERSATIONS_KEY)[tid]
+      : undefined;
+    const linkedToLiveTest = Boolean(
+      input.conversationId &&
+        Array.isArray(convStoreForCheck) &&
+        convStoreForCheck.some((c) => c.id === input.conversationId && c.isLiveTest === true),
+    );
+    const isLiveTest = isInLiveTestContext() || linkedToLiveTest;
 
     const ticket: SupportEscalationTicket = {
       id: `tkt_${randomUUID()}`,
@@ -493,6 +533,7 @@ export function createSupportEscalationTicket(
       reason: input.reason.trim(),
       priority: input.priority ?? 'medium',
       status: 'open',
+      ...(isLiveTest ? { isLiveTest: true } : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -606,6 +647,15 @@ export function proposeSupportPendingAction(
   const store = readStore<SupportPendingAction[]>(ACTIONS_KEY);
   const list = Array.isArray(store[tid]) ? store[tid] : [];
   const now = new Date().toISOString();
+  const convStoreForCheck = input.conversationId
+    ? readStore<SupportConversation[]>(CONVERSATIONS_KEY)[tid]
+    : undefined;
+  const linkedToLiveTest = Boolean(
+    input.conversationId &&
+      Array.isArray(convStoreForCheck) &&
+      convStoreForCheck.some((c) => c.id === input.conversationId && c.isLiveTest === true),
+  );
+  const isLiveTest = isInLiveTestContext() || linkedToLiveTest;
 
   const action: SupportPendingAction = {
     id: `act_${randomUUID()}`,
@@ -618,6 +668,7 @@ export function proposeSupportPendingAction(
     actionSummary: input.actionSummary.trim(),
     payload: input.payload,
     status: 'pending',
+    ...(isLiveTest ? { isLiveTest: true } : {}),
     createdAt: now,
   };
 
@@ -660,15 +711,98 @@ export function reviewSupportPendingAction(
   return updated;
 }
 
+export function linkPendingActionsToConversation(
+  tenantId: string,
+  actionIds: readonly string[],
+  conversationId: string,
+): void {
+  const cleanConvId = conversationId.trim();
+  if (!cleanConvId || actionIds.length === 0) return;
+
+  const tid = String(tenantId);
+  const idSet = new Set(actionIds);
+  const convList = readStore<SupportConversation[]>(CONVERSATIONS_KEY)[tid];
+  const convIsLiveTest =
+    isInLiveTestContext() ||
+    (Array.isArray(convList) && convList.some((c) => c.id === cleanConvId && c.isLiveTest === true));
+
+  const store = readStore<SupportPendingAction[]>(ACTIONS_KEY);
+  const list = Array.isArray(store[tid]) ? store[tid] : [];
+  let changed = false;
+
+  const updated = list.map((act) => {
+    if (!idSet.has(act.id)) return act;
+    const nextConvId = act.conversationId || cleanConvId;
+    const nextLiveTest = act.isLiveTest === true || convIsLiveTest ? true : undefined;
+    if (nextConvId === act.conversationId && nextLiveTest === act.isLiveTest) {
+      return act;
+    }
+    changed = true;
+    return {
+      ...act,
+      conversationId: nextConvId,
+      ...(nextLiveTest ? { isLiveTest: true } : {}),
+    };
+  });
+
+  if (changed) {
+    store[tid] = updated;
+    writeStore(ACTIONS_KEY, store);
+  }
+}
+
+export function appendSupportActionOutcomeMessage(
+  tenantId: string,
+  conversationId: string,
+  input: { reviewer: string; content: string },
+): boolean {
+  const cleanConvId = conversationId.trim();
+  const cleanContent = input.content.trim();
+  if (!cleanConvId || !cleanContent) return false;
+
+  const tid = String(tenantId);
+  const store = readStore<SupportConversation[]>(CONVERSATIONS_KEY);
+  const list = Array.isArray(store[tid]) ? store[tid] : [];
+  const idx = list.findIndex((c) => c.id === cleanConvId);
+  if (idx < 0) return false;
+
+  const now = new Date().toISOString();
+  const reviewer = input.reviewer.trim() || 'Support Reviewer';
+  const existing = list[idx];
+  const msg: SupportConversationMessage = {
+    id: `msg_${randomUUID()}`,
+    senderType: 'human_agent',
+    senderId: reviewer,
+    senderName: reviewer,
+    senderRole: 'staff',
+    content: cleanContent,
+    createdAt: now,
+  };
+
+  list[idx] = {
+    ...existing,
+    messages: [...existing.messages, msg],
+    updatedAt: now,
+  };
+  store[tid] = list;
+  writeStore(CONVERSATIONS_KEY, store);
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // Analytics Summary
 // ---------------------------------------------------------------------------
 
-export function getSupportAnalyticsSummary(tenantId: string): SupportAnalyticsSummary {
+export function getSupportAnalyticsSummary(
+  tenantId: string,
+  options?: { includeLiveTest?: boolean },
+): SupportAnalyticsSummary {
   const tid = String(tenantId);
-  const convs = listSupportConversations(tid);
-  const tickets = listSupportEscalationTickets(tid);
-  const actions = listSupportPendingActions(tid);
+  const keepItem = (item: { isLiveTest?: boolean }) =>
+    options?.includeLiveTest ? true : item.isLiveTest !== true;
+  const convs = listSupportConversations(tid).filter(keepItem);
+  const tickets = listSupportEscalationTickets(tid).filter(keepItem);
+  const actions = listSupportPendingActions(tid).filter(keepItem);
 
   const totalConversations = convs.length;
   const activeConversations = convs.filter((c) => c.status === 'active').length;

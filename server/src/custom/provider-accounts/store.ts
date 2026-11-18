@@ -10,6 +10,7 @@ import { getDb, getSetting, setSetting } from '../../db/index.js';
 import { decrypt, encrypt } from '../../lib/crypto.js';
 import { decryptProxyUrl, encryptProxyUrl, isValidKeyProxyUrl, KEY_PROXY_URL_ERROR, maskProxyUrl } from '../../lib/key-proxy.js';
 import { parseModelScope } from '../../lib/model-scope.js';
+import { assertSafeHttpBaseUrlSync } from '../../lib/url-guard.js';
 import { clearCooldownsForKey } from '../../services/ratelimit.js';
 import { getOutboundProxyUrl } from '../x-gateway/config.js';
 import {
@@ -802,15 +803,13 @@ export function createApiKeyAccount(input: {
     if (!baseUrl) {
       throw new AccountError(400, 'Base URL is required for custom endpoints.');
     }
+  }
+  if (baseUrl) {
     try {
-      const parsed = new URL(baseUrl);
-      if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error();
-      baseUrl = baseUrl.replace(/\/+$/, '');
-    } catch {
-      throw new AccountError(400, 'Base URL must be a valid http(s) URL.');
+      baseUrl = assertSafeHttpBaseUrlSync(baseUrl);
+    } catch (err) {
+      throw new AccountError(400, err instanceof Error ? err.message : 'Base URL must be a valid http(s) URL.');
     }
-  } else if (baseUrl) {
-    baseUrl = baseUrl.replace(/\/+$/, '');
   }
 
   const rawProxyUrl = input.proxyUrl?.trim() ?? '';

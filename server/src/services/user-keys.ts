@@ -2,6 +2,12 @@ import crypto from 'crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { getDb } from '../db/index.js';
 import { parseStoredPermissions, type Permission } from '@freellmapi/shared/permissions.js';
+import type { KeyRoutingMode } from '@freellmapi/shared/customer-ai.js';
+import {
+  assertBindableAssistant,
+  composeUserKeySystemPrompt,
+  normalizeRoutingMode,
+} from '../custom/customer-ai/store.js';
 
 export const USER_KEY_PREFIX = 'sk-flm-';
 
@@ -9,12 +15,16 @@ export type { UserApiKey as UserApiKeyRow } from '@freellmapi/shared/user-access
 import type { UserApiKey as UserApiKeyRow } from '@freellmapi/shared/user-access.js';
 
 export interface ValidatedUserKey {
+  keyId?: number;
   userId: number;
   email: string;
   role: 'admin' | 'member';
   rpmLimit: number;
   isPrimary: boolean;
   permissions: readonly Permission[];
+  routingMode?: KeyRoutingMode;
+  assistantId?: number | null;
+  systemPrompt?: string | null;
 }
 
 function sha256(val: string): string {
@@ -27,23 +37,35 @@ function sha256(val: string): string {
 export function mintUserApiKey(
   userId: number,
   name: string = 'Default Key',
-): { id: number; key: string; keyPrefix: string; name: string; createdAt: string } {
+  options?: { routingMode?: KeyRoutingMode; assistantId?: number | null; callerRole?: 'admin' | 'member' },
+): { id: number; key: string; keyPrefix: string; name: string; createdAt: string; routingMode: KeyRoutingMode; assistantId: number | null } {
   const db = getDb();
   const rawSecret = crypto.randomBytes(24).toString('hex');
   const key = `${USER_KEY_PREFIX}${rawSecret}`;
   const keyHash = sha256(key);
   const keyPrefix = `${key.slice(0, 11)}…${key.slice(-4)}`;
+  const routingMode = normalizeRoutingMode(options?.routingMode, 'default');
+  const assistantId = options?.assistantId !== undefined
+    ? assertBindableAssistant(options.assistantId, options.callerRole ?? 'member')
+    : null;
 
   const result = db.prepare(`
-    INSERT INTO user_api_keys (user_id, name, key_hash, key_prefix)
-    VALUES (?, ?, ?, ?)
-  `).run(userId, name.trim() || 'Default Key', keyHash, keyPrefix);
+    INSERT INTO user_api_keys (user_id, name, key_hash, key_prefix, routing_mode, assistant_id)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(userId, name.trim() || 'Default Key', keyHash, keyPrefix, routingMode, assistantId);
 
   const row = db.prepare(`
-    SELECT id, name, key_prefix, created_at
+    SELECT id, name, key_prefix, created_at, routing_mode, assistant_id
     FROM user_api_keys
     WHERE id = ?
-  `).get(result.lastInsertRowid) as { id: number; name: string; key_prefix: string; created_at: string };
+  `).get(result.lastInsertRowid) as {
+    id: number;
+    name: string;
+    key_prefix: string;
+    created_at: string;
+    routing_mode: string;
+    assistant_id: number | null;
+  };
 
   return {
     id: row.id,
@@ -51,6 +73,8 @@ export function mintUserApiKey(
     keyPrefix: row.key_prefix,
     name: row.name,
     createdAt: row.created_at,
+    routingMode: normalizeRoutingMode(row.routing_mode, 'default'),
+    assistantId: row.assistant_id ?? null,
   };
 }
 
@@ -60,10 +84,16 @@ export function mintUserApiKey(
 export function listUserApiKeys(userId: number): UserApiKeyRow[] {
   const db = getDb();
   const rows = db.prepare(`
-    SELECT id, user_id, name, key_prefix, rpm_limit, revoked, created_at, last_used_at
-    FROM user_api_keys
-    WHERE user_id = ?
-    ORDER BY id DESC
+    SELECT
+      k.id, k.user_id, k.name, k.key_prefix, k.rpm_limit, k.revoked, k.created_at, k.last_used_at,
+      k.routing_mode,
+      a.id AS active_assistant_id,
+      a.slug AS assistant_slug,
+      a.name AS assistant_name
+    FROM user_api_keys k
+    LEFT JOIN custom_ai_assistants a ON a.id = k.assistant_id AND a.enabled = 1
+    WHERE k.user_id = ?
+    ORDER BY k.id DESC
   `).all(userId) as Array<{
     id: number;
     user_id: number;
@@ -73,6 +103,10 @@ export function listUserApiKeys(userId: number): UserApiKeyRow[] {
     revoked: number;
     created_at: string;
     last_used_at: string | null;
+    routing_mode: string | null;
+    active_assistant_id: number | null;
+    assistant_slug: string | null;
+    assistant_name: string | null;
   }>;
 
   return rows.map(r => ({
@@ -84,6 +118,10 @@ export function listUserApiKeys(userId: number): UserApiKeyRow[] {
     revoked: Boolean(r.revoked),
     createdAt: r.created_at,
     lastUsedAt: r.last_used_at,
+    routingMode: normalizeRoutingMode(r.routing_mode, 'default'),
+    assistantId: r.active_assistant_id ?? null,
+    assistantSlug: r.assistant_slug ?? null,
+    assistantName: r.assistant_name ?? null,
   }));
 }
 
@@ -162,19 +200,37 @@ function lookupUserApiKey(token: string): ValidatedUserKey | null {
   const keyHash = sha256(token);
 
   const row = db.prepare(`
-    SELECT k.id as key_id, k.user_id, k.rpm_limit, k.revoked, u.email, u.role, u.is_primary, u.permissions
+    SELECT
+      k.id as key_id, k.user_id, k.rpm_limit, k.revoked,
+      k.routing_mode, k.assistant_id,
+      u.email, u.role, u.is_primary, u.permissions,
+      a.id as active_assistant_id,
+      a.system_prompt as assistant_prompt,
+      p.custom_instructions as custom_instructions,
+      p.apply_to_keys as apply_to_keys
     FROM user_api_keys k
     JOIN users u ON u.id = k.user_id
+    LEFT JOIN custom_ai_assistants a
+      ON a.id = k.assistant_id
+      AND a.enabled = 1
+      AND (u.role = 'admin' OR a.audience <> 'admin_only')
+    LEFT JOIN custom_user_ai_preferences p ON p.user_id = u.id
     WHERE k.key_hash = ?
   `).get(keyHash) as {
     key_id: number;
     user_id: number;
     rpm_limit: number;
     revoked: number;
+    routing_mode: string | null;
+    assistant_id: number | null;
     email: string;
     role: string;
     is_primary: number;
     permissions: string | null;
+    active_assistant_id: number | null;
+    assistant_prompt: string | null;
+    custom_instructions: string | null;
+    apply_to_keys: number | null;
   } | undefined;
 
   if (!row || row.revoked) return null;
@@ -184,13 +240,20 @@ function lookupUserApiKey(token: string): ValidatedUserKey | null {
   const role: 'admin' | 'member' = row.role === 'admin' ? 'admin' : 'member';
   const isPrimary = Boolean(row.is_primary);
   const permissions = parseStoredPermissions(row.permissions, role, isPrimary);
+  const routingMode = normalizeRoutingMode(row.routing_mode, 'default');
+  const applyToKeys = row.apply_to_keys === null ? true : Boolean(row.apply_to_keys);
+  const systemPrompt = composeUserKeySystemPrompt(row.assistant_prompt, row.custom_instructions, applyToKeys);
 
   return {
+    keyId: row.key_id,
     userId: row.user_id,
     email: row.email,
     role,
     rpmLimit: row.rpm_limit || 60,
     isPrimary,
     permissions,
+    routingMode,
+    assistantId: row.active_assistant_id ?? null,
+    systemPrompt,
   };
 }

@@ -4,6 +4,7 @@ import { createApp } from '../../app.js';
 import { getDb, initDb } from '../../db/index.js';
 import { createSession, createUser } from '../../services/auth.js';
 import { setEnabled } from '../../custom/x-gateway/config.js';
+import { createSupportTool } from '../../custom/x-gateway/support-store.js';
 import {
   setTurnExecutor,
   setActionReviewExecutor,
@@ -524,6 +525,14 @@ describe('AI Support Runtime Integration Gateway (Spec 017)', () => {
     let customerToken: string;
 
     beforeAll(async () => {
+      createSupportTool(partnerTenantId, {
+        name: 'refund_order',
+        description: 'Refund an order',
+        method: 'POST',
+        endpointUrl: 'https://example.com/api/actions',
+        allowedRoles: ['customer', 'staff', 'admin'],
+        enabled: true,
+      });
       const s = await apiCall('/thruline/v1/support/session', {
         method: 'POST',
         headers: { Authorization: `Bearer ${partnerTenantSecret}` },

@@ -326,6 +326,31 @@ describe('verdicts', () => {
     expect(report.verdict).toBe('unknown');
     expect(report.detail).toContain('claude');
   });
+
+  it('does not fetch untrusted workspace settings URLs that mismatch expectedUrl', async () => {
+    const workspace = tempHome();
+    const home = tempHome();
+    writeClaudeSettings(home, { env: { ANTHROPIC_BASE_URL: url } });
+    fs.mkdirSync(path.join(workspace, '.claude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(workspace, '.claude', 'settings.json'),
+      JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:59999' } }),
+    );
+    let fetched = false;
+    const spyFetch: typeof fetch = async () => {
+      fetched = true;
+      return gatewayFetch()('http://ignored');
+    };
+    const report = await diagnose('claude', {
+      expectedUrl: url,
+      env: {},
+      homeDir: home,
+      cwd: workspace,
+      fetchImpl: spyFetch,
+    });
+    expect(report.verdict).toBe('shadowed');
+    expect(fetched).toBe(false);
+  });
 });
 
 describe('probeGateway', () => {
@@ -371,6 +396,16 @@ describe('probeGateway', () => {
 
   it('is unhealthy when a non-2xx carries an ok body', async () => {
     expect((await probeGateway('http://x', gatewayFetch(undefined, 500))).healthy).toBe(false);
+  });
+
+  it('disables automatic HTTP redirects when probing', async () => {
+    let seenRedirect: RequestRedirect | undefined;
+    const captureFetch: typeof fetch = async (_url, init) => {
+      seenRedirect = init?.redirect;
+      return gatewayFetch()('http://x');
+    };
+    await probeGateway('http://x', captureFetch);
+    expect(seenRedirect).toBe('error');
   });
 
   it('honours the caller-supplied timeout instead of the hard-coded default', async () => {

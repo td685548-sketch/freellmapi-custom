@@ -31,6 +31,12 @@ import {
   XCircle,
 } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
+import {
+  convertFileToMarkdown,
+  DOCUMENT_MARKDOWN_LIMITS,
+  RAG_UPLOAD_ACCEPT,
+  shouldConvertOnServer,
+} from '../../document-markdown-upload'
 import { useSessionRevision } from '../../session-state'
 import { useUserSession } from '../../use-session'
 import { useSupportEvidenceStrings } from '../support-evidence-strings'
@@ -138,6 +144,7 @@ function SourcesPanel({
   const [revTags, setRevTags] = useState('')
   const [revContent, setRevContent] = useState('')
   const [revUrl, setRevUrl] = useState('')
+  const [convertingFile, setConvertingFile] = useState(false)
   const [importNotice, setImportNotice] = useState<string | null>(null)
   const [importClientError, setImportClientError] = useState<string | null>(null)
 
@@ -254,9 +261,40 @@ function SourcesPanel({
     },
   })
 
-  function handleFileUpload(e: ChangeEvent<HTMLInputElement>) {
+  async function handleFileUpload(e: ChangeEvent<HTMLInputElement>, sourceKind: SupportEvidenceSourceKind) {
     const file = e.target.files?.[0]
+    e.target.value = ''
     if (!file) return
+
+    if (sourceKind !== 'faq_json' && shouldConvertOnServer(file)) {
+      if (file.size > DOCUMENT_MARKDOWN_LIMITS.maxUploadBytes) {
+        setImportClientError(s.sources.errors.officeTooLarge)
+        return
+      }
+      setImportNotice(null)
+      setImportClientError(null)
+      setConvertingFile(true)
+      try {
+        const res = await convertFileToMarkdown(`${tenantBase}/convert`, file)
+        setRevContent(res.markdown)
+        if (!revTitle.trim()) setRevTitle(res.title)
+        if (res.markdown.length > 64_000) {
+          setImportClientError(s.sources.errors.tooManyChars)
+        } else {
+          setImportNotice(
+            s.sources.convertedNotice
+              .replace('{name}', file.name)
+              .replace('{chars}', res.markdown.length.toLocaleString()),
+          )
+        }
+      } catch (err) {
+        setImportClientError(err instanceof Error ? err.message : s.error)
+      } finally {
+        setConvertingFile(false)
+      }
+      return
+    }
+
     if (file.size > 1_048_576) {
       setImportClientError(s.sources.errors.tooLarge)
       return
@@ -384,6 +422,7 @@ function SourcesPanel({
                 <option value="faq_json">{s.sources.kinds.faq_json}</option>
                 <option value="url">{s.sources.kinds.url}</option>
               </select>
+              <small className="x-hint" style={{ marginTop: 4, display: 'block' }}>{s.sources.officeSourceHint}</small>
             </div>
           </div>
 
@@ -834,14 +873,22 @@ function SourcesPanel({
                               />
                             </div>
                             <div className="x-field" style={{ marginBottom: 10 }}>
-                              <label style={{ fontSize: 12 }}>{s.sources.fileUpload}</label>
+                              <label style={{ fontSize: 12 }}>
+                                {src.kind === 'faq_json' ? s.sources.fileUpload : s.sources.fileUploadMarkdown}
+                              </label>
                               <input
                                 data-testid="revision-file-input"
                                 type="file"
-                                accept=".txt,.md,.json"
-                                onChange={handleFileUpload}
+                                accept={src.kind === 'faq_json' ? '.json,.txt' : RAG_UPLOAD_ACCEPT}
+                                disabled={convertingFile}
+                                onChange={e => void handleFileUpload(e, src.kind)}
                                 style={{ fontSize: 12 }}
                               />
+                              {convertingFile && (
+                                <div className="x-hint" role="status" style={{ marginTop: 4 }}>
+                                  {s.sources.convertingFile}
+                                </div>
+                              )}
                             </div>
                           </>
                         )}
@@ -850,7 +897,7 @@ function SourcesPanel({
                           type="button"
                           data-testid="import-revision-btn"
                           className="x-btn x-btn-primary"
-                          disabled={importRevisionMutation.isPending}
+                          disabled={importRevisionMutation.isPending || convertingFile}
                           onClick={handleImportSubmit}
                         >
                           <Upload size={14} />

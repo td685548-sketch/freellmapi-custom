@@ -29,7 +29,12 @@ const settingsSchema = z.object({
 }).strict();
 
 const first = (raw: unknown): unknown => (Array.isArray(raw) ? raw[0] : raw);
-const int = (raw: unknown): number | null => { const n = Number(first(raw)); return Number.isInteger(n) && n > 0 ? n : null; };
+const int = (raw: unknown): number | null => {
+  const s = first(raw);
+  if (typeof s !== 'string' || !/^[1-9]\d*$/.test(s)) return null;
+  const n = Number(s);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+};
 const bad = (res: Response, message: string) => res.status(400).json({ error: { message } });
 
 function profileOf(req: Request, res: Response) {

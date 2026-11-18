@@ -8,6 +8,7 @@ import type { CompletionOptions } from '../../providers/base.js';
 import { decrypt } from '../../lib/crypto.js';
 import { estimateInputTokens } from '../../lib/content.js';
 import { assessProviderUrl } from '../../lib/url-guard.js';
+import { proxyFetch } from '../../lib/proxy.js';
 import { withQuotaTracking } from './quota/tracking.js';
 import { applyQuotaRouting, isWebCookieProvider } from './quota/store.js';
 import { resolveSystemOneComboOrder } from './systemone-router.js';
@@ -1706,10 +1707,15 @@ async function nativeSearch(
     endpoint.searchParams.set('language', 'all');
     const headers: Record<string, string> = { accept: 'application/json' };
     if (apiKey && apiKey !== 'no-auth') headers.authorization = `Bearer ${apiKey}`;
-    const response = await fetch(endpoint.toString(), {
-      headers,
-      signal,
-    });
+    const response = await proxyFetch(
+      endpoint.toString(),
+      {
+        headers,
+        signal,
+      },
+      'custom',
+      'unknown',
+    );
     const data = await readSearchJson(response, providerId);
     items = Array.isArray(data.results) ? data.results : [];
   } else if (providerId === 'tinyfish') {
@@ -1752,18 +1758,24 @@ async function nativeSearch(
     });
   } else if (providerId === 'ollama-search') {
     const rawBase = (accountBaseUrl ?? '').trim().replace(/\/+$/, '');
-    const endpoint = rawBase && rawBase !== 'https://api.openai.com/v1'
+    const hasCustomBase = Boolean(rawBase && rawBase !== 'https://api.openai.com/v1');
+    const endpoint = hasCustomBase
       ? rawBase
       : 'https://ollama.com/api/web_search';
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        ...(apiKey && apiKey !== 'no-auth' ? { authorization: `Bearer ${apiKey}` } : {}),
+    const response = await proxyFetch(
+      endpoint,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(apiKey && apiKey !== 'no-auth' ? { authorization: `Bearer ${apiKey}` } : {}),
+        },
+        body: JSON.stringify({ query, max_results: maxResults }),
+        signal,
       },
-      body: JSON.stringify({ query, max_results: maxResults }),
-      signal,
-    });
+      hasCustomBase ? 'custom' : 'ollama-search',
+      'unknown',
+    );
     const data = await readSearchJson(response, providerId);
     items = Array.isArray(data.results) ? data.results : [];
   } else if (providerId === 'glm') {
@@ -2154,14 +2166,21 @@ async function fetchWithRedirects(
 ): Promise<{ response: FetchResponse; finalUrl: string }> {
   let current = initial;
   for (let hop = 0; hop <= FETCH_MAX_REDIRECTS; hop += 1) {
-    const response = await fetch(current.toString(), {
-      redirect: 'manual',
-      signal,
-      headers: {
-        accept: 'text/html,application/xhtml+xml,text/plain,application/json;q=0.8,*/*;q=0.5',
-        'user-agent': 'FreeLLMAPI-X-Gateway/1.0',
+    const response = await proxyFetch(
+      current.toString(),
+      {
+        redirect: 'manual',
+        signal,
+        headers: {
+          accept: 'text/html,application/xhtml+xml,text/plain,application/json;q=0.8,*/*;q=0.5',
+          'user-agent': 'FreeLLMAPI-X-Gateway/1.0',
+        },
       },
-    });
+      'custom',
+      'unknown',
+      undefined,
+      { blockPrivate: true, allowManualRedirectResponse: true },
+    );
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get('location');
       if (!location) return { response, finalUrl: current.toString() };
