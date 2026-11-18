@@ -1,5 +1,8 @@
 import { apiFetch } from '@/lib/api';
 import type {
+  CopilotDiagnosticsResponse,
+  CopilotExecuteActionRequest,
+  CopilotExecuteActionResponse,
   SupportSetupApplyRequest,
   SupportSetupApplyResponse,
   SupportSetupChatRequest,
@@ -7,6 +10,17 @@ import type {
   SupportSetupProposal,
   SupportSetupStatusResponse,
 } from '../../../../shared/support-setup-copilot';
+
+export function isMemberPersonalCopilotRoute(pathname: string): boolean {
+  return (
+    pathname === '/assistants' ||
+    pathname.startsWith('/assistants/') ||
+    pathname === '/agents' ||
+    pathname.startsWith('/agents/') ||
+    pathname === '/keys' ||
+    pathname.startsWith('/keys/')
+  );
+}
 
 export function isSupportSetupCopilotRoute(pathname: string): boolean {
   if (pathname === '/thruline/playground' || pathname.startsWith('/thruline/playground/')) {
@@ -20,10 +34,9 @@ export function isSupportSetupCopilotRoute(pathname: string): boolean {
     pathname.startsWith('/thruline/') ||
     pathname === '/tenant-portal' ||
     pathname.startsWith('/tenant-portal/') ||
-    pathname === '/assistants' ||
-    pathname.startsWith('/assistants/') ||
     pathname === '/settings' ||
-    pathname.startsWith('/settings/')
+    pathname.startsWith('/settings/') ||
+    isMemberPersonalCopilotRoute(pathname)
   );
 }
 
@@ -32,8 +45,23 @@ export function fetchSupportSetupStatus(tenantId?: number | null): Promise<Suppo
   return apiFetch<SupportSetupStatusResponse>(`/api/support-setup-copilot/status${query}`);
 }
 
+export function fetchCopilotUserDiagnostics(windowHours = 72): Promise<CopilotDiagnosticsResponse> {
+  return apiFetch<CopilotDiagnosticsResponse>(
+    `/api/support-setup-copilot/diagnostics?windowHours=${encodeURIComponent(String(windowHours))}`,
+  );
+}
+
 export function postSupportSetupChat(body: SupportSetupChatRequest): Promise<SupportSetupChatResponse> {
   return apiFetch<SupportSetupChatResponse>('/api/support-setup-copilot/chat', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function postCopilotExecuteAction(
+  body: CopilotExecuteActionRequest,
+): Promise<CopilotExecuteActionResponse> {
+  return apiFetch<CopilotExecuteActionResponse>('/api/support-setup-copilot/execute-action', {
     method: 'POST',
     body: JSON.stringify(body),
   });

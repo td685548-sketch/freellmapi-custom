@@ -1,5 +1,8 @@
 import {
+  COPILOT_ACTION_TYPES,
   SUPPORT_SETUP_STEP_IDS,
+  type CopilotDiagnosticsResponse,
+  type SupportSetupChatResponse,
   type SupportSetupProposal,
   type SupportSetupStatusResponse,
   type SupportSetupStepId,
@@ -21,8 +24,19 @@ import {
   resolvePublicServerOrigin,
   type CopilotUserScope,
 } from './diagnostics.js';
+import {
+  buildErrorDoctorChatResponse,
+  buildUserErrorDiagnosticReport,
+  hasDoctorOrActionVietnameseMarkers,
+  matchErrorDoctorIntent,
+} from './error-doctor.js';
 import { applySupportSetupProposal } from './executor.js';
-import { runSupportSetupCopilotTurn } from './playbook.js';
+import {
+  buildPlatformExpertReply,
+  matchPlatformKnowledgeQuestion,
+  normalizePlatformPath,
+} from './platform-guide.js';
+import { detectConversationLocale, runSupportSetupCopilotTurn } from './playbook.js';
 import {
   listPendingProposalsForUser,
   markSetupProposalDeclined,
@@ -32,6 +46,12 @@ import {
   reprojectSystemActionsForUser,
   SYSTEM_SETTING_IDS,
 } from './system-settings.js';
+import {
+  buildActionProposalChatResponse,
+  buildOnboardingChecklist,
+  executeCopilotUserAction,
+  matchUserActionIntent,
+} from './user-actions.js';
 
 export const supportSetupCopilotRouter = Router();
 
@@ -77,6 +97,18 @@ function paramStr(value: unknown): string {
   return Array.isArray(value) ? String(value[0] ?? '') : String(value ?? '');
 }
 
+function isPersonalMemberRoute(rawPath?: string): boolean {
+  const p = normalizePlatformPath(rawPath);
+  return (
+    p === '/assistants' ||
+    p.startsWith('/assistants/') ||
+    p === '/agents' ||
+    p.startsWith('/agents/') ||
+    p === '/keys' ||
+    p.startsWith('/keys/')
+  );
+}
+
 const chatMessageSchema = z
   .object({
     role: z.enum(['user', 'assistant']),
@@ -118,6 +150,24 @@ const applyBodySchema = z
     approved: z.boolean(),
     selectedSteps: z.array(z.enum(SUPPORT_SETUP_STEP_IDS)).optional(),
     selectedSystemActions: z.array(z.enum(SYSTEM_SETTING_IDS)).optional(),
+  })
+  .strict();
+
+const executeActionParamsSchema = z
+  .object({
+    name: z.string().trim().max(100).optional(),
+    routingMode: z.enum(['eco', 'balanced', 'max']).optional(),
+    assistantId: z.number().int().positive().nullable().optional(),
+    keyId: z.number().int().positive().optional(),
+    focusStep: z.enum(['mint_personal_key', 'test_in_playground', 'connect_ide']).optional(),
+  })
+  .strict();
+
+const executeActionBodySchema = z
+  .object({
+    actionType: z.enum(COPILOT_ACTION_TYPES),
+    confirmed: z.boolean(),
+    params: executeActionParamsSchema.optional(),
   })
   .strict();
 
@@ -172,20 +222,53 @@ function reprojectPendingProposalsForScope(
   return projected;
 }
 
+function buildMemberAssistantGuideReply(locale: 'vi' | 'en'): SupportSetupChatResponse {
+  return {
+    ok: true,
+    replyLocale: locale,
+    reply:
+      locale === 'vi'
+        ? 'Chào bạn! Mình là **Trợ lý AI & Bác sĩ Chẩn đoán Lỗi** của tài khoản bạn. Mình có thể kiểm tra ngay vì sao gọi API bị lỗi (`429`, `400`, `403`, `5xx`/lag), xem phần trăm hạn mức Quota, tạo **Personal API Key** kèm cấu hình **Cursor / Claude Code / OpenCode**, hoặc mở **Checklist 3 bước cho thành viên mới** — mọi thao tác đều chờ bạn bấm xác nhận trước khi thực thi nhé!'
+        : 'Hi there! I am your **In-App Copilot & AI Error Doctor**. I can diagnose recent API errors (`429`, `400`, `403`, `5xx`/latency), inspect your Quota usage %, mint a new **Personal API Key** with ready-to-copy **Cursor / Claude Code / OpenCode** configs, or open your **3-Step Member Onboarding Checklist** — nothing changes without your explicit confirmation!',
+    intent: 'guide',
+    missingQuestions: [],
+    suggestedQuickReplies:
+      locale === 'vi'
+        ? [
+            'Kiểm tra tài khoản & chẩn đoán lỗi giúp mình',
+            'Tạo Personal API Key mới chế độ Balanced',
+            'Mở checklist 3 bước cho thành viên mới',
+          ]
+        : [
+            'Diagnose my account & recent API errors',
+            'Create a new Personal API Key in Balanced mode',
+            'Open 3-step member onboarding checklist',
+          ],
+    proposal: null,
+    userDiagnostic: null,
+    actionProposal: null,
+    modelUsed: null,
+    usedFallback: true,
+  };
+}
+
 // GET /api/support-setup-copilot/status
 supportSetupCopilotRouter.get('/status', (req: Request, res: Response) => {
   const user = (req as Request & { user?: SessionUser }).user!;
   const scope = resolveCopilotUserScope(user);
+  const onboarding = buildOnboardingChecklist(user.userId);
 
   if (!scope.hasAccess) {
     const hidden: SupportSetupStatusResponse = {
       ok: true,
       visible: false,
+      memberCopilotVisible: true,
       canCreateTenant: false,
       availableModels: [],
       tenants: [],
       activeTenant: null,
       pendingProposals: [],
+      onboarding,
     };
     res.json(hidden);
     return;
@@ -216,6 +299,7 @@ supportSetupCopilotRouter.get('/status', (req: Request, res: Response) => {
   const payload: SupportSetupStatusResponse = {
     ok: true,
     visible: true,
+    memberCopilotVisible: true,
     canCreateTenant: scope.canCreateTenant,
     availableModels: listCopilotModelOptions(),
     tenants: scope.tenants.map((entry) => {
@@ -234,23 +318,79 @@ supportSetupCopilotRouter.get('/status', (req: Request, res: Response) => {
     }),
     activeTenant,
     pendingProposals: reprojectPendingProposalsForScope(rawPending, scope, user),
+    onboarding,
   };
 
   res.json(payload);
 });
+
+// GET /api/support-setup-copilot/diagnostics — Strictly scoped to req.user.userId
+supportSetupCopilotRouter.get('/diagnostics', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = (req as Request & { user?: SessionUser }).user!;
+    if (!allowAuthRequest(`setup-copilot-diag:${user.userId}`, 40)) {
+      throw new SupportSetupCopilotError(
+        429,
+        'rate_limit_error',
+        'Too many diagnostic requests. Please wait a moment and try again.',
+      );
+    }
+
+    const rawWindow =
+      typeof req.query.windowHours === 'string' ? Number.parseInt(req.query.windowHours, 10) : 72;
+    const windowHours = Number.isFinite(rawWindow) ? rawWindow : 72;
+
+    const payload: CopilotDiagnosticsResponse = {
+      ok: true,
+      diagnostic: buildUserErrorDiagnosticReport(user, { windowHours }),
+    };
+    res.json(payload);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/support-setup-copilot/execute-action — Consent-gated Human-in-the-Loop actions
+supportSetupCopilotRouter.post(
+  '/execute-action',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const user = (req as Request & { user?: SessionUser }).user!;
+      if (!allowAuthRequest(`setup-copilot-action:${user.userId}`, 25)) {
+        throw new SupportSetupCopilotError(
+          429,
+          'rate_limit_error',
+          'Too many action execution requests. Please wait a moment and try again.',
+        );
+      }
+
+      const parsed = executeActionBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        throw new SupportSetupCopilotError(
+          400,
+          'invalid_input',
+          parsed.error.issues.map((i) => i.message).join(', '),
+        );
+      }
+
+      const result = executeCopilotUserAction({
+        user,
+        body: parsed.data,
+        serverOrigin: resolvePublicServerOrigin(req),
+      });
+
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 // POST /api/support-setup-copilot/chat
 supportSetupCopilotRouter.post('/chat', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = (req as Request & { user?: SessionUser }).user!;
     const scope = resolveCopilotUserScope(user);
-    if (!scope.hasAccess) {
-      throw new SupportSetupCopilotError(
-        403,
-        'forbidden',
-        'You do not have permission to use AI Support Setup Copilot.',
-      );
-    }
 
     if (!allowAuthRequest(`setup-copilot-chat:${user.userId}`, 30)) {
       throw new SupportSetupCopilotError(
@@ -294,6 +434,80 @@ supportSetupCopilotRouter.post('/chat', async (req: Request, res: Response, next
       }
     } else if (targetMode !== 'create_tenant' && scope.tenants.length > 0) {
       scopedEntry = scope.tenants[0]!;
+    }
+
+    const latestUserMessage =
+      [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+    const effectiveLocale: 'vi' | 'en' = hasDoctorOrActionVietnameseMarkers(latestUserMessage)
+      ? 'vi'
+      : detectConversationLocale(messages, locale);
+
+    // 1. Self-Service AI Error Doctor (available to every signed-in user, strictly scoped to user.userId)
+    if (matchErrorDoctorIntent(latestUserMessage)) {
+      res.json(
+        buildErrorDoctorChatResponse({
+          user,
+          locale: effectiveLocale,
+        }),
+      );
+      return;
+    }
+
+    // 2. Consent-gated Personal API Key & Onboarding Action Proposals (zero state mutation on chat)
+    const matchedAction = matchUserActionIntent(latestUserMessage, user);
+    if (matchedAction) {
+      res.json(
+        buildActionProposalChatResponse({
+          matched: matchedAction,
+          locale: effectiveLocale,
+        }),
+      );
+      return;
+    }
+
+    // 3. Regular members without Support Tenant permissions:
+    // Allow platform/member guidance on personal AI Hub/Agents/Keys screens; enforce 403 on tenant setup attempts.
+    if (!scope.hasAccess) {
+      if (isPersonalMemberRoute(currentPath) && targetMode !== 'create_tenant') {
+        const platformMatch = matchPlatformKnowledgeQuestion(latestUserMessage, currentPath);
+        if (platformMatch) {
+          const priorAssistantMessages = messages
+            .filter((m) => m.role === 'assistant')
+            .map((m) => m.content);
+          const expert = buildPlatformExpertReply({
+            match: platformMatch,
+            locale: effectiveLocale,
+            currentPath,
+            diagnostic: null,
+            canCreateTenant: false,
+            canEditAny: false,
+            priorAssistantMessages,
+          });
+          res.json({
+            ok: true,
+            replyLocale: effectiveLocale,
+            reply: expert.reply,
+            intent: 'guide',
+            missingQuestions: [],
+            suggestedQuickReplies: expert.suggestedQuickReplies,
+            proposal: null,
+            userDiagnostic: null,
+            actionProposal: null,
+            modelUsed: null,
+            usedFallback: true,
+          } satisfies SupportSetupChatResponse);
+          return;
+        }
+
+        res.json(buildMemberAssistantGuideReply(effectiveLocale));
+        return;
+      }
+
+      throw new SupportSetupCopilotError(
+        403,
+        'forbidden',
+        'You do not have permission to use AI Support Setup Copilot.',
+      );
     }
 
     const serverOrigin = resolvePublicServerOrigin(req);

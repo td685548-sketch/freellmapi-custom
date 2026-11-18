@@ -1,18 +1,32 @@
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Info, Leaf, Sparkles } from 'lucide-react';
+import { AlertTriangle, ArrowUpCircle, Clock, Gift, Info, Leaf, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/lib/toast';
 import { useCustomT } from '../i18n/use-custom-t';
+import { RedeemVoucherBox } from '../quota-vouchers/RedeemVoucherBox';
+import { TopUpRequestModal } from '../quota-vouchers/TopUpRequestModal';
+import { fetchMyTopUpRequests } from '../quota-vouchers/api';
+import { formatVoucherText, useQuotaVoucherStrings } from '../quota-vouchers/strings';
 import { fetchCustomerQuotaCoach, postApplyEcoToKeys } from './api';
 import type { CustomerQuotaCoachReport, QuotaCoachTip } from '../../../../shared/customer-ai';
 
 export function QuotaCoachCard() {
   const tc = useCustomT();
+  const vs = useQuotaVoucherStrings();
   const queryClient = useQueryClient();
+  const [redeemOpen, setRedeemOpen] = useState(false);
+  const [topUpOpen, setTopUpOpen] = useState(false);
 
   const { data } = useQuery<{ report?: CustomerQuotaCoachReport }>({
     queryKey: ['customer-ai-coach'],
     queryFn: () => fetchCustomerQuotaCoach(14),
+    staleTime: 30_000,
+  });
+
+  const { data: topUpData } = useQuery({
+    queryKey: ['my-topup-requests'],
+    queryFn: fetchMyTopUpRequests,
     staleTime: 30_000,
   });
 
@@ -66,6 +80,49 @@ export function QuotaCoachCard() {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant={redeemOpen ? 'secondary' : 'outline'}
+            onClick={() => setRedeemOpen((v) => !v)}
+            className="h-8 text-xs"
+          >
+            <Gift className="size-3.5 mr-1.5" />
+            {vs.redeemButton}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setTopUpOpen(true)}
+            className="h-8 text-xs"
+          >
+            <ArrowUpCircle className="size-3.5 mr-1.5" />
+            {vs.requestTopUpButton}
+          </Button>
+        </div>
+
+        {topUpData?.pendingRequest && (
+          <button
+            type="button"
+            onClick={() => setTopUpOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium text-amber-700 dark:text-amber-300 hover:bg-amber-500/15 transition-colors"
+          >
+            <Clock className="size-3 shrink-0" />
+            <span>
+              {formatVoucherText(vs.pendingTopUpBadge, {
+                tokens: topUpData.pendingRequest.requestedTokensDaily.toLocaleString(),
+                requests: topUpData.pendingRequest.requestedRequestsDaily.toLocaleString(),
+              })}
+            </span>
+          </button>
+        )}
+      </div>
+
+      {redeemOpen && <RedeemVoucherBox onClose={() => setRedeemOpen(false)} />}
+
       <div className="space-y-2.5">
         {report.tips.map((tip) => (
           <div
@@ -99,6 +156,13 @@ export function QuotaCoachCard() {
           </div>
         ))}
       </div>
+
+      <TopUpRequestModal
+        open={topUpOpen}
+        onClose={() => setTopUpOpen(false)}
+        pendingRequest={topUpData?.pendingRequest ?? null}
+        recentRequests={topUpData?.requests ?? []}
+      />
     </div>
   );
 }

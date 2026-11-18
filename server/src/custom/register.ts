@@ -78,6 +78,13 @@ import {
 } from './render-resource-saver.js';
 import { supportSetupCopilotRouter } from './support-setup-copilot/router.js';
 import { providerIconsRouter, providerStaticIconsMiddleware } from './provider-icons/router.js';
+import { requireCloudAiEntitlement } from './cloud-entitlement/gate.js';
+import { aiEntitlementRouter } from './cloud-entitlement/router.js';
+import { startCloudEntitlementBackgroundSync } from './cloud-entitlement/service.js';
+import { quotaVouchersRouter } from './quota-vouchers/router.js';
+import { scenarioRoutingMiddleware } from './scenario-routing/middleware.js';
+import { scenarioRoutingRouter } from './scenario-routing/router.js';
+import { publicStatusRouter } from '../routes/public-status.js';
 
 // Everything this fork adds to the HTTP surface is wired here, so upstream's
 // app.ts keeps a handful of added lines instead of edited mount statements.
@@ -201,8 +208,8 @@ export function registerCustomRoutes(app: Express): void {
     next();
   });
   // Public read-only status for a client key's own orchestrator flow runs & MCP approval continuations (ahead of user/profile gates).
-  app.use('/v1/ai', runsPublicRouter);
-  app.use('/v1/ai', mcpApprovalsPublicRouter);
+  app.use('/v1/ai', requireCloudAiEntitlement('ai_platform'), runsPublicRouter);
+  app.use('/v1/ai', requireCloudAiEntitlement('ai_platform'), mcpApprovalsPublicRouter);
   // Reject flow:<slug> calls made with non-client-profile keys (unified/personal) cleanly.
   app.use(['/v1', '/v1beta'], (req: Request, res: Response, next: NextFunction) => {
     if (req.method !== 'POST') {
@@ -252,6 +259,7 @@ export function registerCustomRoutes(app: Express): void {
   // Playground chats (unified key + the dashboard session) are attributed to the signed-in account.
   app.use('/v1', playgroundAttribution);
   app.use('/v1', customerAiSessionRoutingMiddleware);
+  app.use('/v1', scenarioRoutingMiddleware);
   // Roll finished days of the request log into the long-term daily table, after an inference
   // response has gone out (a time check per request; the work itself at most once a day).
   app.use(['/v1', '/v1beta'], (_req, res, next) => { res.once('finish', () => { maybeRollUp(); maybeSendWeeklyReport(); }); next(); });
@@ -299,6 +307,7 @@ export function registerCustomRoutes(app: Express): void {
   // what makes a write need a settings permission; reads stay open so a
   // member-facing status view can show what is active.
   app.use('/api/savers', outputSaversRouter);
+  app.use('/api/scenario-routing', scenarioRoutingRouter);
 
   // The /api/analytics gate above enforces auth + view_logs for this mount too.
   app.use('/api/analytics/provider-tiers', providerTiersRouter);
@@ -330,20 +339,25 @@ export function registerCustomRoutes(app: Express): void {
   app.use('/api/admin/guest-access', requireAuth, requireActionPermission('manage_users'), guestAccessAdminRouter);
   app.use('/api/admin/users', requireAuth, requireActionPermission('manage_users'), adminUsersRouter, adminUserAnalyticsRouter, adminUserQuotaRouter, adminUserRequestsRouter);
   app.use('/api/admin/registration-requests', requireAuth, requireActionPermission('manage_requests'), adminRegistrationRequestsRouter);
-  app.use('/api/admin/tenant-memberships', requireAuth, adminTenantMembershipsRouter);
-  app.use('/api/tenant-portal', requireAuth, tenantPortalRouter);
-  app.use('/api/support-setup-copilot', requireAuth, supportSetupCopilotRouter);
-  app.use('/api/user/ai-hub', requireAuth, customerAiUserRouter);
+  app.use('/api/ai-entitlement', aiEntitlementRouter);
+  app.use('/api/admin/tenant-memberships', requireAuth, requireCloudAiEntitlement('tenant_portal'), adminTenantMembershipsRouter);
+  app.use('/api/tenant-portal', requireAuth, requireCloudAiEntitlement('tenant_portal'), tenantPortalRouter);
+  app.use('/api/support-setup-copilot', requireAuth, requireCloudAiEntitlement('support_copilot'), supportSetupCopilotRouter);
+  app.use('/api/user/ai-hub', requireAuth, requireCloudAiEntitlement('customer_ai'), customerAiUserRouter);
   app.use('/api/user', requireAuth, userKeysRouter, userNotificationsRouter, selfAnalyticsRouter, selfQuotaRouter, selfRequestsRouter);
 
   // AI Platform admin API — mounted after auth/permission gates (gate is in PERMISSION_GATES above).
   // Implementation routers (flags, overview, etc.) will be added in later tasks.
-  app.use('/api/ai-platform', requireAuth, requireActionPermission('manage_ai_platform'), aiPlatformRouter);
+  app.use('/api/ai-platform', requireAuth, requireActionPermission('manage_ai_platform'), requireCloudAiEntitlement('ai_platform'), aiPlatformRouter);
 
+  // Start background cloud entitlement lease sync (off in tests unless explicitly ticked).
+  startCloudEntitlementBackgroundSync();
   // Start background semantic retrieval indexing worker (unref'd timer; idempotent).
   startIndexWorker();
   // Start background orchestrator flow scheduler (off in tests unless explicitly ticked).
   startFlowScheduler();
   // Start lightweight Telegram interactive approval poller (off in tests unless explicitly ticked).
   startTelegramBotPoller();
+  app.use('/api/quota-vouchers', quotaVouchersRouter);
+  app.use('/api/public', publicStatusRouter);
 }

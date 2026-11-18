@@ -1,8 +1,8 @@
-import { Suspense, lazy, useEffect, useState, type ReactNode } from 'react'
+import { Suspense, useEffect, useState, type ReactNode } from 'react'
 import { PageSwitch } from './custom/page-switch/PageSwitch'
 import { BrowserRouter, Routes, Route, Navigate, NavLink, Link, useLocation, useNavigate } from 'react-router-dom'
 import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { ChevronDown, KeyRound, LogOut, Menu, MoreHorizontal, RefreshCw, Search, Settings, Sparkles } from 'lucide-react'
+import { Activity, ChevronDown, KeyRound, LogOut, Menu, MoreHorizontal, RefreshCw, Search, Settings, Sparkles } from 'lucide-react'
 import { buttonVariants } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -40,14 +40,13 @@ import {
   AgentsPage, AiPlatformApp, AnalyticsAccessPage, AuditLogPage, AudioPage, CustomerAiHubPage, DecisionPage, EmbeddingDetailPage,
   EmbeddingsPage, FallbackPage, FusionPage, ImagePage, InvitesAccessPage, KeysPage, LogsAccessPage,
   MediaDetailPage, ModelDetailPage, PlaygroundPage, PremiumPage, ProfileUsagePage, SearchPage,
-  TenantPortalApp, UsageRankingPage, UserAnalyticsPage, UsersAccessPage, VideoPage, XGatewayApp, preloadRoute,
+  StatusPage, TenantPortalApp, UsageRankingPage, UserAnalyticsPage, UsersAccessPage, VideoPage, XGatewayApp, preloadRoute,
 } from '@/custom/route-splitting/lazy-pages'
 import { RouteFallback } from '@/custom/route-splitting/RouteFallback'
 import { legacyGatewayTarget } from '@/custom/x-gateway/legacy-gateway-target'
 // ai-platform (T032/US1 — Foundation dashboard)
 import { useCustomT } from '@/custom/i18n/use-custom-t'
-
-const SupportSetupCopilot = lazy(() => import('./custom/support-setup-copilot/SupportSetupCopilot'))
+import { AiActivationGate, GatedSupportSetupCopilot } from '@/custom/cloud-entitlement/AiActivationGate'
 
 // Every failed mutation surfaces as an error toast, so no action fails
 // silently. A page that already shows the failure inline can opt out with
@@ -192,12 +191,14 @@ function AccountMenuItems({
   canManageUpdates = canManageSettings,
   upgradeLabel,
   settingsLabel,
+  statusLabel,
   updatesLabel,
   signOutLabel,
   changeEmailLabel,
   changePasswordLabel,
   onUpgrade,
   onOpenSettings,
+  onOpenStatus,
   onOpenUpdates,
   onChangeEmail,
   onChangePassword,
@@ -207,12 +208,14 @@ function AccountMenuItems({
   canManageUpdates?: boolean
   upgradeLabel: string
   settingsLabel: string
+  statusLabel?: string
   updatesLabel: string
   signOutLabel: string
   changeEmailLabel: string
   changePasswordLabel: string
   onUpgrade: () => void
   onOpenSettings: () => void
+  onOpenStatus?: () => void
   onOpenUpdates: () => void
   onChangeEmail: () => void
   onChangePassword: () => void
@@ -229,6 +232,12 @@ function AccountMenuItems({
         <Settings />
         {settingsLabel}
       </DropdownMenuItem>
+      {onOpenStatus && statusLabel && (
+        <DropdownMenuItem onClick={onOpenStatus}>
+          <Activity />
+          {statusLabel}
+        </DropdownMenuItem>
+      )}
       {canManageSettings && canManageUpdates && (
         <DropdownMenuItem onClick={onOpenUpdates}>
           <RefreshCw />
@@ -384,12 +393,14 @@ export function Navbar() {
                   canManageUpdates={hasPermission('manage_updates')}
                   upgradeLabel={t('nav.upgrade')}
                   settingsLabel={t('nav.settings')}
+                  statusLabel={tc('System Status')}
                   updatesLabel={t('settings.checkForUpdates')}
                   signOutLabel={t('nav.signOut')}
                   changeEmailLabel={t('auth.changeEmail')}
                   changePasswordLabel={t('auth.changePassword')}
                   onUpgrade={() => navigate('/premium')}
                   onOpenSettings={() => setSettingsOpen(true)}
+                  onOpenStatus={() => navigate('/status')}
                   onOpenUpdates={() => setUpdatesOpen(true)}
                   onChangeEmail={() => setCredentialsMode('email')}
                   onChangePassword={() => setCredentialsMode('password')}
@@ -444,12 +455,14 @@ export function Navbar() {
                   canManageUpdates={hasPermission('manage_updates')}
                   upgradeLabel={t('nav.upgrade')}
                   settingsLabel={t('nav.settings')}
+                  statusLabel={tc('System Status')}
                   updatesLabel={t('settings.checkForUpdates')}
                   signOutLabel={t('nav.signOut')}
                   changeEmailLabel={t('auth.changeEmail')}
                   changePasswordLabel={t('auth.changePassword')}
                   onUpgrade={() => navigate('/premium')}
                   onOpenSettings={() => setSettingsOpen(true)}
+                  onOpenStatus={() => navigate('/status')}
                   onOpenUpdates={() => setUpdatesOpen(true)}
                   onChangeEmail={() => setCredentialsMode('email')}
                   onChangePassword={() => setCredentialsMode('password')}
@@ -516,6 +529,7 @@ function AppShell({ children }: { children: ReactNode }) {
   const legacyGateway = legacyGatewayTarget(location)
   if (legacyGateway) return <Navigate to={legacyGateway} replace />
   if (location.pathname === '/thruline' || location.pathname.startsWith('/thruline/')) return <Suspense fallback={<RouteFallback fullScreen />}><XGatewayApp /></Suspense>
+  if (location.pathname === '/status' || location.pathname.startsWith('/status/')) return <Suspense fallback={<RouteFallback fullScreen />}><StatusPage /></Suspense>
   return (
     <div className={`flex flex-col ${fullBleed ? 'h-dvh overflow-hidden' : 'min-h-screen'} ${isMacDesktop ? 'desktop-backdrop' : 'bg-background'}`}>
       {children}
@@ -532,7 +546,7 @@ function App() {
             <AuthGate>
               {/* One switch above both layouts, so it never moves between FreeLLMAPI and Thruline. */}
               <PageSwitch />
-              <Suspense fallback={null}><SupportSetupCopilot /></Suspense>
+              <GatedSupportSetupCopilot />
               {/* Column, so a full-bleed route can claim the height the navbar
                   leaves without anyone having to know how tall the navbar is.
                   Fixed-position children (toaster, palette, reminder) are out of
@@ -567,13 +581,14 @@ function App() {
                         <Route path="/profiles/:id/usage" element={<ProfileUsagePage />} />
                         <Route path="/usage" element={<UsageRankingPage />} />
                         <Route path="/audit" element={<AuditLogPage />} />
-                        <Route path="/assistants" element={<CustomerAiHubPage />} />
-                        <Route path="/tenant-portal/*" element={<TenantPortalApp />} />
-                        <Route path="/ai-platform/*" element={<AiPlatformApp />} />
+                        <Route path="/assistants" element={<AiActivationGate><CustomerAiHubPage /></AiActivationGate>} />
+                        <Route path="/tenant-portal/*" element={<AiActivationGate><TenantPortalApp /></AiActivationGate>} />
+                        <Route path="/ai-platform/*" element={<AiActivationGate><AiPlatformApp /></AiActivationGate>} />
                         <Route path="/agents" element={<AgentsPage />} />
                         <Route path="/fallback" element={<Navigate to="/models/chat" replace />} />
                         <Route path="/analytics" element={<AnalyticsAccessPage />} />
                         <Route path="/logs" element={<LogsAccessPage />} />
+                        <Route path="/status" element={<StatusPage />} />
                         <Route path="/premium" element={<PremiumPage />} />
                         <Route path="/test" element={<Navigate to="/playground" replace />} />
                         <Route path="/health" element={<Navigate to="/keys" replace />} />

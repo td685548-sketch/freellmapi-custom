@@ -8,6 +8,8 @@ export interface SupportSetupCopilotStrings {
   assistantName: string;
   panelTitle: string;
   panelSubtitle: string;
+  memberPanelTitle: string;
+  memberPanelSubtitle: string;
   tenantLabel: string;
   newTenantOption: string;
   expandPanel: string;
@@ -42,6 +44,9 @@ export interface SupportSetupCopilotStrings {
   welcomeBadge: string;
   welcomeTitle: string;
   welcomeDescription: string;
+  memberWelcomeBadge: string;
+  memberWelcomeTitle: string;
+  memberWelcomeDescription: string;
   starterAutoSetup: string;
   starterAutoSetupDesc: string;
   starterAutoSetupPrompt: string;
@@ -51,6 +56,45 @@ export interface SupportSetupCopilotStrings {
   starterGuide: string;
   starterGuideDesc: string;
   starterGuidePrompt: string;
+  starterDoctor: string;
+  starterDoctorDesc: string;
+  starterDoctorPrompt: string;
+  starterMintKey: string;
+  starterMintKeyDesc: string;
+  starterMintKeyPrompt: string;
+  starterOnboarding: string;
+  starterOnboardingDesc: string;
+  starterOnboardingPrompt: string;
+  doctorPillLabel: string;
+  onboardingPillLabel: string;
+  doctorCardTitle: string;
+  doctorHealthHealthy: string;
+  doctorHealthDegraded: string;
+  doctorHealthCritical: string;
+  doctorMetricRequests: string;
+  doctorMetricErrors: string;
+  doctorMetricLatency: string;
+  doctorMetricQuota: string;
+  doctorUnlimitedQuota: string;
+  doctorNoIssues: string;
+  doctorActiveKeysLabel: string;
+  doctorNoActiveKeys: string;
+  actionConsentBanner: string;
+  actionConfirmAndRun: string;
+  actionRunning: string;
+  actionCancel: string;
+  actionExecutedBadge: string;
+  actionCancelledBadge: string;
+  rawKeyOneTimeNotice: string;
+  copyRawKey: string;
+  copiedRawKey: string;
+  ideSnippetsHeading: string;
+  copyIdeConfig: string;
+  copiedIdeConfig: string;
+  onboardingCardTitle: string;
+  onboardingProgressLabel: string;
+  onboardingStepDone: string;
+  onboardingStepPending: string;
   inputPlaceholder: string;
   composerHint: string;
   send: string;
@@ -92,6 +136,8 @@ const en: SupportSetupCopilotStrings = {
   assistantName: 'Setup Copilot',
   panelTitle: 'AI Support Setup Copilot',
   panelSubtitle: 'Your friendly onboarding specialist — nothing changes without your approval',
+  memberPanelTitle: 'AI Copilot & Error Doctor',
+  memberPanelSubtitle: 'Self-diagnostics, Personal API Keys & IDE setup — always consent-gated',
   tenantLabel: 'Target',
   newTenantOption: '+ Create new AI Support tenant',
   expandPanel: 'Expand panel',
@@ -127,6 +173,10 @@ const en: SupportSetupCopilotStrings = {
   welcomeTitle: 'Let’s set up a great AI support assistant together',
   welcomeDescription:
     'Chat naturally in your own words — tell me what kind of website or shop you run and I’ll put together a ready-to-review setup draft, or ask me anything in plain language.',
+  memberWelcomeBadge: 'AI Error Doctor & Onboarding',
+  memberWelcomeTitle: 'Diagnose API errors, mint keys & connect your IDE in seconds',
+  memberWelcomeDescription:
+    'Ask why calls hit 429/400/403/5xx, check your quota usage %, or prepare 1-click Personal API Keys with Cursor, Claude Code & OpenCode configs.',
   starterAutoSetup: 'Draft a tailored setup for me',
   starterAutoSetupDesc: 'Tell me a bit about your business and preview a complete draft',
   starterAutoSetupPrompt: 'Set up a complete AI Support assistant for me',
@@ -136,7 +186,46 @@ const en: SupportSetupCopilotStrings = {
   starterGuide: 'Walk me through the 7 steps',
   starterGuideDesc: 'Plain-English overview of FAQs, privacy masking, widget & website embed',
   starterGuidePrompt: 'How do I set up a complete AI Support assistant step by step?',
-  inputPlaceholder: 'Tell me about your site (e.g. boardgame shop, cafe, SaaS…) or ask anything…',
+  starterDoctor: 'AI Error Doctor — Diagnose my account',
+  starterDoctorDesc: 'Inspect recent 429/400/403/5xx errors, active keys & quota %',
+  starterDoctorPrompt: 'Diagnose my errors and check my account health',
+  starterMintKey: 'Mint Personal API Key + IDE Config',
+  starterMintKeyDesc: 'Create a private sk-flm-… key with Cursor, Claude Code & OpenCode snippets',
+  starterMintKeyPrompt: 'Create a new Personal API Key in Balanced mode',
+  starterOnboarding: '3-Step Member Onboarding Checklist',
+  starterOnboardingDesc: '1. Mint Personal Key -> 2. Test in AI Hub -> 3. Connect IDE',
+  starterOnboardingPrompt: 'Open 3-step member onboarding checklist',
+  doctorPillLabel: 'Error Doctor',
+  onboardingPillLabel: 'Onboarding {done}/3',
+  doctorCardTitle: 'AI Error Doctor · Account Self-Diagnostics',
+  doctorHealthHealthy: 'Healthy',
+  doctorHealthDegraded: 'Needs Attention',
+  doctorHealthCritical: 'Action Needed',
+  doctorMetricRequests: 'Requests ({hours}h)',
+  doctorMetricErrors: 'Errors',
+  doctorMetricLatency: 'Avg Latency',
+  doctorMetricQuota: 'Peak Quota',
+  doctorUnlimitedQuota: 'No cap',
+  doctorNoIssues: 'Zero recent errors or quota bottlenecks detected on your account.',
+  doctorActiveKeysLabel: 'Active Personal Keys',
+  doctorNoActiveKeys: 'No active Personal API Key yet.',
+  actionConsentBanner: 'Human-in-the-loop confirmation required',
+  actionConfirmAndRun: 'Confirm & Run',
+  actionRunning: 'Running…',
+  actionCancel: 'Cancel',
+  actionExecutedBadge: 'Completed',
+  actionCancelledBadge: 'Cancelled',
+  rawKeyOneTimeNotice: 'Shown only once — copy and store your Personal API Key safely:',
+  copyRawKey: 'Copy API Key',
+  copiedRawKey: 'Key Copied!',
+  ideSnippetsHeading: 'Ready-to-Copy IDE Configuration',
+  copyIdeConfig: 'Copy Config',
+  copiedIdeConfig: 'Config Copied!',
+  onboardingCardTitle: 'Member 3-Step Onboarding Checklist',
+  onboardingProgressLabel: '{done}/{total} completed',
+  onboardingStepDone: 'Done',
+  onboardingStepPending: 'To do',
+  inputPlaceholder: 'Ask why API calls fail (429/quota), mint a key, or describe your site…',
   composerHint: 'Enter to send · Shift+Enter for new line',
   send: 'Send',
   thinking: 'Thinking & putting together a helpful reply…',
@@ -194,6 +283,8 @@ const vi: SupportSetupCopilotStrings = {
   assistantName: 'Setup Copilot',
   panelTitle: 'Trợ lý Setup AI Support',
   panelSubtitle: 'Người đồng hành tư vấn & thiết lập cùng bạn — chỉ áp dụng khi bạn duyệt',
+  memberPanelTitle: 'Trợ lý AI & Bác sĩ Chẩn đoán Lỗi',
+  memberPanelSubtitle: 'Tự động bắt bệnh API, tạo Personal Key & cấu hình IDE — luôn chờ bạn xác nhận',
   tenantLabel: 'Mục tiêu',
   newTenantOption: '+ Tạo Tenant AI Support mới',
   expandPanel: 'Mở rộng khung',
@@ -229,6 +320,10 @@ const vi: SupportSetupCopilotStrings = {
   welcomeTitle: 'Mình cùng dựng trợ lý AI chăm sóc khách hàng cho bạn nhé!',
   welcomeDescription:
     'Bạn cứ trò chuyện tự nhiên như nhắn với đồng nghiệp — kể nhẹ về web/shop của mình để mình phác thảo sẵn bản mẫu trọn gói (chỉ cài đặt khi bạn bấm duyệt), hoặc hỏi bất cứ chỗ nào chưa rõ nhé.',
+  memberWelcomeBadge: 'Bác sĩ Lỗi API & Đồng hành',
+  memberWelcomeTitle: 'Bắt bệnh lỗi API, tạo khóa cá nhân & kết nối IDE cực nhanh!',
+  memberWelcomeDescription:
+    'Hỏi mình vì sao gọi API gặp lỗi 429/400/403/lag, kiểm tra % hạn mức Quota, hoặc tạo Personal API Key kèm cấu hình copy ngay cho Cursor, Claude Code & OpenCode.',
   starterAutoSetup: 'Nhờ mình lên bản mẫu trọn gói',
   starterAutoSetupDesc: 'Trò chuyện vài câu tự nhiên, mình soạn sẵn từ A–Z để bạn xem trước',
   starterAutoSetupPrompt: 'Mình muốn nhờ bạn tư vấn và thiết lập giúp một trợ lý AI Support',
@@ -238,7 +333,46 @@ const vi: SupportSetupCopilotStrings = {
   starterGuide: 'Hướng dẫn dễ hiểu 7 bước setup',
   starterGuideDesc: 'Giải thích gọn gàng cách nạp FAQ, che SĐT khách & gắn chat lên web',
   starterGuidePrompt: 'Hướng dẫn tôi chi tiết từng bước để có 1 con AI Support hoàn chỉnh',
-  inputPlaceholder: 'Kể nhẹ về web/shop của bạn (VD: web boardgame, quán cafe…) hoặc hỏi mình nhé…',
+  starterDoctor: 'Bác sĩ AI — Kiểm tra tài khoản & lỗi API',
+  starterDoctorDesc: 'Soi nhanh lỗi 429/400/403/5xx, khóa cá nhân đang bật & % Quota',
+  starterDoctorPrompt: 'Kiểm tra tài khoản giúp mình xem sao gọi API bị lỗi',
+  starterMintKey: 'Tạo Personal API Key + Cấu hình IDE',
+  starterMintKeyDesc: 'Sinh khóa sk-flm-… riêng kèm snippet cho Cursor, Claude Code & OpenCode',
+  starterMintKeyPrompt: 'Tạo giúp mình 1 Personal API Key mới chế độ Balanced',
+  starterOnboarding: 'Checklist 3 bước cho Thành viên mới',
+  starterOnboardingDesc: '1. Tạo Personal Key -> 2. Thử trên AI Hub -> 3. Kết nối IDE',
+  starterOnboardingPrompt: 'Mở hướng dẫn checklist 3 bước cho thành viên mới',
+  doctorPillLabel: 'Bác sĩ Lỗi',
+  onboardingPillLabel: 'Bắt đầu {done}/3',
+  doctorCardTitle: 'AI Error Doctor · Chẩn đoán Tài khoản',
+  doctorHealthHealthy: 'Ổn định',
+  doctorHealthDegraded: 'Cần chú ý',
+  doctorHealthCritical: 'Cần xử lý',
+  doctorMetricRequests: 'Lượt gọi ({hours}h)',
+  doctorMetricErrors: 'Lỗi',
+  doctorMetricLatency: 'Độ trễ TB',
+  doctorMetricQuota: 'Đỉnh Quota',
+  doctorUnlimitedQuota: 'Không giới hạn',
+  doctorNoIssues: 'Không phát hiện lỗi gọi API hay nghẽn hạn mức nào gần đây trên tài khoản của bạn.',
+  doctorActiveKeysLabel: 'Personal Key đang bật',
+  doctorNoActiveKeys: 'Chưa có Personal API Key nào đang bật.',
+  actionConsentBanner: 'Thao tác cần bạn xác nhận trước khi chạy',
+  actionConfirmAndRun: 'Xác nhận & Chạy',
+  actionRunning: 'Đang thực thi…',
+  actionCancel: 'Hủy',
+  actionExecutedBadge: 'Đã thực thi',
+  actionCancelledBadge: 'Đã hủy',
+  rawKeyOneTimeNotice: 'Chỉ hiển thị duy nhất 1 lần — hãy sao chép & lưu Personal API Key ngay:',
+  copyRawKey: 'Sao chép Key',
+  copiedRawKey: 'Đã chép Key!',
+  ideSnippetsHeading: 'Cấu hình dán ngay cho IDE',
+  copyIdeConfig: 'Sao chép cấu hình',
+  copiedIdeConfig: 'Đã chép cấu hình!',
+  onboardingCardTitle: 'Checklist 3 bước bắt đầu cho Thành viên',
+  onboardingProgressLabel: 'Hoàn tất {done}/{total}',
+  onboardingStepDone: 'Hoàn tất',
+  onboardingStepPending: 'Chưa xong',
+  inputPlaceholder: 'Hỏi sao API lỗi 429/lag, tạo Personal Key, hoặc kể về web/shop của bạn…',
   composerHint: 'Enter để gửi · Shift+Enter xuống dòng',
   send: 'Gửi',
   thinking: 'Đang lắng nghe & chuẩn bị câu trả lời cho bạn…',

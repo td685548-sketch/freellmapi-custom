@@ -112,6 +112,9 @@ import * as customAccountWeightsCircuit from '../migrations/20261118_130000_cust
 import * as customPromptEvalCanary from '../migrations/20261118_140000_custom_prompt_eval_canary.js';
 import * as customTracingMcpOauthScheduler from '../migrations/20261118_150000_custom_tracing_mcp_oauth_scheduler.js';
 import * as customNotificationsAndTelegram from '../migrations/20261118_160000_custom_notifications_and_telegram.js';
+import * as customAssistantWorkspace from '../migrations/20261118_180000_custom_assistant_workspace.js';
+import * as customScenarioRouting from '../migrations/20261118_190000_custom_scenario_routing.js';
+import * as customQuotaVouchersTopups from '../migrations/20261118_200000_custom_quota_vouchers_topups.js';
 
 export interface MigrationModule {
   up(db: Db): void;
@@ -316,4 +319,7 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: '20261118_140000_custom_prompt_eval_canary.ts', module: customPromptEvalCanary },
   { filename: '20261118_150000_custom_tracing_mcp_oauth_scheduler.ts', module: customTracingMcpOauthScheduler },
   { filename: '20261118_160000_custom_notifications_and_telegram.ts', module: customNotificationsAndTelegram },
+  { filename: '20261118_180000_custom_assistant_workspace.ts', module: customAssistantWorkspace },
+  { filename: '20261118_190000_custom_scenario_routing.ts', module: customScenarioRouting },
+  { filename: '20261118_200000_custom_quota_vouchers_topups.ts', module: customQuotaVouchersTopups },
 ];

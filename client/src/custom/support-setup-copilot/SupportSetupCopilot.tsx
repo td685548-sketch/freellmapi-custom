@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
+  Activity,
   AlertCircle,
   ArrowUp,
   ArrowUpRight,
@@ -16,6 +17,7 @@ import {
   Circle,
   ClipboardList,
   Copy,
+  KeyRound,
   Lock,
   Maximize2,
   Minimize2,
@@ -23,6 +25,7 @@ import {
   ShieldCheck,
   Sliders,
   Sparkles,
+  Stethoscope,
   Wand2,
   X,
 } from 'lucide-react';
@@ -31,6 +34,15 @@ import { copyText } from '@/lib/clipboard';
 import { toast } from '@/lib/toast';
 import { useUserSession } from '../use-session';
 import type {
+  CopilotActionProposal,
+  CopilotActionRoutingMode,
+  CopilotCreateKeyActionParams,
+  CopilotExecuteActionRequest,
+  CopilotExecuteActionResponse,
+  CopilotOnboardingChecklist,
+  CopilotOpenOnboardingActionParams,
+  CopilotSwitchRoutingModeActionParams,
+  CopilotUserDiagnosticReport,
   SupportSetupApplyResponse,
   SupportSetupLanguage,
   SupportSetupProposal,
@@ -41,8 +53,11 @@ import type {
   SupportSystemSettingId,
 } from '../../../../shared/support-setup-copilot';
 import {
+  fetchCopilotUserDiagnostics,
   fetchSupportSetupStatus,
+  isMemberPersonalCopilotRoute,
   isSupportSetupCopilotRoute,
+  postCopilotExecuteAction,
   postSupportSetupApply,
   postSupportSetupChat,
   postSupportSetupDecline,
@@ -54,7 +69,9 @@ import {
 import './support-setup-copilot.css';
 
 const CLIENT_VI_MARKER_RE =
-  /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]|\b(?:tieng\s+viet|xin\s+chao|chao\s+ban|toi\s+(?:dang|muon|can|co|chua|khong)|minh\s+(?:dang|muon|can|co|chua|khong|moi)|ben\s+(?:minh|toi|em)|va\s+muon|(?:muon|can)\s+(?:setup|thiet\s+lap|cai\s+dat|tu\s+van|lam)|ban\s+co\s+the|ban\s+lam\s+duoc|lam\s+gi\s+ma|la\s+(?:cai\s+)?gi|lam\s+gi|de\s+lam\s+gi|dung\s+de|dung\s+sao|dung\s+the\s+nao|day\s+la\s+(?:trang|web|website|he\s+thong|ung\s+dung|nen\s+tang|muc|man\s+hinh|cho|tab|cong\s+cu)|hoat\s+dong\s+(?:sao|ra\s+sao|kieu\s+gi|the\s+nao|nhu\s+the\s+nao)|ra\s+sao|kieu\s+gi|cho\s+nay|web\s+nay|trang\s+(?:web\s+)?nay|he\s+thong\s+nay|ung\s+dung\s+nay|nen\s+tang\s+nay|muc\s+nay|man\s+hinh\s+nay|gioi\s+thieu|lay\s+api\s*keys?|ket\s+noi|cau\s+hinh|khac\s+nhau|khac\s+gi|co\s+the\s+(?:lam|noi|giup)|giup\s+toi|giup\s+minh|lam\s+sao|thiet\s+lap|cai\s+dat|huong\s+dan|chua\s+co|khong\s+co|sao\s+(?:tra\s+loi|cung\s+nhac|hoi)|tu\s+van|len\s+ke\s+hoach|len\s+ban\s+mau)\b/i;
+  /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]|\b(?:tieng\s+viet|xin\s+chao|chao\s+ban|toi\s+(?:dang|muon|can|co|chua|khong)|minh\s+(?:dang|muon|can|co|chua|khong|moi)|ben\s+(?:minh|toi|em)|va\s+muon|(?:muon|can)\s+(?:setup|thiet\s+lap|cai\s+dat|tu\s+van|lam)|ban\s+co\s+the|ban\s+lam\s+duoc|lam\s+gi\s+ma|la\s+(?:cai\s+)?gi|lam\s+gi|de\s+lam\s+gi|dung\s+de|dung\s+sao|dung\s+the\s+nao|day\s+la\s+(?:trang|web|website|he\s+thong|ung\s+dung|nen\s+tang|muc|man\s+hinh|cho|tab|cong\s+cu)|hoat\s+dong\s+(?:sao|ra\s+sao|kieu\s+gi|the\s+nao|nhu\s+the\s+nao)|ra\s+sao|kieu\s+gi|cho\s+nay|web\s+nay|trang\s+(?:web\s+)?nay|he\s+thong\s+nay|ung\s+dung\s+nay|nen\s+tang\s+nay|muc\s+nay|man\s+hinh\s+nay|gioi\s+thieu|lay\s+api\s*keys?|ket\s+noi|cau\s+hinh|khac\s+nhau|khac\s+gi|co\s+the\s+(?:lam|noi|giup)|giup\s+toi|giup\s+minh|lam\s+sao|thiet\s+lap|cai\s+dat|huong\s+dan|chua\s+co|khong\s+co|sao\s+(?:tra\s+loi|cung\s+nhac|hoi|goi\s+api|bi\s+loi)|bi\s+loi|gap\s+loi|kiem\s+tra\s+(?:tai\s+khoan|loi|key)|chan\s+doan|tao\s+(?:personal\s*)?(?:api\s*)?key|chuyen\s+key|nguoi\s+moi|thanh\s+vien\s+moi|tu\s+van|len\s+ke\s+hoach|len\s+ban\s+mau)\b/i;
+
+type IdeSnippetTab = 'cursor' | 'claudeCode' | 'openCode';
 
 interface ChatTurn {
   id: string;
@@ -64,6 +81,9 @@ interface ChatTurn {
   proposal?: SupportSetupProposal | null;
   applyResult?: SupportSetupApplyResponse | null;
   modelUsed?: string;
+  userDiagnostic?: CopilotUserDiagnosticReport | null;
+  actionProposal?: CopilotActionProposal | null;
+  actionResult?: CopilotExecuteActionResponse | null;
 }
 
 interface BriefDraft {
@@ -104,6 +124,40 @@ function formatQuickReplyLabel(raw: string): string {
   return `${clean.slice(0, 50).trimEnd()}…`;
 }
 
+function buildActionRequestPayload(proposal: CopilotActionProposal): CopilotExecuteActionRequest {
+  if (proposal.actionType === 'create_personal_key') {
+    const p = proposal.params as CopilotCreateKeyActionParams;
+    return {
+      actionType: 'create_personal_key',
+      confirmed: true,
+      params: {
+        name: p.name,
+        ...(p.routingMode ? { routingMode: p.routingMode as CopilotActionRoutingMode } : {}),
+        ...(p.assistantId !== undefined ? { assistantId: p.assistantId } : {}),
+      },
+    };
+  }
+  if (proposal.actionType === 'switch_key_routing_mode') {
+    const p = proposal.params as CopilotSwitchRoutingModeActionParams;
+    return {
+      actionType: 'switch_key_routing_mode',
+      confirmed: true,
+      params: {
+        keyId: p.keyId,
+        routingMode: p.routingMode,
+      },
+    };
+  }
+  const p = proposal.params as CopilotOpenOnboardingActionParams;
+  return {
+    actionType: 'open_onboarding_guide',
+    confirmed: true,
+    params: {
+      ...(p.focusStep ? { focusStep: p.focusStep } : {}),
+    },
+  };
+}
+
 export function SupportSetupCopilot() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -115,6 +169,7 @@ export function SupportSetupCopilot() {
   const session = useUserSession();
 
   const onEligibleRoute = isSupportSetupCopilotRoute(location.pathname);
+  const onMemberPersonalRoute = isMemberPersonalCopilotRoute(location.pathname);
   const canQueryStatus =
     onEligibleRoute && !session.isPending && !session.isError && Boolean(session.session);
 
@@ -129,6 +184,10 @@ export function SupportSetupCopilot() {
   const [selectedStepsMap, setSelectedStepsMap] = useState<Record<string, SupportSetupStepId[]>>({});
   const [selectedSystemActionsMap, setSelectedSystemActionsMap] = useState<Record<string, SupportSystemSettingId[]>>({});
   const [proposalOverrides, setProposalOverrides] = useState<Record<string, SupportSetupProposal>>({});
+  const [actionStatusMap, setActionStatusMap] = useState<
+    Record<string, 'pending' | 'executed' | 'cancelled'>
+  >({});
+  const [ideTabMap, setIdeTabMap] = useState<Record<string, IdeSnippetTab>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesRef = useRef<HTMLDivElement | null>(null);
@@ -148,6 +207,11 @@ export function SupportSetupCopilot() {
   });
 
   const statusData = statusQuery.data;
+  const isTenantSetupVisible = Boolean(statusData?.visible);
+  const isMemberOnlyMode =
+    !isTenantSetupVisible && onMemberPersonalRoute && Boolean(statusData?.memberCopilotVisible);
+  const isCopilotVisible = isTenantSetupVisible || isMemberOnlyMode;
+
   const tenants = statusData?.tenants ?? [];
   const activeTenantDiag = statusData?.activeTenant ?? null;
   const canCreateTenant = Boolean(statusData?.canCreateTenant);
@@ -176,8 +240,9 @@ export function SupportSetupCopilot() {
       effectiveLocale?: 'vi' | 'en';
     }) =>
       postSupportSetupChat({
-        tenantId: resolvedTenantId,
-        targetMode: resolvedTargetMode,
+        ...(isTenantSetupVisible
+          ? { tenantId: resolvedTenantId, targetMode: resolvedTargetMode }
+          : {}),
         locale: payload.effectiveLocale ?? uiLocale,
         currentPath: location.pathname,
         messages: payload.nextTurns.slice(-20).map((t) => ({ role: t.role, content: t.content })),
@@ -197,8 +262,54 @@ export function SupportSetupCopilot() {
           quickReplies: res.suggestedQuickReplies,
           proposal: res.proposal,
           modelUsed: !res.usedFallback && res.modelUsed ? res.modelUsed : undefined,
+          userDiagnostic: res.userDiagnostic ?? null,
+          actionProposal: res.actionProposal ?? null,
         },
       ]);
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
+    },
+  });
+
+  const diagnosticsMutation = useMutation({
+    mutationFn: () => fetchCopilotUserDiagnostics(72),
+    onSuccess: (res) => {
+      const diag = res.diagnostic;
+      const headline = uiLocale === 'vi' ? diag.headlineVi : diag.headlineEn;
+      setTurns((prev) => [
+        ...prev,
+        {
+          id: makeTurnId(),
+          role: 'assistant',
+          content: headline,
+          userDiagnostic: diag,
+          actionProposal: diag.recommendedAction,
+        },
+      ]);
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
+    },
+  });
+
+  const executeActionMutation = useMutation({
+    mutationFn: (args: { proposal: CopilotActionProposal }) =>
+      postCopilotExecuteAction(buildActionRequestPayload(args.proposal)),
+    onSuccess: (res, vars) => {
+      setActionStatusMap((prev) => ({ ...prev, [vars.proposal.id]: 'executed' }));
+      setTurns((prev) => [
+        ...prev,
+        {
+          id: makeTurnId(),
+          role: 'assistant',
+          content: uiLocale === 'vi' ? res.messageVi : res.messageEn,
+          actionResult: res,
+        },
+      ]);
+      void queryClient.invalidateQueries({ queryKey: ['user-api-keys'] });
+      void queryClient.invalidateQueries({ queryKey: ['support-setup-copilot-status'] });
+      void queryClient.invalidateQueries({ queryKey: ['copilot-user-diagnostics'] });
     },
     onError: (err: Error) => {
       toast.error(err.message);
@@ -281,7 +392,14 @@ export function SupportSetupCopilot() {
     if (!open || !messagesRef.current) return;
     const el = messagesRef.current;
     el.scrollTop = el.scrollHeight;
-  }, [open, turns.length, chatMutation.isPending, applyMutation.isPending]);
+  }, [
+    open,
+    turns.length,
+    chatMutation.isPending,
+    applyMutation.isPending,
+    executeActionMutation.isPending,
+    diagnosticsMutation.isPending,
+  ]);
 
   // Auto-resize composer textarea cleanly without ugly native scrollbars
   useEffect(() => {
@@ -293,7 +411,7 @@ export function SupportSetupCopilot() {
     el.style.overflowY = (el.scrollHeight || 0) > 108 ? 'auto' : 'hidden';
   }, [input, open]);
 
-  if (!canQueryStatus || !statusData?.visible) {
+  if (!canQueryStatus || !isCopilotVisible || !statusData) {
     return null;
   }
 
@@ -397,21 +515,415 @@ export function SupportSetupCopilot() {
 
   const pendingProposalsInTurns = turns.some((t) => {
     const effective = t.proposal ? (proposalOverrides[t.proposal.id] ?? t.proposal) : null;
-    return effective?.status === 'pending_consent';
+    const actionPending =
+      t.actionProposal && (actionStatusMap[t.actionProposal.id] ?? 'pending') === 'pending';
+    return effective?.status === 'pending_consent' || Boolean(actionPending);
   });
   const serverPendingProposals = (statusData.pendingProposals ?? []).filter(
     (p) => (proposalOverrides[p.id] ?? p).status === 'pending_consent',
   );
   const hasPendingApproval = pendingProposalsInTurns || serverPendingProposals.length > 0;
 
-  const progressBadge = activeTenantDiag
-    ? `${activeTenantDiag.completedSteps}/${activeTenantDiag.totalSteps}`
-    : s.launcherNew;
+  const onboardingDone = statusData.onboarding?.completedCount ?? 0;
+  const progressBadge = isTenantSetupVisible
+    ? activeTenantDiag
+      ? `${activeTenantDiag.completedSteps}/${activeTenantDiag.totalSteps}`
+      : s.launcherNew
+    : `${onboardingDone}/3`;
 
   const visiblePendingFromServer =
-    turns.length === 0
+    isTenantSetupVisible && turns.length === 0
       ? serverPendingProposals.filter((p) => !turns.some((t) => t.proposal?.id === p.id))
       : [];
+
+  const renderOnboardingChecklist = (checklist: CopilotOnboardingChecklist, cardKey: string) => (
+    <div
+      className="ssc-onboarding-card"
+      data-testid="copilot-onboarding-checklist"
+      key={`onb_${cardKey}`}
+    >
+      <div className="ssc-onboarding-head">
+        <span className="ssc-onboarding-title">
+          <Sparkles size={13} />
+          <span>{s.onboardingCardTitle}</span>
+        </span>
+        <span className="ssc-status-pill ssc-status-pill--complete">
+          {formatSetupString(s.onboardingProgressLabel, {
+            done: checklist.completedCount,
+            total: checklist.totalCount,
+          })}
+        </span>
+      </div>
+      <div className="ssc-onboarding-body">
+        {checklist.steps.map((st) => {
+          const title = uiLocale === 'vi' ? st.titleVi : st.titleEn;
+          const desc = uiLocale === 'vi' ? st.descriptionVi : st.descriptionEn;
+          const cta = uiLocale === 'vi' ? st.ctaLabelVi : st.ctaLabelEn;
+          return (
+            <div
+              key={st.id}
+              data-testid={`copilot-onboarding-step-${st.id}`}
+              className={`ssc-onboarding-step ${st.completed ? 'ssc-onboarding-step--done' : ''}`}
+            >
+              <div className="ssc-roadmap-main">
+                <div className="ssc-roadmap-title">
+                  {st.completed ? (
+                    <CheckCircle2 size={13} style={{ color: 'var(--ssc-green)' }} />
+                  ) : (
+                    <Circle size={13} />
+                  )}
+                  <span>{title}</span>
+                  <span
+                    className={`ssc-status-pill ${
+                      st.completed ? 'ssc-status-pill--complete' : 'ssc-status-pill--partial'
+                    }`}
+                  >
+                    {st.completed ? s.onboardingStepDone : s.onboardingStepPending}
+                  </span>
+                </div>
+                <p className="ssc-roadmap-summary">{desc}</p>
+              </div>
+              <button
+                type="button"
+                className="ssc-link-btn"
+                onClick={() => {
+                  if (st.id === 'mint_personal_key' && !st.completed) {
+                    sendMessage(s.starterMintKeyPrompt);
+                    return;
+                  }
+                  navigate(st.targetPath);
+                }}
+              >
+                <span>{cta}</span>
+                <ArrowUpRight size={12} />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const renderUserDiagnosticCard = (diag: CopilotUserDiagnosticReport, turnId: string) => {
+    const healthLabel =
+      diag.overallHealth === 'critical'
+        ? s.doctorHealthCritical
+        : diag.overallHealth === 'degraded'
+          ? s.doctorHealthDegraded
+          : s.doctorHealthHealthy;
+    const healthClass =
+      diag.overallHealth === 'critical'
+        ? 'ssc-status-pill--missing'
+        : diag.overallHealth === 'degraded'
+          ? 'ssc-status-pill--partial'
+          : 'ssc-status-pill--complete';
+
+    const quotaDisplay =
+      diag.quota.tracked && diag.quota.highestUsagePct !== null
+        ? `${diag.quota.highestUsagePct}%`
+        : s.doctorUnlimitedQuota;
+
+    return (
+      <div
+        className="ssc-diag-card"
+        data-testid="copilot-diagnostic-card"
+        key={`diag_${turnId}`}
+      >
+        <div className="ssc-diag-head">
+          <span className="ssc-diag-title">
+            <Stethoscope size={13} />
+            <span>{s.doctorCardTitle}</span>
+          </span>
+          <span className={`ssc-status-pill ${healthClass}`}>{healthLabel}</span>
+        </div>
+        <div className="ssc-diag-body">
+          <div className="ssc-diag-metrics">
+            <div className="ssc-diag-metric">
+              <span className="ssc-diag-metric-label">
+                {formatSetupString(s.doctorMetricRequests, { hours: diag.windowHours })}
+              </span>
+              <span className="ssc-diag-metric-val">{diag.recentRequests.total}</span>
+            </div>
+            <div className="ssc-diag-metric">
+              <span className="ssc-diag-metric-label">{s.doctorMetricErrors}</span>
+              <span className="ssc-diag-metric-val">{diag.recentRequests.failed}</span>
+            </div>
+            <div className="ssc-diag-metric">
+              <span className="ssc-diag-metric-label">{s.doctorMetricLatency}</span>
+              <span className="ssc-diag-metric-val">{diag.recentRequests.avgLatencyMs}ms</span>
+            </div>
+            <div className="ssc-diag-metric">
+              <span className="ssc-diag-metric-label">{s.doctorMetricQuota}</span>
+              <span className="ssc-diag-metric-val">{quotaDisplay}</span>
+            </div>
+          </div>
+
+          {diag.issues.length === 0 ? (
+            <div className="ssc-diag-issue">
+              <div className="ssc-diag-issue-desc">{s.doctorNoIssues}</div>
+            </div>
+          ) : (
+            diag.issues.map((issue) => (
+              <div
+                key={`${issue.category}_${issue.titleEn}`}
+                className={`ssc-diag-issue ${
+                  issue.severity === 'critical'
+                    ? 'ssc-diag-issue--critical'
+                    : issue.severity === 'warning'
+                      ? 'ssc-diag-issue--warning'
+                      : ''
+                }`}
+              >
+                <div className="ssc-diag-issue-title">
+                  <span>{uiLocale === 'vi' ? issue.titleVi : issue.titleEn}</span>
+                  {issue.category !== 'quota_pressure' && (
+                    <span className="ssc-proposal-count">{issue.count}x</span>
+                  )}
+                </div>
+                <div className="ssc-diag-issue-desc">
+                  {uiLocale === 'vi' ? issue.rootCauseVi : issue.rootCauseEn}
+                </div>
+                {issue.sampleError && (
+                  <div className="ssc-diag-sample">{issue.sampleError}</div>
+                )}
+              </div>
+            ))
+          )}
+
+          <div>
+            <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--ssc-muted)', marginBottom: 4 }}>
+              {s.doctorActiveKeysLabel} ({diag.activeKeys.length})
+            </div>
+            {diag.activeKeys.length === 0 ? (
+              <span style={{ color: 'var(--ssc-muted)', fontSize: 11 }}>{s.doctorNoActiveKeys}</span>
+            ) : (
+              <div className="ssc-diag-keys">
+                {diag.activeKeys.map((k) => (
+                  <span className="ssc-key-pill" key={k.id}>
+                    <KeyRound size={11} />
+                    <span>
+                      {k.name} · {k.keyPrefix} · {k.routingMode.toUpperCase()}
+                    </span>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderActionProposalCard = (actionProposal: CopilotActionProposal) => {
+    const state = actionStatusMap[actionProposal.id] ?? 'pending';
+    const isPending = state === 'pending';
+    const title = uiLocale === 'vi' ? actionProposal.titleVi : actionProposal.titleEn;
+    const summary = uiLocale === 'vi' ? actionProposal.summaryVi : actionProposal.summaryEn;
+
+    return (
+      <div
+        className="ssc-action-card"
+        data-testid="copilot-action-proposal-card"
+        key={actionProposal.id}
+      >
+        <div className="ssc-action-head">
+          <span className="ssc-proposal-tag">
+            <ShieldCheck size={13} />
+            <span>{s.actionConsentBanner}</span>
+          </span>
+          {state === 'executed' && (
+            <span className="ssc-status-pill ssc-status-pill--complete">
+              {s.actionExecutedBadge}
+            </span>
+          )}
+          {state === 'cancelled' && (
+            <span className="ssc-status-pill ssc-status-pill--restricted">
+              {s.actionCancelledBadge}
+            </span>
+          )}
+        </div>
+
+        <div className="ssc-action-body">
+          <div className="ssc-proposal-target">{title}</div>
+          <div className="ssc-proposal-step-summary">{summary}</div>
+          {actionProposal.onboardingPreview &&
+            renderOnboardingChecklist(actionProposal.onboardingPreview, actionProposal.id)}
+        </div>
+
+        {isPending && (
+          <div className="ssc-proposal-actions">
+            <button
+              type="button"
+              className="ssc-btn ssc-btn--primary"
+              data-testid="copilot-action-confirm-btn"
+              disabled={executeActionMutation.isPending}
+              onClick={() => executeActionMutation.mutate({ proposal: actionProposal })}
+            >
+              <Check size={13} />
+              <span>
+                {executeActionMutation.isPending ? s.actionRunning : s.actionConfirmAndRun}
+              </span>
+            </button>
+            <button
+              type="button"
+              className="ssc-btn ssc-btn--ghost"
+              data-testid="copilot-action-cancel-btn"
+              disabled={executeActionMutation.isPending}
+              onClick={() =>
+                setActionStatusMap((prev) => ({ ...prev, [actionProposal.id]: 'cancelled' }))
+              }
+            >
+              <span>{s.actionCancel}</span>
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderActionResultCard = (res: CopilotExecuteActionResponse, turnId: string) => {
+    const activeIdeTab: IdeSnippetTab = ideTabMap[turnId] ?? 'cursor';
+
+    if (res.createdKey) {
+      const { createdKey } = res;
+      const activeSnippet = createdKey.snippets[activeIdeTab];
+      const rawKeyCopyId = `raw_${turnId}`;
+      const ideCopyId = `ide_${turnId}_${activeIdeTab}`;
+
+      return (
+        <div
+          className="ssc-result-card"
+          data-testid="copilot-action-result-card"
+          key={`actres_${turnId}`}
+        >
+          <div className="ssc-result-title">
+            <CheckCircle2 size={15} />
+            <span>
+              {createdKey.name} ({createdKey.routingMode.toUpperCase()})
+            </span>
+          </div>
+
+          <div style={{ fontSize: 11 }}>{s.rawKeyOneTimeNotice}</div>
+          <div className="ssc-raw-key-box">
+            <code className="ssc-raw-key-code" data-testid="copilot-minted-raw-key">
+              {createdKey.rawKey}
+            </code>
+            <button
+              type="button"
+              className="ssc-btn"
+              data-testid="copilot-copy-raw-key"
+              onClick={() => {
+                void copyText(createdKey.rawKey).then((ok) => {
+                  if (ok) {
+                    setCopiedId(rawKeyCopyId);
+                    setTimeout(() => setCopiedId(null), 1800);
+                  }
+                });
+              }}
+            >
+              <Copy size={12} />
+              <span>{copiedId === rawKeyCopyId ? s.copiedRawKey : s.copyRawKey}</span>
+            </button>
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 6,
+            }}
+          >
+            <strong>{s.ideSnippetsHeading}:</strong>
+            <div className="ssc-ide-tabs" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeIdeTab === 'cursor'}
+                data-testid="copilot-ide-tab-cursor"
+                className={`ssc-ide-tab ${activeIdeTab === 'cursor' ? 'ssc-ide-tab--active' : ''}`}
+                onClick={() => setIdeTabMap((prev) => ({ ...prev, [turnId]: 'cursor' }))}
+              >
+                Cursor
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeIdeTab === 'claudeCode'}
+                data-testid="copilot-ide-tab-claude"
+                className={`ssc-ide-tab ${activeIdeTab === 'claudeCode' ? 'ssc-ide-tab--active' : ''}`}
+                onClick={() => setIdeTabMap((prev) => ({ ...prev, [turnId]: 'claudeCode' }))}
+              >
+                Claude Code
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeIdeTab === 'openCode'}
+                data-testid="copilot-ide-tab-opencode"
+                className={`ssc-ide-tab ${activeIdeTab === 'openCode' ? 'ssc-ide-tab--active' : ''}`}
+                onClick={() => setIdeTabMap((prev) => ({ ...prev, [turnId]: 'openCode' }))}
+              >
+                OpenCode
+              </button>
+            </div>
+          </div>
+
+          <pre className="ssc-snippet" data-testid="copilot-ide-snippet">
+            {activeSnippet}
+          </pre>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            <button
+              type="button"
+              className="ssc-btn ssc-btn--primary"
+              data-testid="copilot-copy-ide-snippet"
+              onClick={() => {
+                void copyText(activeSnippet).then((ok) => {
+                  if (ok) {
+                    setCopiedId(ideCopyId);
+                    setTimeout(() => setCopiedId(null), 1800);
+                  }
+                });
+              }}
+            >
+              <Copy size={12} />
+              <span>{copiedId === ideCopyId ? s.copiedIdeConfig : s.copyIdeConfig}</span>
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    if (res.updatedKey) {
+      return (
+        <div
+          className="ssc-result-card"
+          data-testid="copilot-action-result-card"
+          key={`actres_${turnId}`}
+        >
+          <div className="ssc-result-title">
+            <CheckCircle2 size={15} />
+            <span>
+              {res.updatedKey.name} ({res.updatedKey.keyPrefix}) →{' '}
+              {res.updatedKey.routingMode.toUpperCase()}
+            </span>
+          </div>
+        </div>
+      );
+    }
+
+    if (res.onboarding) {
+      return (
+        <div data-testid="copilot-action-result-card" key={`actres_${turnId}`} style={{ width: '100%' }}>
+          {renderOnboardingChecklist(res.onboarding, turnId)}
+        </div>
+      );
+    }
+
+    return null;
+  };
 
   const renderProposalCard = (rawProposal: SupportSetupProposal) => {
     const proposal = proposalOverrides[rawProposal.id] ?? rawProposal;
@@ -604,6 +1116,9 @@ export function SupportSetupCopilot() {
     );
   };
 
+  const panelTitleText = isTenantSetupVisible ? s.panelTitle : s.memberPanelTitle;
+  const panelSubtitleText = isTenantSetupVisible ? s.panelSubtitle : s.memberPanelSubtitle;
+
   return (
     <div className="ssc-root">
       {!open ? (
@@ -626,7 +1141,7 @@ export function SupportSetupCopilot() {
       ) : (
         <section
           role="dialog"
-          aria-label={s.panelTitle}
+          aria-label={panelTitleText}
           data-testid="support-setup-copilot-panel"
           className={`ssc-panel ${wide ? 'ssc-panel--wide' : ''}`}
         >
@@ -639,8 +1154,8 @@ export function SupportSetupCopilot() {
                 <span className="ssc-online-dot" aria-hidden="true" />
               </div>
               <div className="ssc-header-text">
-                <h2>{s.panelTitle}</h2>
-                <p>{s.panelSubtitle}</p>
+                <h2>{panelTitleText}</h2>
+                <p>{panelSubtitleText}</p>
               </div>
             </div>
             <div className="ssc-header-actions">
@@ -686,82 +1201,122 @@ export function SupportSetupCopilot() {
           </header>
 
           <div className="ssc-toolbar">
-            <div className="ssc-toolbar-row">
-              <div className="ssc-tenant-select-wrap">
-                <label htmlFor="ssc-tenant-select">{s.tenantLabel}</label>
-                <select
-                  id="ssc-tenant-select"
-                  className="ssc-select"
-                  value={
-                    targetSelection === 'new'
-                      ? 'new'
-                      : resolvedTenantId !== null
-                        ? String(resolvedTenantId)
-                        : 'new'
-                  }
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setTargetSelection(val === 'new' ? 'new' : Number(val));
-                  }}
-                >
-                  {tenants.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name} ({t.slug})
-                    </option>
-                  ))}
-                  {canCreateTenant && <option value="new">{s.newTenantOption}</option>}
-                </select>
-              </div>
+            {isTenantSetupVisible ? (
+              <>
+                <div className="ssc-toolbar-row">
+                  <div className="ssc-tenant-select-wrap">
+                    <label htmlFor="ssc-tenant-select">{s.tenantLabel}</label>
+                    <select
+                      id="ssc-tenant-select"
+                      className="ssc-select"
+                      value={
+                        targetSelection === 'new'
+                          ? 'new'
+                          : resolvedTenantId !== null
+                            ? String(resolvedTenantId)
+                            : 'new'
+                      }
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setTargetSelection(val === 'new' ? 'new' : Number(val));
+                      }}
+                    >
+                      {tenants.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} ({t.slug})
+                        </option>
+                      ))}
+                      {canCreateTenant && <option value="new">{s.newTenantOption}</option>}
+                    </select>
+                  </div>
 
-              {canEditAnyStep ? (
-                <button
-                  type="button"
-                  className={`ssc-pill-toggle ${briefOpen ? 'ssc-pill-toggle--active' : ''}`}
-                  onClick={() => setBriefOpen((v) => !v)}
-                >
-                  <ClipboardList size={13} />
-                  <span>{s.briefToggle}</span>
-                </button>
-              ) : (
-                <span
-                  className="ssc-status-pill ssc-status-pill--restricted"
-                  data-testid="support-setup-readonly-badge"
-                >
-                  {s.readOnlyBadge}
-                </span>
-              )}
-            </div>
+                  <button
+                    type="button"
+                    className="ssc-pill-toggle"
+                    data-testid="copilot-error-doctor-pill"
+                    disabled={diagnosticsMutation.isPending}
+                    onClick={() => diagnosticsMutation.mutate()}
+                  >
+                    <Activity size={13} />
+                    <span>{s.doctorPillLabel}</span>
+                  </button>
 
-            {activeTenantDiag && (
-              <div className="ssc-progress-row">
-                <span className="ssc-progress-label">
-                  {formatSetupString(s.roadmapProgress, {
-                    done: activeTenantDiag.completedSteps,
-                    total: activeTenantDiag.totalSteps,
-                  })}
-                </span>
-                <div className="ssc-seg-bar" aria-hidden="true">
-                  {activeTenantDiag.steps.map((st) => (
+                  {canEditAnyStep ? (
+                    <button
+                      type="button"
+                      className={`ssc-pill-toggle ${briefOpen ? 'ssc-pill-toggle--active' : ''}`}
+                      onClick={() => setBriefOpen((v) => !v)}
+                    >
+                      <ClipboardList size={13} />
+                      <span>{s.briefToggle}</span>
+                    </button>
+                  ) : (
                     <span
-                      key={st.stepId}
-                      className={`ssc-seg ssc-seg--${st.status}`}
-                    />
-                  ))}
+                      className="ssc-status-pill ssc-status-pill--restricted"
+                      data-testid="support-setup-readonly-badge"
+                    >
+                      {s.readOnlyBadge}
+                    </span>
+                  )}
                 </div>
+
+                {activeTenantDiag && (
+                  <div className="ssc-progress-row">
+                    <span className="ssc-progress-label">
+                      {formatSetupString(s.roadmapProgress, {
+                        done: activeTenantDiag.completedSteps,
+                        total: activeTenantDiag.totalSteps,
+                      })}
+                    </span>
+                    <div className="ssc-seg-bar" aria-hidden="true">
+                      {activeTenantDiag.steps.map((st) => (
+                        <span
+                          key={st.stepId}
+                          className={`ssc-seg ssc-seg--${st.status}`}
+                        />
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      className="ssc-link-btn"
+                      data-testid="support-setup-roadmap-toggle"
+                      onClick={() => setRoadmapOpen((v) => !v)}
+                    >
+                      <span>{roadmapOpen ? s.roadmapToggleHide : s.roadmapToggleShow}</span>
+                      {roadmapOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="ssc-toolbar-row">
                 <button
                   type="button"
-                  className="ssc-link-btn"
-                  data-testid="support-setup-roadmap-toggle"
-                  onClick={() => setRoadmapOpen((v) => !v)}
+                  className="ssc-pill-toggle"
+                  data-testid="copilot-error-doctor-pill"
+                  disabled={diagnosticsMutation.isPending}
+                  onClick={() => diagnosticsMutation.mutate()}
                 >
-                  <span>{roadmapOpen ? s.roadmapToggleHide : s.roadmapToggleShow}</span>
-                  {roadmapOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                  <Stethoscope size={13} />
+                  <span>{s.doctorPillLabel}</span>
+                </button>
+                <button
+                  type="button"
+                  className="ssc-pill-toggle"
+                  data-testid="copilot-onboarding-pill"
+                  disabled={chatMutation.isPending}
+                  onClick={() => sendMessage(s.starterOnboardingPrompt)}
+                >
+                  <Sparkles size={13} />
+                  <span>
+                    {formatSetupString(s.onboardingPillLabel, { done: onboardingDone })}
+                  </span>
                 </button>
               </div>
             )}
           </div>
 
-          {roadmapOpen && activeTenantDiag && (
+          {roadmapOpen && isTenantSetupVisible && activeTenantDiag && (
             <div className="ssc-roadmap" data-testid="support-setup-roadmap">
               {activeTenantDiag.steps.map((step) => {
                 const statusLabel =
@@ -810,7 +1365,7 @@ export function SupportSetupCopilot() {
             </div>
           )}
 
-          {briefOpen && canEditAnyStep && (
+          {briefOpen && isTenantSetupVisible && canEditAnyStep && (
             <div className="ssc-brief" data-testid="support-setup-brief">
               <div style={{ fontSize: 11.5, fontWeight: 600 }}>{s.briefHeading}</div>
               <div className="ssc-brief-grid">
@@ -938,57 +1493,109 @@ export function SupportSetupCopilot() {
               <div className="ssc-welcome">
                 <span className="ssc-welcome-badge">
                   <Sparkles size={11} />
-                  <span>{s.welcomeBadge}</span>
+                  <span>{isTenantSetupVisible ? s.welcomeBadge : s.memberWelcomeBadge}</span>
                 </span>
-                <h3>{s.welcomeTitle}</h3>
-                <p>{s.welcomeDescription}</p>
+                <h3>{isTenantSetupVisible ? s.welcomeTitle : s.memberWelcomeTitle}</h3>
+                <p>{isTenantSetupVisible ? s.welcomeDescription : s.memberWelcomeDescription}</p>
                 <div className="ssc-starters">
-                  {canEditAnyStep && (
-                    <button
-                      type="button"
-                      className="ssc-starter-btn"
-                      onClick={() => sendMessage(s.starterAutoSetupPrompt)}
-                    >
-                      <span className="ssc-starter-icon" aria-hidden="true">
-                        <Wand2 size={15} />
-                      </span>
-                      <span className="ssc-starter-copy">
-                        <span className="ssc-starter-title">{s.starterAutoSetup}</span>
-                        <span className="ssc-starter-desc">{s.starterAutoSetupDesc}</span>
-                      </span>
-                      <ChevronRight size={14} className="ssc-starter-arrow" aria-hidden="true" />
-                    </button>
+                  {isTenantSetupVisible ? (
+                    <>
+                      {canEditAnyStep && (
+                        <button
+                          type="button"
+                          className="ssc-starter-btn"
+                          onClick={() => sendMessage(s.starterAutoSetupPrompt)}
+                        >
+                          <span className="ssc-starter-icon" aria-hidden="true">
+                            <Wand2 size={15} />
+                          </span>
+                          <span className="ssc-starter-copy">
+                            <span className="ssc-starter-title">{s.starterAutoSetup}</span>
+                            <span className="ssc-starter-desc">{s.starterAutoSetupDesc}</span>
+                          </span>
+                          <ChevronRight size={14} className="ssc-starter-arrow" aria-hidden="true" />
+                        </button>
+                      )}
+                      {activeTenantDiag && canEditAnyStep && (
+                        <button
+                          type="button"
+                          className="ssc-starter-btn"
+                          onClick={() => sendMessage(s.starterCompleteCurrentPrompt)}
+                        >
+                          <span className="ssc-starter-icon" aria-hidden="true">
+                            <CheckCircle2 size={15} />
+                          </span>
+                          <span className="ssc-starter-copy">
+                            <span className="ssc-starter-title">{s.starterCompleteCurrent}</span>
+                            <span className="ssc-starter-desc">{s.starterCompleteCurrentDesc}</span>
+                          </span>
+                          <ChevronRight size={14} className="ssc-starter-arrow" aria-hidden="true" />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="ssc-starter-btn"
+                        onClick={() => sendMessage(s.starterGuidePrompt)}
+                      >
+                        <span className="ssc-starter-icon" aria-hidden="true">
+                          <Sparkles size={15} />
+                        </span>
+                        <span className="ssc-starter-copy">
+                          <span className="ssc-starter-title">{s.starterGuide}</span>
+                          <span className="ssc-starter-desc">{s.starterGuideDesc}</span>
+                        </span>
+                        <ChevronRight size={14} className="ssc-starter-arrow" aria-hidden="true" />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="ssc-starter-btn"
+                        data-testid="copilot-starter-doctor"
+                        onClick={() => sendMessage(s.starterDoctorPrompt)}
+                      >
+                        <span className="ssc-starter-icon" aria-hidden="true">
+                          <Stethoscope size={15} />
+                        </span>
+                        <span className="ssc-starter-copy">
+                          <span className="ssc-starter-title">{s.starterDoctor}</span>
+                          <span className="ssc-starter-desc">{s.starterDoctorDesc}</span>
+                        </span>
+                        <ChevronRight size={14} className="ssc-starter-arrow" aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        className="ssc-starter-btn"
+                        data-testid="copilot-starter-mint-key"
+                        onClick={() => sendMessage(s.starterMintKeyPrompt)}
+                      >
+                        <span className="ssc-starter-icon" aria-hidden="true">
+                          <KeyRound size={15} />
+                        </span>
+                        <span className="ssc-starter-copy">
+                          <span className="ssc-starter-title">{s.starterMintKey}</span>
+                          <span className="ssc-starter-desc">{s.starterMintKeyDesc}</span>
+                        </span>
+                        <ChevronRight size={14} className="ssc-starter-arrow" aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        className="ssc-starter-btn"
+                        data-testid="copilot-starter-onboarding"
+                        onClick={() => sendMessage(s.starterOnboardingPrompt)}
+                      >
+                        <span className="ssc-starter-icon" aria-hidden="true">
+                          <CheckCircle2 size={15} />
+                        </span>
+                        <span className="ssc-starter-copy">
+                          <span className="ssc-starter-title">{s.starterOnboarding}</span>
+                          <span className="ssc-starter-desc">{s.starterOnboardingDesc}</span>
+                        </span>
+                        <ChevronRight size={14} className="ssc-starter-arrow" aria-hidden="true" />
+                      </button>
+                    </>
                   )}
-                  {activeTenantDiag && canEditAnyStep && (
-                    <button
-                      type="button"
-                      className="ssc-starter-btn"
-                      onClick={() => sendMessage(s.starterCompleteCurrentPrompt)}
-                    >
-                      <span className="ssc-starter-icon" aria-hidden="true">
-                        <CheckCircle2 size={15} />
-                      </span>
-                      <span className="ssc-starter-copy">
-                        <span className="ssc-starter-title">{s.starterCompleteCurrent}</span>
-                        <span className="ssc-starter-desc">{s.starterCompleteCurrentDesc}</span>
-                      </span>
-                      <ChevronRight size={14} className="ssc-starter-arrow" aria-hidden="true" />
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="ssc-starter-btn"
-                    onClick={() => sendMessage(s.starterGuidePrompt)}
-                  >
-                    <span className="ssc-starter-icon" aria-hidden="true">
-                      <Sparkles size={15} />
-                    </span>
-                    <span className="ssc-starter-copy">
-                      <span className="ssc-starter-title">{s.starterGuide}</span>
-                      <span className="ssc-starter-desc">{s.starterGuideDesc}</span>
-                    </span>
-                    <ChevronRight size={14} className="ssc-starter-arrow" aria-hidden="true" />
-                  </button>
                 </div>
               </div>
             )}
@@ -1018,6 +1625,12 @@ export function SupportSetupCopilot() {
                     turn.content
                   )}
                 </div>
+
+                {turn.userDiagnostic && renderUserDiagnosticCard(turn.userDiagnostic, turn.id)}
+
+                {turn.actionProposal && renderActionProposalCard(turn.actionProposal)}
+
+                {turn.actionResult && renderActionResultCard(turn.actionResult, turn.id)}
 
                 {turn.quickReplies && turn.quickReplies.length > 0 && (
                   <div className="ssc-quick-replies">
@@ -1151,7 +1764,7 @@ export function SupportSetupCopilot() {
               </div>
             ))}
 
-            {chatMutation.isPending && (
+            {(chatMutation.isPending || diagnosticsMutation.isPending) && (
               <div className="ssc-msg-row ssc-msg-row--assistant">
                 <div className="ssc-msg-meta">
                   <span className="ssc-msg-avatar" aria-hidden="true">
