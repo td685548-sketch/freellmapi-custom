@@ -170,6 +170,24 @@ export function purgeLiveTestSandboxData(tenantId: number): SupportLiveTestSandb
       writeSettingsRecord(db, TICKETS_KEY, ticketStore);
     }
 
+    const actionStore = readSettingsRecord<LiveTestTagRecord[]>(db, ACTIONS_KEY);
+    const actionList = Array.isArray(actionStore[tid]) ? actionStore[tid] : [];
+    const deletedActionIds: string[] = [];
+    const keptActions = actionList.filter((item) => {
+      const linked =
+        typeof item.conversationId === 'string' && deletedConvIds.has(item.conversationId);
+      if (item.isLiveTest === true || linked) {
+        if (typeof item.id === 'string' && item.id) deletedActionIds.push(item.id);
+        return false;
+      }
+      return true;
+    });
+    const deletedActions = actionList.length - keptActions.length;
+    if (deletedActions > 0) {
+      actionStore[tid] = keptActions;
+      writeSettingsRecord(db, ACTIONS_KEY, actionStore);
+    }
+
     const filterLinked = (key: string): number => {
       const store = readSettingsRecord<LiveTestTagRecord[]>(db, key);
       const list = Array.isArray(store[tid]) ? store[tid] : [];
@@ -186,7 +204,6 @@ export function purgeLiveTestSandboxData(tenantId: number): SupportLiveTestSandb
       return removed;
     };
 
-    const deletedActions = filterLinked(ACTIONS_KEY);
     const deletedCsat = filterLinked(CSAT_KEY);
 
     const intakeStore = readSettingsRecord<string[]>(db, LIVE_TEST_INTAKES_KEY);
@@ -198,6 +215,8 @@ export function purgeLiveTestSandboxData(tenantId: number): SupportLiveTestSandb
 
     const convIdArr = [...deletedConvIds];
     const ticketIdArr = [...deletedTicketIds];
+
+    deleteByColumnValues(db, 'x_support_action_executions', tenantId, 'action_id', deletedActionIds);
 
     deleteByColumnValues(db, 'x_support_desk_ticket_state', tenantId, 'ticket_id', ticketIdArr);
     deleteByColumnValues(db, 'x_support_desk_ticket_state', tenantId, 'conversation_id', convIdArr);
@@ -217,5 +236,100 @@ export function purgeLiveTestSandboxData(tenantId: number): SupportLiveTestSandb
         csatRatings: deletedCsat,
       },
     };
+  })();
+}
+
+export function purgeSpecificLiveTestRecords(
+  tenantId: number,
+  ids: {
+    conversationIds: readonly string[];
+    actionIds: readonly string[];
+    intakeRequestIds: readonly string[];
+    chatRequestIds?: readonly string[];
+  },
+): void {
+  const convIdArr = [...new Set(ids.conversationIds.map((v) => v.trim()).filter(Boolean))];
+  const actionIdArr = [...new Set(ids.actionIds.map((v) => v.trim()).filter(Boolean))];
+  const intakeReqArr = [...new Set(ids.intakeRequestIds.map((v) => v.trim()).filter(Boolean))];
+  const chatReqArr = [...new Set((ids.chatRequestIds ?? []).map((v) => v.trim()).filter(Boolean))];
+
+  if (
+    convIdArr.length === 0 &&
+    actionIdArr.length === 0 &&
+    intakeReqArr.length === 0 &&
+    chatReqArr.length === 0
+  ) {
+    return;
+  }
+
+  const db = getDb();
+  const tid = String(tenantId);
+  const convSet = new Set(convIdArr);
+  const actionSet = new Set(actionIdArr);
+  const intakeSet = new Set(intakeReqArr);
+
+  db.transaction(() => {
+    if (convSet.size > 0) {
+      const convStore = readSettingsRecord<LiveTestTagRecord[]>(db, CONVERSATIONS_KEY);
+      const convList = Array.isArray(convStore[tid]) ? convStore[tid] : [];
+      const keptConvs = convList.filter((c) => !c.id || !convSet.has(c.id));
+      if (keptConvs.length !== convList.length) {
+        convStore[tid] = keptConvs;
+        writeSettingsRecord(db, CONVERSATIONS_KEY, convStore);
+      }
+
+      const ticketStore = readSettingsRecord<LiveTestTagRecord[]>(db, TICKETS_KEY);
+      const ticketList = Array.isArray(ticketStore[tid]) ? ticketStore[tid] : [];
+      const removedTicketIds: string[] = [];
+      const keptTickets = ticketList.filter((t) => {
+        if (typeof t.conversationId === 'string' && convSet.has(t.conversationId)) {
+          if (typeof t.id === 'string' && t.id) removedTicketIds.push(t.id);
+          return false;
+        }
+        return true;
+      });
+      if (keptTickets.length !== ticketList.length) {
+        ticketStore[tid] = keptTickets;
+        writeSettingsRecord(db, TICKETS_KEY, ticketStore);
+      }
+      deleteByColumnValues(db, 'x_support_desk_ticket_state', tenantId, 'ticket_id', removedTicketIds);
+    }
+
+    if (actionSet.size > 0 || convSet.size > 0) {
+      const actionStore = readSettingsRecord<LiveTestTagRecord[]>(db, ACTIONS_KEY);
+      const actionList = Array.isArray(actionStore[tid]) ? actionStore[tid] : [];
+      const keptActions = actionList.filter((a) => {
+        if (typeof a.id === 'string' && actionSet.has(a.id)) return false;
+        if (typeof a.conversationId === 'string' && convSet.has(a.conversationId)) {
+          if (typeof a.id === 'string' && a.id) actionSet.add(a.id);
+          return false;
+        }
+        return true;
+      });
+      if (keptActions.length !== actionList.length) {
+        actionStore[tid] = keptActions;
+        writeSettingsRecord(db, ACTIONS_KEY, actionStore);
+      }
+    }
+
+    if (intakeSet.size > 0) {
+      const intakeStore = readSettingsRecord<string[]>(db, LIVE_TEST_INTAKES_KEY);
+      const existing = Array.isArray(intakeStore[tid]) ? intakeStore[tid] : [];
+      const kept = existing.filter((reqId) => !intakeSet.has(reqId));
+      if (kept.length !== existing.length) {
+        intakeStore[tid] = kept;
+        writeSettingsRecord(db, LIVE_TEST_INTAKES_KEY, intakeStore);
+      }
+    }
+
+    const allActionIds = [...actionSet];
+    deleteByColumnValues(db, 'x_support_action_executions', tenantId, 'action_id', allActionIds);
+    deleteByColumnValues(db, 'x_support_desk_ticket_state', tenantId, 'conversation_id', convIdArr);
+    deleteByColumnValues(db, 'x_support_desk_intakes', tenantId, 'conversation_id', convIdArr);
+    deleteByColumnValues(db, 'x_support_desk_intakes', tenantId, 'request_id', intakeReqArr);
+    deleteByColumnValues(db, 'x_support_desk_copilot_jobs', tenantId, 'conversation_id', convIdArr);
+    deleteByColumnValues(db, 'x_support_runtime_leases', tenantId, 'conversation_id', convIdArr);
+    deleteByColumnValues(db, 'x_support_runtime_turns', tenantId, 'conversation_id', convIdArr);
+    deleteByColumnValues(db, 'x_support_runtime_turns', tenantId, 'request_id', chatReqArr);
   })();
 }

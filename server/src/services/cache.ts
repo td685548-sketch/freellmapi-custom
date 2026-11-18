@@ -199,6 +199,10 @@ export interface CacheKeyInput {
   // mode/config fingerprint so a settings change cannot replay an answer
   // produced from a different compressed prompt shape.
   compression?: unknown;
+  // Principal / profile / model-restriction scope so cached entries never bleed
+  // across tenants, personal keys, URL tokens, or restricted key policies.
+  authScope?: string;
+  restrictionSignature?: string;
 }
 
 function normModel(model: string | undefined): string {
@@ -238,6 +242,8 @@ export function computeCacheKey(input: CacheKeyInput): string {
     // so pre-existing cache keys are unaffected.
     reasoning_effort: input.reasoning_effort,
     compression: input.compression,
+    authScope: input.authScope,
+    restrictionSignature: input.restrictionSignature,
   });
   return crypto.createHash('sha256').update(canonical).digest('hex');
 }

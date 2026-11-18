@@ -276,11 +276,23 @@ retrievalAdminRouter.post(
         );
       }
       const data: RetrievalQueryRequest = parsed.data;
+      const caller = getUser(req);
+      let queryRoles = data.roles;
+      if (scope.kind === 'support_tenant') {
+        if (!hasPermission(caller, 'use_x_gateway') && !hasPermission(caller, 'edit_x_settings')) {
+          throw new RetrievalStoreError(
+            "Permission denied: 'use_x_gateway' access required for support_tenant retrieval.",
+            'forbidden',
+            403,
+          );
+        }
+        queryRoles = hasPermission(caller, 'edit_x_settings') ? (data.roles ?? []) : [];
+      }
       const result = await retrieve(scope, data.query, {
         topK: data.topK,
         minScore: data.minScore,
         mode: data.mode,
-        roles: data.roles,
+        roles: queryRoles,
         signal: ac.signal,
         respectPillarFlag: true,
       });

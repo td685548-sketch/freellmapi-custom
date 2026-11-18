@@ -26,6 +26,9 @@ import {
 } from '../services/compression/config.js';
 import { getHeadroomThresholds, setHeadroomThresholds, getTaskWeightShare, setTaskWeightShare, getMinReliabilityFloor, setMinReliabilityFloor, isProviderMomentAttributionEnabled, setProviderMomentAttribution } from '../services/router.js';
 import { MCP_ENABLED_SETTING, isMcpServerEnabled } from './mcp.js';
+import { maskProxyUrl } from '../lib/key-proxy.js';
+import { hasPermission } from '../middleware/requirePermission.js';
+import type { SessionUser } from '../services/auth.js';
 import { z } from 'zod';
 import { getAppVersion } from '../lib/app-version.js';
 import {
@@ -485,9 +488,11 @@ settingsRouter.post('/api-key/regenerate', (_req: Request, res: Response) => {
 });
 
 // Get the proxy settings
-settingsRouter.get('/proxy', (_req: Request, res: Response) => {
+settingsRouter.get('/proxy', (req: Request, res: Response) => {
+  const actor = (req as Request & { user?: SessionUser }).user;
+  const canRevealProxy = hasPermission(actor, 'reveal_proxy_credentials');
   res.json({
-    proxyUrl: getProxyUrl(),
+    proxyUrl: canRevealProxy ? getProxyUrl() : maskProxyUrl(getProxyUrl()),
     proxyMode: getProxyMode(),
     fetchRelayTokenConfigured: Boolean(getFetchRelayToken()),
     enabled: isProxyEnabled(),
@@ -581,8 +586,10 @@ settingsRouter.put('/proxy', (req: Request, res: Response) => {
     applyProxyBypass(csv);
   }
 
+  const actor = (req as Request & { user?: SessionUser }).user;
+  const canRevealProxy = hasPermission(actor, 'reveal_proxy_credentials');
   res.json({
-    proxyUrl: getProxyUrl(),
+    proxyUrl: canRevealProxy ? getProxyUrl() : maskProxyUrl(getProxyUrl()),
     proxyMode: getProxyMode(),
     fetchRelayTokenConfigured: Boolean(getFetchRelayToken()),
     enabled: isProxyEnabled(),
@@ -651,12 +658,20 @@ settingsRouter.post('/proxy/test', async (req: Request, res: Response) => {
     res.status(400).json({ error: { message: urlError, type: 'invalid_request_error' } });
     return;
   }
+  const actor = (req as Request & { user?: SessionUser }).user;
+  const canRevealProxy = hasPermission(actor, 'reveal_proxy_credentials');
+  const trimmedDraftUrl = typeof proxyUrl === 'string' ? proxyUrl.trim() : '';
+  const targetsSavedProxy = !trimmedDraftUrl || trimmedDraftUrl === getProxyUrl();
+  const submittedRelayToken = typeof fetchRelayToken === 'string' ? fetchRelayToken.trim() : '';
+  const effectiveRelayToken = submittedRelayToken
+    ? submittedRelayToken
+    : (canRevealProxy || targetsSavedProxy)
+      ? getFetchRelayToken()
+      : '';
   const result = await probeProxyUrl(proxyUrl, {
     targetUrl: proxyProbeTarget(),
     mode,
-    relayToken: typeof fetchRelayToken === 'string' && fetchRelayToken.trim()
-      ? fetchRelayToken.trim()
-      : getFetchRelayToken(),
+    relayToken: effectiveRelayToken,
   });
   res.json(result);
 });

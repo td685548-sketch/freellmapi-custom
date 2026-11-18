@@ -26,7 +26,7 @@
 
 import { inspect } from 'node:util';
 import { getDb } from '../db/index.js';
-import { redactSecrets } from './log-redaction.js';
+import { redactSecrets, redactOperatorOnlyLogLines } from './log-redaction.js';
 import type { Db } from '../db/types.js';
 
 /** Levels the store understands. console.log maps to 'info'; debug and trace
@@ -185,7 +185,7 @@ export interface RecordLogOptions extends ServerLogMeta {
  * Returns the stored entry, or null when the line was filtered out.
  */
 export function recordLogEntry(options: RecordLogOptions): ServerLogEntry | null {
-  const message = truncate(options.message);
+  const message = truncate(redactOperatorOnlyLogLines(redactSecrets(options.message)));
   if (message.trim() === '') return null;
   if (NOISE_RE.test(message)) return null;
 

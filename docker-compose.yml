@@ -58,7 +58,7 @@ services:
     profiles: ["autoupdate"]
     environment:
       WATCHTOWER_HTTP_API_ENDPOINTS: update
-      WATCHTOWER_HTTP_API_TOKEN: ${WATCHTOWER_TOKEN:-}
+      WATCHTOWER_HTTP_API_TOKEN: ${WATCHTOWER_TOKEN:?WATCHTOWER_TOKEN must be set when using the autoupdate profile}
       WATCHTOWER_LABEL_ENABLE: "true"
       WATCHTOWER_SCOPE: freellmapi
       WATCHTOWER_CLEANUP: "true"

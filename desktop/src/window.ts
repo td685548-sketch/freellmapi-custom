@@ -12,10 +12,9 @@ export function getDashboardWindow(): BrowserWindow | null {
 }
 
 // One window at a time, destroyed on close — the app lives in the tray, the
-// window is an on-demand view. The session token rides in via
-// additionalArguments so the CJS preload can seed localStorage before any
-// page script runs (no login flash, no reload).
-export function openDashboard(port: number, token: string): void {
+// window is an on-demand view. The CJS preload requests the session token over
+// origin-verified Chromium IPC so secrets never appear in OS process arguments.
+export function openDashboard(port: number, _token?: string): void {
   if (dashboardWindow && !dashboardWindow.isDestroyed()) {
     dashboardWindow.show();
     dashboardWindow.focus();
@@ -36,7 +35,7 @@ export function openDashboard(port: number, token: string): void {
       nodeIntegration: false,
       // The dashboard has no other way to know which build is running: the
       // server's own package version is not the released app version (#703).
-      additionalArguments: [`--freeapi-token=${token}`, `--freeapi-version=${app.getVersion()}`],
+      additionalArguments: [`--freeapi-version=${app.getVersion()}`],
     },
   });
 

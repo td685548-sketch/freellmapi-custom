@@ -37,6 +37,16 @@ import type { ChatMessage } from '@freellmapi/shared/types.js';
 const DEFAULT_MAX_DIMENSION = 2048;
 const DEFAULT_THRESHOLD_KB = 1024;
 const DEFAULT_QUALITY = 90;
+const DEFAULT_MAX_INPUT_PIXELS = 16_777_216;
+const HARD_MAX_INPUT_PIXELS = 67_108_864;
+
+function resolveMaxInputPixels(): number {
+  const raw = process.env.IMAGE_NORMALIZE_MAX_PIXELS;
+  if (!raw) return DEFAULT_MAX_INPUT_PIXELS;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_MAX_INPUT_PIXELS;
+  return Math.min(HARD_MAX_INPUT_PIXELS, Math.floor(n));
+}
 
 // sharp is a NATIVE module: it ships a prebuilt libvips per platform+arch, and
 // a static `import sharp from 'sharp'` makes a missing or mismatched binary an
@@ -210,7 +220,7 @@ async function normalizeDataUrl(sharp: Sharp, candidate: Candidate, opts: Resolv
   }
 
   try {
-    const image = sharp(buffer);
+    const image = sharp(buffer, { limitInputPixels: resolveMaxInputPixels() });
     const meta = await image.metadata();
     const width = meta.width ?? 0;
     const height = meta.height ?? 0;
@@ -233,12 +243,12 @@ async function normalizeDataUrl(sharp: Sharp, candidate: Candidate, opts: Resolv
     // Alpha is only worth keeping when it actually carries transparency.
     // Screenshots (the dominant vision payload here) are RGBA-but-fully-
     // opaque; honoring the bare hasAlpha flag kept them on PNG and squeezed
-    // 2.0MB → 1.9MB instead of → ~300KB. stats() decodes, but we were about
-    // to re-encode anyway.
+    // 2.0MB → 1.9MB instead of → ~300KB. stats() runs on the resized pipeline
+    // so oversized images never trigger a second full-resolution decode.
     let keepAlpha = false;
     if (meta.hasAlpha) {
       try {
-        keepAlpha = (await sharp(buffer).stats()).isOpaque === false;
+        keepAlpha = (await pipeline.clone().stats()).isOpaque === false;
       } catch {
         keepAlpha = true; // unknown opacity: stay lossless
       }

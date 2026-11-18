@@ -21,6 +21,10 @@ xGatewayOllamaRouter.use((req, res, next) => {
     res.status(204).end();
     return;
   }
+  if (!getConfigSnapshot().enabled) {
+    res.status(404).json({ error: 'Not found' });
+    return;
+  }
   next();
 });
 
@@ -66,13 +70,23 @@ function formatOllamaModel(id: string, family: string) {
   };
 }
 
+function requireOllamaAuth(req: Request, res: Response): ValidatedXGatewayClientKey | null {
+  const user = resolveOllamaUser(req);
+  if (!user) {
+    res.status(401).json({ error: 'Authentication required' });
+    return null;
+  }
+  if (!permissionGranted(user, 'use_x_gateway')) {
+    res.status(403).json({ error: 'Permission denied: use_x_gateway required' });
+    return null;
+  }
+  return user;
+}
+
 function handleTags(req: Request, res: Response): void {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  const user = resolveOllamaUser(req);
-  if (user && !permissionGranted(user, 'use_x_gateway')) {
-    res.status(403).json({ error: 'Permission denied: use_x_gateway required' });
-    return;
-  }
+  const user = requireOllamaAuth(req, res);
+  if (!user) return;
 
   const snapshot = getConfigSnapshot();
   const models: Array<ReturnType<typeof formatOllamaModel>> = [];
@@ -118,15 +132,28 @@ function handleTags(req: Request, res: Response): void {
   res.json({ models });
 }
 
-function handleVersion(_req: Request, res: Response): void {
+function handleVersion(req: Request, res: Response): void {
   res.setHeader('Access-Control-Allow-Origin', '*');
+  const user = requireOllamaAuth(req, res);
+  if (!user) return;
   res.json({ version: '0.5.1' });
 }
 
 function handleShow(req: Request, res: Response): void {
   res.setHeader('Access-Control-Allow-Origin', '*');
+  const user = requireOllamaAuth(req, res);
+  if (!user) return;
   const body = (req.body && typeof req.body === 'object') ? req.body as Record<string, unknown> : {};
-  const model = typeof body.model === 'string' ? body.model : (typeof body.name === 'string' ? body.name : 'auto');
+  const rawModel = typeof body.model === 'string' ? body.model : (typeof body.name === 'string' ? body.name : 'auto');
+  const model = rawModel.trim();
+  if (!model || /[\r\n\0]/.test(model) || model.length > 200) {
+    res.status(400).json({ error: 'Invalid model name' });
+    return;
+  }
+  if (user.access?.restricted && !isModelAllowedForKey(user.access, model)) {
+    res.status(403).json({ error: 'Model is not allowed for this API key' });
+    return;
+  }
 
   res.json({
     license: 'Apache-2.0',

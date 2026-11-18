@@ -1,7 +1,9 @@
 import { EventEmitter } from 'events';
+import { inspect } from 'node:util';
 import { Router, type Request, type Response } from 'express';
 import { requireAuth } from '../../middleware/requireAuth.js';
 import { requirePermission } from '../../middleware/requirePermission.js';
+import { redactSecrets, redactOperatorOnlyLogLines } from '../../lib/log-redaction.js';
 
 const MAX_BUFFERED_LINES = 1000;
 const FLUSH_INTERVAL_MS = 100;
@@ -44,12 +46,28 @@ function stripAnsi(str: string): string {
 
 function formatArg(arg: unknown): string {
   if (typeof arg === 'string') return stripAnsi(arg);
-  if (arg instanceof Error) return stripAnsi(arg.stack || arg.message || String(arg));
-  try {
-    return stripAnsi(JSON.stringify(arg));
-  } catch {
-    return stripAnsi(String(arg));
+  if (arg instanceof Error) {
+    const base = stripAnsi(arg.stack || arg.message || String(arg));
+    const ownKeys = Object.keys(arg);
+    if (ownKeys.length === 0) return base;
+    try {
+      return `${base} ${stripAnsi(inspect(arg, { depth: 3, breakLength: Infinity, maxStringLength: 4000 }))}`;
+    } catch {
+      return base;
+    }
   }
+  if (arg !== null && typeof arg === 'object') {
+    try {
+      return stripAnsi(inspect(arg, { depth: 3, breakLength: Infinity, maxStringLength: 4000 }));
+    } catch {
+      return stripAnsi(String(arg));
+    }
+  }
+  return stripAnsi(String(arg));
+}
+
+function sanitizeBufferedLine(line: string): string {
+  return redactOperatorOnlyLogLines(redactSecrets(line));
 }
 
 function flushPendingLines(): void {
@@ -66,11 +84,12 @@ function scheduleFlush(): void {
 }
 
 function appendLine(line: string): void {
-  state.logs.push(line);
+  const safeLine = sanitizeBufferedLine(line);
+  state.logs.push(safeLine);
   if (state.logs.length > MAX_BUFFERED_LINES) {
     state.logs = state.logs.slice(-MAX_BUFFERED_LINES);
   }
-  state.pendingLines.push(line);
+  state.pendingLines.push(safeLine);
   if (state.pendingLines.length >= MAX_BATCH_LINES) {
     if (state.flushTimer) {
       clearTimeout(state.flushTimer);

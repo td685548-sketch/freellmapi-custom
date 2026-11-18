@@ -277,6 +277,7 @@ export async function executeSupportWebhookTool(options: {
 const FORBIDDEN_KEYWORDS = [
   'INSERT', 'UPDATE', 'DELETE', 'DROP', 'ALTER', 'CREATE', 'REPLACE',
   'TRUNCATE', 'PRAGMA', 'ATTACH', 'DETACH', 'VACUUM',
+  'WITH', 'UNION', 'INTERSECT', 'EXCEPT',
 ];
 const NON_ALIAS_WORDS = new Set([
   'WHERE', 'JOIN', 'INNER', 'LEFT', 'RIGHT', 'FULL', 'OUTER', 'CROSS', 'NATURAL', 'ON', 'USING',
@@ -310,6 +311,8 @@ export function validateAndRewriteSupportSql(
   if (/["`[\]]/.test(masked)) throw new SupportConnectorError(400, 'Quoted identifiers are not allowed');
   if (/[$@?:]/.test(masked)) throw new SupportConnectorError(400, 'Bound parameters are not allowed');
   if (!/^select\b/i.test(masked)) throw new SupportConnectorError(400, 'Only SELECT queries are allowed');
+  if (/\(\s*select\b/i.test(masked)) throw new SupportConnectorError(403, 'Subqueries are not allowed');
+  if (/\b(?:from|join)\s*\(/i.test(masked)) throw new SupportConnectorError(400, 'Parenthesized table references are not allowed');
   for (const kw of FORBIDDEN_KEYWORDS) {
     if (new RegExp(`\\b${kw}\\b`, 'i').test(masked)) {
       throw new SupportConnectorError(403, `Keyword ${kw} is not allowed`);
@@ -318,11 +321,14 @@ export function validateAndRewriteSupportSql(
 
   const policies = source.tablePolicies ?? [];
   const referenced: string[] = [];
+  const clauseMatches = masked.match(/\b(?:from|join)\b/gi) ?? [];
+  let rewriteCount = 0;
   const refRe = /\b(FROM|JOIN)\s+([A-Za-z_]\w*)(\s*\.\s*\w+)?(\s+(?:AS\s+)?([A-Za-z_]\w*))?(\s*,)?/gi;
 
   const rewritten = masked.replace(
     refRe,
-    (full, kw: string, table: string, dotPart: string | undefined, aliasPart: string | undefined, alias: string | undefined, comma: string | undefined) => {
+    (_full, kw: string, table: string, dotPart: string | undefined, aliasPart: string | undefined, alias: string | undefined, comma: string | undefined) => {
+      rewriteCount += 1;
       if (dotPart) throw new SupportConnectorError(403, 'Schema-qualified tables are not allowed');
       if (comma) throw new SupportConnectorError(400, 'Comma joins are not allowed; use explicit JOIN');
       const policy = policies.find((p) => p.tableName.toLowerCase() === table.toLowerCase());
@@ -335,13 +341,24 @@ export function validateAndRewriteSupportSql(
       const tail = aliasPart && !realAlias ? aliasPart : '';
       const needsLock =
         policy.rowOwnerColumn && !isRoleAllowed(policy.bypassRowLockRoles ?? ['admin', 'staff'], context.role);
-      if (!needsLock) return `${kw} ${table}${realAlias ? ` ${realAlias}` : ''}${tail}`;
-      if (!/^[A-Za-z_]\w*$/.test(policy.rowOwnerColumn as string)) {
+      const safeAllowedCols = (policy.allowedColumns ?? []).filter((c) => /^[A-Za-z_]\w*$/.test(c));
+      if (policy.allowedColumns && policy.allowedColumns.length > 0 && safeAllowedCols.length !== policy.allowedColumns.length) {
+        throw new SupportConnectorError(500, 'Invalid allowedColumns in policy');
+      }
+      const projExpr = safeAllowedCols.length > 0 ? safeAllowedCols.join(', ') : '*';
+      if (needsLock && !/^[A-Za-z_]\w*$/.test(policy.rowOwnerColumn as string)) {
         throw new SupportConnectorError(500, 'Invalid rowOwnerColumn in policy');
       }
-      return `${kw} (SELECT * FROM ${policy.tableName} WHERE ${policy.rowOwnerColumn} = ${USER_PARAM}) AS ${realAlias ?? table}${tail}`;
+      if (!needsLock && projExpr === '*') {
+        return `${kw} ${table}${realAlias ? ` ${realAlias}` : ''}${tail}`;
+      }
+      const whereClause = needsLock ? ` WHERE ${policy.rowOwnerColumn} = ${USER_PARAM}` : '';
+      return `${kw} (SELECT ${projExpr} FROM ${policy.tableName}${whereClause}) AS ${realAlias ?? table}${tail}`;
     },
   );
+  if (rewriteCount !== clauseMatches.length) {
+    throw new SupportConnectorError(400, 'Unsupported FROM or JOIN table syntax');
+  }
 
   // Denied columns must not be referenced explicitly.
   for (const table of referenced) {

@@ -718,7 +718,7 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/t
       expect(staffData.profile.userId).toBe('cust_alice');
     });
 
-    it("18. PATCH /profile: Updates caller's own profile attributes, tags, and memory facts", async () => {
+    it("18. PATCH /profile: Updates caller's own profile attributes and memory facts without allowing customer self-tier escalation", async () => {
       const res = await apiCall('/thruline/v1/support/profile', {
         method: 'PATCH',
         headers: {
@@ -736,10 +736,26 @@ describe('AI Support Governance, Customer Memory CRM & Outbound Webhooks (/api/t
       const data = res.body as { ok: boolean; profile: SupportCustomerProfile };
       expect(data.ok).toBe(true);
       expect(data.profile.userId).toBe('cust_alice');
-      expect(data.profile.tier).toBe('gold');
-      expect(data.profile.tags).toContain('app-beta-tester');
+      expect(data.profile.tier).not.toBe('gold');
+      expect(data.profile.tags).not.toContain('app-beta-tester');
       expect(data.profile.memoryFacts).toContain('Prefers contactless dropoff');
       expect(data.profile.customAttributes).toEqual({ theme: 'dark' });
+
+      const staffRes = await apiCall('/thruline/v1/support/profile', {
+        method: 'PATCH',
+        headers: {
+          'X-Support-Tenant-Key': tenant.publicKey,
+          'X-Support-User-Token': staffToken,
+        },
+        body: {
+          tags: ['loyal', 'app-beta-tester'],
+          tier: 'gold',
+        },
+      });
+      expect(staffRes.status).toBe(200);
+      const staffUpdated = staffRes.body as { ok: boolean; profile: SupportCustomerProfile };
+      expect(staffUpdated.profile.tier).toBe('gold');
+      expect(staffUpdated.profile.tags).toContain('app-beta-tester');
     });
 
     it('19. POST /csat: Submits rating, recalculates average, and dispatches csat.submitted event', async () => {

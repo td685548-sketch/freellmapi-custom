@@ -308,6 +308,7 @@ export async function probeGateway(
   let response: Response;
   try {
     response = await fetchImpl(`${normalizeUrl(baseUrl)}/livez`, {
+      redirect: 'error',
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
@@ -391,13 +392,40 @@ export async function diagnose(tool: string, options: DoctorOptions): Promise<To
     };
   }
 
-  const gateway = await probeGateway(effective.value, options.fetchImpl, options.timeoutMs);
-
   // A lower-precedence layer naming a DIFFERENT url is the silent-override
   // case: the user edited that file and something outranks it.
   const overridden = layers.find(
     layer => !layer.effective && layer.value && !sameGateway(layer.value, effective.value),
   );
+
+  // Verify the winning URL matches the expected gateway BEFORE probing it,
+  // so untrusted workspace .claude/settings*.json cannot trigger probes or
+  // redirects to arbitrary hosts or loopback services.
+  if (!sameGateway(effective.value, options.expectedUrl)) {
+    if (overridden) {
+      return {
+        tool,
+        verdict: 'shadowed',
+        layers,
+        effectiveUrl: effective.value,
+        shadowedBy: effective.source,
+        detail:
+          `${overridden.source} sets ${overridden.value}, but ${effective.source} outranks it, `
+          + `so ${tool} actually uses ${effective.value}.`,
+      };
+    }
+    return {
+      tool,
+      verdict: 'elsewhere',
+      layers,
+      effectiveUrl: effective.value,
+      detail:
+        `${tool} reaches ${effective.value}, NOT the ${options.expectedUrl} this command was pointed at. `
+        + 'Its traffic does not touch this gateway.',
+    };
+  }
+
+  const gateway = await probeGateway(effective.value, options.fetchImpl, options.timeoutMs);
 
   if (!gateway.reachable) {
     return {
@@ -421,22 +449,6 @@ export async function diagnose(tool: string, options: DoctorOptions): Promise<To
       detail:
         `${overridden.source} sets ${overridden.value}, but ${effective.source} outranks it, `
         + `so ${tool} actually uses ${effective.value}.`,
-    };
-  }
-
-  // Two distinct ways to be pointed somewhere else, and both must fail the
-  // check: a different host entirely, or the right host answering nothing that
-  // looks like this gateway.
-  if (!sameGateway(effective.value, options.expectedUrl)) {
-    return {
-      tool,
-      verdict: 'elsewhere',
-      layers,
-      effectiveUrl: effective.value,
-      gateway,
-      detail:
-        `${tool} reaches ${effective.value}, NOT the ${options.expectedUrl} this command was pointed at. `
-        + 'Its traffic does not touch this gateway.',
     };
   }
 

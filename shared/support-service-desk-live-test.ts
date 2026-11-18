@@ -152,3 +152,85 @@ export interface SupportLiveTestSandboxCleanupResponse {
     csatRatings: number;
   };
 }
+
+export interface SupportLiveTestPendingActionItem {
+  id: string;
+  conversationId?: string;
+  userId: string;
+  userName?: string;
+  userRole: string;
+  toolName: string;
+  actionSummary: string;
+  payload: Record<string, unknown>;
+  status: 'pending' | 'approved' | 'rejected' | 'failed';
+  createdAt: string;
+  isLiveTest?: boolean;
+}
+
+export interface SupportLiveTestPendingActionsListResponse {
+  ok: true;
+  actions: SupportLiveTestPendingActionItem[];
+}
+
+export interface SupportLiveTestActionReviewResponse {
+  ok: true;
+  action: SupportLiveTestPendingActionItem & {
+    reviewedBy?: string;
+    reviewNote?: string;
+    reviewedAt?: string;
+    executionStatus?: string;
+    executionResult?: unknown;
+  };
+}
+
+export type SupportLiveTestPlaybookExpectation =
+  | 'any_reply'
+  | 'cited'
+  | 'abstained'
+  | 'guardrail_blocked'
+  | 'tool_called'
+  | 'guest_denied';
+
+export interface SupportLiveTestPlaybookCase {
+  id: string;
+  title: string;
+  persona: SupportLiveTestPersonaInput;
+  message: string;
+  expectation: SupportLiveTestPlaybookExpectation;
+  expectedText?: string;
+  expectedTool?: string;
+}
+
+export interface SupportLiveTestPlaybook {
+  version: number;
+  updatedAt: string;
+  cases: SupportLiveTestPlaybookCase[];
+}
+
+export interface SupportLiveTestPlaybookResponse {
+  ok: true;
+  playbook: SupportLiveTestPlaybook;
+}
+
+export interface SupportLiveTestPlaybookCaseResult {
+  caseId: string;
+  title: string;
+  passed: boolean;
+  status: number;
+  durationMs: number;
+  actualOutcome: SupportLiveTestPlaybookExpectation | 'error';
+  replyPreview?: string;
+  citationsCount: number;
+  toolsCalled: string[];
+  errorCode?: string;
+  reason?: string;
+}
+
+export interface SupportLiveTestPlaybookRunResponse {
+  ok: true;
+  tenantId: number;
+  ranAt: string;
+  passedCount: number;
+  failedCount: number;
+  results: SupportLiveTestPlaybookCaseResult[];
+}

@@ -175,7 +175,7 @@ export function registerCustomRoutes(app: Express): void {
   app.use(['/v1', '/thruline/v1'], (_req, _res, next) => withRoutingSettingsScope(next));
   // When the X Gateway is off, answer 404 immediately before any auth checks
   // so an inactive gateway leaks nothing about its existence.
-  app.use('/thruline/v1', (_req, res, next) => {
+  app.use(['/thruline/v1', '/thruline/v1beta'], (_req, res, next) => {
     if (!getConfigSnapshot().enabled) {
       res.status(404).json({ error: { message: 'Not found', type: 'not_found' } });
       return;
@@ -228,8 +228,8 @@ export function registerCustomRoutes(app: Express): void {
       },
     });
   });
-  // Rate-limiting and usage tracking gate for member personal API keys (/v1, /v1beta and /thruline/v1 inference)
-  app.use(['/v1', '/v1beta', '/thruline/v1'], userInferenceGate);
+  // Rate-limiting and usage tracking gate for member personal API keys (/v1, /v1beta, /thruline/v1, /thruline/v1beta)
+  app.use(['/v1', '/v1beta', '/thruline/v1', '/thruline/v1beta'], userInferenceGate);
   // Playground chats (unified key + the dashboard session) are attributed to the signed-in account.
   app.use('/v1', playgroundAttribution);
   app.use('/v1', customerAiSessionRoutingMiddleware);

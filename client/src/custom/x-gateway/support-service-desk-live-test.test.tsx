@@ -8,7 +8,10 @@ import SupportServiceDesk from './pages/SupportServiceDesk'
 import type { SupportDeskWidgetConfig } from '@freellmapi/shared/support-service-desk.js'
 import type {
   SupportLiveTestOriginCheckResponse,
+  SupportLiveTestPendingActionItem,
   SupportLiveTestPersonaSessionResponse,
+  SupportLiveTestPlaybook,
+  SupportLiveTestPlaybookCase,
 } from '@freellmapi/shared/support-service-desk-live-test.js'
 import { getSupportRuntimeWidgetScript } from '../../../../server/src/custom/x-gateway/support-runtime-widget.ts'
 
@@ -73,6 +76,8 @@ let tenants: Array<{
 
 let widgetConfigs: Record<number, SupportDeskWidgetConfig>
 let conversationsByTenant: Record<number, MockConversation[]>
+let pendingActionsByTenant: Record<number, SupportLiveTestPendingActionItem[]>
+let playbooksByTenant: Record<number, SupportLiveTestPlaybook>
 let recordedReplyBodies: Array<{ tenantId: number; convId: string; body: Record<string, unknown> }>
 let recordedCsatSubmissions: Array<Record<string, unknown>>
 let recordedLiveHeaders: Array<{ url: string; auth: string | null; simOrigin: string | null }>
@@ -187,6 +192,11 @@ beforeEach(() => {
   }
 
   conversationsByTenant = { 1: [], 2: [] }
+  pendingActionsByTenant = { 1: [], 2: [] }
+  playbooksByTenant = {
+    1: { version: 1, updatedAt: '2026-11-18T00:00:00.000Z', cases: [] },
+    2: { version: 1, updatedAt: '2026-11-18T00:00:00.000Z', cases: [] },
+  }
   recordedReplyBodies = []
   recordedCsatSubmissions = []
   recordedLiveHeaders = []
@@ -290,26 +300,140 @@ beforeEach(() => {
     if (path.includes('/service-desk/live-test/sandbox')) {
       if (method === 'DELETE') {
         const prevConvs = (conversationsByTenant[tenantId] ?? []).length
+        const prevActions = (pendingActionsByTenant[tenantId] ?? []).length
         const prevCsat = recordedCsatSubmissions.filter((c) => c.tenantId === tenantId).length
         conversationsByTenant[tenantId] = []
+        pendingActionsByTenant[tenantId] = []
         recordedCsatSubmissions = recordedCsatSubmissions.filter((c) => c.tenantId !== tenantId)
         return {
           ok: true,
           tenantId,
-          deleted: { conversations: prevConvs, tickets: 0, pendingActions: 0, csatRatings: prevCsat },
+          deleted: {
+            conversations: prevConvs,
+            tickets: 0,
+            pendingActions: prevActions,
+            csatRatings: prevCsat,
+          },
         }
       }
       const conversationsCount = (conversationsByTenant[tenantId] ?? []).length
+      const pendingActionsCount = (pendingActionsByTenant[tenantId] ?? []).length
       const csatRatingsCount = recordedCsatSubmissions.filter((c) => c.tenantId === tenantId).length
       return {
         ok: true,
         tenantId,
         conversationsCount,
         ticketsCount: 0,
-        pendingActionsCount: 0,
+        pendingActionsCount,
         csatRatingsCount,
-        totalCount: conversationsCount + csatRatingsCount,
+        totalCount: conversationsCount + pendingActionsCount + csatRatingsCount,
       }
+    }
+
+    if (path.includes('/service-desk/live-test/pending-actions')) {
+      const reviewMatch = /\/pending-actions\/([^/]+)\/(approve|reject)$/.exec(path)
+      if (reviewMatch && method === 'POST') {
+        const actionId = decodeURIComponent(reviewMatch[1])
+        const decision = reviewMatch[2] === 'approve' ? 'approved' : 'rejected'
+        const list = pendingActionsByTenant[tenantId] ?? []
+        const idx = list.findIndex((a) => a.id === actionId)
+        if (idx < 0) {
+          throw new Error(`Pending action not found: ${actionId}`)
+        }
+        const reviewNote = typeof body.reviewNote === 'string' ? body.reviewNote : undefined
+        const updated: SupportLiveTestPendingActionItem = {
+          ...list[idx],
+          status: decision,
+        }
+        list[idx] = updated
+        if (updated.conversationId) {
+          const conv = conversationsByTenant[tenantId]?.find((c) => c.id === updated.conversationId)
+          if (conv) {
+            conv.messages.push({
+              id: `msg_act_${conv.messages.length + 1}`,
+              role: 'assistant',
+              senderType: 'human_agent',
+              senderName: session.email,
+              content:
+                decision === 'approved'
+                  ? `Action "${updated.toolName}" was approved and executed${reviewNote ? ` (${reviewNote})` : ''}.`
+                  : `Action "${updated.toolName}" was rejected${reviewNote ? `: ${reviewNote}` : '.'}`,
+              createdAt: '2026-11-18T00:16:00.000Z',
+            })
+          }
+        }
+        return {
+          ok: true,
+          action: {
+            ...updated,
+            reviewedBy: session.email,
+            ...(reviewNote ? { reviewNote } : {}),
+            executionStatus: decision === 'approved' ? 'succeeded' : 'failed',
+          },
+        }
+      }
+
+      const queryIdx = path.indexOf('?')
+      const queryParams = new URLSearchParams(queryIdx >= 0 ? path.slice(queryIdx + 1) : '')
+      const filterConvId = queryParams.get('conversationId')
+      const actions = (pendingActionsByTenant[tenantId] ?? []).filter(
+        (a) => a.status === 'pending' && (!filterConvId || a.conversationId === filterConvId),
+      )
+      return { ok: true, actions }
+    }
+
+    if (path.includes('/service-desk/live-test/playbook/run') && method === 'POST') {
+      const inputCases = Array.isArray(body.cases)
+        ? (body.cases as SupportLiveTestPlaybookCase[])
+        : playbooksByTenant[tenantId].cases
+      const results = inputCases.map((c) => {
+        if (c.expectation === 'guest_denied') {
+          return {
+            caseId: c.id,
+            title: c.title,
+            passed: !tenant.allowGuest,
+            status: 403,
+            durationMs: 5,
+            actualOutcome: 'guest_denied' as const,
+            citationsCount: 0,
+            toolsCalled: [],
+            errorCode: 'guest_not_allowed',
+          }
+        }
+        return {
+          caseId: c.id,
+          title: c.title,
+          passed: c.expectation !== 'guardrail_blocked',
+          status: 200,
+          durationMs: 12,
+          actualOutcome: c.expectation === 'cited' ? ('cited' as const) : ('any_reply' as const),
+          replyPreview: 'Mock runtime playbook reply.',
+          citationsCount: c.expectation === 'cited' ? 1 : 0,
+          toolsCalled: c.expectation === 'tool_called' ? ['lookup_order'] : [],
+        }
+      })
+      const passedCount = results.filter((r) => r.passed).length
+      return {
+        ok: true,
+        tenantId,
+        ranAt: '2026-11-18T00:20:00.000Z',
+        passedCount,
+        failedCount: results.length - passedCount,
+        results,
+      }
+    }
+
+    if (path.includes('/service-desk/live-test/playbook')) {
+      if (method === 'PUT') {
+        const next: SupportLiveTestPlaybook = {
+          version: playbooksByTenant[tenantId].version + 1,
+          updatedAt: '2026-11-18T00:18:00.000Z',
+          cases: Array.isArray(body.cases) ? (body.cases as SupportLiveTestPlaybookCase[]) : [],
+        }
+        playbooksByTenant[tenantId] = next
+        return { ok: true, playbook: next }
+      }
+      return { ok: true, playbook: playbooksByTenant[tenantId] }
     }
 
     if (path.endsWith('/conversations')) {
@@ -448,7 +572,29 @@ beforeEach(() => {
           },
         ],
       }
-      const replyText = 'Return policy allows returns in 30 days [1].'
+      const isRefundRequest = userContent.toLowerCase().includes('refund')
+      const createdPendingAction = isRefundRequest
+        ? {
+            id: `act_live_${tenantId}_${(pendingActionsByTenant[tenantId] ?? []).length + 1}`,
+            conversationId: convId,
+            userId: 'cust_101',
+            userName: 'Alice Nguyen',
+            userRole: 'customer',
+            toolName: 'refund_order',
+            actionSummary: 'Process refund for order ORD-900',
+            payload: { orderId: 'ORD-900' },
+            status: 'pending' as const,
+            isLiveTest: true,
+            createdAt: '2026-11-18T00:05:03.000Z',
+          }
+        : null
+      if (createdPendingAction) {
+        pendingActionsByTenant[tenantId].push(createdPendingAction)
+      }
+
+      const replyText = createdPendingAction
+        ? 'Your refund request is waiting for operator approval.'
+        : 'Return policy allows returns in 30 days [1].'
       conv.messages.push(
         {
           id: `msg_u_${conv.messages.length + 1}`,
@@ -472,14 +618,27 @@ beforeEach(() => {
         object: 'support.chat.completion',
         model: 'gpt-4o-mini',
         userContext: { role: 'customer', userId: 'cust_101', verified: true },
-        allowedTools: ['lookup_order'],
-        toolTrace: [{ name: 'lookup_order', kind: 'db' }],
+        allowedTools: createdPendingAction ? ['webhook__refund_order'] : ['lookup_order'],
+        toolTrace: createdPendingAction
+          ? [{ name: 'webhook__refund_order', kind: 'webhook', status: 'pending_approval', pendingApproval: true }]
+          : [{ name: 'lookup_order', kind: 'db' }],
         reply: replyText,
         runtime: {
           conversationId: convId,
           requestId: body.requestId,
           replySource: 'ai',
           evidence,
+          ...(createdPendingAction
+            ? {
+                pendingActions: [
+                  {
+                    id: createdPendingAction.id,
+                    toolName: createdPendingAction.toolName,
+                    executionStatus: 'pending',
+                  },
+                ],
+              }
+            : {}),
         },
       })
     }
@@ -783,6 +942,7 @@ describe('Service Desk Studio Live End-User Widget Testing UI (Spec 023)', () =>
     expect(byId('live-test-diagnostics-panel').textContent).toContain('Chẩn đoán vận hành')
     expect(byId('live-test-sandbox-panel').textContent).toContain('Dữ liệu thử nghiệm')
     expect(byId('live-test-cleanup-btn').textContent).toContain('Xóa dữ liệu test')
+    expect(byId('live-test-playbook-panel').textContent).toContain('Bộ kiểm thử hồi quy')
   })
 
   it('tracks live-test sandbox counts and cleans up tenant sandbox data cleanly', async () => {
@@ -808,5 +968,58 @@ describe('Service Desk Studio Live End-User Widget Testing UI (Spec 023)', () =>
     await waitFor(() => expect(byId('live-test-cleanup-status')).toBeTruthy())
     await waitFor(() => expect(byId('live-test-sandbox-counts').textContent).toContain('0 chats'))
     expect(byId<HTMLButtonElement>('live-test-cleanup-btn').disabled).toBe(true)
+  })
+
+  it('surfaces live-test pending actions inline, approves them with a review note, and syncs widget outcome immediately', async () => {
+    await mountStudio()
+    await click(byId('widget-mode-live'))
+    await waitFor(() => expect(byId('live-test-persona-panel')).toBeTruthy())
+
+    await click(byId('live-test-preset-customer_alice'))
+    await waitFor(() => expect(byId('widget-intake-input-order_id')).toBeTruthy())
+    await setWidgetDomValue('[data-testid="widget-intake-input-order_id"]', 'ORD-900')
+    await click(byId('widget-intake-submit-btn'))
+    await waitFor(() => expect(byId('widget-intake-form').style.display).toBe('none'))
+
+    await setWidgetDomValue('[data-testid="widget-input"]', 'Please refund order ORD-900')
+    await click(byId('widget-send-btn'))
+
+    await waitFor(() => expect(byId('live-test-approvals-panel')).toBeTruthy())
+    await waitFor(() => expect(byId('live-test-pending-action-act_live_1_1')).toBeTruthy())
+    expect(byId('live-test-pending-action-act_live_1_1').textContent).toContain('refund_order')
+
+    await change('live-test-review-note-act_live_1_1', 'Approved in test')
+    await click(byId('live-test-approve-btn-act_live_1_1'))
+
+    await waitFor(() => expect(byId('live-test-action-review-status')).toBeTruthy())
+    await waitFor(() => {
+      expect(byId('support-widget-live-container').textContent).toContain(
+        'Action "refund_order" was approved and executed (Approved in test).',
+      )
+    })
+    expect(container.querySelector('[data-testid="live-test-pending-action-act_live_1_1"]')).toBeNull()
+  })
+
+  it('configures, saves, and runs per-tenant regression playbooks with pass/fail summary', async () => {
+    await mountStudio()
+    await click(byId('widget-mode-live'))
+    await waitFor(() => expect(byId('live-test-playbook-panel')).toBeTruthy())
+    expect(byId<HTMLButtonElement>('live-test-playbook-run-btn').disabled).toBe(true)
+
+    await click(byId('live-test-playbook-toggle'))
+    await waitFor(() => expect(byId('live-test-playbook-starter-btn')).toBeTruthy())
+
+    await click(byId('live-test-playbook-starter-btn'))
+    await waitFor(() => expect(byId('live-test-playbook-case-0')).toBeTruthy())
+    expect(byId<HTMLButtonElement>('live-test-playbook-run-btn').disabled).toBe(false)
+
+    await click(byId('live-test-playbook-save-btn'))
+    await waitFor(() => expect(byId('live-test-playbook-saved')).toBeTruthy())
+
+    await click(byId('live-test-playbook-run-btn'))
+    await waitFor(() => expect(byId('live-test-playbook-results')).toBeTruthy())
+    expect(byId('live-test-playbook-results').textContent).toContain('Passed: 3')
+    expect(byId('live-test-playbook-results').textContent).toContain('Failed: 0')
+    expect(byId('live-test-playbook-result-pbk_guest_access').textContent).toContain('PASS')
   })
 })

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
+import { getDb } from '../db/index.js';
 import { createUser, createSession } from '../services/auth.js';
 import { validateInviteCode, claimInviteCode } from '../services/invites.js';
 import { mintUserApiKey } from '../services/user-keys.js';
@@ -112,35 +113,43 @@ customAuthRouter.post('/register', (req: Request, res: Response) => {
   }
   const { email, password, inviteCode } = parsed.data;
 
-  const validation = validateInviteCode(inviteCode);
-  if (!validation.valid) {
-    const messages: Record<string, string> = {
-      expired: 'This invite code has expired.',
-      exhausted: 'This invite code has reached its maximum uses.',
-      revoked: 'This invite code has been revoked.',
-    };
-    res.status(400).json({
-      error: { message: messages[validation.reason ?? ''] ?? 'Invalid invite code.', type: 'invalid_invite_code' },
-    });
-    return;
-  }
-
-  let user;
   try {
-    user = createUser(email, password, 'member');
+    const registered = getDb().transaction(() => {
+      const validation = validateInviteCode(inviteCode);
+      if (!validation.valid) {
+        throw Object.assign(new Error('invalid_invite_code'), {
+          code: 'invalid_invite_code',
+          reason: validation.reason,
+        });
+      }
+      const user = createUser(email, password, 'member');
+      if (!claimInviteCode(inviteCode)) {
+        throw Object.assign(new Error('invalid_invite_code'), {
+          code: 'invalid_invite_code',
+          reason: 'exhausted',
+        });
+      }
+      const initialKey = mintUserApiKey(user.userId, 'Default Key');
+      const token = createSession(user.userId);
+      return { token, email: user.email, role: user.role, apiKey: initialKey.key };
+    })();
+    res.status(201).json(registered);
   } catch (err: any) {
+    if (err.code === 'invalid_invite_code') {
+      const messages: Record<string, string> = {
+        expired: 'This invite code has expired.',
+        exhausted: 'This invite code has reached its maximum uses.',
+        revoked: 'This invite code has been revoked.',
+      };
+      res.status(400).json({
+        error: { message: messages[err.reason ?? ''] ?? 'Invalid invite code.', type: 'invalid_invite_code' },
+      });
+      return;
+    }
     if (err.code === 'email_taken') {
       res.status(409).json({ error: { message: 'An account with that email already exists.', type: 'email_taken' } });
       return;
     }
     throw err;
   }
-
-  // Claimed after creation so a rejected email never burns a slot; the guard in
-  // the UPDATE keeps used_count itself correct under a race.
-  claimInviteCode(inviteCode);
-
-  const initialKey = mintUserApiKey(user.userId, 'Default Key');
-  const token = createSession(user.userId);
-  res.status(201).json({ token, email: user.email, role: user.role, apiKey: initialKey.key });
 });

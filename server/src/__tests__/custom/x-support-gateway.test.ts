@@ -88,7 +88,7 @@ describe('Multi-Tenant AI Support Gateway (/api/thruline/support/* & /thruline/v
   // 1. Permission Mapping Verification
   // -------------------------------------------------------------------------
   describe('Permission Mapping (server/src/custom/permission-actions.ts)', () => {
-    it('maps read and test/simulation endpoints to use_x_gateway', () => {
+    it('maps read endpoints to use_x_gateway and privileged token/test mutations to edit_x_settings', () => {
       expect(
         permissionForAction('manage_x_gateway', 'GET', '/api/thruline/support/tenants'),
       ).toBe('use_x_gateway');
@@ -98,28 +98,28 @@ describe('Multi-Tenant AI Support Gateway (/api/thruline/support/* & /thruline/v
           'POST',
           '/api/thruline/support/tenants/1/simulate-chat',
         ),
-      ).toBe('use_x_gateway');
+      ).toBe('edit_x_settings');
       expect(
         permissionForAction(
           'manage_x_gateway',
           'POST',
           '/api/thruline/support/tenants/1/mint-token',
         ),
-      ).toBe('use_x_gateway');
+      ).toBe('edit_x_settings');
       expect(
         permissionForAction(
           'manage_x_gateway',
           'POST',
           '/api/thruline/support/tenants/1/tools/2/test',
         ),
-      ).toBe('use_x_gateway');
+      ).toBe('edit_x_settings');
       expect(
         permissionForAction(
           'manage_x_gateway',
           'POST',
           '/api/thruline/support/tenants/1/db-sources/3/query-test',
         ),
-      ).toBe('use_x_gateway');
+      ).toBe('edit_x_settings');
     });
 
     it('maps configuration writes to edit_x_settings', () => {
@@ -312,12 +312,22 @@ describe('Multi-Tenant AI Support Gateway (/api/thruline/support/* & /thruline/v
         'Updated revenue description',
       );
 
-      // 4. Test tool permission denial for customer
-      const testDeny = await apiCall(
+      // 4. Test tool permission denial for customer (and deny view-only viewerToken from invoking tool test)
+      const testForbidden = await apiCall(
         `/api/thruline/support/tenants/${createdTenantId}/tools/${toolId}/test`,
         {
           method: 'POST',
           token: viewerToken,
+          body: { userId: 'cust_101', role: 'customer' },
+        },
+      );
+      expect(testForbidden.status).toBe(403);
+
+      const testDeny = await apiCall(
+        `/api/thruline/support/tenants/${createdTenantId}/tools/${toolId}/test`,
+        {
+          method: 'POST',
+          token: editorToken,
           body: { userId: 'cust_101', role: 'customer' },
         },
       );
@@ -341,7 +351,7 @@ describe('Multi-Tenant AI Support Gateway (/api/thruline/support/* & /thruline/v
         `/api/thruline/support/tenants/${createdTenantId}/db-sources/${sampleDbSourceId}/query-test`,
         {
           method: 'POST',
-          token: viewerToken,
+          token: editorToken,
           body: { userId: 'guest', role: 'guest', sql: 'SELECT * FROM products' },
         },
       );
@@ -354,7 +364,7 @@ describe('Multi-Tenant AI Support Gateway (/api/thruline/support/* & /thruline/v
         `/api/thruline/support/tenants/${createdTenantId}/db-sources/${sampleDbSourceId}/query-test`,
         {
           method: 'POST',
-          token: viewerToken,
+          token: editorToken,
           body: { userId: 'guest', role: 'guest', sql: 'SELECT * FROM orders' },
         },
       );
@@ -365,7 +375,7 @@ describe('Multi-Tenant AI Support Gateway (/api/thruline/support/* & /thruline/v
         `/api/thruline/support/tenants/${createdTenantId}/db-sources/${sampleDbSourceId}/query-test`,
         {
           method: 'POST',
-          token: viewerToken,
+          token: editorToken,
           body: { userId: 'cust_101', role: 'customer', sql: 'SELECT * FROM orders' },
         },
       );
@@ -379,7 +389,7 @@ describe('Multi-Tenant AI Support Gateway (/api/thruline/support/* & /thruline/v
         `/api/thruline/support/tenants/${createdTenantId}/db-sources/${sampleDbSourceId}/query-test`,
         {
           method: 'POST',
-          token: viewerToken,
+          token: editorToken,
           body: { userId: 'admin_user', role: 'admin', sql: 'SELECT * FROM orders' },
         },
       );
@@ -391,7 +401,7 @@ describe('Multi-Tenant AI Support Gateway (/api/thruline/support/* & /thruline/v
         `/api/thruline/support/tenants/${createdTenantId}/db-sources/${sampleDbSourceId}/query-test`,
         {
           method: 'POST',
-          token: viewerToken,
+          token: editorToken,
           body: { userId: 'cust_101', role: 'customer', sql: 'SELECT * FROM customers' },
         },
       );
@@ -403,12 +413,27 @@ describe('Multi-Tenant AI Support Gateway (/api/thruline/support/* & /thruline/v
       expect(profileRows[0].secret_note).toBeUndefined();
     });
 
-    it('POST /tenants/:id/mint-token generates a valid signed contextToken', async () => {
-      const res = await apiCall(
+    it('POST /tenants/:id/mint-token requires edit_x_settings and generates a valid signed contextToken', async () => {
+      const denied = await apiCall(
         `/api/thruline/support/tenants/${createdTenantId}/mint-token`,
         {
           method: 'POST',
           token: viewerToken,
+          body: {
+            userId: 'cust_101',
+            name: 'Alice Nguyen',
+            role: 'customer',
+            permissions: ['orders:read_own'],
+          },
+        },
+      );
+      expect(denied.status).toBe(403);
+
+      const res = await apiCall(
+        `/api/thruline/support/tenants/${createdTenantId}/mint-token`,
+        {
+          method: 'POST',
+          token: editorToken,
           body: {
             userId: 'cust_101',
             name: 'Alice Nguyen',
@@ -430,7 +455,7 @@ describe('Multi-Tenant AI Support Gateway (/api/thruline/support/* & /thruline/v
         `/api/thruline/support/tenants/${createdTenantId}/simulate-chat`,
         {
           method: 'POST',
-          token: viewerToken,
+          token: editorToken,
           body: {
             userId: 'cust_101',
             name: 'Alice',

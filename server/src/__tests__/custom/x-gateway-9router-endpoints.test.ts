@@ -152,12 +152,17 @@ describe('metadata, fetch compatibility, and context compaction', () => {
   it('mounts web/fetch with the same SSRF guard', async () => {
     expect((await call('/web/fetch', { url: 'http://127.0.0.1/secrets' })).status).toBe(400);
     expect(upstream).not.toHaveBeenCalled();
-    const originalFetch = globalThis.fetch;
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((url, init) => String(url).startsWith('https://93.184.216.34')
-      ? Promise.resolve(new Response('<h1>Hello</h1>', { headers: { 'Content-Type': 'text/html' } })) : originalFetch(url, init));
-    try {
-      expect((await call('/web/fetch', { url: 'https://93.184.216.34/' })).status).toBe(200);
-    } finally { fetchSpy.mockRestore(); }
+    upstream.mockResolvedValueOnce(new Response('<h1>Hello</h1>', { headers: { 'Content-Type': 'text/html' } }));
+    const res = await call('/web/fetch', { url: 'https://93.184.216.34/' });
+    expect(res.status).toBe(200);
+    expect(upstream).toHaveBeenCalledWith(
+      'https://93.184.216.34/',
+      expect.objectContaining({ redirect: 'manual' }),
+      'custom',
+      'unknown',
+      undefined,
+      expect.objectContaining({ blockPrivate: true, allowManualRedirectResponse: true }),
+    );
   });
   it.each(['input', 'messages', 'instructions'])('compacts %s through the selected model', async field => {
     seed('openai', 'o4-mini');

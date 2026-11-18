@@ -1,0 +1,40 @@
+# Architecture Summary — `freellmapi-custom`
+
+## 1. Product, Principals, Normal Authority, and Protected Resources
+- **Product**: Self-hosted multi-provider LLM API aggregator and unified proxy gateway (`FreeLLMAPI`) extended with multi-user RBAC, invite/approval registration, client profiles (`sk-cp-`), Thruline / X Gateway (`/thruline/*`), multi-tenant AI Support Gateway & Service Desk, and a 6-pillar AI Platform (`/api/ai-platform`, `flow:<slug>`), plus React web dashboard, `freellmapi` CLI, and Electron desktop app.
+- **Principals & Normal Authority**:
+  - **Unauthenticated visitor**: `/livez`, `/readyz`, `/api/ping`, `/v1/docs`, `/thruline-skills/*`, `/api/auth/{status,setup,login,register,request-access,validate-invite,google/*,email/*}`; optional opt-in guest reads/trial chat (`/api/guest/chat`); capability URL `/api/thruline/playground/media/:id`; Support widget chat (`allowGuest`) and `/thruline/api/{tags,version,show}`.
+  - **Invited / Registered Member**: personal `sk-flm-` keys, own usage/quotas, own `playground_conversations`, and read-only dashboard tabs.
+  - **Delegated Admin / Custom-Permission User**: granular RBAC permissions (`shared/permissions.ts`) via `PERMISSION_GATES` and `permissionForAction`.
+  - **Primary Admin**: immutable `is_primary=1` (`*` permissions), exclusive control over `mcp/allowed-internal-hosts`.
+  - **API Key / Token Callers**: unified key (`/v1`, `/v1beta`, `/mcp`, `/v1/usage`), `flmurl_` URL tokens (`/v1/t/:token`), `sk-flm-` personal keys, `sk-xgw-` X-Gateway keys (`/thruline/v1`, `/v1beta`), `sk-cp-` client profiles (`flow:<slug>`, `/v1/stored-conversations`, `/v1/ai/runs/:id`), Support `pk_sup_` + HMAC `sup_ctx_` tokens, and proxy-pool webhook `?token=`.
+  - **Local CLI / Desktop Electron / CI**: local config files & `claude`/`codex` spawning (`cli/`), localhost Electron dashboard + `FREEAPI_DESKTOP=1` (`desktop/`), GitHub Actions (`ci`, `docker`, `cli-release`, `desktop-release`, `upstream-sync`).
+- **Protected Resources**: AES-256-GCM encrypted upstream provider keys, OAuth tokens, and service secrets (`api_keys`, `x_gateway_keys`, `custom_ai_mcp_servers`, `x_support_*`, `.encryption-key`); SQLite DB & SQL backups; session tokens (`sessions`), unified/profile/user keys; multi-tenant Support SQL/KB/PII records; operator-owned LLM spend/quotas; release signing secrets and container host socket.
+
+## 2. Comparable Software Baseline
+- `specs/007-admin-x-gateway/spec.md` and `shared/permissions.ts` cite **9Router** as the design baseline for Thruline / X Gateway, while `server/src/routes/status.ts` names **LiteLLM Proxy, LibreChat, and OmniRoute** as comparable meta-gateways consuming `/v1/providers` and `/v1/quota-forecast`. Typical risks in such gateways—SSRF via custom provider URLs, cross-tenant key/context bleed, unauthenticated model enumeration, incomplete key rotation, and Electron desktop loopback privilege escalation—are used to calibrate audit depth, never to dismiss findings.
+
+## 3. Tech Stack, Deployment Paths, and Execution Limits
+- **Stack**: TypeScript ESM workspaces (`shared`, `server`, `client`, `cli`) + standalone `desktop/` on Node.js `>=20.18 <25` (host `v24.22.1`); Express 5, Helmet, CORS, Multer, Undici, `better-sqlite3` (`node:sqlite` on Android, optional `libsql` Turso), `sharp`, React 19 + Vite, Electron 38.
+- **Deployment Paths**: Local Node (`tsx watch` or `node server/dist/index.js`), Docker (`Dockerfile` + `docker-entrypoint.sh` root-to-`node` drop + `docker-compose.yml` with optional Watchtower), Render/PaaS (`HOST=0.0.0.0`), Electron Desktop (`127.0.0.1:31415` or optional `0.0.0.0`), npm `freellmapi` CLI, and GitHub Actions workflows.
+- **Offline / Sandbox Limits**: On this `win32` host, OS-enforced sandboxing (network namespace, read-only target mounts, scratch-only writes, resource caps, POSIX `O_NOFOLLOW`) and `desktop/node_modules` / VS C++ build tools / `docker` are unavailable. Target execution is disabled; runtime-dependent leads remain `needs_validation`.
+
+## 4. Entry Surfaces and Source-to-Sink Paths
+- **HTTP Ingress**: `server/src/app.ts` (`allowedHosts` off by default, `trustProxy` false by default, `legacyGatewayPath`, Helmet/CORS, `preparseGuard` 256 KiB unauth limit & `x-ai-platform-internal` strip, 25 MiB LLM / 10 MiB admin JSON parsers) -> `custom/register.ts` (`PERMISSION_GATES`, custom routes) -> upstream routes & X-Gateway/Support/AI-Platform routers -> DB (`better-sqlite3`/`turso`), `fetch`/`safeFetch`/`proxyFetch`, `sharp`, SQL dump restore (`db.exec`), `reg`/`scutil`/`gsettings`/`git` (`execFile`/`execFileSync`), `node:worker_threads`.
+- **LLM / Protocol Paths**: OpenAI/Anthropic/Gemini/Responses/Ollama/MCP inputs -> compression/custom regex filters (`toolfilter.ts`), prompt templating (`prompts/render.ts`), hybrid RAG (`retrieval/hybrid.ts`), tool-loop/MCP dispatch (`mcp-client`), provider HTTP translation, `tool-args`/`tool-call-rescue`, output-guard worker/stream interceptor, and SSE/JSON cache.
+- **Browser / Desktop / CLI / CI**: `client/src/` (React + `PlaygroundMessage` custom HTML sanitizer + sandboxed `iframe srcDoc` + `localStorage`/`sessionStorage`/`BroadcastChannel` + embedded `support-runtime-widget.ts`) -> Electron `BrowserWindow` (`sandbox: false`, `preload.ts`, `shell.openExternal`) -> CLI (`doctor.ts` reading workspace `.claude`/`.codex`, `config-files.ts`, `cross-spawn`) -> `.github/workflows/*.yml` + Docker.
+
+## 5. Trust Boundaries and Strongest Visible Controls
+- **Auth & Loopback**: SHA-256 hashed 32B session tokens (`services/auth.ts`), atomic invites & durable `auth_request_limits` (`custom/auth.ts`), PKCE/JWKS/sealed cookies (`google-auth.ts`), `isLoopbackRequest` checking socket + right-most XFF (`lib/loopback.ts`), process-ephemeral HMAC + body SHA-256 + timestamp/nonce (`ai-platform/loopback.ts`).
+- **RBAC & Tenant Isolation**: `installGate` + `permissionForAction` + `noBroaderThan` (`services/users.ts`), `guardKeyAddition`, `profileInferenceGate`, `support-store.ts` `tenant_id` scoping + `sup_ctx_` HMAC, `support-connectors.ts` AST/regex SQL `SELECT` rewrite & column stripping.
+- **SSRF & Crypto**: `safeFetch` DNS IP-pinning & redirect checks (`support-safe-http.ts`) vs unpinned `assessProviderUrl` (`url-guard.ts`, private IPs allowed by default) vs bare `fetch` in `provider-accounts`/`proxy-webhook`; AES-256-GCM via `ENCRYPTION_KEY` (fail-closed in prod `crypto.ts`).
+
+## 6. Repository-Relative Starting Paths
+- `server/src/app.ts`, `server/src/index.ts`, `server/src/custom/register.ts`, `server/src/custom/auth.ts`, `server/src/custom/permission-actions.ts`, `server/src/routes/`, `server/src/services/`, `server/src/lib/`, `server/src/providers/`, `server/src/db/`, `server/src/custom/x-gateway/`, `server/src/custom/provider-accounts/`, `server/src/custom/ai-platform/`, `server/src/custom/proxy-webhook/`, `client/src/`, `shared/`, `cli/src/`, `desktop/src/`, `desktop/scripts/`, `Dockerfile`, `docker-compose.yml`, `docker-entrypoint.sh`, `scripts/`, `.github/workflows/`.
+
+## 7. Prior Coverage Gaps
+- No compatible prior audit runs exist for `freellmapi-custom`; all units initialize with `prior_status: "none"`.
+
+## 8. Companion Selection Summary
+- Selected: `WEB-PROTOCOL-AND-AUTH.md` (HTTP auth, sessions, OAuth, recovery, API keys, Host/CORS), `AI-AND-LLM.md` (prompts, RAG, MCP tool loops, output guard, orchestrator approvals), `CLIENT-SIDE.md` (React/markdown DOM sinks, iframes, widget, storage, CORS, `BroadcastChannel`), `DATA-ISOLATION-AND-LIFECYCLE.md` (multi-tenant Support, SQL backups/restore, key rotation, logs), `DESKTOP-MOBILE-AND-LOCAL-IPC.md` (Electron preloads, IPC, `shell.openExternal`, local file perms), `SUPPLY-CHAIN-AND-RELEASE.md` (GitHub Actions, npm OIDC, Electron notarization/updater), `CLOUD-AND-DEPLOYMENT.md` (Docker privilege drop, Compose/Watchtower, env config), `RESOURCE-EXHAUSTION-AND-AVAILABILITY.md` (ReDoS, buffering, quotas, unauth work), `PROTOCOLS-RPC-AND-MESSAGING.md` (MCP JSON-RPC, Ollama/OpenAI/Anthropic/Gemini dialect mismatches).
+- Excluded: `MEMORY-SAFETY-AND-BINARY.md` (no C/C++/Rust/unsafe native source in repository).
