@@ -9,7 +9,6 @@ import {
   clearSavedActivationToken,
   configureCloudEntitlementForTesting,
   ensureCloudEntitlementActive,
-  ensureVerifiedCloudRuntimePack,
   getCloudEntitlementStatus,
   refreshCloudEntitlementLease,
   requireVerifiedCloudRuntimePack,
