@@ -35,6 +35,8 @@ import { useUserSession } from '../../use-session'
 import { proxyPoolApi } from '../proxy-pool-api'
 import { quotaApi } from '../quota-api'
 import AccountQuotaSummary from '../components/AccountQuotaSummary'
+import AccountResilienceControls from '../components/AccountResilienceControls'
+import { fetchAccountResilienceList } from '../account-resilience-strings'
 import { usePoolStrings } from '../proxy-pool-strings'
 import { useXStrings } from '../strings'
 import { useXGatewayCopy } from '../copy'
@@ -144,6 +146,16 @@ export default function ProviderAccounts() {
     retry: false,
   })
   const cooldowns = cooldownQuery.data?.cooldowns ?? {}
+
+  const resilienceQuery = useQuery({
+    queryKey: ['x-account-resilience', revision],
+    queryFn: ({ signal }) => fetchAccountResilienceList(signal),
+    enabled: Boolean(providerId),
+    refetchInterval: 5_000,
+    retry: false,
+  })
+  const resiliencePolicies = resilienceQuery.data?.policies ?? {}
+  const resilienceSemaphores = resilienceQuery.data?.semaphores ?? {}
 
   const [connect, setConnect] = useState<true | ProviderAccount | null>(null)
   const [edit, setEdit] = useState<ProviderAccount | null>(null)
@@ -971,6 +983,14 @@ export default function ProviderAccounts() {
                   />
                 </div>
               )}
+
+              <AccountResilienceControls
+                accountId={account.id}
+                accountLabel={account.label || provider.name}
+                canEdit={permissions.edit}
+                policy={resiliencePolicies[account.id]}
+                semaphore={resilienceSemaphores[account.id]}
+              />
 
               <div className="x-account-actions">
                 {permissions.test && (
