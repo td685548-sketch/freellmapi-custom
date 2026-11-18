@@ -41,9 +41,9 @@ export function MemberKeysView() {
 
   const keys = data?.keys ?? []
 
-  const { data: usageData } = useQuery<{ usage: { requests: number; tokens: number; month: string } }>({
+  const { data: usageData } = useQuery<{ usage: { requests: number; tokens: number; month: string; rpmLimit?: number } }>({
     queryKey: ['user-usage'],
-    queryFn: () => apiFetch<{ usage: { requests: number; tokens: number; month: string } }>('/api/user/usage'),
+    queryFn: () => apiFetch<{ usage: { requests: number; tokens: number; month: string; rpmLimit?: number } }>('/api/user/usage'),
   })
 
   const { data: catalogData } = useQuery<{ assistants: CustomerAiAssistant[] }>({
@@ -133,9 +133,11 @@ export function MemberKeysView() {
         <div className="rounded-2xl border bg-card p-5 space-y-1 shadow-sm">
           <div className="text-xs font-medium text-muted-foreground">{tc('Rate Limit Quota')}</div>
           <div className="text-2xl font-bold text-foreground">
-            60 <span className="text-sm font-normal text-muted-foreground">{tc('RPM')}</span>
+            {usageData?.usage?.rpmLimit ?? 60} <span className="text-sm font-normal text-muted-foreground">{tc('RPM')}</span>
           </div>
-          <div className="text-xs text-muted-foreground">{tc('Up to 60 requests/minute allocated to your personal keys')}</div>
+          <div className="text-xs text-muted-foreground">
+            {tc('Up to {rpm} requests/minute allocated to your personal keys', { rpm: usageData?.usage?.rpmLimit ?? 60 })}
+          </div>
         </div>
       </div>
 
@@ -286,7 +288,7 @@ export function MemberKeysView() {
                     endpointMode === 'origin' ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground'
                   }`}
                 >
-                  Public / Network
+                  {tc('Public / Network')}
                 </button>
               )}
             </div>
@@ -299,8 +301,8 @@ export function MemberKeysView() {
           </div>
           <p className="text-[11px] text-muted-foreground max-w-lg">
             {endpointMode === 'local'
-              ? 'Gọi trực tiếp ngay trên máy chủ (0ms, không đi vòng qua mạng ngoài).'
-              : 'Dùng cho các máy tính/thiết bị khác kết nối qua mạng hoặc Internet.'}
+              ? tc('Direct local server call (0ms overhead, bypasses external network).')
+              : tc('Use for external devices connecting over LAN or the Internet.')}
           </p>
         </div>
 

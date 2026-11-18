@@ -24,6 +24,7 @@ import {
   X,
 } from 'lucide-react'
 import { apiFetch, getToken } from '@/lib/api'
+import { useI18n } from '@/i18n'
 import { useAccounts } from '../api'
 import { useXStrings } from '../strings'
 import { useSessionRevision } from '../../session-state'
@@ -150,6 +151,8 @@ const fmtTokens = (n: number) => {
 }
 
 export default function AccountUsage() {
+  const { locale } = useI18n()
+  const isVi = locale === 'vi'
   const s = useXStrings()
   const revision = useSessionRevision()
   const session = useUserSession()
@@ -709,7 +712,9 @@ export default function AccountUsage() {
                 Pricing Settings ($ / 1M Tokens)
               </h2>
               <p className="x-caption" style={{ margin: '0.25rem 0 0 0' }}>
-                Cấu hình đơn giá Input, Output và Cached ($/1M tokens) theo từng Provider/Model để tính chính xác chi phí trên Usage và Request Logs.
+                {isVi
+                  ? 'Cấu hình đơn giá Input, Output và Cached ($/1M tokens) theo từng Provider/Model để tính chính xác chi phí trên Usage và Request Logs.'
+                  : 'Configure Input, Output, and Cached rates ($/1M tokens) per Provider/Model for accurate cost calculation across Usage and Request Logs.'}
               </p>
             </div>
 
@@ -756,7 +761,7 @@ export default function AccountUsage() {
           )}
           {savePricingMutation.isSuccess && (
             <p role="status" className="x-test-ok" style={{ marginBottom: '0.75rem' }}>
-              Đã lưu bảng giá thành công.
+              {isVi ? 'Đã lưu bảng giá thành công.' : 'Pricing table saved successfully.'}
             </p>
           )}
 
@@ -833,7 +838,7 @@ export default function AccountUsage() {
                 onClick={handleAddCustomModelRate}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
               >
-                <Plus size={14} /> Thêm đơn giá
+                <Plus size={14} /> {isVi ? 'Thêm đơn giá' : 'Add Rate'}
               </button>
             </div>
           )}
@@ -842,7 +847,7 @@ export default function AccountUsage() {
           <div style={{ marginBottom: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
             <input
               type="text"
-              placeholder="Tìm nhanh provider hoặc model trong bảng giá..."
+              placeholder={isVi ? 'Tìm nhanh provider hoặc model trong bảng giá...' : 'Filter provider or model in pricing table...'}
               value={pricingFilter}
               onChange={e => setPricingFilter(e.target.value)}
               style={{
@@ -865,7 +870,7 @@ export default function AccountUsage() {
                   <th>Input ($/1M)</th>
                   <th>Output ($/1M)</th>
                   <th>Cached ($/1M)</th>
-                  {canEditPricing && <th>Thao tác</th>}
+                  {canEditPricing && <th>{isVi ? 'Thao tác' : 'Actions'}</th>}
                 </tr>
               </thead>
               <tbody>
@@ -1058,9 +1063,11 @@ export default function AccountUsage() {
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 formatter={(val: any) => [
                   chartMetric === 'tokens' ? `${fmtTokens(Number(val) || 0)} tokens` : `${Number(val || 0).toLocaleString()} requests`,
-                  chartMetric === 'tokens' ? 'Lượng Token' : 'Lượng Requests',
+                  chartMetric === 'tokens'
+                    ? (isVi ? 'Lượng Token' : 'Tokens')
+                    : (isVi ? 'Lượng Requests' : 'Requests'),
                 ] as [string, string]}
-                labelFormatter={label => `Thời gian: ${label}`}
+                labelFormatter={label => (isVi ? `Thời gian: ${label}` : `Time: ${label}`)}
               />
               <Area
                 type="monotone"
@@ -1154,7 +1161,9 @@ export default function AccountUsage() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <Layers size={18} />
-            <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 600 }}>Chi tiết hạn mức & Sử dụng theo tài khoản</h3>
+            <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 600 }}>
+              {isVi ? 'Chi tiết hạn mức & Sử dụng theo tài khoản' : 'Account Quota & Usage Breakdown'}
+            </h3>
           </div>
 
           {/* Search / Filter Provider Input + Refresh Quotas */}
@@ -1167,14 +1176,16 @@ export default function AccountUsage() {
                 onClick={() => refreshAllQuotas.mutate()}
               >
                 <RefreshCw size={13} className={refreshAllQuotas.isPending ? 'x-spin' : undefined} />
-                {refreshAllQuotas.isPending ? 'Đang đo hạn mức…' : 'Cập nhật hạn mức'}
+                {refreshAllQuotas.isPending
+                  ? (isVi ? 'Đang đo hạn mức…' : 'Refreshing quotas…')
+                  : (isVi ? 'Cập nhật hạn mức' : 'Refresh Quotas')}
               </button>
             )}
             <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
               <Search size={14} style={{ position: 'absolute', left: '0.6rem', color: 'var(--text-muted)' }} />
               <input
                 type="text"
-                placeholder="Tìm kiếm tài khoản / Provider..."
+                placeholder={isVi ? 'Tìm kiếm tài khoản / Provider...' : 'Search account / provider...'}
                 value={providerSearch}
                 onChange={e => setProviderSearch(e.target.value)}
                 style={{
@@ -1230,7 +1241,11 @@ export default function AccountUsage() {
               </td>
             </>
           )}
-          emptyMessage={providerSearch ? 'Không tìm thấy tài khoản phù hợp với từ khóa.' : s.noAccounts}
+          emptyMessage={
+            providerSearch
+              ? (isVi ? 'Không tìm thấy tài khoản phù hợp với từ khóa.' : 'No accounts match your search.')
+              : s.noAccounts
+          }
         />
         {!filteredAccounts.length && !accounts.length && (
           <div style={{ marginTop: '0.75rem', textAlign: 'center' }}>

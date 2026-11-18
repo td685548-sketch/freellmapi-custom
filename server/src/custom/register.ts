@@ -28,6 +28,7 @@ import { maybeRollUp } from '../services/usage-daily.js';
 import { maybeSendWeeklyReport } from '../services/usage-report.js';
 import { usageReportSettingsRouter } from '../routes/usage-report-settings.js';
 import { contextPolicyRouter, contextPolicySettingsRouter } from '../routes/context-policy.js';
+import { starterQuotaSettingsRouter } from '../routes/starter-quota-settings.js';
 import { auditMiddleware } from '../services/audit-log.js';
 import { auditLogRouter } from '../routes/audit-log.js';
 import { playgroundAttribution } from './playground-attribution.js';
@@ -284,6 +285,8 @@ export function registerCustomRoutes(app: Express): void {
   app.use('/api/settings/usage-report', usageReportSettingsRouter);
   // System default context budget policy; same gate (view_settings / edit_settings, see permission-actions.ts).
   app.use('/api/settings/context-policy', contextPolicySettingsRouter);
+  // Default starter usage quota automatically assigned to newly created member accounts.
+  app.use('/api/settings/starter-quota', starterQuotaSettingsRouter);
   // Usage ranking of accounts and client keys; its view_usage gate is in PERMISSION_GATES.
   app.use('/api/usage', usageRouter);
 

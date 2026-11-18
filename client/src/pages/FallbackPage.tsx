@@ -54,6 +54,7 @@ import { ReliabilityFloorControl } from '@/components/reliability-floor-control'
 import { ProviderMomentControl } from '@/components/provider-moment-control'
 import { DecisionRoutingPopover, DecisionSetupGuide } from '@/components/decision-routing-popover'
 import { ChainManager } from '@/components/chain-manager'
+import { useUserSession } from '@/custom/use-session'
 
 // `tKey` is the i18n suffix under `strategies.*` (label) and `strategies.*Blurb`.
 // It differs from the routing `key` for Manual, whose strategy id is 'priority'.
@@ -95,6 +96,9 @@ function readOptionsCollapsed(): boolean {
 
 export default function FallbackPage() {
   const { t } = useI18n()
+  const { hasPermission } = useUserSession()
+  const canManageRouting = hasPermission('manage_routing')
+  const canInspectPenalties = canManageRouting || hasPermission('test_keys')
   const listStrings = useModelListStrings()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -253,7 +257,7 @@ export default function FallbackPage() {
     if (hasManualOrder) return visibleGroups
     return visibleGroups.slice().sort((a, b) => (pagination.groupOrder.get(a.key) ?? 0) - (pagination.groupOrder.get(b.key) ?? 0))
   }, [visibleGroups, hasManualOrder, pagination.groupOrder])
-  const draggable = canReorder
+  const draggable = canManageRouting && canReorder
   const renderedGroups = sortedGroups
 
   function clearFilters() {
@@ -265,6 +269,7 @@ export default function FallbackPage() {
   }
 
   function handleGroupToggle(memberIds: number[], enabled: boolean) {
+    if (!canManageRouting) return
     const ids = new Set(memberIds)
     setLocalEntries(allEntries.map(e => (ids.has(e.modelDbId) ? { ...e, enabled } : e)))
   }
@@ -279,6 +284,7 @@ export default function FallbackPage() {
   const visibleEnabledCount = visibleGroups.filter(g => g.members.some(m => m.enabled)).length
 
   function handleBulkToggle(enabled: boolean) {
+    if (!canManageRouting) return
     const ids = new Set(visibleMemberIds)
     setLocalEntries(allEntries.map(e => (ids.has(e.modelDbId) ? { ...e, enabled } : e)))
   }
@@ -385,23 +391,23 @@ export default function FallbackPage() {
                 return (
                   <Tooltip key={s.key} text={t(`strategies.${s.tKey}Blurb`)}>
                     <button
-                      disabled={strategyMutation.isPending}
-                      onClick={() => strategyMutation.mutate({ strategy: s.key })}
-                      className={pillClass}
+                      disabled={!canManageRouting || strategyMutation.isPending}
+                      onClick={() => canManageRouting && strategyMutation.mutate({ strategy: s.key })}
+                      className={`${pillClass} disabled:cursor-default disabled:opacity-75`}
                     >
                       {t(`strategies.${s.tKey}`)}
                     </button>
                   </Tooltip>
                 )
               })}
-              {strategy === 'custom' && routing && (
+              {canManageRouting && strategy === 'custom' && routing && (
                 <CustomWeightsPopover
                   saved={routing.customWeights}
                   saving={strategyMutation.isPending}
                   onSave={w => strategyMutation.mutate({ strategy: 'custom', weights: w })}
                 />
               )}
-              {strategy === 'decision' && routing?.decision && (
+              {canManageRouting && strategy === 'decision' && routing?.decision && (
                 <DecisionRoutingPopover
                   status={routing.decision}
                   saving={strategyMutation.isPending}
@@ -412,9 +418,10 @@ export default function FallbackPage() {
 
             <button
               type="button"
-              onClick={toggleOptions}
+              disabled={!canManageRouting}
+              onClick={() => canManageRouting && toggleOptions()}
               aria-expanded={!optionsCollapsed}
-              className="inline-flex items-center gap-1 rounded-lg px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              className="inline-flex items-center gap-1 rounded-lg px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
             >
               {t('strategies.moreOptions')}
               <ChevronDown className={`size-3.5 transition-transform ${optionsCollapsed ? '-rotate-90' : ''}`} />
@@ -518,9 +525,9 @@ export default function FallbackPage() {
 
         {/* Named fallback chains (#960/#895): list/create/activate/delete.
             Activating a chain makes the table below edit that chain. */}
-        <ChainManager />
+        {canManageRouting && <ChainManager />}
 
-        <PenaltyInspector />
+        {canInspectPenalties && <PenaltyInspector />}
 
         {/* Unified routing / fallback table */}
         {isLoading ? (
@@ -588,26 +595,28 @@ export default function FallbackPage() {
                     </button>
                   ))}
                 </div>
-                <div className="inline-flex items-center gap-1 rounded-xl border p-1" role="group" aria-label={t('models.bulkToggle')}>
-                  <Tooltip text={t('models.enableAllHint')}>
-                    <button
-                      onClick={() => handleBulkToggle(true)}
-                      disabled={visibleEnabledCount === visibleGroups.length}
-                      className="rounded-lg px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
-                    >
-                      {t('models.enableAll')}
-                    </button>
-                  </Tooltip>
-                  <Tooltip text={t('models.disableAllHint')}>
-                    <button
-                      onClick={() => handleBulkToggle(false)}
-                      disabled={visibleEnabledCount === 0}
-                      className="rounded-lg px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
-                    >
-                      {t('models.disableAll')}
-                    </button>
-                  </Tooltip>
-                </div>
+                {canManageRouting && (
+                  <div className="inline-flex items-center gap-1 rounded-xl border p-1" role="group" aria-label={t('models.bulkToggle')}>
+                    <Tooltip text={t('models.enableAllHint')}>
+                      <button
+                        onClick={() => handleBulkToggle(true)}
+                        disabled={visibleEnabledCount === visibleGroups.length}
+                        className="rounded-lg px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
+                      >
+                        {t('models.enableAll')}
+                      </button>
+                    </Tooltip>
+                    <Tooltip text={t('models.disableAllHint')}>
+                      <button
+                        onClick={() => handleBulkToggle(false)}
+                        disabled={visibleEnabledCount === 0}
+                        className="rounded-lg px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
+                      >
+                        {t('models.disableAll')}
+                      </button>
+                    </Tooltip>
+                  </div>
+                )}
               </div>
             </div>
 

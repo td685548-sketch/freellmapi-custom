@@ -28,6 +28,7 @@ import { type Theme, useTheme } from '@/theme-context'
 import { apiFetch } from '@/lib/api'
 import { CacheSettingsSection } from '@/custom/CacheSettingsSection'
 import { ContextPolicyDefaultSection } from '@/custom/ContextPolicyDefaultSection'
+import { StarterQuotaDefaultSection } from '@/custom/StarterQuotaDefaultSection'
 import { useUserSession } from '@/custom/use-session'
 import { useDesktopLoginItem } from '@/lib/desktop-login-item'
 
@@ -579,6 +580,7 @@ function GeneralSection() {
       />
       <CacheSettingsSection />
       <ContextPolicyDefaultSection />
+      <StarterQuotaDefaultSection />
       {loginItem.enabled !== null && (
         <Row
           label={t('settings.startAtLogin')}

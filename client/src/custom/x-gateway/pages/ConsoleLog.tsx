@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Coins, Copy, ScrollText, Search, Terminal, Trash2, X } from 'lucide-react'
 import { apiFetch, getToken } from '@/lib/api'
+import { useI18n } from '@/i18n'
 import { useSessionRevision } from '../../session-state'
 import { useUserSession } from '../../use-session'
 import { mgmtApi, type XLog } from '../management-api'
@@ -33,6 +34,7 @@ function colorLine(line: string) {
 }
 
 export default function ConsoleLog() {
+  const { locale } = useI18n()
   const s = useMgmtStrings()
   const xs = useXStrings()
   const revision = useSessionRevision()
@@ -545,7 +547,7 @@ export default function ConsoleLog() {
                         style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem' }}
                       >
                         {copiedLogJson ? <Check size={13} /> : <Copy size={13} />}
-                        {copiedLogJson ? 'Đã sao chép!' : 'Copy JSON'}
+                        {copiedLogJson ? (locale === 'vi' ? 'Đã sao chép!' : 'Copied!') : 'Copy JSON'}
                       </button>
                     </div>
                     <pre style={{

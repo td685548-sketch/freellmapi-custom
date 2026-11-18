@@ -13,6 +13,7 @@ import {
 import { claimInviteCode } from './invites.js';
 import { hashPassword } from '../lib/password.js';
 import { mintUserApiKey } from './user-keys.js';
+import { applyStarterQuotaToNewMember } from './starter-quota.js';
 import {
   digest,
   randomSecret,
@@ -236,6 +237,7 @@ export function finishGoogleLogin(
         const created = createUser(identity.email, randomSecret(), 'member');
         user = { id: created.userId, email: created.email, role: 'member' };
         apiKey = mintUserApiKey(user.id, 'Default Key').key;
+        applyStarterQuotaToNewMember(user.id);
       }
       db.prepare(
         'INSERT INTO auth_google_identities (subject, user_id) VALUES (?, ?)',

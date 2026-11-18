@@ -11,6 +11,7 @@ import { PermissionsDialog } from './PermissionsDialog'
 import { TenantAccessDialog } from './TenantAccessDialog'
 import { UsageLink } from './UsageLink'
 import { GuestAccessCard } from './GuestAccessCard'
+import { StarterQuotaDefaultSection } from './StarterQuotaDefaultSection'
 
 import type { AdminUser, RegistrationRequest } from '../../../shared/user-access'
 import { useCustomT } from './i18n/use-custom-t'
@@ -477,6 +478,7 @@ export function UsersPage({ capabilities }: { capabilities?: UserPageCapabilitie
         onSuccess={refreshAll}
       />
 
+      {can('viewUsers') && <StarterQuotaDefaultSection />}
       {can('viewUsers') && <GuestAccessCard canEdit={can('permissions')} />}
 
       <p className="text-xs text-muted-foreground">{tc('Creating accounts directly without invitation or approval is not allowed to protect system capacity.')}</p>
