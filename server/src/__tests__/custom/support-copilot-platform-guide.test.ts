@@ -158,10 +158,13 @@ describe('AI Support Setup Copilot — Platform & Current-Page Expertise', () =>
       for (const question of [
         'web này làm gì?',
         'web nay dung de lam gi',
+        'day la web gi vay',
         'trang web này là gì',
         'hệ thống này là gì',
         'FreeLLMAPI là gì?',
         'Thruline dùng để làm gì?',
+        'thruline la cai gi vay',
+        'thruline hoat dong the nao',
       ]) {
         const res = await hit(
           '/api/support-setup-copilot/chat',
@@ -303,6 +306,24 @@ describe('AI Support Setup Copilot — Platform & Current-Page Expertise', () =>
         locale: 'vi',
         expectedPattern: /AI Hub|Coding|Eco|Balanced|Max/i,
       },
+      {
+        path: '/thruline/providers',
+        question: 'day la trang gi',
+        locale: 'en',
+        expectedPattern: /Providers|OAuth|xoay vòng/i,
+      },
+      {
+        path: '/thruline/combos',
+        question: 'chỗ này là gì?',
+        locale: 'vi',
+        expectedPattern: /Combos|dự phòng|model ảo/i,
+      },
+      {
+        path: '/thruline/savers',
+        question: 'chỗ này dùng để làm gì?',
+        locale: 'vi',
+        expectedPattern: /Token Savers|Agentic Token Compactor/i,
+      },
     ];
 
     for (const tc of routeCases) {
@@ -323,6 +344,9 @@ describe('AI Support Setup Copilot — Platform & Current-Page Expertise', () =>
       expect(res.status).toBe(200);
       expect(res.body?.intent).toBe('guide');
       expect(res.body?.proposal).toBeNull();
+      if (tc.question === 'day la trang gi') {
+        expect(res.body?.replyLocale).toBe('vi');
+      }
       const reply = String(res.body?.reply ?? '');
       assertFluentHumanReply(reply);
       expect(reply).toMatch(tc.expectedPattern);
@@ -338,6 +362,9 @@ describe('AI Support Setup Copilot — Platform & Current-Page Expertise', () =>
       ['how to add provider keys?', /\/thruline\/providers|OAuth/i],
       ['token savers là gì?', /Token Savers|Agentic Token Compactor/i],
       ['cli tools là gì?', /CLI Tools|Claude Code|Cursor/i],
+      ['kết nối claude code kiểu gì?', /CLI Tools|Claude Code|Cursor/i],
+      ['kết nối cursor thế nào?', /CLI Tools|Claude Code|Cursor/i],
+      ['cấu hình codex ở đâu?', /CLI Tools|Claude Code|Codex/i],
       ['protocol translator dùng để làm gì?', /Protocol Translator|OpenAI|Gemini/i],
     ];
 
@@ -363,6 +390,9 @@ describe('AI Support Setup Copilot — Platform & Current-Page Expertise', () =>
     const userBusinessMessages = [
       'tôi đang có web boardgame, và muốn setup',
       'toi dang co web boardgame, va muon setup',
+      'dự án này bên mình bán boardgame, bạn giúp được gì?',
+      'web này bên mình bán giày, bạn giúp được gì?',
+      'trang web này của mình chuyên đồ gốm, muốn setup',
       'web của tôi bán giày sneaker chính hãng',
       'web của mình bán mỹ phẩm skincare, đổi trả 7 ngày',
       'trang web bên mình chuyên cho thuê lều cắm trại',
@@ -554,6 +584,8 @@ describe('AI Support Setup Copilot — Platform & Current-Page Expertise', () =>
     expect(guardedRes.status).toBe(200);
     expect(guardedRes.body?.intent).toBe('guide');
     expect(guardedRes.body?.proposal).toBeNull();
+    expect(guardedRes.body?.usedFallback).toBe(true);
+    expect(guardedRes.body?.modelUsed).toBeNull();
     expect(String(guardedRes.body?.reply ?? '')).toContain('Combos');
     expect(String(guardedRes.body?.reply ?? '')).not.toContain('Cho mình xin tên shop');
   });

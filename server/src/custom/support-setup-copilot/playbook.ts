@@ -486,7 +486,7 @@ const VI_DIACRITIC_RE =
   /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i;
 
 const VI_UNACCENTED_PHRASE_RE =
-  /\b(?:xin\s+chao|chao\s+ban|toi\s+(?:dang|muon|can|co|chua|khong)|minh\s+(?:dang|muon|can|co|chua|khong|moi)|ben\s+(?:minh|toi|em)|va\s+muon|(?:muon|can)\s+(?:setup|thiet\s+lap|cai\s+dat|tu\s+van|lam)|ban\s+co\s+the|ban\s+lam\s+duoc|lam\s+gi\s+ma|la\s+gi|lam\s+gi|de\s+lam\s+gi|dung\s+de|dung\s+sao|web\s+nay|trang\s+(?:web\s+)?nay|he\s+thong\s+nay|ung\s+dung\s+nay|nen\s+tang\s+nay|muc\s+nay|man\s+hinh\s+nay|gioi\s+thieu|lay\s+api\s*keys?|o\s+dau|khac\s+nhau|khac\s+gi|tai\s+khoan|co\s+the\s+(?:lam|noi|giup)|tieng\s+viet|giup\s+toi|giup\s+minh|cho\s+toi|cho\s+minh|cua\s+toi|cua\s+minh|lam\s+sao|nhu\s+the\s+nao|thiet\s+lap|cai\s+dat|huong\s+dan|buoc\s*[1-7]|duoc\s+khong|tuy\s+ban|lam\s+luon|mac\s+dinh|chua\s+co|khong\s+co|sao\s+(?:tra\s+loi|cung\s+nhac|hoi)|hoi\s+nhieu|nhu\s+may|cam\s+on|ban\s+la\s+ai|ban\s+oi|cung\s+nhac|tu\s+van|len\s+ke\s+hoach|len\s+ban\s+mau|trien\s+luon|ok\s+ban)\b/i;
+  /\b(?:xin\s+chao|chao\s+ban|toi\s+(?:dang|muon|can|co|chua|khong)|minh\s+(?:dang|muon|can|co|chua|khong|moi)|ben\s+(?:minh|toi|em)|va\s+muon|(?:muon|can)\s+(?:setup|thiet\s+lap|cai\s+dat|tu\s+van|lam)|ban\s+co\s+the|ban\s+lam\s+duoc|lam\s+gi\s+ma|la\s+(?:cai\s+)?gi|lam\s+gi|de\s+lam\s+gi|dung\s+de|dung\s+sao|dung\s+the\s+nao|day\s+la\s+(?:trang|web|website|he\s+thong|ung\s+dung|nen\s+tang|muc|man\s+hinh|cho|tab|cong\s+cu)|hoat\s+dong\s+(?:sao|ra\s+sao|kieu\s+gi|the\s+nao|nhu\s+the\s+nao)|ra\s+sao|kieu\s+gi|cho\s+nay|web\s+nay|trang\s+(?:web\s+)?nay|he\s+thong\s+nay|ung\s+dung\s+nay|nen\s+tang\s+nay|muc\s+nay|man\s+hinh\s+nay|gioi\s+thieu|lay\s+api\s*keys?|ket\s+noi|cau\s+hinh|o\s+dau|khac\s+nhau|khac\s+gi|tai\s+khoan|co\s+the\s+(?:lam|noi|giup)|tieng\s+viet|giup\s+toi|giup\s+minh|cho\s+toi|cho\s+minh|cua\s+toi|cua\s+minh|lam\s+sao|nhu\s+the\s+nao|thiet\s+lap|cai\s+dat|huong\s+dan|buoc\s*[1-7]|duoc\s+khong|tuy\s+ban|lam\s+luon|mac\s+dinh|chua\s+co|khong\s+co|sao\s+(?:tra\s+loi|cung\s+nhac|hoi)|hoi\s+nhieu|nhu\s+may|cam\s+on|ban\s+la\s+ai|ban\s+oi|cung\s+nhac|tu\s+van|len\s+ke\s+hoach|len\s+ban\s+mau|trien\s+luon|ok\s+ban)\b/i;
 
 const EXPLICIT_SPEAK_VI_RE =
   /\b(?:speak|talk\s+in|reply\s+in|use|switch\s+to)\s+vietnamese\b|(?:nói|dùng|trả\s+lời|giao\s+tiếp|chat)\s*(?:bằng\s*)?tiếng\s*việt|tieng\s+viet\s+(?:khong|duoc\s+khong|nhe|di)/i;
@@ -1484,8 +1484,8 @@ export async function runSupportSetupCopilotTurn(params: {
           ? llm.output.suggestedQuickReplies.slice(0, 4)
           : humanTurn.suggestedQuickReplies,
       proposal: null,
-      modelUsed: llm?.modelUsed ?? null,
-      usedFallback: !llm,
+      modelUsed: useLlmGuideReply ? (llm?.modelUsed ?? null) : null,
+      usedFallback: !useLlmGuideReply,
     };
   }
 
@@ -1509,8 +1509,8 @@ export async function runSupportSetupCopilotTurn(params: {
           ? llm.output.suggestedQuickReplies.slice(0, 4)
           : humanTurn.suggestedQuickReplies,
       proposal: null,
-      modelUsed: llm?.modelUsed ?? null,
-      usedFallback: !llm,
+      modelUsed: useLlmGatherReply ? (llm?.modelUsed ?? null) : null,
+      usedFallback: !useLlmGatherReply,
     };
   }
 
