@@ -207,6 +207,100 @@ export function getFallbackTimeBudgetMs(): number {
   return DEFAULT_FALLBACK_TIME_BUDGET_MS;
 }
 
+// ── Backoff between failover hops ────────────────────────────────────────────
+// Serial failover used to dispatch the next hop the instant the previous one
+// failed, so a provider answering 429/5xx to every key got hammered once per
+// key with no breathing room — the loop itself became retry traffic against
+// an already-overloaded upstream. Between two hops on a 429/5xx the loop now
+// waits a short, growing delay (100ms → 200ms → 400ms → 500ms, plus jitter),
+// capped so the backoff can never eat the request's own time budget.
+// Successful requests pay nothing: the delay only runs after a failed hop,
+// and only for 429/5xx — auth rotations (401), model-not-found skips and
+// skipBench format failures keep their immediate next hop.
+
+/** First-hop backoff; doubled per failed hop until the cap. */
+export const FALLBACK_RETRY_DELAY_BASE_MS = 100;
+/** Backoff ceiling: a longer wait would burn the 45s budget for nothing —
+ *  the failed key is already benched via cooldown, so the next hop is a
+ *  different key and does not need this one to recover. */
+export const FALLBACK_RETRY_DELAY_MAX_MS = 500;
+/** Uniform jitter added to the backoff so co-deployed gateways don't
+ *  re-hit the provider in lock-step. */
+export const FALLBACK_RETRY_DELAY_JITTER_MS = 100;
+
+/** True when the failure is a 429 or a 5xx — the only classes worth waiting
+ *  out. A structured upstream status wins; the message-substring rules are
+ *  the fallback for errors that carry the code in their text but no numeric
+ *  status (mirrors isRateLimitSignal / classifyAttemptError). */
+export function isRetryDelayableError(err: any): boolean {
+  const status = typeof err?.status === 'number' ? err.status : 0;
+  if (status === 429 || (status >= 500 && status <= 599)) return true;
+  if (status !== 0) return false;
+  const msg = (err?.message ?? '').toLowerCase();
+  return msg.includes('429') || msg.includes('rate limit') || msg.includes('too many requests')
+    || msg.includes('500') || msg.includes('502') || msg.includes('503') || msg.includes('504')
+    || msg.includes('service unavailable') || msg.includes('internal server error')
+    || msg.includes('bad gateway') || msg.includes('gateway timeout');
+}
+
+/**
+ * Backoff before the next hop after failed attempt `failedAttempt`
+ * (0-based). 0 for anything that is not a 429/5xx. A provider that names a
+ * SHORT wait knows best: a Retry-After below the computed backoff is honored
+ * exactly. A long Retry-After is deliberately NOT waited out — the key is
+ * already benched for the cooldown duration, the next hop tries a different
+ * key, and sitting on one request for tens of seconds would burn the retry
+ * budget for nothing. `random` is injectable so tests can pin the jitter.
+ */
+export function getFallbackRetryDelayMs(
+  failedAttempt: number,
+  err: any,
+  random: () => number = Math.random,
+): number {
+  if (!isRetryDelayableError(err)) return 0;
+  const backoff = Math.min(
+    FALLBACK_RETRY_DELAY_MAX_MS,
+    FALLBACK_RETRY_DELAY_BASE_MS * 2 ** Math.max(0, failedAttempt),
+  );
+  const withJitter = Math.min(
+    FALLBACK_RETRY_DELAY_MAX_MS,
+    backoff + Math.floor(random() * FALLBACK_RETRY_DELAY_JITTER_MS),
+  );
+  const retryAfterMs = err?.retryAfterMs;
+  if (typeof retryAfterMs === 'number' && Number.isFinite(retryAfterMs) && retryAfterMs > 0 && retryAfterMs < withJitter) {
+    return Math.min(retryAfterMs, FALLBACK_RETRY_DELAY_MAX_MS);
+  }
+  return withJitter;
+}
+
+/**
+ * The delay the loop actually sleeps: the backoff above, but only when the
+ * retry budget comfortably affords it. The wait runs in full when at least
+ * four times the delay is still unspent; otherwise it is skipped outright —
+ * a request in its last few hundred milliseconds needs that time for its
+ * next hop, not for pacing (and a 100ms test budget must not lose an
+ * attempt to a 100ms sleep). Returns 0 when the budget is already gone (the
+ * loop-top check will render timedOut exhaustion instead of sleeping past
+ * the deadline). Pure, so tests can pin the clock.
+ */
+export function resolveRetryDelayMs(opts: {
+  failedAttempt: number;
+  err: any;
+  budgetMs: number;
+  startedAtMs: number;
+  nowMs?: number;
+  random?: () => number;
+}): number {
+  const delay = getFallbackRetryDelayMs(opts.failedAttempt, opts.err, opts.random);
+  if (delay <= 0) return 0;
+  if (opts.budgetMs <= 0) return delay;
+  const remaining = opts.budgetMs - ((opts.nowMs ?? Date.now()) - opts.startedAtMs);
+  if (remaining < delay * 4) return 0;
+  return delay;
+}
+
+const realSleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
 // Mutable per-request skip state threaded through the loop and mutated by
 // recordRetryableFailure / recordAuthFailure. skipKeys entries are
 // "platform:modelId:keyId"; skipModels holds model_db_ids ruled out for the
@@ -1327,8 +1421,13 @@ export interface FallbackHooks {
   // Successful endpoint TTFB history can widen this floor.
   timeBudgetMs?: number;
   // Circuit-breaker threshold override, mostly for tests. Defaults to
-  // getMaxConsecutiveUpstreamFails() (setting → env → 0 = disabled).
+  // getMaxConsecutiveUpstreamFails() (setting → env → 6; 0 disables).
   breakerLimit?: number;
+  // Sleep used for the inter-hop backoff on 429/5xx (see
+  // getFallbackRetryDelayMs). Mostly a test seam: tests inject a recording
+  // fake so asserting the backoff costs no wall-clock time. Defaults to a
+  // real setTimeout sleep.
+  sleep?: (ms: number) => Promise<void>;
   // When provided, the loop records every failed attempt into THIS array (it
   // is the same array used for exhaustion bodies), so the surface can stamp
   // X-Fallback-Trail on successful responses too.
@@ -1687,6 +1786,21 @@ async function runFallbackLoopAttempts(hooks: FallbackHooks, trace: RequestTrace
         // about whether candidate four is up. Once the empty-completion streak
         // lifts the exemption (#751), the failure counts everywhere.
         if (!exempt && stopIfBreakerTripped()) return;
+        // Back off briefly before the next hop on a 429/5xx (the failed key
+        // is already benched, so this is pacing for the overloaded provider,
+        // not waiting for this key). Skipped on the last attempt — there is
+        // no next hop to pace — and resolveRetryDelayMs skips the wait
+        // outright when the retry budget cannot comfortably afford it.
+        // Successful requests never reach this branch, so they pay nothing.
+        if (attempt + 1 < maxRetries) {
+          const delayMs = resolveRetryDelayMs({
+            failedAttempt: attempt,
+            err,
+            budgetMs: baseBudgetMs,
+            startedAtMs: startedAt,
+          });
+          if (delayMs > 0) await (hooks.sleep ?? realSleep)(delayMs);
+        }
         continue;
       }
       traceAttempt(classifyAttemptError(err), err);
