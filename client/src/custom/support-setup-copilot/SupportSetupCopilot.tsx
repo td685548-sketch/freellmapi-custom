@@ -52,7 +52,7 @@ import {
 import './support-setup-copilot.css';
 
 const CLIENT_VI_MARKER_RE =
-  /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]|\b(?:tieng\s+viet|xin\s+chao|chao\s+ban|ban\s+co\s+the|giup\s+toi|giup\s+minh|lam\s+sao|thiet\s+lap|cai\s+dat|huong\s+dan)\b/i;
+  /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]|\b(?:tieng\s+viet|xin\s+chao|chao\s+ban|ban\s+co\s+the|ban\s+lam\s+duoc|lam\s+gi\s+ma|giup\s+toi|giup\s+minh|lam\s+sao|thiet\s+lap|cai\s+dat|huong\s+dan|tu\s+van|len\s+ke\s+hoach|len\s+ban\s+mau)\b/i;
 
 interface ChatTurn {
   id: string;
@@ -213,8 +213,8 @@ export function SupportSetupCopilot() {
           role: 'assistant',
           content:
             uiLocale === 'vi'
-              ? `Đã triển khai xong cho **${res.tenant.name}** (${res.diagnostic.completedSteps}/${res.diagnostic.totalSteps} bước đạt). Bạn có thể mở **Live Test** hoặc sao chép mã nhúng widget ngay bên dưới!`
-              : `Deployment complete for **${res.tenant.name}** (${res.diagnostic.completedSteps}/${res.diagnostic.totalSteps} steps ready). Copy the embed snippet below or open Live Test!`,
+              ? `Tuyệt vời! 🎉 Mình đã triển khai xong cấu hình cho **${res.tenant.name}** (${res.diagnostic.completedSteps}/${res.diagnostic.totalSteps} bước sẵn sàng). Bạn có thể bấm **Mở Live Test ngay** để chat thử hoặc sao chép mã nhúng widget bên dưới nhé!`
+              : `All set! 🎉 Deployment is complete for **${res.tenant.name}** (${res.diagnostic.completedSteps}/${res.diagnostic.totalSteps} steps ready). Open Live Test to try it out or copy the website embed snippet below!`,
           applyResult: res,
         },
       ]);

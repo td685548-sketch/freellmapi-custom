@@ -965,4 +965,186 @@ describe('AI Support Setup Copilot (Guided Onboarding & Consent-Gated Auto-Deplo
     );
     expect(plainProse?.reply).toContain('tiếng Việt tự nhiên');
   });
+
+  it('converses like a warm human onboarding specialist for open-domain businesses (boardgame regression + multi-turn progression) without numbered forms or repetition', async () => {
+    const humanTestAdmin = createUser('human-persona-admin@example.com', 'AdminPass123!');
+    setUserPermissions(humanTestAdmin.userId, ['*'], primaryAdminId);
+    const humanAdminToken = createSession(humanTestAdmin.userId);
+
+    const history: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+    const assistantReplies: string[] = [];
+
+    // Turn 1: Exact user message "tôi đang có web boardgame, và muốn setup" on an active tenant (like EXE)
+    history.push({ role: 'user', content: 'tôi đang có web boardgame, và muốn setup' });
+    const turn1 = await hit(
+      '/api/support-setup-copilot/chat',
+      'POST',
+      {
+        tenantId: existingTenantId,
+        locale: 'vi',
+        messages: [...history],
+      },
+      humanAdminToken,
+    );
+
+    expect(turn1.status).toBe(200);
+    expect(turn1.body?.intent).toBe('gather_requirements');
+    expect(turn1.body?.proposal).toBeNull();
+    const reply1 = String(turn1.body?.reply ?? '');
+    // Must warmly acknowledge boardgame and relevant customer questions, NEVER dump a numbered 1. 2. 3. form
+    expect(reply1.toLowerCase()).toContain('boardgame');
+    expect(reply1).toMatch(/người chơi|luật chơi|sleeves|mảnh ghép/i);
+    expect(reply1).not.toMatch(/(?:^|\n)\s*1[.)]\s+/m);
+    expect(reply1).not.toMatch(/lĩnh vực kinh doanh\s*\/\s*sản phẩm chính của bạn/i);
+    expect(
+      (turn1.body?.suggestedQuickReplies as string[]).some((q) => /boardgame|meeple/i.test(q)),
+    ).toBe(true);
+    history.push({ role: 'assistant', content: reply1 });
+    assistantReplies.push(reply1);
+
+    // Turn 2: Exact user pushback "bạn có thể làm gì mà"
+    history.push({ role: 'user', content: 'bạn có thể làm gì mà' });
+    const turn2 = await hit(
+      '/api/support-setup-copilot/chat',
+      'POST',
+      {
+        tenantId: existingTenantId,
+        locale: 'vi',
+        messages: [...history],
+      },
+      humanAdminToken,
+    );
+
+    expect(turn2.status).toBe(200);
+    expect(turn2.body?.intent).toBe('guide');
+    expect(turn2.body?.proposal).toBeNull();
+    const reply2 = String(turn2.body?.reply ?? '');
+    expect(reply2.toLowerCase()).toContain('boardgame');
+    expect(reply2).not.toMatch(/(?:^|\n)\s*1[.)]\s+/m);
+    expect(reply2).not.toBe(reply1);
+    history.push({ role: 'assistant', content: reply2 });
+    assistantReplies.push(reply2);
+
+    // Turn 3: Frustration pushback "sao trả lời cứng nhắc vậy"
+    history.push({ role: 'user', content: 'sao trả lời cứng nhắc vậy' });
+    const turn3 = await hit(
+      '/api/support-setup-copilot/chat',
+      'POST',
+      {
+        tenantId: existingTenantId,
+        locale: 'vi',
+        messages: [...history],
+      },
+      humanAdminToken,
+    );
+
+    expect(turn3.status).toBe(200);
+    expect(turn3.body?.intent).toBe('guide');
+    expect(turn3.body?.proposal).toBeNull();
+    const reply3 = String(turn3.body?.reply ?? '');
+    expect(reply3).toMatch(/xin lỗi|máy móc|cứng nhắc/i);
+    expect(reply3).not.toMatch(/(?:^|\n)\s*1[.)]\s+/m);
+    history.push({ role: 'assistant', content: reply3 });
+    assistantReplies.push(reply3);
+
+    // Turn 4: "chưa có website đâu"
+    history.push({ role: 'user', content: 'chưa có website đâu' });
+    const turn4 = await hit(
+      '/api/support-setup-copilot/chat',
+      'POST',
+      {
+        tenantId: existingTenantId,
+        locale: 'vi',
+        messages: [...history],
+      },
+      humanAdminToken,
+    );
+
+    expect(turn4.status).toBe(200);
+    expect(turn4.body?.intent).toBe('gather_requirements');
+    expect(turn4.body?.proposal).toBeNull();
+    const reply4 = String(turn4.body?.reply ?? '');
+    expect(reply4).toMatch(/không sao|thử nghiệm|quản trị/i);
+    expect(reply4).not.toMatch(/(?:^|\n)\s*1[.)]\s+/m);
+    history.push({ role: 'assistant', content: reply4 });
+    assistantReplies.push(reply4);
+
+    // Turn 5: "ok lên bản mẫu luôn đi" -> generates pending_consent proposal tailored to Boardgame!
+    history.push({ role: 'user', content: 'ok lên bản mẫu luôn đi' });
+    const turn5 = await hit(
+      '/api/support-setup-copilot/chat',
+      'POST',
+      {
+        tenantId: existingTenantId,
+        locale: 'vi',
+        messages: [...history],
+      },
+      humanAdminToken,
+    );
+
+    expect(turn5.status).toBe(200);
+    expect(turn5.body?.intent).toBe('propose_setup');
+    const reply5 = String(turn5.body?.reply ?? '');
+    expect(reply5).toContain('Chờ xác nhận triển khai');
+    assistantReplies.push(reply5);
+
+    // Guarantee zero repeated replies across all 5 turns
+    expect(new Set(assistantReplies).size).toBe(5);
+
+    const boardgameProposal = turn5.body?.proposal;
+    expect(boardgameProposal).toBeTruthy();
+    expect(boardgameProposal.status).toBe('pending_consent');
+    expect(boardgameProposal.requirements.industry).toMatch(/Boardgame/i);
+    expect(boardgameProposal.requirements.websiteOrigin).toBe('*');
+
+    const tenantStep = (boardgameProposal.steps as Array<Record<string, any>>).find(
+      (s) => s.stepId === 'tenant_ai',
+    );
+    expect(String(tenantStep?.payload?.systemPrompt ?? '')).toMatch(/Boardgame/i);
+    expect(String(tenantStep?.payload?.systemPrompt ?? '')).toMatch(/người chơi|sleeves/i);
+
+    const kbStep = (boardgameProposal.steps as Array<Record<string, any>>).find(
+      (s) => s.stepId === 'knowledge_masking',
+    );
+    const kbCombinedContent = ((kbStep?.payload?.docs as Array<{ content: string }>) ?? [])
+      .map((d) => d.content)
+      .join('\n');
+    expect(kbCombinedContent).toMatch(/boardgame/i);
+    expect(kbCombinedContent).toMatch(/người chơi|bọc bài|mảnh ghép/i);
+
+    const widgetStep = (boardgameProposal.steps as Array<Record<string, any>>).find(
+      (s) => s.stepId === 'widget_appearance',
+    );
+    const widgetPrompts = (widgetStep?.payload?.appearance?.quickPrompts as string[]) ?? [];
+    expect(widgetPrompts.some((p) => /boardgame|sleeves|mảnh ghép/i.test(p))).toBe(true);
+
+    // Open-ended uncurated domain test: handmade ceramics shop ("tiệm gốm thủ công")
+    const ceramicsRes = await hit(
+      '/api/support-setup-copilot/chat',
+      'POST',
+      {
+        targetMode: 'create_tenant',
+        locale: 'vi',
+        messages: [
+          {
+            role: 'user',
+            content:
+              'Mình đang mở tiệm gốm thủ công, tên là Gốm Mộc, đổi trả 7 ngày nếu nứt vỡ khi vận chuyển, màu cam',
+          },
+        ],
+      },
+      humanAdminToken,
+    );
+    expect(ceramicsRes.status).toBe(200);
+    expect(ceramicsRes.body?.intent).toBe('propose_setup');
+    expect(ceramicsRes.body?.proposal?.tenantName).toBe('Gốm Mộc');
+    expect(String(ceramicsRes.body?.proposal?.requirements?.industry ?? '')).toMatch(/gốm thủ công/i);
+    const ceramicsPrompt = String(
+      (ceramicsRes.body?.proposal?.steps as Array<Record<string, any>>).find(
+        (s) => s.stepId === 'tenant_ai',
+      )?.payload?.systemPrompt ?? '',
+    );
+    expect(ceramicsPrompt).toMatch(/Gốm Mộc/);
+    expect(ceramicsPrompt).toMatch(/gốm thủ công/i);
+  });
 });
