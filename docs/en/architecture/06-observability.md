@@ -189,7 +189,7 @@ interface AttemptTraceRecord {
 | Endpoint | Purpose |
 |----------|---------|
 | `GET /livez` | Process alive (k8s liveness) |
-| `GET /readyz` | Ready to serve (DB + at least one healthy provider) |
+| `GET /readyz` | Ready to serve (DB readable + writable, at least one proven-healthy provider key with a cooldown-free route; `unknown` keys count only before the first health pass) |
 | `GET /api/health` | Full status: `{status, degraded, providers: [{platform, healthy, totalKeys, usableKeys, status}], catalog: {version, tier, lastSync}}` |
 
 - Degraded mode reported via `degradation.getDegradationStatus()`.
