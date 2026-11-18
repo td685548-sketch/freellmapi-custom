@@ -41,6 +41,8 @@ const REASON_LABELS: Record<ContextDropReason, string> = {
   block_alignment: 'Block alignment',
   leading_assistant: 'Leading assistant',
   max_messages: 'Max messages',
+  shingle_dedup: 'Duplicate overlap',
+  min_score: 'Below min score',
 }
 
 interface ContextPreviewDialogProps {
@@ -56,11 +58,13 @@ function buildPreviewUrl(
   conversationId: string | null,
   endUser: string | null | undefined,
   modelKey: string,
+  query: string,
 ): string {
   if (!conversationId) return ''
   const params = new URLSearchParams()
   if (endUser) params.set('endUser', endUser)
   if (modelKey) params.set('model', modelKey)
+  if (query) params.set('query', query)
   const qs = params.toString()
   return `/api/client-profiles/${profileId}/conversations/${encodeURIComponent(conversationId)}/context-preview${qs ? `?${qs}` : ''}`
 }
@@ -98,6 +102,8 @@ function ContextPreviewBody({
   const { hasPermission } = useUserSession()
   const [modelInput, setModelInput] = useState('')
   const [selectedModel, setSelectedModel] = useState('')
+  const [queryInput, setQueryInput] = useState('')
+  const [selectedQuery, setSelectedQuery] = useState('')
 
   const catalogQuery = useQuery<unknown>({
     queryKey: ['model-catalog-ids'],
@@ -108,12 +114,11 @@ function ContextPreviewBody({
 
   const modelOptions = useMemo(() => extractModelOptions(catalogQuery.data), [catalogQuery.data])
   const trimmedModel = selectedModel.trim()
-  const url = buildPreviewUrl(profileId, conversationId, endUser, trimmedModel)
+  const trimmedQuery = selectedQuery.trim()
+  const url = buildPreviewUrl(profileId, conversationId, endUser, trimmedModel, trimmedQuery)
 
   const { data, isLoading, isError, error } = useQuery<ContextPreview>({
-    queryKey: trimmedModel
-      ? ['context-preview', profileId, conversationId, endUser ?? null, trimmedModel]
-      : ['context-preview', profileId, conversationId, endUser ?? null],
+    queryKey: ['context-preview', profileId, conversationId, endUser ?? null, trimmedModel, trimmedQuery],
     queryFn: () => apiFetch<ContextPreview>(url),
     enabled: Boolean(conversationId),
   })
@@ -144,6 +149,9 @@ function ContextPreviewBody({
   }, [data])
 
   const trimmedInput = modelInput.trim()
+  const trimmedQueryInput = queryInput.trim()
+  const hasSimulationChanges = trimmedInput !== trimmedModel || trimmedQueryInput !== trimmedQuery
+  const hasActiveSimulation = Boolean(trimmedModel || trimmedQuery)
 
   return (
     <>
@@ -151,10 +159,11 @@ function ContextPreviewBody({
         className="flex flex-wrap items-end gap-2 rounded-xl border bg-muted/20 p-2.5 text-xs"
         onSubmit={(e) => {
           e.preventDefault()
-          if (trimmedInput) setSelectedModel(trimmedInput)
+          setSelectedModel(trimmedInput)
+          setSelectedQuery(trimmedQueryInput)
         }}
       >
-        <div className="min-w-52 flex-1 space-y-1">
+        <div className="min-w-44 flex-1 space-y-1">
           <label htmlFor="ctx-preview-model" className="block text-[11px] text-muted-foreground">
             {tc('Target model simulation')}
           </label>
@@ -175,16 +184,29 @@ function ContextPreviewBody({
             ))}
           </datalist>
         </div>
+        <div className="min-w-52 flex-[1.3] space-y-1">
+          <label htmlFor="ctx-preview-query" className="block text-[11px] text-muted-foreground">
+            {tc('Sample user query')}
+          </label>
+          <Input
+            id="ctx-preview-query"
+            aria-label="Simulate sample user query"
+            value={queryInput}
+            onChange={(e) => setQueryInput(e.target.value)}
+            placeholder={tc('Enter a question to simulate Knowledge retrieval')}
+            className="h-8 text-xs"
+          />
+        </div>
         <Button
           type="submit"
           size="sm"
           variant="outline"
           className="h-8 text-xs"
-          disabled={!trimmedInput || trimmedInput === trimmedModel}
+          disabled={!hasSimulationChanges}
         >
           {tc('Simulate')}
         </Button>
-        {trimmedModel && (
+        {hasActiveSimulation && (
           <Button
             type="button"
             size="sm"
@@ -193,9 +215,11 @@ function ContextPreviewBody({
             onClick={() => {
               setModelInput('')
               setSelectedModel('')
+              setQueryInput('')
+              setSelectedQuery('')
             }}
           >
-            {tc('Auto')}
+            {tc('Reset')}
           </Button>
         )}
       </form>

@@ -12,16 +12,25 @@ import {
   SETTINGS_COLUMNS,
   settingsFromRow,
 } from '../../services/profile-conversations.js';
+import { knowledgeBlock, searchKnowledgeRanked } from '../../services/profile-knowledge.js';
 import { parseAllowedModels } from '../../services/profile-usage.js';
-import { estimateMessageTokens } from './estimate.js';
+import { isPillarEnabled } from '../ai-platform/flags.js';
+import { retrieve } from '../ai-platform/retrieval/hybrid.js';
+import { estimateMessageTokens, estimateTextTokens } from './estimate.js';
 import { computeEffectiveBudget, fitToBudget, type SegmentFitDecision } from './fit.js';
-import { historyCandidateLimits } from './gate.js';
+import { historyCandidateLimits, isShingleDuplicate } from './gate.js';
 import { getContextPolicyDefault, resolveContextPolicy } from './policy.js';
 import { createRegistry, registerUnit } from './registry.js';
 import { classifySegments, type ContextSegment } from './segments.js';
 
 const HOUR_MS = 3_600_000;
 const PREVIEW_MAX_CHARS = 200;
+const MAX_PREVIEW_QUERY_CHARS = 2_000;
+const MESSAGE_OVERHEAD_TOKENS = 4;
+const KNOWLEDGE_HEADER_TEXT =
+  'Reference material from this website. Use it when it answers the question; if it does not, answer normally. Do not mention that you were given it.\n\n';
+const KNOWLEDGE_HEADER_TOKENS = MESSAGE_OVERHEAD_TOKENS + estimateTextTokens(KNOWLEDGE_HEADER_TEXT);
+const PASSAGE_OVERHEAD_TOKENS = 4;
 const KNOWLEDGE_NOTE =
   'Tri thức phụ thuộc câu hỏi thật nên không được giả lập trong xem trước.';
 
@@ -46,6 +55,15 @@ export class ContextPreviewError extends Error {
 export interface ContextPreviewOptions {
   modelKey?: string;
   endUser?: string | null;
+  query?: string | null;
+}
+
+interface SimulatedKnowledgeCandidate {
+  docId: number;
+  title: string;
+  text: string;
+  score: number;
+  tokens: number;
 }
 
 interface ProfilePreviewRow {
@@ -189,15 +207,222 @@ function segmentPreviewText(
   return truncatePreview(raw);
 }
 
+async function simulateKnowledgeForPreview(opts: {
+  profileId: number;
+  simulatedQuery: string;
+  kbEnabled: boolean;
+  policy: ReturnType<typeof resolveContextPolicy>;
+  provisionalBudget: number;
+  provisionalMandatory: number;
+  referenceTexts: readonly string[];
+}): Promise<{
+  keptHits: SimulatedKnowledgeCandidate[];
+  block: string | null;
+  droppedSegments: ContextPreviewSegment[];
+  note: string;
+}> {
+  if (!opts.simulatedQuery) {
+    return {
+      keptHits: [],
+      block: null,
+      droppedSegments: [],
+      note: KNOWLEDGE_NOTE,
+    };
+  }
+  if (!opts.kbEnabled) {
+    return {
+      keptHits: [],
+      block: null,
+      droppedSegments: [],
+      note: 'Knowledge base is disabled for this client key.',
+    };
+  }
+
+  const available = Math.max(0, opts.provisionalBudget - opts.provisionalMandatory);
+  const provKnowledgeCap = Math.floor(available * (opts.policy.knowledgeSharePct / 100));
+
+  let rawHits: Array<{ docId: number; title: string; text: string; score: number }> = [];
+  let minScoreThreshold: number | null = null;
+
+  if (isPillarEnabled('retrieval')) {
+    try {
+      const ret = await retrieve({ kind: 'profile', id: String(opts.profileId) }, opts.simulatedQuery, {
+        respectPillarFlag: true,
+      });
+      if (ret.hits.length > 0) {
+        rawHits = ret.hits.map((h) => ({
+          docId: Number(h.docId),
+          title: h.title,
+          text: h.text,
+          score: h.score,
+        }));
+        if (ret.modeUsed === 'semantic') {
+          minScoreThreshold = opts.policy.knowledgeMinScore;
+        }
+      }
+    } catch {
+      // Fallback to synchronous BM25 search below.
+    }
+  }
+
+  if (rawHits.length === 0) {
+    try {
+      rawHits = searchKnowledgeRanked(opts.profileId, opts.simulatedQuery, 20).map((h) => ({
+        docId: h.docId,
+        title: h.title,
+        text: h.text,
+        score: h.score,
+      }));
+    } catch {
+      rawHits = [];
+    }
+  }
+
+  if (rawHits.length === 0) {
+    return {
+      keptHits: [],
+      block: null,
+      droppedSegments: [],
+      note: 'Simulated query matched 0 knowledge passages.',
+    };
+  }
+
+  const ordered = [...rawHits].sort((a, b) => b.score - a.score);
+  const droppedSegments: ContextPreviewSegment[] = [];
+  const keptHits: SimulatedKnowledgeCandidate[] = [];
+  let usedTokens = KNOWLEDGE_HEADER_TOKENS;
+
+  for (const hit of ordered) {
+    const passageTokens = estimateTextTokens(hit.text) + PASSAGE_OVERHEAD_TOKENS;
+    const labelPreview = truncatePreview(hit.title ? `${hit.title}: ${hit.text}` : hit.text);
+
+    if (minScoreThreshold !== null && hit.score < minScoreThreshold) {
+      droppedSegments.push({
+        kind: 'knowledge',
+        role: 'system',
+        tokens: passageTokens,
+        preview: labelPreview,
+        sent: false,
+        reason: 'min_score',
+      });
+      continue;
+    }
+
+    if (opts.referenceTexts.length > 0 && isShingleDuplicate(hit.text, opts.referenceTexts)) {
+      droppedSegments.push({
+        kind: 'knowledge',
+        role: 'system',
+        tokens: passageTokens,
+        preview: labelPreview,
+        sent: false,
+        reason: 'shingle_dedup',
+      });
+      continue;
+    }
+
+    if (provKnowledgeCap <= 0 || usedTokens + passageTokens > provKnowledgeCap) {
+      droppedSegments.push({
+        kind: 'knowledge',
+        role: 'system',
+        tokens: passageTokens,
+        preview: labelPreview,
+        sent: false,
+        reason: 'budget',
+      });
+      continue;
+    }
+
+    keptHits.push({
+      docId: hit.docId,
+      title: hit.title,
+      text: hit.text,
+      score: hit.score,
+      tokens: passageTokens,
+    });
+    usedTokens += passageTokens;
+  }
+
+  while (keptHits.length > 0) {
+    const block = knowledgeBlock(keptHits);
+    if (block && MESSAGE_OVERHEAD_TOKENS + estimateTextTokens(block) <= provKnowledgeCap) {
+      return {
+        keptHits,
+        block,
+        droppedSegments,
+        note: `Simulated query: ${keptHits.length} passage(s) kept, ${droppedSegments.length} dropped.`,
+      };
+    }
+    const popped = keptHits.pop()!;
+    droppedSegments.unshift({
+      kind: 'knowledge',
+      role: 'system',
+      tokens: popped.tokens,
+      preview: truncatePreview(popped.title ? `${popped.title}: ${popped.text}` : popped.text),
+      sent: false,
+      reason: 'budget',
+    });
+  }
+
+  return {
+    keptHits: [],
+    block: null,
+    droppedSegments,
+    note: `Simulated query: 0 passage(s) kept, ${droppedSegments.length} dropped.`,
+  };
+}
+
+function buildKnowledgePreviewEntries(
+  keptHits: readonly SimulatedKnowledgeCandidate[],
+  droppedSegments: readonly ContextPreviewSegment[],
+  blockSent: boolean,
+  totalBlockTokens: number,
+  dropReason?: ContextPreviewSegment['reason'],
+): ContextPreviewSegment[] {
+  const entries: ContextPreviewSegment[] = [];
+  if (keptHits.length > 0) {
+    if (blockSent) {
+      let assigned = 0;
+      for (let i = 0; i < keptHits.length; i++) {
+        const hit = keptHits[i]!;
+        const tokens =
+          i === keptHits.length - 1
+            ? Math.max(0, totalBlockTokens - assigned)
+            : Math.min(hit.tokens, Math.max(0, totalBlockTokens - assigned));
+        assigned += tokens;
+        entries.push({
+          kind: 'knowledge',
+          role: 'system',
+          tokens,
+          preview: truncatePreview(hit.title ? `${hit.title}: ${hit.text}` : hit.text),
+          sent: true,
+        });
+      }
+    } else {
+      for (const hit of keptHits) {
+        entries.push({
+          kind: 'knowledge',
+          role: 'system',
+          tokens: hit.tokens,
+          preview: truncatePreview(hit.title ? `${hit.title}: ${hit.text}` : hit.text),
+          sent: false,
+          reason: dropReason ?? 'budget',
+        });
+      }
+    }
+  }
+  entries.push(...droppedSegments);
+  return entries;
+}
+
 /**
  * Simulate next-turn context assembly for a stored conversation without invoking
  * any upstream provider or mutating the database.
  */
-export function previewConversationContext(
+export async function previewConversationContext(
   profileId: number,
   conversationKey: string,
   options: ContextPreviewOptions = {},
-): ContextPreview {
+): Promise<ContextPreview> {
   const db = getDb();
   const profileRow = db
     .prepare(
@@ -240,6 +465,7 @@ export function previewConversationContext(
   const def = getContextPolicyDefault();
   const model = selectPreviewModel(parseAllowedModels(profileRow.allowed_models), options.modelKey);
   const limits = historyCandidateLimits(policy, convSettings);
+  const simulatedQuery = (options.query ?? '').trim().slice(0, MAX_PREVIEW_QUERY_CHARS);
 
   const allStored = db
     .prepare(
@@ -284,6 +510,33 @@ export function previewConversationContext(
       ? `Summary of the earlier part of this conversation:\n${conv.summary}`
       : null;
 
+  const simulatedUserMsg: ChatMessage = { role: 'user' as const, content: simulatedQuery };
+  const provisionalEffective = computeEffectiveBudget(
+    policy,
+    model.contextWindow,
+    policy.outputReserveTokens,
+    def.fallbackWindowTokens,
+  );
+  const provisionalMandatory = [...mandatorySystemMessages, simulatedUserMsg].reduce(
+    (sum, m) => sum + estimateMessageTokens(m, def.imageTokens),
+    0,
+  );
+
+  const referenceTexts: string[] = [
+    ...(summaryText ? [summaryText] : []),
+    ...candidates.map((c) => c.content),
+  ];
+
+  const simKnowledge = await simulateKnowledgeForPreview({
+    profileId,
+    simulatedQuery,
+    kbEnabled: profileRow.kb_enabled === 1,
+    policy,
+    provisionalBudget: provisionalEffective,
+    provisionalMandatory,
+    referenceTexts,
+  });
+
   const syntheticReq = {} as Request;
   const registry = createRegistry(syntheticReq, policy, { imageTokens: def.imageTokens });
   if (summaryText) {
@@ -292,6 +545,14 @@ export function previewConversationContext(
       role: 'system',
       text: summaryText,
       seq: 0,
+    });
+  }
+  if (simKnowledge.block) {
+    registerUnit(syntheticReq, {
+      kind: 'knowledge',
+      role: 'system',
+      text: simKnowledge.block,
+      seq: 1,
     });
   }
   for (const row of candidates) {
@@ -305,13 +566,17 @@ export function previewConversationContext(
   }
 
   const simulatedUserIndexOffset =
-    mandatorySystemMessages.length + (summaryText ? 1 : 0) + candidates.length;
+    mandatorySystemMessages.length +
+    (summaryText ? 1 : 0) +
+    (simKnowledge.block ? 1 : 0) +
+    candidates.length;
 
   const messages: ChatMessage[] = [
     ...mandatorySystemMessages,
     ...(summaryText ? [{ role: 'system' as const, content: summaryText }] : []),
+    ...(simKnowledge.block ? [{ role: 'system' as const, content: simKnowledge.block }] : []),
     ...candidates.map((c) => ({ role: c.role, content: c.content })),
-    { role: 'user' as const, content: '' },
+    simulatedUserMsg,
   ];
 
   const classified = classifySegments(messages, registry);
@@ -328,6 +593,7 @@ export function previewConversationContext(
   let oldestSentHistoryId: number | null = null;
 
   if (fit.ok) {
+    let insertedKnowledge = false;
     let insertedMaxMessages = false;
     for (const decision of fit.decisions) {
       const seg = decision.segment;
@@ -335,7 +601,25 @@ export function previewConversationContext(
         seg.indexes.length === 1 && seg.indexes[0] === simulatedUserIndexOffset;
       if (isSimulatedNextUser) continue;
 
+      if (seg.kind === 'knowledge') {
+        insertedKnowledge = true;
+        previewSegments.push(
+          ...buildKnowledgePreviewEntries(
+            simKnowledge.keptHits,
+            simKnowledge.droppedSegments,
+            decision.sent,
+            decision.sent ? decision.tokens : 0,
+            decision.reason,
+          ),
+        );
+        continue;
+      }
+
       if (!insertedMaxMessages && seg.kind === 'history') {
+        if (!insertedKnowledge && simKnowledge.droppedSegments.length > 0) {
+          previewSegments.push(...simKnowledge.droppedSegments);
+          insertedKnowledge = true;
+        }
         previewSegments.push(...excludedByMaxMessages);
         insertedMaxMessages = true;
       }
@@ -357,6 +641,9 @@ export function previewConversationContext(
         ...(!decision.sent && decision.reason ? { reason: decision.reason } : {}),
       });
     }
+    if (!insertedKnowledge && simKnowledge.droppedSegments.length > 0) {
+      previewSegments.push(...simKnowledge.droppedSegments);
+    }
     if (!insertedMaxMessages) {
       previewSegments.push(...excludedByMaxMessages);
     }
@@ -366,6 +653,17 @@ export function previewConversationContext(
         m.id > conv.summarized_through &&
         (oldestSentHistoryId === null || m.id < oldestSentHistoryId),
     ).length;
+
+    const finalKeptCount = fit.counts.knowledgeSent > 0 ? simKnowledge.keptHits.length : 0;
+    const finalDroppedCount =
+      simKnowledge.droppedSegments.length + (finalKeptCount === 0 ? simKnowledge.keptHits.length : 0);
+    const finalNote = simulatedQuery
+      ? profileRow.kb_enabled !== 1
+        ? simKnowledge.note
+        : finalKeptCount + finalDroppedCount === 0
+          ? simKnowledge.note
+          : `Simulated query: ${finalKeptCount} passage(s) kept, ${finalDroppedCount} dropped.`
+      : KNOWLEDGE_NOTE;
 
     return {
       model,
@@ -382,7 +680,8 @@ export function previewConversationContext(
           conv.summarized_through > 0 && conv.summary ? conv.summarized_through : null,
         pendingFoldMessages,
       },
-      knowledgeNote: KNOWLEDGE_NOTE,
+      knowledgeNote: finalNote,
+      simulatedQuery: simulatedQuery || null,
     };
   }
 
@@ -393,13 +692,32 @@ export function previewConversationContext(
     policy.outputReserveTokens,
     def.fallbackWindowTokens,
   );
+  let insertedKnowledge = false;
   let insertedMaxMessages = false;
   for (const seg of classified) {
     const isSimulatedNextUser =
       seg.indexes.length === 1 && seg.indexes[0] === simulatedUserIndexOffset;
     if (isSimulatedNextUser) continue;
 
+    if (seg.kind === 'knowledge') {
+      insertedKnowledge = true;
+      previewSegments.push(
+        ...buildKnowledgePreviewEntries(
+          simKnowledge.keptHits,
+          simKnowledge.droppedSegments,
+          false,
+          0,
+          'budget',
+        ),
+      );
+      continue;
+    }
+
     if (!insertedMaxMessages && seg.kind === 'history') {
+      if (!insertedKnowledge && simKnowledge.droppedSegments.length > 0) {
+        previewSegments.push(...simKnowledge.droppedSegments);
+        insertedKnowledge = true;
+      }
       previewSegments.push(...excludedByMaxMessages);
       insertedMaxMessages = true;
     }
@@ -414,6 +732,9 @@ export function previewConversationContext(
       sent,
       ...(!sent ? { reason: 'budget' as const } : {}),
     });
+  }
+  if (!insertedKnowledge && simKnowledge.droppedSegments.length > 0) {
+    previewSegments.push(...simKnowledge.droppedSegments);
   }
   if (!insertedMaxMessages) {
     previewSegments.push(...excludedByMaxMessages);
@@ -435,6 +756,9 @@ export function previewConversationContext(
         conv.summarized_through > 0 && conv.summary ? conv.summarized_through : null,
       pendingFoldMessages,
     },
-    knowledgeNote: KNOWLEDGE_NOTE,
+    knowledgeNote: simulatedQuery
+      ? simKnowledge.note
+      : KNOWLEDGE_NOTE,
+    simulatedQuery: simulatedQuery || null,
   };
 }

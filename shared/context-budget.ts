@@ -19,7 +19,9 @@ export type ContextDropReason =
   | 'budget'
   | 'block_alignment'
   | 'leading_assistant'
-  | 'max_messages';
+  | 'max_messages'
+  | 'shingle_dedup'
+  | 'min_score';
 
 export interface ContextPolicy {
   profileId?: number;
@@ -213,4 +215,5 @@ export interface ContextPreview {
     pendingFoldMessages: number;
   };
   knowledgeNote: string;
+  simulatedQuery?: string | null;
 }

@@ -148,7 +148,7 @@ contextPolicyRouter.get('/:id/context-stats', (req: Request, res: Response) => {
   res.json(getContextStats(profile.id, parsedDays.data));
 });
 
-contextPolicyRouter.get('/:id/conversations/:conversationId/context-preview', (req: Request, res: Response) => {
+contextPolicyRouter.get('/:id/conversations/:conversationId/context-preview', async (req: Request, res: Response) => {
   const profile = loadProfileOrRespond(req, res);
   if (!profile) return;
 
@@ -159,6 +159,7 @@ contextPolicyRouter.get('/:id/conversations/:conversationId/context-preview', (r
   }
 
   const modelKey = firstParam(req.query.model);
+  const query = firstParam(req.query.query);
   const rawEndUser = firstParam(req.query.endUser);
   const endUser = rawEndUser !== undefined ? normalizeEndUser(rawEndUser) : undefined;
   if (rawEndUser !== undefined && endUser === null) {
@@ -167,8 +168,9 @@ contextPolicyRouter.get('/:id/conversations/:conversationId/context-preview', (r
   }
 
   try {
-    const preview = previewConversationContext(profile.id, convKey, {
+    const preview = await previewConversationContext(profile.id, convKey, {
       ...(modelKey ? { modelKey } : {}),
+      ...(query ? { query } : {}),
       ...(endUser !== undefined ? { endUser } : {}),
     });
     res.json(preview);
