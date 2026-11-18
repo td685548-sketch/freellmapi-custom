@@ -1,2 +1,0 @@
-# Research
-Decision: reuse original dialogs, not duplicate forms. Standard AddKeyDialog owns scope follow-up and must stay mounted after initial dialog close. Custom endpoint dialog takes baseUrl directly. Tier DTO intentionally omits raw URLs; existing authorized /api/keys provides masked key metadata on demand. Match its normalized baseUrl with the existing server SHA-256 identity using browser Web Crypto. No new API/library unknowns.
