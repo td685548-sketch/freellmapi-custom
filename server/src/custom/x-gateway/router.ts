@@ -1721,10 +1721,16 @@ async function nativeSearch(
   } else if (providerId === 'tinyfish') {
     const endpoint = new URL('https://api.tinyfish.ai/v1/search');
     endpoint.searchParams.set('query', query);
-    const response = await fetch(endpoint.toString(), {
-      headers: { accept: 'application/json', 'X-API-Key': apiKey },
-      signal,
-    });
+    const response = await proxyFetch(
+      endpoint.toString(),
+      {
+        headers: { accept: 'application/json', 'X-API-Key': apiKey },
+        redirect: 'error',
+        signal,
+      },
+      providerId,
+      'unknown',
+    );
     const data = await readSearchJson(response, providerId);
     items = Array.isArray(data.results) ? data.results : Array.isArray(data.data) ? data.data : [];
   } else if (providerId === 'xquik') {
@@ -1732,10 +1738,16 @@ async function nativeSearch(
     const endpoint = new URL('https://api.xquik.com/api/v1/x/tweets/search');
     endpoint.searchParams.set('q', query);
     endpoint.searchParams.set('limit', String(maxResults));
-    const response = await fetch(endpoint.toString(), {
-      headers: { accept: 'application/json', 'x-api-key': apiKey },
-      signal,
-    });
+    const response = await proxyFetch(
+      endpoint.toString(),
+      {
+        headers: { accept: 'application/json', 'x-api-key': apiKey },
+        redirect: 'error',
+        signal,
+      },
+      providerId,
+      'unknown',
+    );
     const data = await readSearchJson(response, providerId);
     const rawTweets = Array.isArray(data.tweets)
       ? data.tweets
@@ -1780,24 +1792,30 @@ async function nativeSearch(
     items = Array.isArray(data.results) ? data.results : [];
   } else if (providerId === 'glm') {
     const endpoint = 'https://api.z.ai/api/mcp/web_search_prime/mcp';
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        accept: 'application/json, text/event-stream',
-        ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
-      },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 'thruline-search',
-        method: 'tools/call',
-        params: {
-          name: 'web_search_prime',
-          arguments: { search_query: query, count: maxResults },
+    const response = await proxyFetch(
+      endpoint,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+          ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
         },
-      }),
-      signal,
-    });
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'thruline-search',
+          method: 'tools/call',
+          params: {
+            name: 'web_search_prime',
+            arguments: { search_query: query, count: maxResults },
+          },
+        }),
+        redirect: 'error',
+        signal,
+      },
+      providerId,
+      'unknown',
+    );
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
       throw new Error(`glm search failed with HTTP ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`);

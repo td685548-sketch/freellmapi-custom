@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { initDb, getDb } from '../../db/index.js';
-import { encrypt, decrypt } from '../../lib/crypto.js';
+import { encrypt, decrypt, initEncryptionKey, probeStoredSecrets } from '../../lib/crypto.js';
 import {
   rotateSecrets,
   applyRotation,
@@ -80,5 +80,50 @@ describe('rotate-encryption-key: aes-256-gcm parity with crypto.ts', () => {
     // And its own ciphertext decrypts under the server module with that key.
     const scriptEnc = encryptWith(key, 'script-parity');
     expect(decrypt(scriptEnc.encrypted, scriptEnc.iv, scriptEnc.authTag)).toBe('script-parity');
+  });
+});
+
+describe('rotate-encryption-key & probeStoredSecrets: thruline_sso_config.oidcClientSecretEnc', () => {
+  it('skips empty oidcClientSecretEnc and rotates + probes populated oidcClientSecretEnc', () => {
+    process.env.ENCRYPTION_KEY = 'a'.repeat(64);
+    initDb(':memory:');
+    const db = getDb();
+    initEncryptionKey(db);
+
+    // 1. Empty oidcClientSecretEnc should not fail rotation or probeStoredSecrets
+    db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)')
+      .run('thruline_sso_config', JSON.stringify({ authMode: 'saml', oidcIssuerUrl: '', oidcClientSecretEnc: '' }));
+    const emptyRes = rotateSecrets(db, OLD_KEY, NEW_KEY);
+    expect(emptyRes.error).toBeUndefined();
+    expect(emptyRes.rows).toHaveLength(0);
+    expect(probeStoredSecrets(db)).toBeNull();
+
+    // 2. Populated oidcClientSecretEnc rotates cleanly preserving sibling JSON fields
+    const encSecret = JSON.stringify(encryptWith(OLD_KEY, 'oidc-secret-xyz'));
+    db.prepare('UPDATE settings SET value = ? WHERE key = ?')
+      .run(JSON.stringify({
+        authMode: 'oidc',
+        oidcIssuerUrl: 'https://idp.example.test',
+        oidcClientSecretEnc: encSecret,
+      }), 'thruline_sso_config');
+
+    expect(probeStoredSecrets(db)).toBe(true);
+    process.env.ENCRYPTION_KEY = 'b'.repeat(64);
+    initEncryptionKey(db);
+    expect(probeStoredSecrets(db)).toBe(false);
+
+    const rot = rotateSecrets(db, OLD_KEY, NEW_KEY);
+    expect(rot.error).toBeUndefined();
+    expect(rot.rows).toHaveLength(1);
+    applyRotation(db, rot.rows);
+
+    const stored = JSON.parse(
+      (db.prepare('SELECT value FROM settings WHERE key = ?').get('thruline_sso_config') as { value: string }).value,
+    ) as { authMode: string; oidcIssuerUrl: string; oidcClientSecretEnc: string };
+    expect(stored.authMode).toBe('oidc');
+    expect(stored.oidcIssuerUrl).toBe('https://idp.example.test');
+    const inner = JSON.parse(stored.oidcClientSecretEnc) as { encrypted: string; iv: string; authTag: string };
+    expect(decryptWith(NEW_KEY, inner.encrypted, inner.iv, inner.authTag)).toBe('oidc-secret-xyz');
+    expect(probeStoredSecrets(db)).toBe(true);
   });
 });

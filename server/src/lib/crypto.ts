@@ -249,8 +249,9 @@ const SECRET_COLUMN_PROBES: ReadonlyArray<{ table: string; encrypted: string; iv
   { table: 'x_support_desk_widget_configs', encrypted: 'payload_encrypted', iv: 'payload_iv', authTag: 'payload_auth_tag' },
 ];
 
-const SECRET_JSON_PROBES: ReadonlyArray<{ table: string; settingKey: string }> = [
+const SECRET_JSON_PROBES: ReadonlyArray<{ table: string; settingKey: string; nestedField?: string }> = [
   { table: 'settings', settingKey: 'fetch_relay_token' },
+  { table: 'settings', settingKey: 'thruline_sso_config', nestedField: 'oidcClientSecretEnc' },
   { table: 'x_gateway_config', settingKey: 'outbound_proxy' },
 ];
 
@@ -282,9 +283,21 @@ export function probeStoredSecrets(db: Db): boolean | null {
       continue;
     }
     if (!row?.value) continue;
+    let payloadStr = row.value;
+    if (target.nestedField) {
+      let outer: Record<string, unknown>;
+      try {
+        outer = JSON.parse(row.value) as Record<string, unknown>;
+      } catch {
+        return false;
+      }
+      const inner = outer?.[target.nestedField];
+      if (typeof inner !== 'string' || !inner) continue;
+      payloadStr = inner;
+    }
     checked += 1;
     try {
-      const parsed = JSON.parse(row.value) as { encrypted?: string; iv?: string; authTag?: string };
+      const parsed = JSON.parse(payloadStr) as { encrypted?: string; iv?: string; authTag?: string };
       if (!parsed.encrypted || !parsed.iv || !parsed.authTag) return false;
       decrypt(parsed.encrypted, parsed.iv, parsed.authTag);
     } catch {
