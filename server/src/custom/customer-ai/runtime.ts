@@ -12,6 +12,7 @@ import { validateSession, type SessionUser } from '../../services/auth.js';
 import { getMemoizedUserKey, type ValidatedUserKey } from '../../services/user-keys.js';
 import { checkUserRateLimit, recordUserUsage } from '../../services/user-quotas.js';
 import { enforceUsageQuota } from '../quota-gate.js';
+import { ensureVerifiedCloudRuntimePack } from '../cloud-entitlement/service.js';
 import { PLAYGROUND_SESSION_HEADER } from '../playground-attribution.js';
 import {
   composeUserKeySystemPrompt,
@@ -147,6 +148,7 @@ export async function chatWithAssistant(
     threadId?: number;
   },
 ): Promise<AssistantChatResult | null> {
+  await ensureVerifiedCloudRuntimePack('customer_ai');
   const assistant = resolveWorkspaceAssistantForUser(user, slugOrRef);
   if (!assistant) {
     throw new CustomerAiError(404, 'assistant_not_found', 'Assistant not found or unavailable.');

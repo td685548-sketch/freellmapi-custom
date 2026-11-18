@@ -90,6 +90,7 @@ import { xSupportPublicRouter } from './support-router.js';
 import { xSupportEnterprisePublicRouter } from './support-enterprise-router.js';
 import { xSupportGovernancePublicRouter } from './support-governance-router.js';
 import { xSupportServiceDeskPublicRouter } from './support-service-desk-router.js';
+import { requireCloudAiEntitlement } from '../cloud-entitlement/gate.js';
 import { evaluateGatewaySmartRoute } from './intent-router.js';
 import {
   applyLearnedCapsToDispatch,
@@ -2728,6 +2729,7 @@ xGatewayRouter.get('/models', xGatewayAuth, (req: Request, res: Response) => {
 xGatewayRouter.use(xGatewayProtocolsRouter);
 
 // AI Support Partner Gateway (/thruline/v1/support/*)
+xGatewayRouter.use('/support', requireCloudAiEntitlement('support_suite'));
 xGatewayRouter.use('/support', xSupportPublicRouter);
 xGatewayRouter.use('/support', xSupportEnterprisePublicRouter);
 xGatewayRouter.use('/support', xSupportGovernancePublicRouter);

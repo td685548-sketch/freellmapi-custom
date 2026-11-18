@@ -51,6 +51,7 @@ import {
 } from './support-runtime-router.js';
 import { getSupportConversationForUser } from './support-workflows.js';
 import { renderTenantSystemPrompt } from '../ai-platform/prompts/render.js';
+import { ensureVerifiedCloudRuntimePack } from '../cloud-entitlement/service.js';
 
 // ---------------------------------------------------------------------------
 // Shared Types
@@ -280,6 +281,7 @@ export async function executeSupportChatPipeline(options: {
   model?: string;
   hooks?: SupportPipelineHooks;
 }): Promise<SupportChatCompletionResult & { usedFallback?: boolean }> {
+  await ensureVerifiedCloudRuntimePack('support_suite');
   const { tenant, userContext, messages, hooks } = options;
   const tools = listSupportTools(tenant.id);
   const dbSources = listSupportDbSources(tenant.id);

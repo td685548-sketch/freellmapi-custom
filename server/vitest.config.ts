@@ -8,7 +8,12 @@ export default defineConfig({
     // account's own count in the background; that call would land in every
     // test's fetch mock. Its own tests switch it back on.
     // Local .env may enable Azure; offline tests opt in only with SDK mocks.
-    env: { CLOUDFLARE_NEURON_ANALYTICS: '0', SUPPORT_DOCUMENT_STORAGE: 'disabled' },
+    env: {
+      CLOUDFLARE_NEURON_ANALYTICS: '0',
+      SUPPORT_DOCUMENT_STORAGE: 'disabled',
+      CLOUD_ENTITLEMENT_BACKGROUND_POLL: '0',
+    },
+    setupFiles: ['./src/__tests__/setup-cloud-entitlement.ts'],
     include: ['src/__tests__/**/*.test.ts'],
     coverage: {
       enabled: process.env.COVERAGE === '1',

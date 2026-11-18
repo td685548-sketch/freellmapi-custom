@@ -114,6 +114,7 @@ jobs:
       - name: Run server tests (shard ${{ matrix.shard }}/4)
         env:
           COVERAGE: ${{ matrix.node-version == '22' && '1' || '' }}
+          FREEAPI_AI_ACTIVATION_TOKEN: ${{ secrets.FREEAPI_AI_ACTIVATION_TOKEN }}
         run: npm run test -w server -- --shard=${{ matrix.shard }}/4
 
   test-cli:
