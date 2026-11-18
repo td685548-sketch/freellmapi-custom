@@ -78,6 +78,7 @@ import {
 } from './render-resource-saver.js';
 import { supportSetupCopilotRouter } from './support-setup-copilot/router.js';
 import { providerIconsRouter, providerStaticIconsMiddleware } from './provider-icons/router.js';
+import { quotaVouchersRouter } from './quota-vouchers/router.js';
 
 // Everything this fork adds to the HTTP surface is wired here, so upstream's
 // app.ts keeps a handful of added lines instead of edited mount statements.
@@ -346,4 +347,5 @@ export function registerCustomRoutes(app: Express): void {
   startFlowScheduler();
   // Start lightweight Telegram interactive approval poller (off in tests unless explicitly ticked).
   startTelegramBotPoller();
+  app.use('/api/quota-vouchers', quotaVouchersRouter);
 }
