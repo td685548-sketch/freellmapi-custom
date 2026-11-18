@@ -12,22 +12,13 @@
  * - Native React only — no @testing-library/react import anywhere in this module.
  */
 
+import { Suspense } from 'react';
 import { Routes, Route, NavLink, Navigate } from 'react-router-dom';
 import { PageHeader } from '@/components/page-header';
 import { useCustomT } from '../i18n/use-custom-t';
+import { lazyNamed } from '../route-splitting/lazy-page';
 import { useAdministrativeAccess } from '../use-administrative-access';
 import { useUserSession } from '../use-session';
-import { Flows } from './pages/Flows';
-import { Knowledge } from './pages/Knowledge';
-import { McpServers } from './pages/McpServers';
-import { OutputGuard } from './pages/OutputGuard';
-import { Overview } from './pages/Overview';
-import { PromptCache } from './pages/PromptCache';
-import { SemanticCache } from './pages/SemanticCache';
-import { Prompts } from './pages/Prompts';
-import { Runs } from './pages/Runs';
-import { TraceTimelinePage } from './pages/TraceTimelinePage';
-import { AdminCustomerAiPanel } from '../customer-ai/AdminCustomerAiPanel';
 import { KNOWLEDGE_NAV_HEADING } from './knowledge-strings';
 import { SEMANTIC_CACHE_NAV_HEADING } from './semantic-cache-strings';
 import { TRACES_NAV_HEADING } from './tracing-strings';
@@ -44,6 +35,18 @@ import {
   FLOWS_HEADING,
   RUNS_HEADING,
 } from './strings';
+
+const Flows = lazyNamed(() => import('./pages/Flows'), 'Flows');
+const Knowledge = lazyNamed(() => import('./pages/Knowledge'), 'Knowledge');
+const McpServers = lazyNamed(() => import('./pages/McpServers'), 'McpServers');
+const OutputGuard = lazyNamed(() => import('./pages/OutputGuard'), 'OutputGuard');
+const Overview = lazyNamed(() => import('./pages/Overview'), 'Overview');
+const PromptCache = lazyNamed(() => import('./pages/PromptCache'), 'PromptCache');
+const SemanticCache = lazyNamed(() => import('./pages/SemanticCache'), 'SemanticCache');
+const Prompts = lazyNamed(() => import('./pages/Prompts'), 'Prompts');
+const Runs = lazyNamed(() => import('./pages/Runs'), 'Runs');
+const TraceTimelinePage = lazyNamed(() => import('./pages/TraceTimelinePage'), 'TraceTimelinePage');
+const AdminCustomerAiPanel = lazyNamed(() => import('../customer-ai/AdminCustomerAiPanel'), 'AdminCustomerAiPanel');
 
 // ─── Sub-nav ──────────────────────────────────────────────────────────────────
 
@@ -266,8 +269,9 @@ function AiPlatformShell({
       />
 
       {/* Page content */}
-      <div>
-        <Routes>
+      <Suspense fallback={<div className="py-8 text-sm text-muted-foreground">{tc('Loading…')}</div>}>
+        <div>
+          <Routes>
           <Route index element={<Navigate to={`${BASE}/${defaultPath}`} replace />} />
           <Route path="overview" element={<Overview />} />
           <Route
@@ -376,10 +380,11 @@ function AiPlatformShell({
             }
           />
 
-          {/* Catch-all */}
-          <Route path="*" element={defaultElement} />
-        </Routes>
-      </div>
+            {/* Catch-all */}
+            <Route path="*" element={defaultElement} />
+          </Routes>
+        </div>
+      </Suspense>
     </div>
   );
 }

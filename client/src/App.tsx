@@ -2,7 +2,7 @@ import { Suspense, useEffect, useState, type ReactNode } from 'react'
 import { PageSwitch } from './custom/page-switch/PageSwitch'
 import { BrowserRouter, Routes, Route, Navigate, NavLink, Link, useLocation, useNavigate } from 'react-router-dom'
 import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { ChevronDown, KeyRound, LogOut, Menu, MoreHorizontal, RefreshCw, Search, Settings, Sparkles } from 'lucide-react'
+import { Activity, ChevronDown, KeyRound, LogOut, Menu, MoreHorizontal, RefreshCw, Search, Settings, Sparkles } from 'lucide-react'
 import { buttonVariants } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -40,7 +40,7 @@ import {
   AgentsPage, AiPlatformApp, AnalyticsAccessPage, AuditLogPage, AudioPage, CustomerAiHubPage, DecisionPage, EmbeddingDetailPage,
   EmbeddingsPage, FallbackPage, FusionPage, ImagePage, InvitesAccessPage, KeysPage, LogsAccessPage,
   MediaDetailPage, ModelDetailPage, PlaygroundPage, PremiumPage, ProfileUsagePage, SearchPage,
-  TenantPortalApp, UsageRankingPage, UserAnalyticsPage, UsersAccessPage, VideoPage, XGatewayApp, preloadRoute,
+  StatusPage, TenantPortalApp, UsageRankingPage, UserAnalyticsPage, UsersAccessPage, VideoPage, XGatewayApp, preloadRoute,
 } from '@/custom/route-splitting/lazy-pages'
 import { RouteFallback } from '@/custom/route-splitting/RouteFallback'
 import { legacyGatewayTarget } from '@/custom/x-gateway/legacy-gateway-target'
@@ -191,12 +191,14 @@ function AccountMenuItems({
   canManageUpdates = canManageSettings,
   upgradeLabel,
   settingsLabel,
+  statusLabel,
   updatesLabel,
   signOutLabel,
   changeEmailLabel,
   changePasswordLabel,
   onUpgrade,
   onOpenSettings,
+  onOpenStatus,
   onOpenUpdates,
   onChangeEmail,
   onChangePassword,
@@ -206,12 +208,14 @@ function AccountMenuItems({
   canManageUpdates?: boolean
   upgradeLabel: string
   settingsLabel: string
+  statusLabel?: string
   updatesLabel: string
   signOutLabel: string
   changeEmailLabel: string
   changePasswordLabel: string
   onUpgrade: () => void
   onOpenSettings: () => void
+  onOpenStatus?: () => void
   onOpenUpdates: () => void
   onChangeEmail: () => void
   onChangePassword: () => void
@@ -228,6 +232,12 @@ function AccountMenuItems({
         <Settings />
         {settingsLabel}
       </DropdownMenuItem>
+      {onOpenStatus && statusLabel && (
+        <DropdownMenuItem onClick={onOpenStatus}>
+          <Activity />
+          {statusLabel}
+        </DropdownMenuItem>
+      )}
       {canManageSettings && canManageUpdates && (
         <DropdownMenuItem onClick={onOpenUpdates}>
           <RefreshCw />
@@ -383,12 +393,14 @@ export function Navbar() {
                   canManageUpdates={hasPermission('manage_updates')}
                   upgradeLabel={t('nav.upgrade')}
                   settingsLabel={t('nav.settings')}
+                  statusLabel={tc('System Status')}
                   updatesLabel={t('settings.checkForUpdates')}
                   signOutLabel={t('nav.signOut')}
                   changeEmailLabel={t('auth.changeEmail')}
                   changePasswordLabel={t('auth.changePassword')}
                   onUpgrade={() => navigate('/premium')}
                   onOpenSettings={() => setSettingsOpen(true)}
+                  onOpenStatus={() => navigate('/status')}
                   onOpenUpdates={() => setUpdatesOpen(true)}
                   onChangeEmail={() => setCredentialsMode('email')}
                   onChangePassword={() => setCredentialsMode('password')}
@@ -443,12 +455,14 @@ export function Navbar() {
                   canManageUpdates={hasPermission('manage_updates')}
                   upgradeLabel={t('nav.upgrade')}
                   settingsLabel={t('nav.settings')}
+                  statusLabel={tc('System Status')}
                   updatesLabel={t('settings.checkForUpdates')}
                   signOutLabel={t('nav.signOut')}
                   changeEmailLabel={t('auth.changeEmail')}
                   changePasswordLabel={t('auth.changePassword')}
                   onUpgrade={() => navigate('/premium')}
                   onOpenSettings={() => setSettingsOpen(true)}
+                  onOpenStatus={() => navigate('/status')}
                   onOpenUpdates={() => setUpdatesOpen(true)}
                   onChangeEmail={() => setCredentialsMode('email')}
                   onChangePassword={() => setCredentialsMode('password')}
@@ -515,6 +529,7 @@ function AppShell({ children }: { children: ReactNode }) {
   const legacyGateway = legacyGatewayTarget(location)
   if (legacyGateway) return <Navigate to={legacyGateway} replace />
   if (location.pathname === '/thruline' || location.pathname.startsWith('/thruline/')) return <Suspense fallback={<RouteFallback fullScreen />}><XGatewayApp /></Suspense>
+  if (location.pathname === '/status' || location.pathname.startsWith('/status/')) return <Suspense fallback={<RouteFallback fullScreen />}><StatusPage /></Suspense>
   return (
     <div className={`flex flex-col ${fullBleed ? 'h-dvh overflow-hidden' : 'min-h-screen'} ${isMacDesktop ? 'desktop-backdrop' : 'bg-background'}`}>
       {children}
@@ -573,6 +588,7 @@ function App() {
                         <Route path="/fallback" element={<Navigate to="/models/chat" replace />} />
                         <Route path="/analytics" element={<AnalyticsAccessPage />} />
                         <Route path="/logs" element={<LogsAccessPage />} />
+                        <Route path="/status" element={<StatusPage />} />
                         <Route path="/premium" element={<PremiumPage />} />
                         <Route path="/test" element={<Navigate to="/playground" replace />} />
                         <Route path="/health" element={<Navigate to="/keys" replace />} />

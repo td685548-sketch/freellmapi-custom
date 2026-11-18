@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Building2, Shield } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
@@ -10,15 +11,17 @@ import {
   type TenantParentPermission,
 } from '../../../../shared/tenant-rbac';
 import { useCustomT } from '../i18n/use-custom-t';
+import { lazyNamed } from '../route-splitting/lazy-page';
 import { tenantPortalApi } from './api';
-import { TenantAiTab } from './TenantAiTab';
-import { TenantAnalyticsTab } from './TenantAnalyticsTab';
-import { TenantDeskTab } from './TenantDeskTab';
-import { TenantGuardrailsTab } from './TenantGuardrailsTab';
-import { TenantIntegrationTab } from './TenantIntegrationTab';
-import { TenantKnowledgeTab } from './TenantKnowledgeTab';
-import { TenantMembersTab } from './TenantMembersTab';
-import { TenantToolsTab } from './TenantToolsTab';
+
+const TenantAiTab = lazyNamed(() => import('./TenantAiTab'), 'TenantAiTab');
+const TenantAnalyticsTab = lazyNamed(() => import('./TenantAnalyticsTab'), 'TenantAnalyticsTab');
+const TenantDeskTab = lazyNamed(() => import('./TenantDeskTab'), 'TenantDeskTab');
+const TenantGuardrailsTab = lazyNamed(() => import('./TenantGuardrailsTab'), 'TenantGuardrailsTab');
+const TenantIntegrationTab = lazyNamed(() => import('./TenantIntegrationTab'), 'TenantIntegrationTab');
+const TenantKnowledgeTab = lazyNamed(() => import('./TenantKnowledgeTab'), 'TenantKnowledgeTab');
+const TenantMembersTab = lazyNamed(() => import('./TenantMembersTab'), 'TenantMembersTab');
+const TenantToolsTab = lazyNamed(() => import('./TenantToolsTab'), 'TenantToolsTab');
 
 const TENANT_TABS: ReadonlyArray<{
   id: TenantParentPermission;
@@ -36,9 +39,12 @@ const TENANT_TABS: ReadonlyArray<{
 
 export function TenantPortalApp() {
   const tc = useCustomT();
-  const [selectedTenantId, setSelectedTenantId] = useState<number | null>(null);
-  const [selectedTab, setSelectedTab] = useState<TenantParentPermission | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [permsOpen, setPermsOpen] = useState(false);
+
+  const paramTenantId = Number(searchParams.get('tenant'));
+  const selectedTenantId = Number.isInteger(paramTenantId) && paramTenantId > 0 ? paramTenantId : null;
+  const selectedTab = (searchParams.get('tab') as TenantParentPermission | null) ?? null;
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['tenant-portal-tenants'],
@@ -105,8 +111,8 @@ export function TenantPortalApp() {
               aria-label={tc('Active tenant')}
               value={activeTenant.id}
               onChange={(e) => {
-                setSelectedTenantId(Number(e.target.value));
-                setSelectedTab(null);
+                const nextId = e.target.value;
+                setSearchParams({ tenant: nextId }, { replace: true });
               }}
               className="h-8 rounded-lg border border-input bg-background px-2.5 text-xs font-medium"
             >
@@ -141,7 +147,12 @@ export function TenantPortalApp() {
               <button
                 key={tab.id}
                 type="button"
-                onClick={() => setSelectedTab(tab.id)}
+                onClick={() =>
+                  setSearchParams(
+                    { tenant: String(activeTenant.id), tab: tab.id },
+                    { replace: true },
+                  )
+                }
                 className={`shrink-0 rounded-lg px-3 py-1.5 text-xs transition-colors ${
                   activeTab === tab.id
                     ? 'bg-foreground text-background font-medium'
@@ -153,54 +164,56 @@ export function TenantPortalApp() {
             ))}
           </nav>
 
-          <div>
-            {activeTab === 'tenant_ai_config' && (
-              <TenantAiTab
-                tenantId={activeTenant.id}
-                permissions={activeTenant.permissions}
-                availableModels={availableModels}
-              />
-            )}
-            {activeTab === 'tenant_knowledge' && (
-              <TenantKnowledgeTab
-                tenantId={activeTenant.id}
-                permissions={activeTenant.permissions}
-              />
-            )}
-            {activeTab === 'tenant_tools' && (
-              <TenantToolsTab
-                tenantId={activeTenant.id}
-                permissions={activeTenant.permissions}
-              />
-            )}
-            {activeTab === 'tenant_guardrails' && (
-              <TenantGuardrailsTab
-                tenantId={activeTenant.id}
-                permissions={activeTenant.permissions}
-              />
-            )}
-            {activeTab === 'tenant_desk' && (
-              <TenantDeskTab
-                tenantId={activeTenant.id}
-                permissions={activeTenant.permissions}
-              />
-            )}
-            {activeTab === 'tenant_integration' && (
-              <TenantIntegrationTab
-                tenantId={activeTenant.id}
-                permissions={activeTenant.permissions}
-              />
-            )}
-            {activeTab === 'tenant_members' && (
-              <TenantMembersTab
-                tenantId={activeTenant.id}
-                myPermissions={activeTenant.permissions}
-              />
-            )}
-            {activeTab === 'tenant_analytics' && (
-              <TenantAnalyticsTab tenantId={activeTenant.id} />
-            )}
-          </div>
+          <Suspense fallback={<div className="py-8 text-center text-sm text-muted-foreground">{tc('Loading…')}</div>}>
+            <div>
+              {activeTab === 'tenant_ai_config' && (
+                <TenantAiTab
+                  tenantId={activeTenant.id}
+                  permissions={activeTenant.permissions}
+                  availableModels={availableModels}
+                />
+              )}
+              {activeTab === 'tenant_knowledge' && (
+                <TenantKnowledgeTab
+                  tenantId={activeTenant.id}
+                  permissions={activeTenant.permissions}
+                />
+              )}
+              {activeTab === 'tenant_tools' && (
+                <TenantToolsTab
+                  tenantId={activeTenant.id}
+                  permissions={activeTenant.permissions}
+                />
+              )}
+              {activeTab === 'tenant_guardrails' && (
+                <TenantGuardrailsTab
+                  tenantId={activeTenant.id}
+                  permissions={activeTenant.permissions}
+                />
+              )}
+              {activeTab === 'tenant_desk' && (
+                <TenantDeskTab
+                  tenantId={activeTenant.id}
+                  permissions={activeTenant.permissions}
+                />
+              )}
+              {activeTab === 'tenant_integration' && (
+                <TenantIntegrationTab
+                  tenantId={activeTenant.id}
+                  permissions={activeTenant.permissions}
+                />
+              )}
+              {activeTab === 'tenant_members' && (
+                <TenantMembersTab
+                  tenantId={activeTenant.id}
+                  myPermissions={activeTenant.permissions}
+                />
+              )}
+              {activeTab === 'tenant_analytics' && (
+                <TenantAnalyticsTab tenantId={activeTenant.id} />
+              )}
+            </div>
+          </Suspense>
         </>
       )}
 
