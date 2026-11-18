@@ -17,6 +17,7 @@ import {
 } from '../../services/compression/preservation.js';
 import {
   compressRequest,
+  compressionCacheKey,
   _clearPrefixFreezeForTesting,
 } from '../../services/compression/pipeline.js';
 import {
@@ -50,7 +51,9 @@ describe('compression configuration', () => {
     initDb(':memory:');
   });
 
-  it('uses setting → env → off precedence and persists complete engine defaults', () => {
+  it('uses setting → env → standard precedence and persists complete engine defaults', () => {
+    // No setting, no env var: the default mode is standard.
+    expect(getCompressionConfig().mode).toBe('standard');
     process.env.FREELLMAPI_COMPRESSION = 'lossless';
     expect(getCompressionConfig().mode).toBe('lossless');
     const saved = setCompressionConfig({
@@ -355,6 +358,28 @@ describe('compression engines', () => {
     expect(stats.requests).toBe(1);
     expect(stats.compressedRequests).toBe(1);
     expect(JSON.stringify(stats)).not.toContain('hello');
+  });
+
+  it('compressionCacheKey agrees with compressRequest across modes, headers, and the auto-trigger', () => {
+    const messages = [msg('user', 'hello world')];
+    for (const mode of ['off', 'lossless', 'standard', 'aggressive'] as const) {
+      const cfg = config(mode);
+      expect(compressionCacheKey(messages, { config: cfg }))
+        .toBe(compressRequest(messages, { config: cfg, recordStats: false }).cacheKey);
+      expect(compressionCacheKey(messages, { config: cfg, header: 'off' }))
+        .toBe(compressRequest(messages, { config: cfg, header: 'off', recordStats: false }).cacheKey);
+    }
+    // Auto-trigger: a long prompt over the threshold flips lossless →
+    // aggressive in both, so the early cache key matches the pipeline's.
+    const payload = 'unprotected context line\n'.repeat(400);
+    const cfg = config('lossless', { autoTriggerEstTokens: 100 });
+    const long = [msg('user', payload)];
+    expect(compressRequest(long, { config: cfg, recordStats: false }).mode).toBe('aggressive');
+    expect(compressionCacheKey(long, { config: cfg }))
+      .toBe(compressRequest(long, { config: cfg, recordStats: false }).cacheKey);
+    // A header that lowers the mode lowers the fingerprint in both.
+    expect(compressionCacheKey(long, { config: cfg, header: 'lossless' }))
+      .toBe(compressRequest(long, { config: cfg, header: 'lossless', recordStats: false }).cacheKey);
   });
 
   it('keeps compression modes/config versions isolated in response-cache keys', () => {

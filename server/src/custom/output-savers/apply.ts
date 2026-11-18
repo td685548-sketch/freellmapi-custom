@@ -11,8 +11,9 @@ import { buildSaverBlock } from './prompts.js';
  * an existing one: the caller's system message stays byte-identical, and a
  * constant block at a constant position keeps the provider-side cache prefix
  * stable across requests. The block becomes part of `messages`, so token
- * estimation, routing budgets and the response cache key all see it without a
- * separate fingerprint.
+ * estimation and routing budgets see it. The response-cache key is computed
+ * BEFORE savers are applied, so the saver header itself is keyed explicitly
+ * (see computeCacheKey) instead of riding along in the messages.
  *
  * Fail-open: any problem leaves the conversation untouched. A saver is a
  * styling nicety and must never be the reason a request breaks.

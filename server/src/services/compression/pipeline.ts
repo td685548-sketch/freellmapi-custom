@@ -91,6 +91,36 @@ function emptyStats(chars: number, started: number): CompressionRequestStats {
   };
 }
 
+/**
+ * The response-cache fingerprint for these messages WITHOUT running
+ * compression: the resolved mode (including the auto-trigger to
+ * 'aggressive' — see compressRequest) plus the full config, hashed by
+ * compressionConfigFingerprint. The proxy computes the cache key on the
+ * ORIGINAL messages with this fingerprint and looks the cache up BEFORE
+ * compressing, so a hit skips the whole compression pass; a miss compresses
+ * as before. Must stay in lockstep with compressRequest's own mode
+ * resolution — the compression tests assert helper and pipeline agree.
+ */
+export function compressionCacheKey(
+  messages: ChatMessage[],
+  options: CompressRequestOptions = {},
+): string {
+  const config = options.config ?? getCompressionConfig();
+  const directive = parseCompressionDirective(options.header);
+  const originalEstimate = estimateTokensFromChars(messageChars(messages));
+  let mode = options.previewMode ?? resolveCompressionMode(config, directive);
+  if (
+    options.previewMode === undefined
+    && mode !== 'off'
+    && (directive === 'default' || directive === 'on')
+    && config.autoTriggerEstTokens !== undefined
+    && originalEstimate >= config.autoTriggerEstTokens
+  ) {
+    mode = 'aggressive';
+  }
+  return compressionConfigFingerprint(config, mode);
+}
+
 export function compressRequest(
   messages: ChatMessage[],
   options: CompressRequestOptions = {},

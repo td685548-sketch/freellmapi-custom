@@ -15,9 +15,11 @@
 //     identical prompt is a valid hit, which is what maximizes the hit rate for
 //     auto-routed traffic. platform/model_id/key_id are stored for attribution
 //     and savings accounting only.
-//   - Opt-in. Off unless enabled via the RESPONSE_CACHE env var or the
-//     response_cache_enabled setting, so existing installs see no behavior
-//     change. A per-request header overrides either way.
+//   - On by default. An identical re-ask burns a free-tier slot for an
+//     answer we already have, so caching is the default, not an opt-in: the
+//     cache is exact-match only (see below), so it cannot serve a different
+//     prompt's answer. Set RESPONSE_CACHE=0, or the response_cache_enabled
+//     setting to 0, to turn it off; a per-request header overrides either way.
 //   - Temperature-gated. High-temperature requests are asking for variety, so
 //     replaying one frozen answer would defeat that. Cached only when the
 //     temperature is omitted or at/below RESPONSE_CACHE_MAX_TEMPERATURE.
@@ -68,16 +70,17 @@ function readSetting(key: string): string | undefined {
 export const CACHE_ENABLED_SETTING = 'response_cache_enabled';
 
 /**
- * Master switch. Default off so adopting the cache is an explicit choice. The
- * settings-table value wins when present (dashboard toggle, no restart), then
- * the RESPONSE_CACHE env var, then off.
+ * Master switch. On by default so adopting the cache is the default, not an
+ * explicit choice (exact-match only, so a cached answer is always an answer
+ * to this exact request). The settings-table value wins when present
+ * (dashboard toggle, no restart), then the RESPONSE_CACHE env var, then on.
  */
 export function isCacheEnabled(): boolean {
   const stored = readSetting(CACHE_ENABLED_SETTING);
   if (stored !== undefined && stored.trim() !== '') {
     return /^(1|true|on|yes)$/i.test(stored.trim());
   }
-  return envFlag('RESPONSE_CACHE', false);
+  return envFlag('RESPONSE_CACHE', true);
 }
 
 /**
@@ -195,10 +198,18 @@ export interface CacheKeyInput {
   logprobs?: unknown;
   top_logprobs?: unknown;
   reasoning_effort?: unknown;
-  // Request-side compression runs before cache lookup. Include its resolved
+  // Request-side compression runs after cache lookup. Include its resolved
   // mode/config fingerprint so a settings change cannot replay an answer
-  // produced from a different compressed prompt shape.
+  // produced from a different compressed prompt shape. The key is computed
+  // on the ORIGINAL messages (pre-compression), so the fingerprint is what
+  // distinguishes compression settings, not the compressed bytes.
   compression?: unknown;
+  // The server-enforced system prompt and the output-saver header both
+  // rewrite what is sent upstream AFTER the cache key is computed, so they
+  // are keyed explicitly: a prompt edit or a different saver level must
+  // never be served another request's cached answer.
+  systemPrompt?: unknown;
+  saver?: unknown;
   // Principal / profile / model-restriction scope so cached entries never bleed
   // across tenants, personal keys, URL tokens, or restricted key policies.
   authScope?: string;
@@ -213,7 +224,11 @@ function normModel(model: string | undefined): string {
 
 export function computeCacheKey(input: CacheKeyInput): string {
   const canonical = stableStringify({
-    v: 4, // explicit-but-default-valued sampling params dropped from the key
+    // v5: the key moved to the ORIGINAL (pre-compression) messages, so entries
+    // cached under v4 (compressed messages, no systemPrompt/saver fields)
+    // never collide with v5 entries — they simply miss once and are
+    // re-populated under the new key.
+    v: 5,
     model: normModel(input.model),
     messages: input.messages,
     temperature: input.temperature,
@@ -242,6 +257,8 @@ export function computeCacheKey(input: CacheKeyInput): string {
     // so pre-existing cache keys are unaffected.
     reasoning_effort: input.reasoning_effort,
     compression: input.compression,
+    systemPrompt: input.systemPrompt,
+    saver: input.saver,
     authScope: input.authScope,
     restrictionSignature: input.restrictionSignature,
   });
