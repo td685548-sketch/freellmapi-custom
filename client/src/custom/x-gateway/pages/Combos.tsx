@@ -1,12 +1,12 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowUp, Check, Copy, Eye, Layers, Mic, Pencil, Plus, RefreshCw, Search, Sparkles, Trash2, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, Copy, Eye, FileText, Film, Globe, Layers, Mic, Pencil, Plus, RefreshCw, Search, Sparkles, Trash2, X } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { useI18n } from '@/i18n'
 import { useUserSession } from '../../use-session'
 import { useSessionRevision } from '../../session-state'
 import { useAccounts } from '../api'
-import { mgmtApi, type ComboEntry, type ComboPayload, type ComboStrategy, type XCombo } from '../management-api'
+import { mgmtApi, type ComboEntry, type ComboKind, type ComboPayload, type ComboStrategy, type XCombo } from '../management-api'
 import { useMgmtStrings } from '../management-strings'
 import { askConfirm } from '../shell/confirm'
 
@@ -19,6 +19,9 @@ interface ComboPolicyFields {
   smartPolicy?: ComboSmartPolicy
   sessionSticky?: boolean
   confidenceThreshold?: number
+  kind?: ComboKind
+  systemOneModel?: string
+  judgeModel?: string
 }
 
 type PolicyCombo = XCombo & ComboPolicyFields
@@ -29,13 +32,17 @@ interface Draft {
   name: string
   entries: ComboEntry[]
   strategy: ComboStrategy
+  kind: ComboKind
   description: string
   smartPolicy: ComboSmartPolicy
   sessionSticky: boolean
   confidenceThreshold: number
+  systemOneModel: string
+  judgeModel: string
 }
 
 const STRATEGIES: ComboStrategy[] = ['fallback', 'round-robin', 'smart', 'fusion']
+const KINDS: ComboKind[] = ['chat', 'image', 'audio', 'embedding', 'video']
 const SMART_POLICIES: ComboSmartPolicy[] = ['smart', 'strict', 'per-turn', 'custom']
 const DEFAULT_CONFIDENCE_THRESHOLD = 0.8
 
@@ -77,6 +84,8 @@ const POLICY_LABELS = {
 const policyKey = (policy: ComboSmartPolicy): 'smart' | 'strict' | 'perTurn' | 'custom' =>
   policy === 'strict' ? 'strict' : policy === 'per-turn' ? 'perTurn' : policy === 'custom' ? 'custom' : 'smart'
 
+export type CapacityPoolKey = 'vision' | 'audioInput' | 'pdf' | 'videoInput' | 'search'
+
 export interface CapacityPool {
   enabled: boolean
   roundRobin: boolean
@@ -86,7 +95,12 @@ export interface CapacityPool {
 export interface CapacityAdapterSettings {
   vision: CapacityPool
   audioInput: CapacityPool
+  pdf?: CapacityPool
+  videoInput?: CapacityPool
+  search?: CapacityPool
 }
+
+const EMPTY_CAPACITY_POOL: CapacityPool = { enabled: false, roundRobin: false, models: [] }
 
 interface CatalogSyncStatus {
   syncedAt: string | null
@@ -117,8 +131,9 @@ export default function Combos() {
     queryFn: ({ signal }) => apiFetch<CapacityAdapterSettings>('/api/thruline/capacity-adapter', { signal }),
     retry: false,
   })
-  const [newVisionModel, setNewVisionModel] = useState('')
-  const [newAudioModel, setNewAudioModel] = useState('')
+  const [newPoolModels, setNewPoolModels] = useState<Record<CapacityPoolKey, string>>({
+    vision: '', audioInput: '', pdf: '', videoInput: '', search: '',
+  })
 
   // Auto route health cooldown
   const routingHealthQuery = useQuery({
@@ -202,6 +217,13 @@ export default function Combos() {
     smart: s.strategySmart,
     fusion: s.strategyFusion,
   }
+  const kindLabels: Record<ComboKind, string> = {
+    chat: s.kindChat,
+    image: s.kindImage,
+    audio: s.kindAudio,
+    embedding: s.kindEmbedding,
+    video: s.kindVideo,
+  }
 
   const combos = useMemo(() => query.data?.combos ?? [], [query.data])
   const filtered = useMemo(() => {
@@ -236,10 +258,13 @@ export default function Combos() {
       name: d.name,
       entries: d.entries,
       strategy: d.strategy,
+      kind: d.kind !== 'chat' ? d.kind : undefined,
       description: d.description.trim() || undefined,
       smartPolicy: d.strategy === 'smart' ? d.smartPolicy : undefined,
       sessionSticky: d.strategy === 'smart' ? d.sessionSticky : undefined,
       confidenceThreshold: d.strategy === 'smart' ? d.confidenceThreshold : undefined,
+      systemOneModel: d.strategy === 'smart' && d.systemOneModel.trim() ? d.systemOneModel.trim() : undefined,
+      judgeModel: d.strategy === 'fusion' && d.judgeModel.trim() ? d.judgeModel.trim() : undefined,
     }
     return payload
   }
@@ -263,10 +288,13 @@ export default function Combos() {
         name: combo.name,
         entries: combo.entries,
         strategy,
+        kind: combo.kind,
         description: combo.description,
         smartPolicy: combo.smartPolicy,
         sessionSticky: combo.sessionSticky,
         confidenceThreshold: combo.confidenceThreshold,
+        systemOneModel: combo.systemOneModel,
+        judgeModel: combo.judgeModel,
       }
       return mgmtApi.updateCombo(combo.id, payload)
     },
@@ -300,10 +328,13 @@ export default function Combos() {
       name: '',
       entries: [{ platform: providers[0]?.id ?? '', modelId: '' }],
       strategy: 'fallback',
+      kind: 'chat',
       description: '',
       smartPolicy: 'smart',
       sessionSticky: true,
       confidenceThreshold: DEFAULT_CONFIDENCE_THRESHOLD,
+      systemOneModel: '',
+      judgeModel: '',
     })
   }
   const startEdit = (c: PolicyCombo) => {
@@ -314,10 +345,13 @@ export default function Combos() {
       name: c.name,
       entries: c.entries.map(e => ({ ...e })),
       strategy: c.strategy ?? 'fallback',
+      kind: c.kind ?? 'chat',
       description: c.description ?? '',
       smartPolicy,
       sessionSticky: c.sessionSticky ?? smartPolicy !== 'per-turn',
       confidenceThreshold: c.confidenceThreshold ?? DEFAULT_CONFIDENCE_THRESHOLD,
+      systemOneModel: c.systemOneModel ?? '',
+      judgeModel: c.judgeModel ?? '',
     })
   }
 
@@ -335,45 +369,51 @@ export default function Combos() {
     return next
   })
 
-  const capacityData = capacityQuery.data ?? {
-    vision: { enabled: true, roundRobin: false, models: ['oc/mimo-v2.6-flash-free'] },
-    audioInput: { enabled: false, roundRobin: false, models: [] },
+  const capacityData: CapacityAdapterSettings = {
+    vision: capacityQuery.data?.vision ?? { enabled: true, roundRobin: false, models: ['oc/mimo-v2.6-flash-free'] },
+    audioInput: capacityQuery.data?.audioInput ?? EMPTY_CAPACITY_POOL,
+    pdf: capacityQuery.data?.pdf ?? EMPTY_CAPACITY_POOL,
+    videoInput: capacityQuery.data?.videoInput ?? EMPTY_CAPACITY_POOL,
+    search: capacityQuery.data?.search ?? EMPTY_CAPACITY_POOL,
   }
 
-  const handleTogglePool = (poolKey: 'vision' | 'audioInput', enabled: boolean) => {
+  const handleTogglePool = (poolKey: CapacityPoolKey, enabled: boolean) => {
+    const pool = capacityData[poolKey] ?? EMPTY_CAPACITY_POOL
     saveCapacity.mutate({
       ...capacityData,
-      [poolKey]: { ...capacityData[poolKey], enabled },
+      [poolKey]: { ...pool, enabled },
     })
   }
 
-  const handleToggleStrategy = (poolKey: 'vision' | 'audioInput', roundRobin: boolean) => {
+  const handleToggleStrategy = (poolKey: CapacityPoolKey, roundRobin: boolean) => {
+    const pool = capacityData[poolKey] ?? EMPTY_CAPACITY_POOL
     saveCapacity.mutate({
       ...capacityData,
-      [poolKey]: { ...capacityData[poolKey], roundRobin },
+      [poolKey]: { ...pool, roundRobin },
     })
   }
 
-  const handleAddModel = (poolKey: 'vision' | 'audioInput', model: string) => {
+  const handleAddModel = (poolKey: CapacityPoolKey, model: string) => {
     const trimmed = model.trim()
-    if (!trimmed || capacityData[poolKey].models.includes(trimmed)) return
+    const pool = capacityData[poolKey] ?? EMPTY_CAPACITY_POOL
+    if (!trimmed || pool.models.includes(trimmed)) return
     saveCapacity.mutate({
       ...capacityData,
       [poolKey]: {
-        ...capacityData[poolKey],
-        models: [...capacityData[poolKey].models, trimmed],
+        ...pool,
+        models: [...pool.models, trimmed],
       },
     })
-    if (poolKey === 'vision') setNewVisionModel('')
-    else setNewAudioModel('')
+    setNewPoolModels(prev => ({ ...prev, [poolKey]: '' }))
   }
 
-  const handleRemoveModel = (poolKey: 'vision' | 'audioInput', model: string) => {
+  const handleRemoveModel = (poolKey: CapacityPoolKey, model: string) => {
+    const pool = capacityData[poolKey] ?? EMPTY_CAPACITY_POOL
     saveCapacity.mutate({
       ...capacityData,
       [poolKey]: {
-        ...capacityData[poolKey],
-        models: capacityData[poolKey].models.filter(m => m !== model),
+        ...pool,
+        models: pool.models.filter(m => m !== model),
       },
     })
   }
@@ -410,6 +450,9 @@ export default function Combos() {
       <h2>{draft.id ? s.editCombo : s.newCombo}</h2>
       <label>{s.comboName}<input value={draft.name} maxLength={48} required onChange={e => setDraft({ ...draft, name: e.target.value })} /></label>
       <label>{s.description}<input value={draft.description} maxLength={200} placeholder={s.descriptionPlaceholder} onChange={e => setDraft({ ...draft, description: e.target.value })} /></label>
+      <label>{s.comboKind}<select value={draft.kind} onChange={e => setDraft({ ...draft, kind: e.target.value as ComboKind })}>
+        {KINDS.map(kind => <option key={kind} value={kind}>{kindLabels[kind]}</option>)}
+      </select></label>
       <label>{s.strategy}<select value={draft.strategy} onChange={e => setDraft({ ...draft, strategy: e.target.value as ComboStrategy })}>
         {STRATEGIES.map(strategy => <option key={strategy} value={strategy}>{strategyLabels[strategy]}</option>)}
       </select></label>
@@ -462,6 +505,16 @@ export default function Combos() {
             ? policyLabels[draft.smartPolicy === 'strict' ? 'strictHelp' : draft.smartPolicy === 'custom' ? 'customHelp' : 'smartHelp']
             : draft.smartPolicy === 'per-turn' ? policyLabels.perTurnHelp : policyLabels.stickyOff}
         </p>
+        <label>{s.systemOneModel}
+          <input value={draft.systemOneModel} maxLength={120} placeholder={s.systemOnePlaceholder} onChange={e => setDraft({ ...draft, systemOneModel: e.target.value })} />
+        </label>
+        <span className="x-caption">{s.systemOneHelp}</span>
+      </fieldset>}
+      {draft.strategy === 'fusion' && <fieldset className="x-panel" style={{ background: 'var(--x-surface-subtle)', padding: 12, display: 'grid', gap: 6, border: 0, margin: 0 }}>
+        <label>{s.judgeModel}
+          <input value={draft.judgeModel} maxLength={120} placeholder={s.judgePlaceholder} onChange={e => setDraft({ ...draft, judgeModel: e.target.value })} />
+        </label>
+        <span className="x-caption">{s.judgeHelp}</span>
       </fieldset>}
       <div className="x-mgmt-steps">{draft.entries.map((entry, i) => <div className="x-mgmt-step" key={i}>
         <span className="x-mgmt-index">{i + 1}</span>
@@ -499,9 +552,12 @@ export default function Combos() {
             {canEdit && <input type="checkbox" checked={selected.has(c.id)} aria-label={`${s.select} ${c.name}`} onChange={() => toggleSelected(c.id)} />}
             <h2 style={{ margin: 0 }}>{c.name}</h2>
             <span className="x-badge">{strategyLabels[strategy]}</span>
+            {c.kind && c.kind !== 'chat' && <span className="x-badge">{kindLabels[c.kind]}</span>}
             {strategy === 'smart' && <span className="x-badge" title={policyLabels[policyKey(policy)]}>
               {policyLabels[policyKey(policy)]}{policy === 'custom' ? ` ${Math.round((c.confidenceThreshold ?? DEFAULT_CONFIDENCE_THRESHOLD) * 100)}%` : ''}
             </span>}
+            {strategy === 'smart' && c.systemOneModel && <span className="x-badge">SystemOne: <code>{c.systemOneModel}</code></span>}
+            {strategy === 'fusion' && c.judgeModel && <span className="x-badge">Judge: <code>{c.judgeModel}</code></span>}
           </div>
           {canEdit && <div className="x-mgmt-actions" style={{ margin: 0 }}>
             <select aria-label={s.strategy} value={strategy} disabled={changeStrategy.isPending} onChange={e => changeStrategy.mutate({ combo: c, strategy: e.target.value as ComboStrategy })}>
@@ -527,172 +583,100 @@ export default function Combos() {
         <p className="x-muted" style={{ fontSize: '0.85rem' }}>{s.capacityHelp}</p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14 }}>
-        {/* Vision Pool */}
-        <div className="x-panel" style={{ background: 'var(--x-surface-subtle)', padding: 12, display: 'grid', gap: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <strong style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Eye size={16} />
-              {s.visionPool}
-            </strong>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={capacityData.vision.enabled}
-                disabled={!canEdit || saveCapacity.isPending}
-                onChange={e => handleTogglePool('vision', e.target.checked)}
-              />
-              <span>{s.enablePool}</span>
-            </label>
-          </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
+        {([
+          { key: 'vision', label: s.visionPool, icon: <Eye size={16} /> },
+          { key: 'audioInput', label: s.audioPool, icon: <Mic size={16} /> },
+          { key: 'pdf', label: s.pdfPool, icon: <FileText size={16} /> },
+          { key: 'videoInput', label: s.videoPool, icon: <Film size={16} /> },
+          { key: 'search', label: s.searchPool, icon: <Globe size={16} /> },
+        ] as const).map(({ key, label, icon }) => {
+          const pool = capacityData[key] ?? EMPTY_CAPACITY_POOL
+          const inputVal = newPoolModels[key] ?? ''
+          return (
+            <div key={key} className="x-panel" style={{ background: 'var(--x-surface-subtle)', padding: 12, display: 'grid', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <strong style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {icon}
+                  {label}
+                </strong>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={pool.enabled}
+                    disabled={!canEdit || saveCapacity.isPending}
+                    onChange={e => handleTogglePool(key, e.target.checked)}
+                  />
+                  <span>{s.enablePool}</span>
+                </label>
+              </div>
 
-          <div style={{ display: 'flex', gap: 10, fontSize: '0.8rem' }}>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
-              <input
-                type="radio"
-                name="visionStrategy"
-                checked={!capacityData.vision.roundRobin}
-                disabled={!canEdit || saveCapacity.isPending}
-                onChange={() => handleToggleStrategy('vision', false)}
-              />
-              <span>{s.fallbackStrategy}</span>
-            </label>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
-              <input
-                type="radio"
-                name="visionStrategy"
-                checked={capacityData.vision.roundRobin}
-                disabled={!canEdit || saveCapacity.isPending}
-                onChange={() => handleToggleStrategy('vision', true)}
-              />
-              <span>{s.roundRobinStrategy}</span>
-            </label>
-          </div>
+              <div style={{ display: 'flex', gap: 10, fontSize: '0.8rem' }}>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name={`${key}Strategy`}
+                    checked={!pool.roundRobin}
+                    disabled={!canEdit || saveCapacity.isPending}
+                    onChange={() => handleToggleStrategy(key, false)}
+                  />
+                  <span>{s.fallbackStrategy}</span>
+                </label>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name={`${key}Strategy`}
+                    checked={pool.roundRobin}
+                    disabled={!canEdit || saveCapacity.isPending}
+                    onChange={() => handleToggleStrategy(key, true)}
+                  />
+                  <span>{s.roundRobinStrategy}</span>
+                </label>
+              </div>
 
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, minHeight: 28 }}>
-            {capacityData.vision.models.length === 0 ? (
-              <span className="x-muted" style={{ fontSize: '0.75rem' }}>{s.noPoolModels}</span>
-            ) : (
-              capacityData.vision.models.map(m => (
-                <span key={m} className="x-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px' }}>
-                  <code>{m}</code>
-                  {canEdit && (
-                    <button
-                      type="button"
-                      className="x-icon-button"
-                      style={{ width: 14, height: 14, padding: 0 }}
-                      aria-label={`Remove ${m}`}
-                      onClick={() => handleRemoveModel('vision', m)}
-                    >
-                      <X size={12} />
-                    </button>
-                  )}
-                </span>
-              ))
-            )}
-          </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, minHeight: 28 }}>
+                {pool.models.length === 0 ? (
+                  <span className="x-muted" style={{ fontSize: '0.75rem' }}>{s.noPoolModels}</span>
+                ) : (
+                  pool.models.map(m => (
+                    <span key={m} className="x-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px' }}>
+                      <code>{m}</code>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          className="x-icon-button"
+                          style={{ width: 14, height: 14, padding: 0 }}
+                          aria-label={`Remove ${m}`}
+                          onClick={() => handleRemoveModel(key, m)}
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </span>
+                  ))
+                )}
+              </div>
 
-          {canEdit && (
-            <form
-              onSubmit={(e: FormEvent) => { e.preventDefault(); handleAddModel('vision', newVisionModel) }}
-              style={{ display: 'flex', gap: 6 }}
-            >
-              <input
-                type="text"
-                value={newVisionModel}
-                placeholder={s.addModelToPool}
-                onChange={e => setNewVisionModel(e.target.value)}
-                style={{ flex: 1, padding: '4px 8px', fontSize: '0.8rem', borderRadius: 6, border: '1px solid var(--x-border)' }}
-              />
-              <button type="submit" className="x-button" style={{ padding: '4px 8px', fontSize: '0.8rem' }} disabled={!newVisionModel.trim() || saveCapacity.isPending}>
-                <Plus size={13} />
-              </button>
-            </form>
-          )}
-        </div>
-
-        {/* Audio Pool */}
-        <div className="x-panel" style={{ background: 'var(--x-surface-subtle)', padding: 12, display: 'grid', gap: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <strong style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Mic size={16} />
-              {s.audioPool}
-            </strong>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={capacityData.audioInput.enabled}
-                disabled={!canEdit || saveCapacity.isPending}
-                onChange={e => handleTogglePool('audioInput', e.target.checked)}
-              />
-              <span>{s.enablePool}</span>
-            </label>
-          </div>
-
-          <div style={{ display: 'flex', gap: 10, fontSize: '0.8rem' }}>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
-              <input
-                type="radio"
-                name="audioStrategy"
-                checked={!capacityData.audioInput.roundRobin}
-                disabled={!canEdit || saveCapacity.isPending}
-                onChange={() => handleToggleStrategy('audioInput', false)}
-              />
-              <span>{s.fallbackStrategy}</span>
-            </label>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
-              <input
-                type="radio"
-                name="audioStrategy"
-                checked={capacityData.audioInput.roundRobin}
-                disabled={!canEdit || saveCapacity.isPending}
-                onChange={() => handleToggleStrategy('audioInput', true)}
-              />
-              <span>{s.roundRobinStrategy}</span>
-            </label>
-          </div>
-
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, minHeight: 28 }}>
-            {capacityData.audioInput.models.length === 0 ? (
-              <span className="x-muted" style={{ fontSize: '0.75rem' }}>{s.noPoolModels}</span>
-            ) : (
-              capacityData.audioInput.models.map(m => (
-                <span key={m} className="x-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px' }}>
-                  <code>{m}</code>
-                  {canEdit && (
-                    <button
-                      type="button"
-                      className="x-icon-button"
-                      style={{ width: 14, height: 14, padding: 0 }}
-                      aria-label={`Remove ${m}`}
-                      onClick={() => handleRemoveModel('audioInput', m)}
-                    >
-                      <X size={12} />
-                    </button>
-                  )}
-                </span>
-              ))
-            )}
-          </div>
-
-          {canEdit && (
-            <form
-              onSubmit={(e: FormEvent) => { e.preventDefault(); handleAddModel('audioInput', newAudioModel) }}
-              style={{ display: 'flex', gap: 6 }}
-            >
-              <input
-                type="text"
-                value={newAudioModel}
-                placeholder={s.addModelToPool}
-                onChange={e => setNewAudioModel(e.target.value)}
-                style={{ flex: 1, padding: '4px 8px', fontSize: '0.8rem', borderRadius: 6, border: '1px solid var(--x-border)' }}
-              />
-              <button type="submit" className="x-button" style={{ padding: '4px 8px', fontSize: '0.8rem' }} disabled={!newAudioModel.trim() || saveCapacity.isPending}>
-                <Plus size={13} />
-              </button>
-            </form>
-          )}
-        </div>
+              {canEdit && (
+                <form
+                  onSubmit={(e: FormEvent) => { e.preventDefault(); handleAddModel(key, inputVal) }}
+                  style={{ display: 'flex', gap: 6 }}
+                >
+                  <input
+                    type="text"
+                    value={inputVal}
+                    placeholder={s.addModelToPool}
+                    onChange={e => setNewPoolModels(prev => ({ ...prev, [key]: e.target.value }))}
+                    style={{ flex: 1, padding: '4px 8px', fontSize: '0.8rem', borderRadius: 6, border: '1px solid var(--x-border)' }}
+                  />
+                  <button type="submit" className="x-button" style={{ padding: '4px 8px', fontSize: '0.8rem' }} disabled={!inputVal.trim() || saveCapacity.isPending}>
+                    <Plus size={13} />
+                  </button>
+                </form>
+              )}
+            </div>
+          )
+        })}
       </div>
       {saveCapacity.isSuccess && <p className="x-test-ok" role="status" style={{ fontSize: '0.82rem' }}><Check size={14} />{s.poolSaved}</p>}
     </section>

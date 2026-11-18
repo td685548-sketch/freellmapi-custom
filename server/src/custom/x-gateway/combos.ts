@@ -11,6 +11,13 @@ export type ComboStrategy = 'fallback' | 'round-robin' | 'smart' | 'fusion';
 export const COMBO_STRATEGIES: readonly ComboStrategy[] = ['fallback', 'round-robin', 'smart', 'fusion'];
 export const DEFAULT_COMBO_STRATEGY: ComboStrategy = 'fallback';
 
+export type ComboKind = 'chat' | 'image' | 'audio' | 'embedding' | 'video';
+export const COMBO_KINDS: readonly ComboKind[] = ['chat', 'image', 'audio', 'embedding', 'video'];
+
+export function isComboKind(value: unknown): value is ComboKind {
+  return typeof value === 'string' && (COMBO_KINDS as readonly string[]).includes(value);
+}
+
 export function isComboStrategy(value: unknown): value is ComboStrategy {
   return typeof value === 'string' && (COMBO_STRATEGIES as readonly string[]).includes(value);
 }
@@ -63,6 +70,9 @@ export interface ComboPolicyInput {
   smartPolicy?: unknown;
   sessionSticky?: unknown;
   confidenceThreshold?: unknown;
+  systemOneModel?: unknown;
+  judgeModel?: unknown;
+  kind?: unknown;
 }
 
 /**
@@ -133,6 +143,19 @@ export function validateComboMeta(
       return 'confidenceThreshold must be a number between 0 and 1';
     }
   }
+  if (policy?.systemOneModel !== undefined) {
+    if (typeof policy.systemOneModel !== 'string' || policy.systemOneModel.trim().length > 120) {
+      return 'systemOneModel must be a string at most 120 characters';
+    }
+  }
+  if (policy?.judgeModel !== undefined) {
+    if (typeof policy.judgeModel !== 'string' || policy.judgeModel.trim().length > 120) {
+      return 'judgeModel must be a string at most 120 characters';
+    }
+  }
+  if (policy?.kind !== undefined && !isComboKind(policy.kind)) {
+    return `Kind must be one of: ${COMBO_KINDS.join(', ')}`;
+  }
   return null;
 }
 
@@ -160,6 +183,9 @@ export interface ValidateComboOptions {
   smartPolicy?: unknown;
   sessionSticky?: unknown;
   confidenceThreshold?: unknown;
+  systemOneModel?: unknown;
+  judgeModel?: unknown;
+  kind?: unknown;
 }
 
 export function validateCombo(
@@ -180,6 +206,9 @@ export function validateCombo(
     smartPolicy: opts?.smartPolicy,
     sessionSticky: opts?.sessionSticky,
     confidenceThreshold: opts?.confidenceThreshold,
+    systemOneModel: opts?.systemOneModel,
+    judgeModel: opts?.judgeModel,
+    kind: opts?.kind,
   });
   if (metaError) {
     return { valid: false, error: metaError };

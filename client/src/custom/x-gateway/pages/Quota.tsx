@@ -5,7 +5,7 @@ import { Clock, Gauge, RefreshCw, RotateCcw } from 'lucide-react';
 import type { QuotaTier, XAccountQuota } from '../../../../../shared/x-quota';
 import { useUserSession } from '../../use-session';
 import { useSessionRevision } from '../../session-state';
-import { quotaApi, type CodexResetCreditsResponse } from '../quota-api';
+import { quotaApi, type ClaudeResetGrantsResponse, type CodexResetCreditsResponse } from '../quota-api';
 import { quotaCountdown } from '../quota-format';
 import { useQuotaStrings } from '../quota-strings';
 import '../quota.css';
@@ -24,6 +24,8 @@ export default function Quota() {
   const [confirmResetId, setConfirmResetId] = useState<number | null>(null);
   const [resetNotice, setResetNotice] = useState<{ id: number; ok: boolean; text: string } | null>(null);
   const [creditDetails, setCreditDetails] = useState<Record<number, { open: boolean; loading: boolean; error?: string; data?: CodexResetCreditsResponse }>>({});
+  const [confirmClaudeResetId, setConfirmClaudeResetId] = useState<number | null>(null);
+  const [claudeGrants, setClaudeGrants] = useState<Record<number, { open: boolean; loading: boolean; error?: string; data?: ClaudeResetGrantsResponse }>>({});
   const query = useQuery({ queryKey: ['x-quota', revision], queryFn: ({ signal }) => quotaApi.list(signal), enabled: canView, refetchInterval: 30_000, retry: false });
   const invalidate = () => client.invalidateQueries({ queryKey: ['x-quota', revision] });
   const refresh = useMutation({
@@ -44,6 +46,33 @@ export default function Quota() {
     },
     meta: { silenceToast: true },
   });
+  const claudeReset = useMutation({
+    mutationFn: (id: number) => quotaApi.useClaudeResetGrant(id),
+    onSuccess: (res, id) => {
+      setConfirmClaudeResetId(null);
+      setResetNotice({ id, ok: res.ok, text: res.ok ? s.claudeResetSuccess : (res.message || s.claudeResetNone) });
+      void invalidate();
+    },
+    onError: (err, id) => {
+      setConfirmClaudeResetId(null);
+      setResetNotice({ id, ok: false, text: err instanceof Error ? err.message : s.claudeResetNone });
+    },
+    meta: { silenceToast: true },
+  });
+  const toggleClaudeGrants = async (id: number) => {
+    const cur = claudeGrants[id];
+    if (cur?.open) {
+      setClaudeGrants(prev => ({ ...prev, [id]: { ...cur, open: false } }));
+      return;
+    }
+    setClaudeGrants(prev => ({ ...prev, [id]: { open: true, loading: true } }));
+    try {
+      const data = await quotaApi.claudeResetGrants(id);
+      setClaudeGrants(prev => ({ ...prev, [id]: { open: true, loading: false, data } }));
+    } catch (err) {
+      setClaudeGrants(prev => ({ ...prev, [id]: { open: true, loading: false, error: err instanceof Error ? err.message : s.claudeResetNone } }));
+    }
+  };
   const toggleCreditDetails = async (id: number) => {
     const cur = creditDetails[id];
     if (cur?.open) {
@@ -86,7 +115,7 @@ export default function Quota() {
       <header><div><h2>{a.label || a.providerName}</h2><span>{a.providerName}{!a.enabled && ` · ${s.disabled}`}</span></div><select aria-label={`${s.tier}: ${a.label || a.providerName}`} value={a.tier} disabled={!canEdit || tier.isPending} onChange={e => tier.mutate({ id: a.accountId, value: e.target.value as QuotaTier })}>{(['subscription', 'cheap', 'free'] as const).map(t => <option value={t} key={t}>{s[t]}</option>)}</select></header>
       <p className={`x-quota-state ${stale(a) ? 'stale' : ''}`}>{stale(a) ? s.stale : s.live}</p>
       {!a.windows.length && <p className="x-quota-note">{s.noWindows}</p>}
-      {a.windows.filter(w => w.id !== 'reset_credits').map(w => {
+      {a.windows.filter(w => w.id !== 'reset_credits' && w.id !== 'reset_grants').map(w => {
         const ratio = w.remaining != null && w.limit != null && w.limit > 0 ? Math.max(0, Math.min(100, w.remaining / w.limit * 100)) : null;
         const countdown = quotaCountdown(w.resetAt, now);
         return <div className="x-quota-window" key={`${w.id}:${w.modelId ?? ''}`}><div className="x-quota-window-title"><strong>{w.id}{w.modelId && ` · ${w.modelId}`}</strong><small>{w.source === 'header' ? s.header : s.api}</small></div>
@@ -96,6 +125,58 @@ export default function Quota() {
           {(!w.blocking || w.modelId) && <small className="x-quota-note">{s.modelOnly}</small>}
         </div>;
       })}
+      {a.provider === 'claude' && (() => {
+        const grantWin = a.windows.find(w => w.id === 'reset_grants');
+        const grantCount = grantWin?.remaining ?? null;
+        const gDetail = claudeGrants[a.accountId];
+        return <div className="x-quota-window">
+          <div className="x-quota-window-title">
+            <strong>{s.claudeResetTitle}{grantCount != null ? `: ${grantCount}` : ''}</strong>
+            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="x-button"
+                disabled={!canEdit || !a.enabled || claudeReset.isPending}
+                onClick={() => { setResetNotice(null); setConfirmClaudeResetId(a.accountId); }}
+              >
+                <RotateCcw size={14} />
+                {claudeReset.isPending && claudeReset.variables === a.accountId ? s.resetting : s.claudeResetAction}
+              </button>
+              <button
+                type="button"
+                className="x-button"
+                disabled={!a.enabled || gDetail?.loading}
+                onClick={() => void toggleClaudeGrants(a.accountId)}
+              >
+                <Clock size={14} />
+                {gDetail?.loading ? s.loadingDetails : s.claudeResetCheck}
+              </button>
+            </div>
+          </div>
+          {confirmClaudeResetId === a.accountId && (
+            <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <small>{s.claudeResetConfirm}</small>
+              <button type="button" className="x-button" disabled={claudeReset.isPending} onClick={() => claudeReset.mutate(a.accountId)}>{s.confirmBtn}</button>
+              <button type="button" className="x-button" disabled={claudeReset.isPending} onClick={() => setConfirmClaudeResetId(null)}>{s.cancelBtn}</button>
+            </div>
+          )}
+          {resetNotice?.id === a.accountId && (
+            <p className={resetNotice.ok ? 'x-quota-note' : 'x-error'} role={resetNotice.ok ? 'status' : 'alert'}>{resetNotice.text}</p>
+          )}
+          {gDetail?.open && (
+            <div style={{ marginTop: '0.5rem' }}>
+              {gDetail.error && <p className="x-error" role="alert">{gDetail.error}</p>}
+              {!gDetail.loading && !gDetail.error && (gDetail.data?.grants.length ? (
+                <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.82rem' }}>
+                  {gDetail.data.grants.map((g) => (
+                    <li key={g.id}>{g.label || g.id}: {g.resetsLeft}/{g.resetsTotal}{g.endsAt ? ` · ${s.creditExpires}: ${new Date(g.endsAt).toLocaleString()}` : ''}</li>
+                  ))}
+                </ul>
+              ) : <small className="x-quota-note">{s.claudeResetNone}</small>)}
+            </div>
+          )}
+        </div>;
+      })()}
       {a.provider === 'codex' && (() => {
         const resetWin = a.windows.find(w => w.id === 'reset_credits');
         const creditCount = resetWin?.remaining ?? null;

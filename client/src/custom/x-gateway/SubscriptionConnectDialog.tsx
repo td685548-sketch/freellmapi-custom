@@ -2,12 +2,14 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Dialog, DialogDescription, DialogPopup, DialogTitle } from '@/components/ui/dialog'
 import type { AccountProvider, ProviderAccount } from '../../../../shared/x-accounts'
-import { refreshAccounts } from './api'
+import { accountsApi, refreshAccounts } from './api'
 import { subscriptionApi, type SubscriptionAttempt } from './subscription-api'
 import { useSessionRevision } from '../session-state'
 import { proxyPoolApi } from './proxy-pool-api'
 import { usePoolStrings } from './proxy-pool-strings'
 import { useXStrings } from './strings'
+
+const NATIVE_SUBSCRIPTION_IDS = new Set(['codex', 'claude', 'gemini-cli', 'kiro'])
 
 export function SubscriptionConnectDialog({ provider, account, onClose }: { provider: AccountProvider; account?: ProviderAccount; onClose: () => void }) {
   const client = useQueryClient()
@@ -20,6 +22,8 @@ export function SubscriptionConnectDialog({ provider, account, onClose }: { prov
   const [label, setLabel] = useState(account?.label ?? '')
   const [proxyUrl, setProxyUrl] = useState(account?.proxyUrl ?? '')
   const [poolChoice, setPoolChoice] = useState(account?.proxyPoolId != null ? String(account.proxyPoolId) : '')
+  const [gitlabBaseUrl, setGitlabBaseUrl] = useState('https://gitlab.com')
+  const [gitlabClientId, setGitlabClientId] = useState('')
   const [credential, setCredential] = useState('')
   const [code, setCode] = useState('')
   const [attempt, setAttempt] = useState<SubscriptionAttempt | null>(null)
@@ -63,7 +67,14 @@ export function SubscriptionConnectDialog({ provider, account, onClose }: { prov
     ...(proxyUrl.trim() ? { proxyUrl: proxyUrl.trim() } : {}),
     ...(resolvedPoolId !== undefined ? { proxyPoolId: resolvedPoolId } : {}),
   }
-  const body = { provider: provider.id, label: label.trim(), ...(account ? { reconnectId: account.id } : {}), ...proxyBody }
+  const body = {
+    provider: provider.id,
+    label: label.trim(),
+    ...(account ? { reconnectId: account.id } : {}),
+    ...(provider.id === 'gitlab' && gitlabBaseUrl.trim() ? { baseUrl: gitlabBaseUrl.trim() } : {}),
+    ...(provider.id === 'gitlab' && gitlabClientId.trim() ? { clientId: gitlabClientId.trim() } : {}),
+    ...proxyBody,
+  }
   async function start() {
     await run(async () => {
       const value = await subscriptionApi.start(body)
@@ -71,13 +82,29 @@ export function SubscriptionConnectDialog({ provider, account, onClose }: { prov
       pending.current = value.attemptId; setAttempt(value)
     })
   }
-  function importJson(event: FormEvent) { event.preventDefault(); void run(async () => { await subscriptionApi.import({ ...body, credential }); if (mounted.current) done() }) }
+  function importJson(event: FormEvent) {
+    event.preventDefault()
+    void run(async () => {
+      if (NATIVE_SUBSCRIPTION_IDS.has(provider.id)) {
+        await subscriptionApi.import({ ...body, credential })
+      } else {
+        await accountsApi.addKey(provider.id, credential.trim(), label.trim(), undefined, proxyUrl.trim() || undefined, undefined, resolvedPoolId)
+      }
+      if (mounted.current) done()
+    })
+  }
   return <Dialog open onOpenChange={open => { if (!open) onClose() }}><DialogPopup className="x-console x-dialog">
     <DialogTitle>{account ? 'Reconnect' : 'Connect'} · {provider.name}</DialogTitle>
     <DialogDescription>Credentials stay encrypted on the server. Saving a credential does not verify upstream access.</DialogDescription>
     {error && <p className="x-error" role="alert">{error}</p>}
     {!attempt ? <form className="x-form" onSubmit={importJson}>
       <label>Account name<input required maxLength={200} value={label} onChange={e => setLabel(e.target.value)} disabled={busy} /></label>
+      {provider.id === 'gitlab' && (
+        <>
+          <label>GitLab URL<input value={gitlabBaseUrl} onChange={e => setGitlabBaseUrl(e.target.value)} placeholder="https://gitlab.com" disabled={busy} /></label>
+          <label>GitLab OAuth App Client ID<input value={gitlabClientId} onChange={e => setGitlabClientId(e.target.value)} placeholder="Optional custom OAuth application ID" disabled={busy} /></label>
+        </>
+      )}
       <label>{s.accountProxy}<input id="x-account-proxy" name="proxyUrl" value={proxyUrl} onChange={event => setProxyUrl(event.target.value)} placeholder={s.accountProxyPlaceholder} disabled={busy} /></label>
       <label>{p.accountPool}<select id="x-account-pool" name="proxyPoolId" value={poolChoice} onChange={event => setPoolChoice(event.target.value)} disabled={busy}><option value="">{p.accountPoolAuto}</option><option value="none">{p.accountPoolNone}</option>{poolEntries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}{entry.enabled ? '' : ` (${p.disabled})`}</option>)}</select><span className="x-caption">{p.accountPoolHint}</span></label>
       <button type="button" className="x-button x-primary" disabled={busy || !label.trim()} onClick={() => void start()}>Sign in with browser</button>

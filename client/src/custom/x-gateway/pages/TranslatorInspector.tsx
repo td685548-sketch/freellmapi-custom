@@ -16,10 +16,14 @@ import {
   useInspectTranslation,
   useDispatchTranslation,
   useTranslatorTemplates,
+  useTranslatorCases,
+  useSaveTranslatorCase,
+  useDeleteTranslatorCase,
 } from '../translator-api';
 import type {
   PipelineStep,
   ProtocolType,
+  SavedTranslatorCase,
   TranslatorTemplate,
 } from '../translator-types';
 
@@ -28,6 +32,11 @@ const PROTOCOL_OPTIONS: Array<{ value: ProtocolType; labelKey: keyof ReturnType<
   { value: 'anthropic', labelKey: 'protocolAnthropic' },
   { value: 'openai_responses', labelKey: 'protocolOpenAIResponses' },
   { value: 'gemini', labelKey: 'protocolGemini' },
+  { value: 'kiro', labelKey: 'protocolKiro' },
+  { value: 'antigravity', labelKey: 'protocolAntigravity' },
+  { value: 'vertex', labelKey: 'protocolVertex' },
+  { value: 'ollama', labelKey: 'protocolOllama' },
+  { value: 'cursor', labelKey: 'protocolCursor' },
   { value: 'sse_openai', labelKey: 'protocolSseOpenAI' },
   { value: 'sse_anthropic', labelKey: 'protocolSseAnthropic' },
 ];
@@ -51,8 +60,13 @@ export default function TranslatorInspector() {
   const [activeTab, setActiveTab] = useState<'pipeline' | 'json' | 'dispatch'>('pipeline');
 
   const templatesQuery = useTranslatorTemplates();
+  const casesQuery = useTranslatorCases();
+  const saveCaseMutation = useSaveTranslatorCase();
+  const deleteCaseMutation = useDeleteTranslatorCase();
   const inspectMutation = useInspectTranslation();
   const dispatchMutation = useDispatchTranslation();
+  const [caseName, setCaseName] = useState('');
+  const [selectedCaseId, setSelectedCaseId] = useState('');
 
   // Validate JSON input syntax
   const parseValidation = useMemo(() => {
@@ -266,6 +280,79 @@ export default function TranslatorInspector() {
               {s.clear}
             </button>
           </div>
+        </div>
+
+        {/* Saved Test Cases Row */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--x-border)' }}>
+          <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--x-muted)', textTransform: 'uppercase' }}>{s.savedCases}:</span>
+          {(casesQuery.data?.length ?? 0) > 0 && (
+            <>
+              <select
+                className="x-input"
+                aria-label={s.savedCases}
+                value={selectedCaseId}
+                onChange={(e) => {
+                  const nextId = e.target.value;
+                  setSelectedCaseId(nextId);
+                  const found = casesQuery.data?.find((c: SavedTranslatorCase) => c.id === nextId);
+                  if (found) {
+                    setSourceProtocol(found.sourceProtocol);
+                    setTargetProtocol(found.targetProtocol);
+                    setJsonInput(JSON.stringify(found.payload, null, 2));
+                  }
+                }}
+                style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--x-border)', background: 'var(--x-bg)', fontSize: '12px' }}
+              >
+                <option value="">{s.savedCases}...</option>
+                {casesQuery.data!.map((c: SavedTranslatorCase) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.sourceProtocol} → {c.targetProtocol})
+                  </option>
+                ))}
+              </select>
+              {selectedCaseId && (
+                <button
+                  type="button"
+                  className="x-button"
+                  onClick={() => {
+                    const id = selectedCaseId;
+                    setSelectedCaseId('');
+                    deleteCaseMutation.mutate(id);
+                  }}
+                  style={{ fontSize: '12px', padding: '6px 10px' }}
+                >
+                  {s.deleteCase}
+                </button>
+              )}
+            </>
+          )}
+          <input
+            type="text"
+            className="x-input"
+            value={caseName}
+            onChange={(e) => setCaseName(e.target.value)}
+            placeholder={s.caseNamePlaceholder}
+            style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--x-border)', background: 'var(--x-bg)', fontSize: '12px', minWidth: '180px' }}
+          />
+          <button
+            type="button"
+            className="x-button"
+            disabled={!caseName.trim() || !parseValidation.valid || saveCaseMutation.isPending}
+            onClick={() => {
+              if (!parseValidation.valid || !parseValidation.parsed || !caseName.trim()) return;
+              saveCaseMutation.mutate({
+                name: caseName.trim(),
+                sourceProtocol,
+                targetProtocol,
+                payload: parseValidation.parsed as Record<string, unknown>,
+              }, {
+                onSuccess: () => setCaseName(''),
+              });
+            }}
+            style={{ fontSize: '12px', padding: '6px 12px' }}
+          >
+            {s.saveCase}
+          </button>
         </div>
       </div>
 

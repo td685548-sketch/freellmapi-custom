@@ -3,7 +3,7 @@ import { Router } from 'express';
 import type { NextFunction, Request, Response } from 'express';
 import { createHash } from 'node:crypto';
 import { getDb } from '../../db/index.js';
-import type { ChatMessage } from '@freellmapi/shared/types.js';
+import type { ChatCompletionChunk, ChatCompletionResponse, ChatMessage } from '@freellmapi/shared/types.js';
 import type { CompletionOptions } from '../../providers/base.js';
 import { decrypt } from '../../lib/crypto.js';
 import { estimateInputTokens } from '../../lib/content.js';
@@ -11,6 +11,8 @@ import { assessProviderUrl } from '../../lib/url-guard.js';
 import { proxyFetch } from '../../lib/proxy.js';
 import { withQuotaTracking } from './quota/tracking.js';
 import { applyQuotaRouting, isWebCookieProvider } from './quota/store.js';
+import { resolveSystemOneComboOrder } from './systemone-router.js';
+import { executeJudgeFusion } from './combo-fusion.js';
 import { getAccountCooldown } from '../provider-accounts/auto-ping.js';
 import {
   clearAutoSessionRoute,
@@ -51,6 +53,7 @@ import {
   DEFAULT_COMBO_STRATEGY,
   resolveComboPolicy,
   rotateComboEntries,
+  type ComboKind,
   type ComboPolicyInput,
   type ComboSmartPolicy,
   type ComboStrategy,
@@ -266,9 +269,12 @@ function pickCandidateModel(models: { id: string; name?: string }[], modality: C
 export interface ComboRouteInfo {
   name: string;
   strategy: ComboStrategy;
+  kind?: ComboKind;
   smartPolicy: ComboSmartPolicy;
   sessionSticky: boolean;
   confidenceThreshold: number;
+  systemOneModel?: string;
+  judgeModel?: string;
 }
 
 /**
@@ -411,7 +417,16 @@ export function resolveCandidateRoutes(
     });
     return finalizeCandidateRoutes(
       strategy === 'smart' ? sortCandidatesByHealth(rotateCandidateAccounts(candidates)) : rotateCandidateAccounts(candidates),
-      { combo: { name: combo.name, strategy, ...resolveComboPolicy(combo) } },
+      {
+        combo: {
+          name: combo.name,
+          strategy,
+          ...resolveComboPolicy(combo),
+          ...(combo.kind ? { kind: combo.kind } : {}),
+          ...(combo.systemOneModel ? { systemOneModel: combo.systemOneModel } : {}),
+          ...(combo.judgeModel ? { judgeModel: combo.judgeModel } : {}),
+        },
+      },
     );
   }
 
@@ -565,7 +580,7 @@ export function sortCandidatesByHealth<T extends Pick<CandidateRoute, 'account' 
  * Fusion fans a request out to the first two distinct combo steps. Candidates
  * for the same step (several accounts of one provider) collapse to the first.
  */
-export function pickFusionCandidates<T extends { step?: number }>(candidates: T[]): T[] {
+export function pickFusionCandidates<T extends { step?: number }>(candidates: T[], maxCount = 2): T[] {
   const picked: T[] = [];
   const seenSteps = new Set<number>();
   for (const candidate of candidates) {
@@ -574,7 +589,7 @@ export function pickFusionCandidates<T extends { step?: number }>(candidates: T[
       seenSteps.add(candidate.step);
     }
     picked.push(candidate);
-    if (picked.length >= 2) break;
+    if (picked.length >= maxCount) break;
   }
   return picked;
 }
@@ -676,6 +691,7 @@ function shouldReleasePin(pinned: CandidateRoute, candidates: CandidateRoute[], 
 export interface SessionStickyCombo extends ComboPolicyInput {
   name: string;
   strategy?: ComboStrategy;
+  systemOneModel?: string;
 }
 
 /**
@@ -689,7 +705,7 @@ export function applySessionStickiness(
   combo: SessionStickyCombo | undefined,
   messages: ChatMessage[],
 ): CandidateRoute[] {
-  if (!combo || combo.strategy !== 'smart' || candidates.length === 0) return candidates;
+  if (!combo || combo.strategy !== 'smart' || combo.systemOneModel?.trim() || candidates.length === 0) return candidates;
   const policy = resolveComboPolicy(combo);
   if (!policy.sessionSticky || policy.smartPolicy === 'per-turn') return candidates;
 
@@ -751,6 +767,40 @@ function raceFirstSuccess<T>(tasks: Array<Promise<T>>): Promise<T> {
       });
     }
   });
+}
+
+function resolveCandidateByTarget(target: string, fallbackList: CandidateRoute[]): CandidateRoute | undefined {
+  const trimmed = target.trim();
+  if (trimmed) {
+    const resolved = resolveCandidateRoutes(trimmed, 'chat');
+    if (resolved.candidates.length > 0) return resolved.candidates[0];
+    const direct = fallbackList.find(c => `${c.account.provider}/${c.modelId}` === trimmed || c.modelId === trimmed);
+    if (direct) return direct;
+  }
+  return fallbackList[0];
+}
+
+async function executeRouteChatCompletion(
+  candidate: CandidateRoute,
+  msgs: ChatMessage[],
+  opts: CompletionOptions,
+): Promise<{ candidate: CandidateRoute; completion: ChatCompletionResponse; latencyMs: number }> {
+  const { account, modelId } = candidate;
+  const provider = resolveAccountProvider(account);
+  if (!provider) throw new Error(`Provider '${account.provider}' is not available.`);
+  const credential = decrypt(account.encrypted_key, account.iv, account.auth_tag);
+  const effectiveProxy = resolveXGatewayAccountProxy(account);
+  const startedAt = Date.now();
+  const completion = await withQuotaTracking(account, modelId, effectiveProxy, () =>
+    provider.chatCompletion(
+      credential,
+      msgs,
+      modelId,
+      opts,
+      { platform: account.platform, keyId: account.id, modelId },
+    ),
+  );
+  return { candidate, completion, latencyMs: Date.now() - startedAt };
 }
 
 export function applyGatewaySavers(req: Request, messages: ChatMessage[]): {
@@ -920,7 +970,8 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
       }
       // The adapter only ever returns account/model pairs, so it can keep the
       // combo step metadata that `resolveCandidateRoutes` attached.
-      const augmented = augmentCandidatesWithCapacityAdapter(rawCandidates, messages) as CandidateRoute[];
+      const tools = Array.isArray(body.tools) ? (body.tools as Array<Record<string, any>>) : undefined;
+      const augmented = augmentCandidatesWithCapacityAdapter(rawCandidates, messages, tools) as CandidateRoute[];
       // Smart combos keep a conversation on the same route to protect the
       // provider's warm prompt cache; other strategies keep their own ordering.
       return {
@@ -1009,25 +1060,42 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
     const estimatedPromptTokens = estimateInputTokens(messages);
     let lastError: unknown = null;
 
-    /** One non-streaming attempt, isolated so fusion can run two in parallel. */
-    const attemptNonStream = async (candidate: CandidateRoute, signal: AbortSignal) => {
-      const { account, modelId } = candidate;
-      const provider = resolveAccountProvider(account);
-      if (!provider) throw new Error(`Provider '${account.provider}' is not available.`);
-      const credential = decrypt(account.encrypted_key, account.iv, account.auth_tag);
-      const effectiveProxy = resolveXGatewayAccountProxy(account);
-      const startedAt = Date.now();
-      const completion = await withQuotaTracking(account, modelId, effectiveProxy, () =>
-        provider.chatCompletion(
-          credential,
-          messages,
-          modelId,
-          { ...options, signal },
-          { platform: account.platform, keyId: account.id, modelId },
-        ),
-      );
-      return { candidate, completion, latencyMs: Date.now() - startedAt };
-    };
+    if (combo && strategy === 'smart' && combo.systemOneModel?.trim() && candidates.length > 1) {
+      const sessionHdr = req.headers['x-session-id'];
+      const sessionId = typeof sessionHdr === 'string' && sessionHdr.trim()
+        ? sessionHdr.trim()
+        : (typeof body.user === 'string' && body.user.trim() ? body.user.trim() : conversationFingerprint(messages));
+      const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+      const promptState = lastUserMsg ? messageText(lastUserMsg.content) : '';
+      const sysOne = await resolveSystemOneComboOrder({
+        items: candidates,
+        keyOf: c => `${c.account.provider}/${c.modelId}`,
+        comboName: combo.name,
+        systemOneModel: combo.systemOneModel,
+        smartPolicy: combo.smartPolicy,
+        confidenceThreshold: combo.confidenceThreshold,
+        sessionId,
+        promptState,
+        invokeClassifier: async (targetModel, classifyMsgs, timeoutMs) => {
+          const classifierCandidate = resolveCandidateByTarget(targetModel, candidates);
+          if (!classifierCandidate) return null;
+          const r = await executeRouteChatCompletion(classifierCandidate, classifyMsgs, {
+            temperature: 0,
+            max_tokens: 256,
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(timeoutMs)]),
+          });
+          return r.completion;
+        },
+      });
+      candidates = sysOne.ordered;
+      if (sysOne.decision?.choice) {
+        res.setHeader('X-SystemOne-Choice', sysOne.decision.choice);
+      }
+    }
+
+    /** One non-streaming attempt, isolated so fusion can run in parallel. */
+    const attemptNonStream = (candidate: CandidateRoute, signal: AbortSignal) =>
+      executeRouteChatCompletion(candidate, messages, { ...options, signal });
 
     const succeedNonStream = (result: Awaited<ReturnType<typeof attemptNonStream>>) => {
       const { account, modelId } = result.candidate;
@@ -1055,7 +1123,130 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
       res.status(200).json(result.completion);
     };
 
-    if (!isStream && strategy === 'fusion') {
+    if (strategy === 'fusion' && combo?.judgeModel?.trim()) {
+      const panelCandidates = pickFusionCandidates(candidates, 4);
+      if (panelCandidates.length > 1) {
+        const panelMap = new Map<string, CandidateRoute>(panelCandidates.map(c => [`${c.account.provider}/${c.modelId}`, c]));
+        let judgeUsed = resolveCandidateByTarget(combo.judgeModel, candidates) ?? candidates[0];
+        const fusionToken = beginUsageRequest(judgeUsed.account.provider, judgeUsed.modelId, fromPlayground);
+        try {
+          const fusionOut = await executeJudgeFusion({
+            panelTargets: [...panelMap.keys()],
+            judgeModel: combo.judgeModel,
+            messages,
+            stream: isStream,
+            runPanelTarget: async (target, panelMessages) => {
+              const candidate = panelMap.get(target);
+              if (!candidate) throw new Error(`Panel target '${target}' unavailable`);
+              const r = await executeRouteChatCompletion(candidate, panelMessages, { ...options, signal: controller.signal });
+              return r.completion;
+            },
+            runJudgeNonStream: async (judgeTarget, judgeMessages) => {
+              judgeUsed = resolveCandidateByTarget(judgeTarget, candidates) ?? candidates[0];
+              const r = await executeRouteChatCompletion(judgeUsed, judgeMessages, { ...options, signal: controller.signal });
+              return r.completion;
+            },
+            runJudgeStream: async function* (judgeTarget, judgeMessages) {
+              judgeUsed = resolveCandidateByTarget(judgeTarget, candidates) ?? candidates[0];
+              const provider = resolveAccountProvider(judgeUsed.account);
+              if (!provider) throw new Error(`Provider '${judgeUsed.account.provider}' is not available.`);
+              const credential = decrypt(judgeUsed.account.encrypted_key, judgeUsed.account.iv, judgeUsed.account.auth_tag);
+              const stream = provider.streamChatCompletion(
+                credential,
+                judgeMessages,
+                judgeUsed.modelId,
+                { ...options, signal: controller.signal },
+                { platform: judgeUsed.account.platform, keyId: judgeUsed.account.id, modelId: judgeUsed.modelId },
+              );
+              for await (const chunk of stream) {
+                yield chunk;
+              }
+            },
+          });
+          if (controller.signal.aborted) {
+            cancelUsageRequest(fusionToken);
+            return;
+          }
+          if (fusionOut?.type === 'response') {
+            recordRouteOutcome(healthKey(judgeUsed), { latencyMs: Date.now() - startMs });
+            recordCandidateSuccess(judgeUsed.account.id, judgeUsed.modelId);
+            res.setHeader('X-Fusion-Judge', combo.judgeModel.trim());
+            succeedNonStream({ candidate: judgeUsed, completion: fusionOut.response, latencyMs: Date.now() - startMs });
+            endUsageRequest(fusionToken, { status: 'success', provider: judgeUsed.account.provider, model: judgeUsed.modelId });
+            return;
+          }
+          if (fusionOut?.type === 'stream') {
+            const iter = fusionOut.stream[Symbol.asyncIterator]();
+            const first = await iter.next();
+            if (!first.done) {
+              res.setHeader('Content-Type', 'text/event-stream');
+              res.setHeader('Cache-Control', 'no-cache');
+              res.setHeader('X-Accel-Buffering', 'no');
+              res.setHeader('X-Routed-Via', `${judgeUsed.account.provider}/${judgeUsed.modelId}`);
+              res.setHeader('X-Fusion-Judge', combo.judgeModel.trim());
+              const ttfbMs = Date.now() - startMs;
+              let promptTokens = estimatedPromptTokens;
+              let completionTokens = 0;
+              const emitChunk = (chunk: ChatCompletionChunk) => {
+                if (chunk.usage?.prompt_tokens != null) promptTokens = chunk.usage.prompt_tokens;
+                if (chunk.usage?.completion_tokens != null) completionTokens = chunk.usage.completion_tokens;
+                res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+              };
+              emitChunk(first.value);
+              while (true) {
+                const next = await iter.next();
+                if (next.done || controller.signal.aborted) break;
+                emitChunk(next.value);
+              }
+              if (controller.signal.aborted) {
+                cancelUsageRequest(fusionToken);
+                return;
+              }
+              res.write('data: [DONE]\n\n');
+              res.end();
+              recordRouteOutcome(healthKey(judgeUsed), { latencyMs: Date.now() - startMs });
+              recordCandidateSuccess(judgeUsed.account.id, judgeUsed.modelId);
+              recordXGatewayKeyUsage(judgeUsed.account.id, promptTokens + completionTokens);
+              logRequest(
+                judgeUsed.account.provider,
+                judgeUsed.modelId,
+                null,
+                'success',
+                promptTokens,
+                completionTokens,
+                Date.now() - startMs,
+                null,
+                ttfbMs,
+                requestedModel === 'auto' ? null : requestedModel,
+                null,
+                'x-gateway',
+              );
+              endUsageRequest(fusionToken, { status: 'success', provider: judgeUsed.account.provider, model: judgeUsed.modelId });
+              return;
+            }
+          }
+          cancelUsageRequest(fusionToken);
+        } catch (err) {
+          if (controller.signal.aborted) {
+            cancelUsageRequest(fusionToken);
+            return;
+          }
+          lastError = err;
+          endUsageRequest(fusionToken, {
+            status: 'error',
+            provider: judgeUsed.account.provider,
+            model: judgeUsed.modelId,
+            errorMessage: sanitizeProviderErrorMessage(err instanceof Error ? err.message : 'Judge fusion failed'),
+          });
+          if (res.headersSent) {
+            const errMsg = sanitizeProviderErrorMessage(err instanceof Error ? err.message : 'Judge fusion stream interrupted');
+            res.write(`data: ${JSON.stringify({ error: { message: errMsg } })}\n\n`);
+            res.end();
+            return;
+          }
+        }
+      }
+    } else if (!isStream && strategy === 'fusion') {
       // Fusion races the first two distinct combo steps; the first success wins
       // and the slower attempt is aborted. One step (or a single account) simply
       // behaves like fallback.
@@ -1366,7 +1557,28 @@ type RoutableAccount = CandidateRoute['account'];
 type FetchResponse = Awaited<ReturnType<typeof fetch>>;
 type FetchFormat = 'markdown' | 'text' | 'html';
 
-const NATIVE_SEARCH_PROVIDERS = new Set(['tavily', 'serper', 'brave-search', 'exa', 'searxng']);
+const NATIVE_SEARCH_PROVIDERS = new Set([
+  'tavily',
+  'serper',
+  'brave-search',
+  'exa',
+  'searxng',
+  'tinyfish',
+  'xquik',
+  'ollama-search',
+  'glm',
+]);
+const CREDENTIAL_FALLBACK_ORDER = [
+  'tavily',
+  'brave-search',
+  'exa',
+  'serper',
+  'tinyfish',
+  'xquik',
+  'ollama-search',
+  'searxng',
+  'glm',
+] as const;
 const MAX_SEARCH_QUERY_LENGTH = 2_000;
 const MAX_SEARCH_RESULTS = 20;
 const SEARCH_TIMEOUT_MS = 30_000;
@@ -1487,16 +1699,18 @@ async function nativeSearch(
     const data = await readSearchJson(response, providerId);
     items = Array.isArray(data.results) ? data.results : [];
   } else if (providerId === 'searxng') {
-    const base = (accountBaseUrl ?? '').trim();
-    if (!base) throw new Error('SearXNG search requires a base_url on the account.');
+    const base = (accountBaseUrl ?? '').trim().replace(/\/+$/, '');
+    if (!base || base === 'https://api.openai.com/v1') throw new Error('SearXNG search requires a base_url on the account.');
     const endpoint = new URL('search', base.endsWith('/') ? base : `${base}/`);
     endpoint.searchParams.set('q', query);
     endpoint.searchParams.set('format', 'json');
     endpoint.searchParams.set('language', 'all');
+    const headers: Record<string, string> = { accept: 'application/json' };
+    if (apiKey && apiKey !== 'no-auth') headers.authorization = `Bearer ${apiKey}`;
     const response = await proxyFetch(
       endpoint.toString(),
       {
-        headers: { accept: 'application/json', ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
+        headers,
         signal,
       },
       'custom',
@@ -1504,6 +1718,116 @@ async function nativeSearch(
     );
     const data = await readSearchJson(response, providerId);
     items = Array.isArray(data.results) ? data.results : [];
+  } else if (providerId === 'tinyfish') {
+    const endpoint = new URL('https://api.tinyfish.ai/v1/search');
+    endpoint.searchParams.set('query', query);
+    const response = await fetch(endpoint.toString(), {
+      headers: { accept: 'application/json', 'X-API-Key': apiKey },
+      signal,
+    });
+    const data = await readSearchJson(response, providerId);
+    items = Array.isArray(data.results) ? data.results : Array.isArray(data.data) ? data.data : [];
+  } else if (providerId === 'xquik') {
+    if (!apiKey || apiKey === 'no-auth') throw new Error('Xquik requires an API key.');
+    const endpoint = new URL('https://api.xquik.com/api/v1/x/tweets/search');
+    endpoint.searchParams.set('q', query);
+    endpoint.searchParams.set('limit', String(maxResults));
+    const response = await fetch(endpoint.toString(), {
+      headers: { accept: 'application/json', 'x-api-key': apiKey },
+      signal,
+    });
+    const data = await readSearchJson(response, providerId);
+    const rawTweets = Array.isArray(data.tweets)
+      ? data.tweets
+      : Array.isArray(data.results)
+        ? data.results
+        : Array.isArray(data.data)
+          ? data.data
+          : [];
+    items = rawTweets.map(entry => {
+      if (!entry || typeof entry !== 'object') return entry;
+      const rec = entry as Record<string, any>;
+      const tweetUrl = asString(rec.url) || (rec.id ? `https://x.com/i/web/status/${String(rec.id)}` : '');
+      const username = asString(rec.author?.username);
+      return {
+        ...rec,
+        title: asString(rec.title) || (username ? `@${username}` : tweetUrl),
+        url: tweetUrl,
+        snippet: asString(rec.snippet) || asString(rec.text),
+      };
+    });
+  } else if (providerId === 'ollama-search') {
+    const rawBase = (accountBaseUrl ?? '').trim().replace(/\/+$/, '');
+    const hasCustomBase = Boolean(rawBase && rawBase !== 'https://api.openai.com/v1');
+    const endpoint = hasCustomBase
+      ? rawBase
+      : 'https://ollama.com/api/web_search';
+    const response = await proxyFetch(
+      endpoint,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(apiKey && apiKey !== 'no-auth' ? { authorization: `Bearer ${apiKey}` } : {}),
+        },
+        body: JSON.stringify({ query, max_results: maxResults }),
+        signal,
+      },
+      hasCustomBase ? 'custom' : 'ollama-search',
+      'unknown',
+    );
+    const data = await readSearchJson(response, providerId);
+    items = Array.isArray(data.results) ? data.results : [];
+  } else if (providerId === 'glm') {
+    const endpoint = 'https://api.z.ai/api/mcp/web_search_prime/mcp';
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+        ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'thruline-search',
+        method: 'tools/call',
+        params: {
+          name: 'web_search_prime',
+          arguments: { search_query: query, count: maxResults },
+        },
+      }),
+      signal,
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      throw new Error(`glm search failed with HTTP ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`);
+    }
+    let rpcPayload: Record<string, any> = {};
+    const ct = (response.headers.get('content-type') || '').toLowerCase();
+    if (ct.includes('text/event-stream')) {
+      const text = await response.text();
+      for (const line of text.split(/\r?\n/)) {
+        const trimmedLine = line.trim();
+        if (!trimmedLine.startsWith('data:')) continue;
+        try {
+          rpcPayload = JSON.parse(trimmedLine.slice(5).trim()) as Record<string, any>;
+          break;
+        } catch { /* next line */ }
+      }
+    } else {
+      rpcPayload = await response.json().catch(() => ({})) as Record<string, any>;
+    }
+    const rawContentText = rpcPayload?.result?.content?.[0]?.text;
+    let parsedList: unknown = rpcPayload?.result?.results ?? rpcPayload?.results;
+    if (typeof rawContentText === 'string' && rawContentText.trim()) {
+      try {
+        const inner = JSON.parse(rawContentText) as any;
+        parsedList = Array.isArray(inner) ? inner : (inner?.search_result ?? inner?.results ?? parsedList);
+      } catch {
+        // ignore parse failure
+      }
+    }
+    items = Array.isArray(parsedList) ? parsedList : [];
   } else {
     throw new Error(`Provider '${providerId}' has no native search adapter.`);
   }
@@ -1610,6 +1934,29 @@ export async function handleXGatewaySearch(req: Request, res: Response): Promise
   if (providerInput) {
     const normalizedProvider = normalizeXGatewayProviderId(providerInput) ?? providerInput.toLowerCase();
     searchCandidates = candidates.filter(candidate => candidate.account.provider === normalizedProvider);
+  } else {
+    const rawPrefix = target.includes('/') ? target.split('/')[0] : '';
+    const normPrefix = rawPrefix ? (normalizeXGatewayProviderId(rawPrefix) ?? rawPrefix.toLowerCase()) : '';
+    const isAutoOrNativeTarget = target === 'auto' || NATIVE_SEARCH_PROVIDERS.has(normPrefix);
+    if (isAutoOrNativeTarget) {
+      const rank = new Map<string, number>(CREDENTIAL_FALLBACK_ORDER.map((id, idx) => [id, idx]));
+      const usableNative = getUsableXGatewayKeys()
+        .map(account => ({ account, modelId: 'default' }))
+        .filter(c => NATIVE_SEARCH_PROVIDERS.has(normalizeXGatewayProviderId(c.account.provider) ?? c.account.provider.toLowerCase()))
+        .sort((a, b) => {
+          const pa = normalizeXGatewayProviderId(a.account.provider) ?? a.account.provider.toLowerCase();
+          const pb = normalizeXGatewayProviderId(b.account.provider) ?? b.account.provider.toLowerCase();
+          return (rank.get(pa) ?? 99) - (rank.get(pb) ?? 99);
+        });
+      if (target === 'auto') {
+        const seenAcc = new Set<number>(usableNative.map(c => c.account.id));
+        const nonNative = searchCandidates.filter(c => !seenAcc.has(c.account.id));
+        searchCandidates = [...usableNative, ...nonNative];
+      } else {
+        const seenAcc = new Set<number>(searchCandidates.map(c => c.account.id));
+        searchCandidates = [...searchCandidates, ...usableNative.filter(c => !seenAcc.has(c.account.id))];
+      }
+    }
   }
   if (searchCandidates.length === 0) {
     res.status(503).json({
@@ -2024,18 +2371,66 @@ xGatewayRouter.get(/^\/models\/(.+)$/, xGatewayAuth, (req: Request, res: Respons
   handleModelInfo(req, res);
 });
 
+function inferModelMetadata(modelId: string, kind?: string): {
+  capabilities: string[];
+  thinking_levels?: string[];
+} {
+  const lower = modelId.toLowerCase();
+  const capabilities: string[] = [];
+  if (kind && ['image', 'video', 'tts', 'stt', 'embedding'].includes(kind)) {
+    capabilities.push(kind);
+  } else {
+    capabilities.push('chat');
+  }
+
+  const isReasoning =
+    /thinking|reason|deepthink|\bo[134](?:-|$)|\br1\b|gpt-5|gpt-6|claude-(?:sonnet|opus|haiku)-4|claude-.*-(?:4\.5|4\.6|5)|gemini-2\.5|gemini-3|qwen3|qwq|glm-5|glm-4\.[5-9]/i.test(lower);
+  let thinkingLevels: string[] | undefined;
+  if (isReasoning && capabilities[0] === 'chat') {
+    capabilities.push('thinking');
+    thinkingLevels = /gpt-6|gpt-5\.6/i.test(lower)
+      ? ['low', 'medium', 'high', 'xhigh', 'max']
+      : ['low', 'medium', 'high'];
+  }
+
+  if (capabilities[0] === 'chat' && /vl|vision|gpt-4o|gpt-5|gpt-6|claude-|gemini|grok|pixtral|llava/i.test(lower)) {
+    capabilities.push('vision');
+  }
+  if (capabilities[0] === 'chat' && !/\bo1-mini\b/i.test(lower)) {
+    capabilities.push('tools');
+  }
+  return {
+    capabilities,
+    ...(thinkingLevels ? { thinking_levels: thinkingLevels } : {}),
+  };
+}
+
 // GET /thruline/v1/models — list models from enabled X Gateway accounts and combos
 xGatewayRouter.get('/models', xGatewayAuth, (req: Request, res: Response) => {
   res.setHeader('X-Gateway', 'x');
   const snapshot = getConfigSnapshot();
   const seen = new Set<string>();
-  const data: Array<{ id: string; object: 'model'; created: number; owned_by: string }> = [];
+  const data: Array<{
+    id: string;
+    object: 'model';
+    created: number;
+    owned_by: string;
+    capabilities?: string[];
+    thinking_levels?: string[];
+  }> = [];
 
   for (const combo of snapshot.combos) {
     const id = `combo:${combo.name}`;
     if (!seen.has(id)) {
       seen.add(id);
-      data.push({ id, object: 'model', created: 0, owned_by: 'x-gateway' });
+      const comboKind = combo.kind && combo.kind !== 'chat' ? combo.kind : 'chat';
+      data.push({
+        id,
+        object: 'model',
+        created: 0,
+        owned_by: 'x-gateway',
+        capabilities: comboKind === 'chat' ? ['chat', 'tools'] : [comboKind],
+      });
     }
   }
 
@@ -2043,22 +2438,28 @@ xGatewayRouter.get('/models', xGatewayAuth, (req: Request, res: Response) => {
     const providerEntry = getXGatewayProvider(account.provider);
     const alias = providerEntry?.alias ?? account.provider;
     const modelsForAccount = accountModels(account);
+    const catalogKinds = new Map<string, string>();
+    for (const cm of providerEntry?.models ?? []) {
+      const k = (cm as { kind?: string }).kind;
+      if (typeof k === 'string' && k) catalogKinds.set(cm.id, k);
+    }
     if (modelsForAccount.length > 0) {
       const autoId = `${alias}/auto`;
       if (!seen.has(autoId)) {
         seen.add(autoId);
-        data.push({ id: autoId, object: 'model', created: 0, owned_by: account.provider });
+        data.push({ id: autoId, object: 'model', created: 0, owned_by: account.provider, capabilities: ['chat'] });
       }
     }
     for (const model of modelsForAccount) {
+      const meta = inferModelMetadata(model.id, catalogKinds.get(model.id));
       const prefixed = `${alias}/${model.id}`;
       if (!seen.has(prefixed)) {
         seen.add(prefixed);
-        data.push({ id: prefixed, object: 'model', created: 0, owned_by: account.provider });
+        data.push({ id: prefixed, object: 'model', created: 0, owned_by: account.provider, ...meta });
       }
       if (!seen.has(model.id)) {
         seen.add(model.id);
-        data.push({ id: model.id, object: 'model', created: 0, owned_by: account.provider });
+        data.push({ id: model.id, object: 'model', created: 0, owned_by: account.provider, ...meta });
       }
     }
   }

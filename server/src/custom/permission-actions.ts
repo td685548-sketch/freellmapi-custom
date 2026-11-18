@@ -89,6 +89,7 @@ export function permissionForAction(parent: ParentPermission, method: string, ur
     if (path.startsWith('/api/thruline/tools')) return 'use_x_gateway';
     if (path.startsWith('/api/thruline/translator')) return 'use_x_gateway';
     if (path.startsWith('/api/thruline/skills')) return read ? 'use_x_gateway' : 'edit_x_settings';
+    if (path.startsWith('/api/thruline/sso')) return read ? 'use_x_gateway' : 'edit_x_settings';
     if (path.startsWith('/api/thruline/media/test')) return 'use_x_gateway';
     if (path.startsWith('/api/thruline/media')) return read ? 'use_x_gateway' : 'edit_x_settings';
     if (path.startsWith('/api/thruline/proxy-pool')) {

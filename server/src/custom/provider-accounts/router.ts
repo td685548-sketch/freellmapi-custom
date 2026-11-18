@@ -12,6 +12,7 @@ import { proxyFetch, withKeyProxy } from '../../lib/proxy.js';
 import { assessProviderUrl, assertProviderUrlAllowedWithPin } from '../../lib/url-guard.js';
 import { AccountError } from './http.js';
 import { getXGatewayProvider, normalizeXGatewayProviderId } from './catalog.js';
+import { fetchOpenCodeFreeModels } from './opencode.js';
 import {
   accountModels,
   accountRow,
@@ -60,7 +61,7 @@ const createSchema = z.object({
   label: labelSchema.optional(),
   baseUrl: z.string().trim().max(2048).optional(),
   proxyUrl: z.string().trim().max(KEY_PROXY_URL_MAX).optional(),
-  proxyPoolId: z.number().int().positive().safe().nullable().optional(),
+  proxyPoolId: z.union([z.literal(-1), z.number().int().positive().safe()]).nullable().optional(),
   authMethod: z.enum(['api_key', 'oauth_pkce', 'device_code', 'cookie']).optional(),
   models: z.array(z.object({
     id: z.string().trim().min(1).max(200),
@@ -73,7 +74,7 @@ const updateSchema = z.object({
   label: labelSchema.optional(),
   enabled: z.boolean().optional(),
   proxyUrl: z.string().trim().max(KEY_PROXY_URL_MAX).optional(),
-  proxyPoolId: z.number().int().positive().safe().nullable().optional(),
+  proxyPoolId: z.union([z.literal(-1), z.number().int().positive().safe()]).nullable().optional(),
   monthlyRequestCap: z.number().int().min(0).safe().optional(),
   monthlyTokenCap: z.number().int().min(0).safe().optional(),
 }).strict().refine(b => Object.keys(b).length > 0);
@@ -90,7 +91,7 @@ const bulkCreateSchema = z.object({
   })).min(1).max(100),
   baseUrl: z.string().trim().max(2048).optional(),
   proxyUrl: z.string().trim().max(KEY_PROXY_URL_MAX).optional(),
-  proxyPoolId: z.number().int().positive().safe().nullable().optional(),
+  proxyPoolId: z.union([z.literal(-1), z.number().int().positive().safe()]).nullable().optional(),
   authMethod: z.enum(['api_key', 'oauth_pkce', 'device_code', 'cookie']).optional(),
 }).strict();
 const providerToggleSchema = z.object({
@@ -117,8 +118,8 @@ const bulkDeleteSchema = z.object({
 }).strict();
 const bulkProxySchema = z.object({
   accountIds: z.array(z.number().int().positive().safe()).min(1).max(200),
-  mode: z.enum(['none', 'one-to-one', 'pool']),
-  proxyPoolId: z.number().int().positive().safe().nullable().optional(),
+  mode: z.enum(['none', 'one-to-one', 'pool', 'auto-rotate']),
+  proxyPoolId: z.union([z.literal(-1), z.number().int().positive().safe()]).nullable().optional(),
 }).strict();
 export const customNodeSchema = z.object({
   id: z.string().trim().min(1).max(100).optional(),
@@ -204,6 +205,62 @@ providerAccountsRouter.post('/', requirePermission('add_keys'), async (req: Sess
     userId: req.user?.userId ?? null,
   });
   res.status(201).json({ id: accountId });
+});
+
+const connectFreeSchema = z.object({
+  provider: z.string().trim().min(1).max(64),
+  label: z.string().trim().max(120).optional(),
+  baseUrl: z.string().trim().max(500).optional(),
+  proxyUrl: z.string().trim().max(KEY_PROXY_URL_MAX).nullable().optional(),
+  proxyPoolId: z.union([z.literal(-1), z.number().int().positive().safe()]).nullable().optional(),
+  skipModelFetch: z.boolean().optional(),
+});
+
+const FREE_KEYLESS_PROVIDERS = new Set(['opencode', 'mimo-free', 'searxng']);
+
+providerAccountsRouter.post('/connect-free', requirePermission('add_keys'), async (req: SessionRequest, res) => {
+  const body = parse(connectFreeSchema, req.body ?? {});
+  const normalized = normalizeXGatewayProviderId(body.provider);
+  if (!normalized || !FREE_KEYLESS_PROVIDERS.has(normalized)) {
+    throw new AccountError(400, 'Provider does not support keyless free connection.');
+  }
+  if (body.baseUrl && !hasPermission(req.user, 'manage_key_models')) {
+    throw new AccountError(403, 'Permission denied.');
+  }
+  if (body.baseUrl) {
+    const verdict = await assessProviderUrl(body.baseUrl);
+    if (!verdict.allowed) {
+      throw new AccountError(400, verdict.reason || 'Base URL is blocked by security policy.');
+    }
+  }
+  const catalogEntry = getXGatewayProvider(normalized);
+  const label = body.label?.trim() || `${catalogEntry?.name ?? normalized} (Free)`;
+
+  const accountId = createApiKeyAccount({
+    provider: normalized,
+    key: 'no-auth',
+    label,
+    baseUrl: body.baseUrl,
+    proxyUrl: body.proxyUrl,
+    proxyPoolId: body.proxyPoolId,
+    authMethod: 'api_key',
+    userId: req.user?.userId ?? null,
+  });
+
+  let modelsCount = catalogEntry?.models.length ?? 0;
+  if (normalized === 'opencode' && !body.skipModelFetch) {
+    const liveModels = await fetchOpenCodeFreeModels(body.baseUrl || catalogEntry?.baseUrl).catch(() => []);
+    if (liveModels.length > 0) {
+      const staticIds = new Set((catalogEntry?.models ?? []).map((m) => m.id));
+      const extraModels = liveModels.filter((m) => !staticIds.has(m.id));
+      if (extraModels.length > 0) {
+        setProviderModelConfig(normalized, { customModels: extraModels });
+      }
+      modelsCount = new Set([...staticIds, ...liveModels.map((m) => m.id)]).size;
+    }
+  }
+
+  res.status(201).json({ id: accountId, provider: normalized, modelsCount });
 });
 
 providerAccountsRouter.post('/bulk', requirePermission('add_keys'), async (req: SessionRequest, res) => {

@@ -12,6 +12,7 @@ import { useI18n } from '@/i18n'
 import { toast } from '@/lib/toast'
 import { useSessionBoundary } from '@/custom/session-state'
 import { GoogleSignIn } from '@/custom/GoogleSignIn'
+import { SsoSignIn } from '@/custom/SsoSignIn'
 import { EmailRecovery, ExternalForgotPassword } from '@/custom/EmailRecovery'
 import { ExternalAuthCallback } from '@/custom/ExternalAuthCallback'
 import { useExternalAuthLanding } from '@/custom/use-external-auth'
@@ -393,6 +394,7 @@ function AuthForm({ mode, onAuthed, start = 'login' }: { mode: 'setup' | 'login'
           </Button>
         </form>
         {!isSetup && <GoogleSignIn inviteCode={isRegister && registerType === 'invite' ? inviteCode : undefined} requiresInvite={isRegister && registerType === 'invite'} />}
+        {!isSetup && <SsoSignIn inviteCode={isRegister && registerType === 'invite' ? inviteCode : undefined} requiresInvite={isRegister && registerType === 'invite'} />}
         {isLogin && (
           <div className="mt-3 space-y-3">
             <button
@@ -747,7 +749,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   if (landing) return <Centered>{landing.kind === 'google'
     ? <ExternalAuthCallback onComplete={finishLanding} />
-    : <EmailRecovery resetToken={landing.token} onBack={finishLanding} />}</Centered>
+    : landing.kind === 'sso'
+      ? <ExternalAuthCallback endpoint="/api/auth/sso/complete" onComplete={finishLanding} />
+      : <EmailRecovery resetToken={landing.token} onBack={finishLanding} />}</Centered>
 
   if (isLoading) {
     return (

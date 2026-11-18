@@ -13,6 +13,11 @@ export type ProtocolType =
   | 'anthropic'
   | 'openai_responses'
   | 'gemini'
+  | 'kiro'
+  | 'antigravity'
+  | 'vertex'
+  | 'ollama'
+  | 'cursor'
   | 'sse_openai'
   | 'sse_anthropic';
 
@@ -1331,6 +1336,263 @@ export function convertSseAnthropicToOpenAI(
 }
 
 // ---------------------------------------------------------------------------
+// Extended Provider Protocol Adapters (Kiro, Antigravity, Vertex, Ollama, Cursor)
+// ---------------------------------------------------------------------------
+
+export function ingestKiro(body: Record<string, any>, steps: PipelineStep[]): NormalizedRequest {
+  const cs = (body.conversationState && typeof body.conversationState === 'object' ? body.conversationState : body) as Record<string, any>;
+  const curr = (cs.currentMessage?.userInputMessage ?? {}) as Record<string, any>;
+  const model = typeof curr.modelId === 'string' ? curr.modelId : typeof body.model === 'string' ? body.model : 'claude-sonnet-4.5';
+  const messages: ChatMessage[] = [];
+  if (Array.isArray(cs.history)) {
+    for (const h of cs.history) {
+      if (h?.userInputMessage) {
+        messages.push({ role: 'user', content: String(h.userInputMessage.content ?? '') });
+      } else if (h?.assistantResponseMessage) {
+        messages.push({ role: 'assistant', content: String(h.assistantResponseMessage.content ?? '') });
+      }
+    }
+  }
+  if (typeof curr.content === 'string') {
+    messages.push({ role: 'user', content: curr.content });
+  }
+  const rawTools = Array.isArray(curr.userInputMessageContext?.tools) ? curr.userInputMessageContext.tools : [];
+  const tools: ChatToolDefinition[] = rawTools
+    .filter((t: any) => t?.toolSpecification?.name)
+    .map((t: any) => ({
+      type: 'function' as const,
+      function: {
+        name: String(t.toolSpecification.name),
+        description: typeof t.toolSpecification.description === 'string' ? t.toolSpecification.description : '',
+        parameters: t.toolSpecification.inputSchema?.json ?? { type: 'object', properties: {} },
+      },
+    }));
+  steps.push({
+    step: 1,
+    name: 'Protocol Ingestion & Validation',
+    status: 'ok',
+    title: 'AWS Kiro conversationState Parsed',
+    details: `Extracted ${messages.length} turns and ${tools.length} tool specs for model '${model}'.`,
+  });
+  return { model, messages, tools: tools.length ? tools : undefined };
+}
+
+export function compileToKiro(norm: NormalizedRequest, steps: PipelineStep[], lossyFields: string[]): Record<string, unknown> {
+  if (typeof norm.temperature === 'number') lossyFields.push('temperature (not configurable on Kiro runtime)');
+  const prior = norm.messages.slice(0, Math.max(0, norm.messages.length - 1));
+  const last = norm.messages[norm.messages.length - 1];
+  const history = prior.map(m =>
+    m.role === 'assistant'
+      ? { assistantResponseMessage: { content: contentToString(m.content) } }
+      : { userInputMessage: { content: contentToString(m.content), modelId: norm.model || 'claude-sonnet-4.5', origin: 'AI_EDITOR' } },
+  );
+  const sysPrefix = norm.systemPrompt ? `[System]\n${norm.systemPrompt}\n\n` : '';
+  const userContent = last ? `${sysPrefix}${contentToString(last.content)}` : sysPrefix.trim();
+  steps.push({
+    step: 4,
+    name: 'Kiro Conversation Envelope Mapping',
+    status: 'ok',
+    title: 'Compiled AWS CodeWhisperer / Kiro conversationState',
+    details: `Mapped ${history.length} history turns and current userInputMessage.`,
+  });
+  return {
+    conversationState: {
+      chatTriggerType: 'MANUAL',
+      currentMessage: {
+        userInputMessage: {
+          content: userContent,
+          modelId: norm.model || 'claude-sonnet-4.5',
+          origin: 'AI_EDITOR',
+          ...(norm.tools?.length
+            ? {
+                userInputMessageContext: {
+                  tools: norm.tools.map(t => ({
+                    toolSpecification: {
+                      name: t.function.name,
+                      description: t.function.description || '',
+                      inputSchema: { json: t.function.parameters ?? { type: 'object', properties: {} } },
+                    },
+                  })),
+                },
+              }
+            : {}),
+        },
+      },
+      history,
+    },
+  };
+}
+
+export function ingestAntigravity(body: Record<string, any>, steps: PipelineStep[], lossyFields?: string[], warnings?: string[]): NormalizedRequest {
+  const inner = (body.request && typeof body.request === 'object' ? body.request : body) as Record<string, any>;
+  const norm = ingestGemini(inner, [], lossyFields, warnings);
+  norm.model = typeof body.model === 'string' ? body.model : norm.model ?? 'gemini-2.5-flash';
+  steps.push({
+    step: 1,
+    name: 'Protocol Ingestion & Validation',
+    status: 'ok',
+    title: 'Antigravity v1internal Request Envelope Parsed',
+    details: `Parsed v1internal payload for project '${body.project ?? 'auto'}' and model '${norm.model}'.`,
+  });
+  return norm;
+}
+
+export function compileToAntigravity(norm: NormalizedRequest, steps: PipelineStep[], lossyFields: string[], warnings: string[]): Record<string, unknown> {
+  const geminiInner = compileToGemini(norm, steps, lossyFields, warnings);
+  steps.push({
+    step: 6,
+    name: 'Antigravity Envelope Wrapping',
+    status: 'ok',
+    title: 'Wrapped into Cloud Code v1internal Envelope',
+    details: `Wrapped Gemini request for model '${norm.model || 'gemini-2.5-flash'}'.`,
+  });
+  return {
+    project: 'thruline-project',
+    model: norm.model || 'gemini-2.5-flash',
+    requestType: 'agent',
+    userAgent: 'antigravity',
+    request: geminiInner,
+  };
+}
+
+export function ingestVertex(body: Record<string, any>, steps: PipelineStep[], lossyFields?: string[], warnings?: string[]): NormalizedRequest {
+  if (typeof body.anthropic_version === 'string' || typeof body.system === 'string') {
+    const norm = ingestAnthropic(body, [], lossyFields, warnings);
+    steps.push({
+      step: 1,
+      name: 'Protocol Ingestion & Validation',
+      status: 'ok',
+      title: 'Vertex AI Partner Anthropic rawPredict Parsed',
+      details: `Parsed Anthropic-on-Vertex payload with ${norm.messages.length} messages.`,
+    });
+    return norm;
+  }
+  const norm = ingestGemini(body, [], lossyFields, warnings);
+  steps.push({
+    step: 1,
+    name: 'Protocol Ingestion & Validation',
+    status: 'ok',
+    title: 'Vertex AI Publisher Gemini Payload Parsed',
+    details: `Parsed Vertex AI contents (${norm.messages.length} turns).`,
+  });
+  return norm;
+}
+
+export function compileToVertex(norm: NormalizedRequest, steps: PipelineStep[], lossyFields: string[], warnings: string[]): Record<string, unknown> {
+  if (norm.model && /^claude/i.test(norm.model)) {
+    const body = compileToAnthropic(norm, steps, lossyFields, warnings);
+    return { anthropic_version: 'vertex-2023-10-16', ...body };
+  }
+  return compileToGemini(norm, steps, lossyFields, warnings);
+}
+
+export function ingestOllama(body: Record<string, any>, steps: PipelineStep[], lossyFields?: string[], warnings?: string[]): NormalizedRequest {
+  const opts = (body.options && typeof body.options === 'object' ? body.options : {}) as Record<string, any>;
+  const syntheticOpenAI = {
+    model: body.model ?? 'llama3.3',
+    messages: Array.isArray(body.messages) ? body.messages : [],
+    tools: body.tools,
+    stream: body.stream,
+    temperature: typeof opts.temperature === 'number' ? opts.temperature : body.temperature,
+    top_p: typeof opts.top_p === 'number' ? opts.top_p : body.top_p,
+    max_tokens: typeof opts.num_predict === 'number' ? opts.num_predict : body.max_tokens,
+    stop: opts.stop ?? body.stop,
+  };
+  const norm = ingestOpenAIChat(syntheticOpenAI, [], lossyFields, warnings);
+  if (typeof opts.top_k === 'number') norm.topK = opts.top_k;
+  steps.push({
+    step: 1,
+    name: 'Protocol Ingestion & Validation',
+    status: 'ok',
+    title: 'Ollama /api/chat Request Parsed',
+    details: `Parsed Ollama model '${norm.model}' with ${norm.messages.length} messages.`,
+  });
+  return norm;
+}
+
+export function compileToOllama(norm: NormalizedRequest, steps: PipelineStep[]): Record<string, unknown> {
+  const msgs: Array<Record<string, unknown>> = [];
+  if (norm.systemPrompt) msgs.push({ role: 'system', content: norm.systemPrompt });
+  for (const m of norm.messages) {
+    msgs.push({ role: m.role, content: contentToString(m.content) });
+  }
+  const options: Record<string, unknown> = {};
+  if (typeof norm.temperature === 'number') options.temperature = norm.temperature;
+  if (typeof norm.topP === 'number') options.top_p = norm.topP;
+  if (typeof norm.topK === 'number') options.top_k = norm.topK;
+  if (typeof norm.maxTokens === 'number') options.num_predict = norm.maxTokens;
+  if (norm.stopSequences?.length) options.stop = norm.stopSequences;
+  steps.push({
+    step: 6,
+    name: 'Ollama Options Serialization',
+    status: 'ok',
+    title: 'Compiled /api/chat Payload with options{}',
+    details: `Mapped ${msgs.length} messages for Ollama runtime.`,
+  });
+  return {
+    model: norm.model || 'llama3.3',
+    messages: msgs,
+    stream: Boolean(norm.stream),
+    ...(Object.keys(options).length > 0 ? { options } : {}),
+    ...(norm.tools?.length ? { tools: norm.tools } : {}),
+  };
+}
+
+export function ingestCursor(body: Record<string, any>, steps: PipelineStep[]): NormalizedRequest {
+  const rawTurns = Array.isArray(body.conversation) ? body.conversation : Array.isArray(body.messages) ? body.messages : [];
+  const systemParts: string[] = [];
+  const messages: ChatMessage[] = [];
+  for (const item of rawTurns) {
+    if (!item || typeof item !== 'object') continue;
+    const text = String(item.text ?? contentToString(item.content ?? '') ?? '');
+    if (item.role === 'system' || item.type === 0) {
+      if (text) systemParts.push(text);
+    } else if (item.role === 'assistant' || item.type === 2) {
+      messages.push({ role: 'assistant', content: text });
+    } else {
+      messages.push({ role: 'user', content: text });
+    }
+  }
+  const model = body.modelDetails?.modelName ?? body.model ?? 'claude-sonnet-4.5';
+  steps.push({
+    step: 1,
+    name: 'Protocol Ingestion & Validation',
+    status: 'ok',
+    title: 'Cursor IDE Chat Envelope Parsed',
+    details: `Parsed ${messages.length} Cursor turns for model '${model}'.`,
+  });
+  return {
+    model: String(model),
+    systemPrompt: systemParts.length ? systemParts.join('\n\n') : undefined,
+    messages,
+  };
+}
+
+export function compileToCursor(norm: NormalizedRequest, steps: PipelineStep[]): Record<string, unknown> {
+  const conversation: Array<Record<string, unknown>> = [];
+  if (norm.systemPrompt) conversation.push({ type: 0, role: 'system', text: norm.systemPrompt });
+  for (const m of norm.messages) {
+    conversation.push({
+      type: m.role === 'assistant' ? 2 : 1,
+      role: m.role,
+      text: contentToString(m.content),
+    });
+  }
+  steps.push({
+    step: 4,
+    name: 'Cursor Conversation Serialization',
+    status: 'ok',
+    title: 'Compiled Cursor modelDetails + conversation[]',
+    details: `Formatted ${conversation.length} Cursor conversation items.`,
+  });
+  return {
+    modelDetails: { modelName: norm.model || 'claude-sonnet-4.5' },
+    conversation,
+    ...(norm.tools?.length ? { tools: norm.tools } : {}),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Orchestrator: 7-Step Pipeline Inspection
 // ---------------------------------------------------------------------------
 
@@ -1399,6 +1661,21 @@ export function inspectTranslation(
     case 'openai_responses':
       norm = ingestOpenAIResponses(payload, steps, lossyFields, warnings);
       break;
+    case 'kiro':
+      norm = ingestKiro(payload, steps);
+      break;
+    case 'antigravity':
+      norm = ingestAntigravity(payload, steps, lossyFields, warnings);
+      break;
+    case 'vertex':
+      norm = ingestVertex(payload, steps, lossyFields, warnings);
+      break;
+    case 'ollama':
+      norm = ingestOllama(payload, steps, lossyFields, warnings);
+      break;
+    case 'cursor':
+      norm = ingestCursor(payload, steps);
+      break;
     case 'openai_chat':
     default:
       norm = ingestOpenAIChat(payload, steps, lossyFields, warnings);
@@ -1416,6 +1693,21 @@ export function inspectTranslation(
       break;
     case 'openai_responses':
       transformed = compileToOpenAIResponses(norm, steps, lossyFields, warnings);
+      break;
+    case 'kiro':
+      transformed = compileToKiro(norm, steps, lossyFields);
+      break;
+    case 'antigravity':
+      transformed = compileToAntigravity(norm, steps, lossyFields, warnings);
+      break;
+    case 'vertex':
+      transformed = compileToVertex(norm, steps, lossyFields, warnings);
+      break;
+    case 'ollama':
+      transformed = compileToOllama(norm, steps);
+      break;
+    case 'cursor':
+      transformed = compileToCursor(norm, steps);
       break;
     case 'openai_chat':
     default:

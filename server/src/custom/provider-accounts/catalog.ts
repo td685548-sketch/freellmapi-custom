@@ -1,6 +1,19 @@
 import { CodexProvider } from './codex.js';
 import { GeminiCliProvider } from './gemini-cli.js';
 import { KiroProvider } from './kiro.js';
+import { OpenCodeProvider } from './opencode.js';
+import { VertexProvider } from './vertex.js';
+import { BedrockProvider } from './bedrock.js';
+import { CommandCodeProvider } from './commandcode.js';
+import { AntigravityProvider } from './antigravity.js';
+import {
+  GrokCliProvider,
+  CodeBuddyProvider,
+  ClineProvider,
+  ZedProvider,
+  CursorProvider,
+  OAuthCompatibleProvider,
+} from './oauth-wire-executors.js';
 import type { Platform } from '@freellmapi/shared/types.js';
 import type { ProviderAccountAuthMethod, ProviderCategory } from '@freellmapi/shared/x-accounts.js';
 import type { BaseProvider } from '../../providers/base.js';
@@ -240,7 +253,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "Antigravity",
     "category": "oauth",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "oauth_pkce"
     ],
     "baseUrl": "https://daily-cloudcode-pa.googleapis.com/v1internal",
     "models": [
@@ -1057,7 +1071,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "Claude Code",
     "category": "oauth",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "oauth_pkce"
     ],
     "baseUrl": "https://api.anthropic.com/v1",
     "models": [
@@ -1101,7 +1116,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "Cline",
     "category": "oauth",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "oauth_pkce"
     ],
     "baseUrl": "https://api.cline.bot/api/v1",
     "models": [
@@ -1145,7 +1161,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "ClinePass",
     "category": "oauth",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "oauth_pkce"
     ],
     "baseUrl": "https://api.cline.bot/api/v1",
     "models": [
@@ -1309,7 +1326,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "CodeBuddy",
     "category": "oauth",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "device_code"
     ],
     "baseUrl": "https://www.codebuddy.ai/v2",
     "models": [
@@ -1381,7 +1399,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "CodeBuddy CN",
     "category": "oauth",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "device_code"
     ],
     "baseUrl": "https://copilot.tencent.com/v2",
     "models": [
@@ -1601,7 +1620,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "Cursor IDE",
     "category": "oauth",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "oauth_pkce"
     ],
     "baseUrl": "https://api2.cursor.sh",
     "models": [
@@ -2502,7 +2522,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "GitLab Duo",
     "category": "oauth",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "oauth_pkce"
     ],
     "baseUrl": "https://gitlab.com/api/v4",
     "models": [
@@ -2602,7 +2623,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "Grok CLI (Grok Build)",
     "category": "oauth",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "device_code"
     ],
     "baseUrl": "https://api.x.ai/v1",
     "models": [
@@ -2903,7 +2925,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "iFlow AI",
     "category": "oauth",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "oauth_pkce"
     ],
     "baseUrl": "https://apis.iflow.cn/v1",
     "models": [
@@ -3023,7 +3046,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "Kilo Code",
     "category": "oauth",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "device_code"
     ],
     "baseUrl": "https://api.kilo.ai/api/openrouter/v1",
     "models": [
@@ -3103,7 +3127,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "Kimchi",
     "category": "freeTier",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "oauth_pkce"
     ],
     "baseUrl": "https://llm.kimchi.dev/openai/v1",
     "models": [
@@ -3147,7 +3172,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "Kimi",
     "category": "oauth",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "device_code"
     ],
     "baseUrl": "https://api.kimi.com/coding/v1",
     "models": [
@@ -3543,7 +3569,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "MiniMax Code",
     "category": "oauth",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "device_code"
     ],
     "baseUrl": "https://agent.minimax.cn/mavis/api/v1/llm/v1",
     "models": [
@@ -3571,7 +3598,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "MiniMax Code (Global)",
     "category": "oauth",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "device_code"
     ],
     "baseUrl": "https://agent.minimax.io/mavis/api/v1/llm/v1",
     "models": [
@@ -3743,7 +3771,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "Muse (Meta Model API)",
     "category": "oauth",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "device_code"
     ],
     "baseUrl": "https://api.meta.ai/v1",
     "models": [
@@ -3860,7 +3889,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "Nous Research",
     "category": "freeTier",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "device_code"
     ],
     "baseUrl": "https://inference-api.nousresearch.com/v1",
     "models": [
@@ -4664,7 +4694,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "OpenAI Codex",
     "category": "oauth",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "oauth_pkce"
     ],
     "baseUrl": "https://chatgpt.com/backend-api/codex",
     "models": [
@@ -5578,7 +5609,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "Qoder",
     "category": "oauth",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "device_code"
     ],
     "baseUrl": "https://api3.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation",
     "models": [
@@ -5662,7 +5694,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "Qoder CN",
     "category": "oauth",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "device_code"
     ],
     "baseUrl": "https://gateway.qoder.com.cn/algo/api/v2/service/pro/sse/agent_chat_generation",
     "models": [
@@ -5738,7 +5771,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "Qwen Code",
     "category": "oauth",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "oauth_pkce"
     ],
     "baseUrl": "https://portal.qwen.ai/v1",
     "models": [
@@ -5993,6 +6027,38 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     ]
   },
   {
+    "id": "sensenova-intl",
+    "alias": "sensenova-intl",
+    "name": "SenseNova International",
+    "category": "apikey",
+    "authMethods": [
+      "api_key"
+    ],
+    "baseUrl": "https://token.sensenova.ai/v1",
+    "models": [
+      {
+        "id": "sensenova-6.8-flash",
+        "name": "SenseNova 6.8 Flash"
+      },
+      {
+        "id": "sensenova-6.8-flash-lite",
+        "name": "SenseNova 6.8 Flash Lite"
+      },
+      {
+        "id": "sensenova-6.7-flash-lite",
+        "name": "SenseNova 6.7 Flash Lite"
+      },
+      {
+        "id": "sensenova-u1.5-lite",
+        "name": "SenseNova U1.5 Lite"
+      },
+      {
+        "id": "sensenova-u1-fast",
+        "name": "SenseNova U1 Fast"
+      }
+    ]
+  },
+  {
     "id": "serper",
     "alias": "serper",
     "name": "Serper",
@@ -6113,6 +6179,54 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
       {
         "id": "sd3.5-medium",
         "name": "Stable Diffusion 3.5 Medium"
+      }
+    ]
+  },
+  {
+    "id": "synthetic",
+    "alias": "syn",
+    "name": "Synthetic",
+    "category": "apikey",
+    "authMethods": [
+      "api_key"
+    ],
+    "baseUrl": "https://api.synthetic.new/openai/v1",
+    "models": [
+      {
+        "id": "hf:zai-org/GLM-5.3",
+        "name": "GLM 5.3"
+      },
+      {
+        "id": "hf:zai-org/GLM-5.3-Flash",
+        "name": "GLM 5.3 Flash"
+      },
+      {
+        "id": "hf:zai-org/GLM-4.7-Flash",
+        "name": "GLM 4.7 Flash"
+      },
+      {
+        "id": "hf:moonshotai/Kimi-K3",
+        "name": "Kimi K3"
+      },
+      {
+        "id": "hf:deepseek-ai/DeepSeek-V4.1-Flash",
+        "name": "DeepSeek V4.1 Flash"
+      },
+      {
+        "id": "hf:deepseek-ai/DeepSeek-V4.1-Flash-1017",
+        "name": "DeepSeek V4.1 Flash 1017"
+      },
+      {
+        "id": "hf:Qwen/Qwen3.8-27B",
+        "name": "Qwen3.8 27B"
+      },
+      {
+        "id": "hf:openai/gpt-oss-120b",
+        "name": "GPT-OSS 120B"
+      },
+      {
+        "id": "hf:nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4",
+        "name": "Nemotron 3 Super 120B NVFP4"
       }
     ]
   },
@@ -6378,7 +6492,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "Trae",
     "category": "oauth",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "oauth_pkce"
     ],
     "baseUrl": "https://core-normal.trae.ai/api/remote/v1",
     "models": [
@@ -6947,7 +7062,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "Windsurf",
     "category": "oauth",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "oauth_pkce"
     ],
     "baseUrl": "https://server.codeium.com/exa.language_server_pb.LanguageServerService/GetChatMessage",
     "models": [
@@ -7259,7 +7375,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "xAI (Grok)",
     "category": "oauth",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "oauth_pkce"
     ],
     "baseUrl": "https://api.x.ai/v1",
     "models": [
@@ -7307,7 +7424,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "Xiaomi MiMo",
     "category": "oauth",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "oauth_pkce"
     ],
     "baseUrl": "https://api.xiaomimimo.com/v1",
     "models": [
@@ -7356,28 +7474,16 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "baseUrl": "https://token-plan-sgp.xiaomimimo.com/v1",
     "models": [
       {
-        "id": "mimo-v2.5-pro",
-        "name": "MiMo V2.5 Pro"
+        "id": "mimo-v2.6-pro",
+        "name": "MiMo V2.6 Pro"
       },
       {
-        "id": "mimo-v2.5-pro-claude",
-        "name": "MiMo V2.5 Pro (Claude Native)"
+        "id": "mimo-v2.6-flash",
+        "name": "MiMo V2.6 Flash"
       },
       {
-        "id": "mimo-v2.5",
-        "name": "MiMo V2.5"
-      },
-      {
-        "id": "mimo-v2-pro",
-        "name": "MiMo V2 Pro"
-      },
-      {
-        "id": "mimo-v2-omni",
-        "name": "MiMo V2 Omni"
-      },
-      {
-        "id": "mimo-v2-tts",
-        "name": "MiMo V2 TTS"
+        "id": "mimo-v2.5-asr",
+        "name": "MiMo V2.5 ASR"
       },
       {
         "id": "mimo-v2.5-tts",
@@ -7431,7 +7537,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "Zai GLM Coding",
     "category": "oauth",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "device_code"
     ],
     "baseUrl": "https://api.z.ai/api/anthropic/v1",
     "models": [
@@ -7475,7 +7582,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "name": "Zed",
     "category": "oauth",
     "authMethods": [
-      "api_key"
+      "api_key",
+      "oauth_pkce"
     ],
     "baseUrl": "https://cloud.zed.dev/completions",
     "models": [
@@ -7570,7 +7678,12 @@ export function platformForXGatewayProvider(providerId: string): Platform {
   return builtin ? (normalized as Platform) : 'custom';
 }
 
-export const X_GATEWAY_OAUTH_EXECUTORS = new Set(['codex', 'claude', 'gemini-cli', 'kiro', 'github-copilot', 'openrouter', 'qoder', 'qoder-cn', 'glm']);
+export const X_GATEWAY_OAUTH_EXECUTORS = new Set([
+  'codex', 'claude', 'gemini-cli', 'kiro', 'github-copilot', 'openrouter', 'qoder', 'qoder-cn', 'glm',
+  'antigravity', 'grok-cli', 'codebuddy-cn', 'codebuddy-intl', 'cline', 'clinepass', 'zed', 'cursor',
+  'xiaomi-mimo', 'kimchi', 'trae', 'windsurf', 'gitlab', 'kimi', 'minimax-code', 'minimax-code-global',
+  'kilocode', 'muse', 'nous', 'qwen', 'iflow', 'xai',
+]);
 
 export function resolveXGatewayProvider(
   providerId: string,
@@ -7611,6 +7724,129 @@ export function resolveXGatewayProvider(
   const catalogEntry = getXGatewayProvider(normalized);
   if (catalogEntry?.category === 'oauth' && !X_GATEWAY_OAUTH_EXECUTORS.has(normalized)) return undefined;
   if (normalized === 'claude') return new AnthropicWireProvider({ name: catalogEntry?.name ?? 'Claude', baseUrl: trimmedUrl ?? 'https://api.anthropic.com/v1', timeoutMs: 120_000, extraHeaders });
+  if (
+    normalized === 'opencode'
+    || normalized === 'opencode-zen'
+    || normalized === 'opencode-go'
+    || normalized === 'mimo-free'
+  ) {
+    return new OpenCodeProvider({
+      providerId: normalized,
+      name: catalogEntry?.name,
+      baseUrl: trimmedUrl ?? catalogEntry?.baseUrl,
+      extraHeaders,
+    });
+  }
+  if (normalized === 'vertex' || normalized === 'vertex-partner') {
+    return new VertexProvider({
+      providerId: normalized,
+      name: catalogEntry?.name,
+      baseUrl: trimmedUrl ?? catalogEntry?.baseUrl,
+      extraHeaders,
+    });
+  }
+  if (normalized === 'bedrock' || normalized === 'bedrock-xai') {
+    return new BedrockProvider({
+      providerId: normalized,
+      name: catalogEntry?.name,
+      baseUrl: trimmedUrl ?? undefined,
+      extraHeaders,
+    });
+  }
+  if (normalized === 'commandcode') {
+    return new CommandCodeProvider({
+      name: catalogEntry?.name,
+      baseUrl: trimmedUrl ?? catalogEntry?.baseUrl,
+      extraHeaders,
+    });
+  }
+  if (normalized === 'antigravity') {
+    return new AntigravityProvider({
+      name: catalogEntry?.name,
+      baseUrl: trimmedUrl ?? catalogEntry?.baseUrl,
+      extraHeaders,
+    });
+  }
+  if (normalized === 'grok-cli') {
+    return new GrokCliProvider({ baseUrl: trimmedUrl ?? undefined, extraHeaders });
+  }
+  if (normalized === 'codebuddy-cn' || normalized === 'codebuddy-intl') {
+    return new CodeBuddyProvider(normalized, { baseUrl: trimmedUrl ?? undefined, extraHeaders });
+  }
+  if (normalized === 'cline' || normalized === 'clinepass') {
+    return new ClineProvider(normalized, { baseUrl: trimmedUrl ?? undefined, extraHeaders });
+  }
+  if (normalized === 'zed') {
+    return new ZedProvider({ baseUrl: trimmedUrl ?? undefined, extraHeaders });
+  }
+  if (normalized === 'cursor') {
+    return new CursorProvider({ baseUrl: trimmedUrl ?? undefined, extraHeaders });
+  }
+  if (normalized === 'kimi') {
+    return new OAuthCompatibleProvider({
+      providerId: 'kimi',
+      name: catalogEntry?.name ?? 'Kimi',
+      baseUrl: trimmedUrl ?? 'https://api.kimi.com/coding/v1/messages',
+      wireFormat: 'anthropic',
+      refreshUrl: 'https://auth.kimi.com/api/oauth/token',
+      clientId: '17e5f671-d194-4dfb-9706-5516cb48c098',
+      extraHeaders: {
+        'Anthropic-Version': '2023-06-01',
+        'Anthropic-Beta': 'claude-code-20250219,interleaved-thinking-2025-05-14',
+        ...extraHeaders,
+      },
+    });
+  }
+  if (normalized === 'minimax-code' || normalized === 'minimax-code-global') {
+    const isCn = normalized === 'minimax-code';
+    return new OAuthCompatibleProvider({
+      providerId: normalized,
+      name: catalogEntry?.name ?? normalized,
+      baseUrl: trimmedUrl ?? (isCn
+        ? 'https://agent.minimax.cn/mavis/api/v1/llm/v1/messages'
+        : 'https://agent.minimax.io/mavis/api/v1/llm/v1/messages'),
+      wireFormat: 'anthropic',
+      refreshUrl: isCn ? 'https://account.minimax.cn/oauth2/token' : 'https://account.minimax.io/oauth2/token',
+      clientId: 'mcode-public',
+      extraHeaders: {
+        'User-Agent': 'MiniMaxAgent',
+        'X-Mavis-Agent-Id': 'main',
+        ...extraHeaders,
+      },
+    });
+  }
+  if (
+    normalized === 'xiaomi-mimo'
+    || normalized === 'kimchi'
+    || normalized === 'trae'
+    || normalized === 'windsurf'
+    || normalized === 'gitlab'
+    || normalized === 'kilocode'
+    || normalized === 'muse'
+    || normalized === 'nous'
+    || normalized === 'qwen'
+    || normalized === 'iflow'
+    || normalized === 'xai'
+  ) {
+    const headerDefaults: Record<string, Record<string, string>> = {
+      kimchi: { 'User-Agent': 'kimchi/0.1.50' },
+      iflow: { 'User-Agent': 'iFlow-Cli' },
+    };
+    const refreshDefaults: Record<string, { url: string; clientId?: string }> = {
+      xai: { url: 'https://auth.x.ai/oauth2/token', clientId: 'b1a00492-073a-47ea-816f-4c329264a828' },
+      iflow: { url: 'https://iflow.cn/oauth/token', clientId: '10009311001' },
+      nous: { url: 'https://portal.nousresearch.com/api/oauth/token', clientId: 'hermes-cli' },
+    };
+    return new OAuthCompatibleProvider({
+      providerId: normalized,
+      name: catalogEntry?.name ?? normalized,
+      baseUrl: trimmedUrl ?? catalogEntry?.baseUrl ?? 'https://api.openai.com/v1',
+      wireFormat: 'openai',
+      refreshUrl: refreshDefaults[normalized]?.url,
+      clientId: refreshDefaults[normalized]?.clientId,
+      extraHeaders: { ...(headerDefaults[normalized] ?? {}), ...extraHeaders },
+    });
+  }
   const effectiveUrl = trimmedUrl ?? catalogEntry?.baseUrl?.trim();
 
   if (customNodesGetter) {
@@ -7681,6 +7917,7 @@ export function resolveXGatewayProvider(
     platform: 'custom',
     name: catalogEntry?.name ?? normalized,
     baseUrl: effectiveUrl,
+    validateUrl: normalized === 'synthetic' ? 'https://api.synthetic.new/v2/quotas' : undefined,
     extraHeaders,
     timeoutMs: 120_000,
   });

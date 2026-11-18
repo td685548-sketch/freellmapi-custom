@@ -78,6 +78,11 @@ const en = {
   lastTest: 'Last probe: {status}',
   webhookCopied: 'Webhook URL copied to clipboard!',
   webhookHelp: 'Paste this URL into Android app MiProxy to auto-update IP/port when network changes or tunnel restarts.',
+  autoRotateUnboundLabel: 'Auto-rotate unbound accounts across pool',
+  autoRotateUnboundHelp: 'Round-robin enabled pool proxies automatically for accounts without an explicit proxy or pinned pool.',
+  filterAll: 'All',
+  filterEnabled: 'Enabled',
+  filterDisabled: 'Disabled',
 } as const
 
 const vi: Record<keyof typeof en, string> = {
@@ -158,6 +163,11 @@ const vi: Record<keyof typeof en, string> = {
   lastTest: 'Kiểm tra gần nhất: {status}',
   webhookCopied: 'Đã sao chép URL webhook vào bộ nhớ tạm!',
   webhookHelp: 'Dán URL này vào ô webhook trên app Android MiProxy để tự động cập nhật khi đổi mạng hoặc reset tunnel.',
+  autoRotateUnboundLabel: 'Tự động xoay vòng cho account chưa gắn proxy',
+  autoRotateUnboundHelp: 'Tự động xoay vòng các proxy đang bật trong pool cho tài khoản chưa gắn proxy riêng hoặc pool cố định.',
+  filterAll: 'Tất cả',
+  filterEnabled: 'Đang bật',
+  filterDisabled: 'Đã tắt',
 }
 
 export function usePoolStrings() {

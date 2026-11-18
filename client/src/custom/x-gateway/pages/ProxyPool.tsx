@@ -79,9 +79,11 @@ export default function ProxyPool() {
   const [copiedTemplate, setCopiedTemplate] = useState(false)
 
   const [showSettings, setShowSettings] = useState(false)
-  const [settingsDraft, setSettingsDraft] = useState<{ noProxy: string; strictProxy: boolean } | null>(null)
+  const [settingsDraft, setSettingsDraft] = useState<{ noProxy: string; strictProxy: boolean; autoRotateUnbound: boolean } | null>(null)
   const [settingsSavedMsg, setSettingsSavedMsg] = useState(false)
 
+  const [filterMode, setFilterMode] = useState<'all' | 'enabled' | 'disabled'>('all')
+  const [lastClickedId, setLastClickedId] = useState<number | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [testResults, setTestResults] = useState<Record<number, XProxyPoolTestResult>>({})
   const [testAllSummary, setTestAllSummary] = useState<XProxyPoolTestAllResult | null>(null)
@@ -182,7 +184,7 @@ export default function ProxyPool() {
 
   const saveConfig = useMutation({
     meta: { silenceToast: true },
-    mutationFn: (conf: { noProxy: string[]; strictProxy: boolean }) => proxyPoolApi.saveConfig(conf),
+    mutationFn: (conf: { noProxy: string[]; strictProxy: boolean; autoRotateUnbound?: boolean }) => proxyPoolApi.saveConfig(conf),
     onSuccess: async () => {
       setSettingsSavedMsg(true)
       await client.invalidateQueries({ queryKey: ['x-proxy-pool-config'] })
@@ -191,23 +193,43 @@ export default function ProxyPool() {
   })
 
   const allEntries = query.data?.entries ?? []
-  const allSelected = allEntries.length > 0 && selectedIds.size === allEntries.length
+  const enabledCount = allEntries.filter(e => e.enabled).length
+  const disabledCount = allEntries.length - enabledCount
+  const filteredEntries = allEntries.filter(e =>
+    filterMode === 'all' ? true : filterMode === 'enabled' ? e.enabled : !e.enabled,
+  )
+  const allSelected = filteredEntries.length > 0 && filteredEntries.every(e => selectedIds.has(e.id))
 
   const handleSelectAll = () => {
     if (allSelected) {
       setSelectedIds(new Set())
     } else {
-      setSelectedIds(new Set(allEntries.map(e => e.id)))
+      setSelectedIds(new Set(filteredEntries.map(e => e.id)))
     }
   }
 
-  const handleToggleSelect = (id: number) => {
+  const handleToggleSelect = (id: number, shiftKey = false) => {
     setSelectedIds(prev => {
       const next = new Set(prev)
+      if (shiftKey && lastClickedId != null && lastClickedId !== id) {
+        const idxA = filteredEntries.findIndex(e => e.id === lastClickedId)
+        const idxB = filteredEntries.findIndex(e => e.id === id)
+        if (idxA >= 0 && idxB >= 0) {
+          const start = Math.min(idxA, idxB)
+          const end = Math.max(idxA, idxB)
+          const targetChecked = !prev.has(id)
+          for (let i = start; i <= end; i += 1) {
+            if (targetChecked) next.add(filteredEntries[i].id)
+            else next.delete(filteredEntries[i].id)
+          }
+          return next
+        }
+      }
       if (next.has(id)) next.delete(id)
       else next.add(id)
       return next
     })
+    setLastClickedId(id)
   }
 
   const handleCopyTemplate = async (provider = scriptProvider) => {
@@ -229,6 +251,7 @@ export default function ProxyPool() {
     setSettingsDraft({
       noProxy: (cur?.noProxy ?? []).join(', '),
       strictProxy: cur?.strictProxy ?? false,
+      autoRotateUnbound: cur?.autoRotateUnbound ?? false,
     })
     setShowSettings(true)
   }
@@ -625,6 +648,7 @@ export default function ProxyPool() {
                 .map(x => x.trim())
                 .filter(Boolean),
               strictProxy: settingsDraft.strictProxy,
+              autoRotateUnbound: settingsDraft.autoRotateUnbound,
             })
           }}
         >
@@ -658,6 +682,23 @@ export default function ProxyPool() {
             </button>
           </div>
 
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '8px 0' }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>{s.autoRotateUnboundLabel}</div>
+              <div className="x-caption">{s.autoRotateUnboundHelp}</div>
+            </div>
+            <button
+              type="button"
+              className="x-switch"
+              role="switch"
+              aria-checked={settingsDraft.autoRotateUnbound}
+              aria-label={s.autoRotateUnboundLabel}
+              onClick={() => setSettingsDraft({ ...settingsDraft, autoRotateUnbound: !settingsDraft.autoRotateUnbound })}
+            >
+              <span />
+            </button>
+          </div>
+
           {settingsSavedMsg && <div className="x-test-ok">{s.settingsSaved}</div>}
           {saveConfig.isError && (
             <div role="alert" className="x-error">
@@ -676,8 +717,28 @@ export default function ProxyPool() {
         </form>
       )}
 
+      {/* Filter tabs + Bulk actions toolbar */}
+      {allEntries.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+          {([
+            { id: 'all', label: `${s.filterAll} (${allEntries.length})` },
+            { id: 'enabled', label: `${s.filterEnabled} (${enabledCount})` },
+            { id: 'disabled', label: `${s.filterDisabled} (${disabledCount})` },
+          ] as const).map(tab => (
+            <button
+              key={tab.id}
+              type="button"
+              className={`x-button x-small ${filterMode === tab.id ? 'x-primary' : ''}`}
+              onClick={() => setFilterMode(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Bulk actions toolbar */}
-      {canEdit && allEntries.length > 0 && (
+      {canEdit && filteredEntries.length > 0 && (
         <div
           style={{
             display: 'flex',
@@ -754,7 +815,7 @@ export default function ProxyPool() {
 
       {/* Proxy cards list */}
       <div className="x-mgmt-list">
-        {allEntries.map(entry => {
+        {filteredEntries.map(entry => {
           const testRes = testResults[entry.id]
           const isSelected = selectedIds.has(entry.id)
 
@@ -776,7 +837,7 @@ export default function ProxyPool() {
                       className="x-icon-button"
                       aria-label={`Select ${entry.name}`}
                       style={{ marginTop: 2 }}
-                      onClick={() => handleToggleSelect(entry.id)}
+                      onClick={e => handleToggleSelect(entry.id, e.shiftKey)}
                     >
                       {isSelected ? <CheckSquare size={17} /> : <Square size={17} />}
                     </button>

@@ -58,6 +58,7 @@ const bulkActionSchema = z.object({
 const configSchema = z.object({
   noProxy: z.union([z.string(), z.array(z.string())]).optional(),
   strictProxy: z.boolean().optional(),
+  autoRotateUnbound: z.boolean().optional(),
 }).strict();
 
 const deployWorkerSchema = z.object({

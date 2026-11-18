@@ -29,6 +29,7 @@ export interface XProxyPoolTestResult {
 export interface XProxyPoolConfig {
   noProxy: string[]
   strictProxy: boolean
+  autoRotateUnbound?: boolean
 }
 
 export interface XProxyPoolTestAllResult {
@@ -98,7 +99,7 @@ export const proxyPoolApi = {
       body: JSON.stringify(body),
     }),
   getConfig: (signal?: AbortSignal) => apiFetch<{ config: XProxyPoolConfig }>(`${base}/config`, { signal }),
-  saveConfig: (body: { noProxy?: string[] | string; strictProxy?: boolean }) =>
+  saveConfig: (body: { noProxy?: string[] | string; strictProxy?: boolean; autoRotateUnbound?: boolean }) =>
     apiFetch<{ config: XProxyPoolConfig }>(`${base}/config`, { method: 'POST', body: JSON.stringify(body) }),
   deployWorker: (body: XProxyPoolDeployParams) =>
     apiFetch<XProxyPoolDeployResult>(`${base}/deploy-worker`, { method: 'POST', body: JSON.stringify(body) }),

@@ -12,6 +12,9 @@ export interface CapacityPool {
 export interface CapacityAdapterSettings {
   vision: CapacityPool;
   audioInput: CapacityPool;
+  pdf?: CapacityPool;
+  videoInput?: CapacityPool;
+  search?: CapacityPool;
 }
 
 export const DEFAULT_CAPACITY_ADAPTER: CapacityAdapterSettings = {
@@ -21,6 +24,21 @@ export const DEFAULT_CAPACITY_ADAPTER: CapacityAdapterSettings = {
     models: ['oc/mimo-v2.6-flash-free'],
   },
   audioInput: {
+    enabled: false,
+    roundRobin: false,
+    models: [],
+  },
+  pdf: {
+    enabled: false,
+    roundRobin: false,
+    models: [],
+  },
+  videoInput: {
+    enabled: false,
+    roundRobin: false,
+    models: [],
+  },
+  search: {
     enabled: false,
     roundRobin: false,
     models: [],
@@ -63,6 +81,24 @@ export function looksLikeAudioModel(modelId: string | undefined): boolean {
   return /audio|voice|speech|whisper|omni/i.test(id);
 }
 
+export function looksLikePdfModel(modelId: string | undefined): boolean {
+  if (!modelId) return false;
+  const id = String(modelId).toLowerCase();
+  return /gemini|claude|gpt-4o|gpt-5|gpt-6|mimo|qwen.*vl/i.test(id);
+}
+
+export function looksLikeVideoModel(modelId: string | undefined): boolean {
+  if (!modelId) return false;
+  const id = String(modelId).toLowerCase();
+  return /gemini|omni|qwen.*vl|mimo-v2-omni/i.test(id);
+}
+
+export function looksLikeSearchModel(modelId: string | undefined): boolean {
+  if (!modelId) return false;
+  const id = String(modelId).toLowerCase();
+  return /sonar|perplexity|search|grounding|gemini/i.test(id);
+}
+
 let cachedSettings: CapacityAdapterSettings | null = null;
 
 export function getCapacityAdapterSettings(): CapacityAdapterSettings {
@@ -82,6 +118,21 @@ export function getCapacityAdapterSettings(): CapacityAdapterSettings {
           enabled: Boolean(parsed.audioInput?.enabled),
           roundRobin: Boolean(parsed.audioInput?.roundRobin),
           models: Array.isArray(parsed.audioInput?.models) ? parsed.audioInput.models.filter(m => typeof m === 'string' && m.trim()) : [],
+        },
+        pdf: {
+          enabled: Boolean(parsed.pdf?.enabled),
+          roundRobin: Boolean(parsed.pdf?.roundRobin),
+          models: Array.isArray(parsed.pdf?.models) ? parsed.pdf.models.filter(m => typeof m === 'string' && m.trim()) : [],
+        },
+        videoInput: {
+          enabled: Boolean(parsed.videoInput?.enabled),
+          roundRobin: Boolean(parsed.videoInput?.roundRobin),
+          models: Array.isArray(parsed.videoInput?.models) ? parsed.videoInput.models.filter(m => typeof m === 'string' && m.trim()) : [],
+        },
+        search: {
+          enabled: Boolean(parsed.search?.enabled),
+          roundRobin: Boolean(parsed.search?.roundRobin),
+          models: Array.isArray(parsed.search?.models) ? parsed.search.models.filter(m => typeof m === 'string' && m.trim()) : [],
         },
       };
       return cachedSettings;
@@ -107,11 +158,29 @@ export function setCapacityAdapterSettings(settings: CapacityAdapterSettings, us
 export interface RequiredCapabilities {
   vision: boolean;
   audioInput: boolean;
+  pdf: boolean;
+  videoInput: boolean;
+  search: boolean;
 }
 
-export function detectRequiredCapabilities(messages: ChatMessage[]): RequiredCapabilities {
+export function detectRequiredCapabilities(
+  messages: ChatMessage[],
+  tools?: Array<Record<string, any>>,
+): RequiredCapabilities {
   let vision = false;
   let audioInput = false;
+  let pdf = false;
+  let videoInput = false;
+  let search = false;
+
+  if (Array.isArray(tools)) {
+    for (const tool of tools) {
+      const name = String(tool?.function?.name ?? tool?.name ?? tool?.type ?? '').toLowerCase();
+      if (name === 'web_search' || name === 'web_search_preview' || name === 'google_search' || name === 'google_search_retrieval' || name === 'x_search') {
+        search = true;
+      }
+    }
+  }
 
   for (const msg of messages) {
     if (!msg) continue;
@@ -119,19 +188,34 @@ export function detectRequiredCapabilities(messages: ChatMessage[]): RequiredCap
     if (Array.isArray(content)) {
       for (const part of content) {
         if (!part || typeof part !== 'object') continue;
-        const p = part as Record<string, unknown>;
+        const p = part as Record<string, any>;
         const type = String(p.type || '').toLowerCase();
-        if (type === 'image_url' || type === 'image' || p.image_url || p.image) {
+        if (type === 'image_url' || type === 'image' || type === 'input_image' || p.image_url || p.image) {
           vision = true;
         }
-        if (type === 'input_audio' || type === 'audio' || p.input_audio || p.audio) {
+        if (type === 'input_audio' || type === 'audio' || type === 'audio_url' || p.input_audio || p.audio) {
           audioInput = true;
+        }
+        if (type === 'input_video' || type === 'video' || type === 'video_url' || p.video_url || p.video) {
+          videoInput = true;
+        }
+        if (type === 'file' || type === 'document' || type === 'input_file') {
+          const mime = String(
+            p.file?.mime_type
+            ?? p.source?.media_type
+            ?? (typeof p.file?.file_data === 'string' ? p.file.file_data.match(/^data:([^;,]+)/)?.[1] : '')
+            ?? '',
+          ).toLowerCase();
+          if (mime.startsWith('image/')) vision = true;
+          else if (mime.startsWith('audio/')) audioInput = true;
+          else if (mime.startsWith('video/')) videoInput = true;
+          else pdf = true;
         }
       }
     } else if (typeof content === 'string') {
-      if (content.includes('data:image/') || content.includes('"type":"image_url"')) {
-        vision = true;
-      }
+      if (content.includes('data:image/') || content.includes('"type":"image_url"')) vision = true;
+      if (content.includes('data:application/pdf')) pdf = true;
+      if (content.includes('data:video/')) videoInput = true;
     }
     const extra = msg as unknown as Record<string, unknown>;
     if (Array.isArray(extra.images) && extra.images.length > 0) {
@@ -139,12 +223,37 @@ export function detectRequiredCapabilities(messages: ChatMessage[]): RequiredCap
     }
   }
 
-  return { vision, audioInput };
+  return { vision, audioInput, pdf, videoInput, search };
 }
 
 export interface CandidateRouteLike {
   account: AccountRow & { requests: number; tokens: number };
   modelId: string;
+}
+
+export function reorderCandidatesByCapabilities(
+  candidates: CandidateRouteLike[],
+  req: RequiredCapabilities,
+): CandidateRouteLike[] {
+  if (candidates.length <= 1) return candidates;
+  const hardChecks: Array<(m: string) => boolean> = [];
+  if (req.vision) hardChecks.push(looksLikeVisionModel);
+  if (req.audioInput) hardChecks.push(looksLikeAudioModel);
+  if (req.pdf) hardChecks.push(looksLikePdfModel);
+  if (req.videoInput) hardChecks.push(looksLikeVideoModel);
+  if (hardChecks.length === 0 && !req.search) return candidates;
+
+  const scoreOf = (m: string): number => {
+    const hardOk = hardChecks.every((fn) => fn(m));
+    if (!hardOk) return 2;
+    if (req.search && !looksLikeSearchModel(m)) return 1;
+    return 0;
+  };
+
+  return candidates
+    .map((c, idx) => ({ c, idx, score: scoreOf(c.modelId) }))
+    .sort((a, b) => a.score - b.score || a.idx - b.idx)
+    .map((x) => x.c);
 }
 
 /**
@@ -155,38 +264,37 @@ export interface CandidateRouteLike {
 export function augmentCandidatesWithCapacityAdapter(
   candidates: CandidateRouteLike[],
   messages: ChatMessage[],
+  tools?: Array<Record<string, any>>,
 ): CandidateRouteLike[] {
-  const req = detectRequiredCapabilities(messages);
-  if (!req.vision && !req.audioInput) return candidates;
+  const req = detectRequiredCapabilities(messages, tools);
+  if (!req.vision && !req.audioInput && !req.pdf && !req.videoInput && !req.search) return candidates;
 
   const settings = getCapacityAdapterSettings();
+  let extra: CandidateRouteLike[] = [];
 
-  // 1. Check vision
-  if (req.vision && settings.vision.enabled) {
-    const hasVisionAlready = candidates.some(c => looksLikeVisionModel(c.modelId));
-    if (!hasVisionAlready) {
-      const adapterCandidates = resolveAdapterPoolCandidates(settings.vision.models, 'vision');
-      if (adapterCandidates.length > 0) {
-        return [...adapterCandidates, ...candidates];
-      }
-    }
+  if (req.vision && settings.vision.enabled && !candidates.some(c => looksLikeVisionModel(c.modelId))) {
+    extra = extra.concat(resolveAdapterPoolCandidates(settings.vision.models, 'vision'));
+  }
+  if (req.audioInput && settings.audioInput.enabled && !candidates.some(c => looksLikeAudioModel(c.modelId))) {
+    extra = extra.concat(resolveAdapterPoolCandidates(settings.audioInput.models, 'audio'));
+  }
+  if (req.pdf && settings.pdf?.enabled && !candidates.some(c => looksLikePdfModel(c.modelId))) {
+    extra = extra.concat(resolveAdapterPoolCandidates(settings.pdf.models, 'pdf'));
+  }
+  if (req.videoInput && settings.videoInput?.enabled && !candidates.some(c => looksLikeVideoModel(c.modelId))) {
+    extra = extra.concat(resolveAdapterPoolCandidates(settings.videoInput.models, 'video'));
+  }
+  if (req.search && settings.search?.enabled && !candidates.some(c => looksLikeSearchModel(c.modelId))) {
+    extra = extra.concat(resolveAdapterPoolCandidates(settings.search.models, 'search'));
   }
 
-  // 2. Check audio
-  if (req.audioInput && settings.audioInput.enabled) {
-    const hasAudioAlready = candidates.some(c => looksLikeAudioModel(c.modelId));
-    if (!hasAudioAlready) {
-      const adapterCandidates = resolveAdapterPoolCandidates(settings.audioInput.models, 'audio');
-      if (adapterCandidates.length > 0) {
-        return [...adapterCandidates, ...candidates];
-      }
-    }
-  }
-
-  return candidates;
+  return extra.length > 0 ? [...extra, ...candidates] : candidates;
 }
 
-function resolveAdapterPoolCandidates(poolModels: string[], cap: 'vision' | 'audio'): CandidateRouteLike[] {
+function resolveAdapterPoolCandidates(
+  poolModels: string[],
+  cap: 'vision' | 'audio' | 'pdf' | 'video' | 'search',
+): CandidateRouteLike[] {
   const usable = getUsableXGatewayKeys();
   const result: CandidateRouteLike[] = [];
 

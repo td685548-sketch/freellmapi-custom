@@ -37,6 +37,9 @@ scripts/backup.mjs
 # CodeGraph index directory
 .codegraph/
 
+# Local 9Router reference clone
+/9router/
+
 
 
 # --- GitHub compliance (see docs/LOCAL_TOOLS_AND_COMPLIANCE.md) ---

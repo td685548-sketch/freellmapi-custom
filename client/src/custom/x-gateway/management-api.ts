@@ -3,18 +3,32 @@ import { apiFetch } from '@/lib/api'
 const base = '/api/thruline'
 
 export type ComboStrategy = 'fallback' | 'round-robin' | 'smart' | 'fusion'
+export type ComboKind = 'chat' | 'image' | 'audio' | 'embedding' | 'video'
+export type ComboSmartPolicy = 'smart' | 'strict' | 'per-turn' | 'custom'
 export interface ComboEntry { platform: string; modelId: string }
 export interface XCombo {
   id: number
   name: string
   entries: ComboEntry[]
   strategy?: ComboStrategy
+  kind?: ComboKind
+  smartPolicy?: ComboSmartPolicy
+  sessionSticky?: boolean
+  confidenceThreshold?: number
+  systemOneModel?: string
+  judgeModel?: string
   description?: string
 }
 export interface ComboPayload {
   name: string
   entries: ComboEntry[]
   strategy?: ComboStrategy
+  kind?: ComboKind
+  smartPolicy?: ComboSmartPolicy
+  sessionSticky?: boolean
+  confidenceThreshold?: number
+  systemOneModel?: string
+  judgeModel?: string
   description?: string
 }
 export interface ComboPresetResult {

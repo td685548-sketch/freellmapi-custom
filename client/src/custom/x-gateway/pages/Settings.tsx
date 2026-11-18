@@ -4,7 +4,7 @@ import { Settings as SettingsIcon } from 'lucide-react'
 import { useI18n } from '@/i18n'
 import { useUserSession } from '../../use-session'
 import { useSessionRevision } from '../../session-state'
-import { settingsApi, type XRoutingDefaults } from '../settings-api'
+import { settingsApi, type SsoAuthMode, type XRoutingDefaults } from '../settings-api'
 import { useSettingsStrings } from '../settings-strings'
 
 const validLimit = (value: string) => /^\d{1,3}$/.test(value) && Number(value) >= 1 && Number(value) <= 100
@@ -110,6 +110,98 @@ function AccountSection() {
   </section>
 }
 
+function SsoSection() {
+  const s = useSettingsStrings()
+  const client = useQueryClient()
+  const revision = useSessionRevision()
+  const canEdit = useUserSession().hasPermission('edit_x_settings')
+  const query = useQuery({ queryKey: ['x-sso-config', revision], queryFn: ({ signal }) => settingsApi.ssoConfig(signal), retry: false })
+  const current = query.data
+  const validMode = (m: unknown): SsoAuthMode => (m === 'oidc' || m === 'saml' || m === 'both' ? m : 'local')
+
+  const [draft, setDraft] = useState<{
+    authMode?: SsoAuthMode
+    publicBaseUrl?: string
+    autoProvisionMembers?: boolean
+    oidcIssuerUrl?: string
+    oidcClientId?: string
+    oidcClientSecret?: string
+    oidcScopes?: string
+    oidcLoginLabel?: string
+    samlEntryPoint?: string
+    samlIssuer?: string
+    samlCert?: string
+    samlLoginLabel?: string
+  }>({})
+
+  const authMode = draft.authMode ?? validMode(current?.authMode)
+  const showOidc = authMode === 'oidc' || authMode === 'both'
+  const showSaml = authMode === 'saml' || authMode === 'both'
+  const dirty = Object.keys(draft).length > 0
+
+  const save = useMutation({
+    meta: { silenceToast: true },
+    mutationFn: () => settingsApi.saveSsoConfig({
+      authMode,
+      ...(draft.publicBaseUrl !== undefined ? { publicBaseUrl: draft.publicBaseUrl } : {}),
+      ...(draft.autoProvisionMembers !== undefined ? { autoProvisionMembers: draft.autoProvisionMembers } : {}),
+      ...(draft.oidcIssuerUrl !== undefined ? { oidcIssuerUrl: draft.oidcIssuerUrl } : {}),
+      ...(draft.oidcClientId !== undefined ? { oidcClientId: draft.oidcClientId } : {}),
+      ...(draft.oidcClientSecret?.trim() ? { oidcClientSecret: draft.oidcClientSecret } : {}),
+      ...(draft.oidcScopes !== undefined ? { oidcScopes: draft.oidcScopes } : {}),
+      ...(draft.oidcLoginLabel !== undefined ? { oidcLoginLabel: draft.oidcLoginLabel } : {}),
+      ...(draft.samlEntryPoint !== undefined ? { samlEntryPoint: draft.samlEntryPoint } : {}),
+      ...(draft.samlIssuer !== undefined ? { samlIssuer: draft.samlIssuer } : {}),
+      ...(draft.samlCert !== undefined ? { samlCert: draft.samlCert } : {}),
+      ...(draft.samlLoginLabel !== undefined ? { samlLoginLabel: draft.samlLoginLabel } : {}),
+    }),
+    onSuccess: async () => { setDraft({}); await client.invalidateQueries({ queryKey: ['x-sso-config'] }) },
+  })
+
+  return <section className="x-panel x-endpoint-panel" aria-labelledby="x-set-sso">
+    <h2 id="x-set-sso">{s.sso}</h2>
+    <p className="x-caption">{s.ssoHelp}</p>
+    {query.data && <form className="x-mgmt-form" onSubmit={e => { e.preventDefault(); save.mutate() }}>
+      <label>{s.ssoAuthMode}
+        <select aria-label={s.ssoAuthMode} value={authMode} disabled={!canEdit} onChange={e => setDraft(d => ({ ...d, authMode: validMode(e.target.value) }))}>
+          <option value="local">{s.ssoModeLocal}</option>
+          <option value="oidc">{s.ssoModeOidc}</option>
+          <option value="saml">{s.ssoModeSaml}</option>
+          <option value="both">{s.ssoModeBoth}</option>
+        </select>
+      </label>
+      {authMode !== 'local' && <>
+        <label>{s.ssoPublicUrl}
+          <input value={draft.publicBaseUrl ?? current?.publicBaseUrl ?? ''} disabled={!canEdit} placeholder="https://your-app.onrender.com" onChange={e => setDraft(d => ({ ...d, publicBaseUrl: e.target.value }))} />
+        </label>
+        <label style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <input type="checkbox" checked={draft.autoProvisionMembers ?? current?.autoProvisionMembers ?? true} disabled={!canEdit} onChange={e => setDraft(d => ({ ...d, autoProvisionMembers: e.target.checked }))} />
+          <span>{s.ssoAutoProvision}</span>
+        </label>
+      </>}
+      {showOidc && <>
+        <label>{s.ssoOidcIssuer}<input value={draft.oidcIssuerUrl ?? current?.oidcIssuerUrl ?? ''} disabled={!canEdit} placeholder="https://accounts.google.com" onChange={e => setDraft(d => ({ ...d, oidcIssuerUrl: e.target.value }))} /></label>
+        <label>{s.ssoOidcClientId}<input value={draft.oidcClientId ?? current?.oidcClientId ?? ''} disabled={!canEdit} onChange={e => setDraft(d => ({ ...d, oidcClientId: e.target.value }))} /></label>
+        <label>{s.ssoOidcClientSecret}
+          <input type="password" value={draft.oidcClientSecret ?? ''} disabled={!canEdit} placeholder={current?.oidcClientSecretConfigured ? '••••••••' : ''} onChange={e => setDraft(d => ({ ...d, oidcClientSecret: e.target.value }))} />
+          {current?.oidcClientSecretConfigured && <small className="x-caption">{s.ssoSecretSet}</small>}
+        </label>
+        <label>{s.ssoOidcScopes}<input value={draft.oidcScopes ?? current?.oidcScopes ?? 'openid profile email'} disabled={!canEdit} onChange={e => setDraft(d => ({ ...d, oidcScopes: e.target.value }))} /></label>
+        <label>{s.ssoOidcLabel}<input value={draft.oidcLoginLabel ?? current?.oidcLoginLabel ?? 'Sign in with OIDC'} disabled={!canEdit} onChange={e => setDraft(d => ({ ...d, oidcLoginLabel: e.target.value }))} /></label>
+      </>}
+      {showSaml && <>
+        <label>{s.ssoSamlEntryPoint}<input value={draft.samlEntryPoint ?? current?.samlEntryPoint ?? ''} disabled={!canEdit} placeholder="https://idp.example.com/sso/saml" onChange={e => setDraft(d => ({ ...d, samlEntryPoint: e.target.value }))} /></label>
+        <label>{s.ssoSamlIssuer}<input value={draft.samlIssuer ?? current?.samlIssuer ?? 'urn:freellmapi:sp'} disabled={!canEdit} onChange={e => setDraft(d => ({ ...d, samlIssuer: e.target.value }))} /></label>
+        <label>{s.ssoSamlCert}<textarea rows={4} value={draft.samlCert ?? current?.samlCert ?? ''} disabled={!canEdit} placeholder="-----BEGIN CERTIFICATE-----" onChange={e => setDraft(d => ({ ...d, samlCert: e.target.value }))} /></label>
+        <label>{s.ssoSamlLabel}<input value={draft.samlLoginLabel ?? current?.samlLoginLabel ?? 'Sign in with SAML SSO'} disabled={!canEdit} onChange={e => setDraft(d => ({ ...d, samlLoginLabel: e.target.value }))} /></label>
+      </>}
+      {canEdit && <div><button type="submit" className="x-button x-primary" disabled={!dirty || save.isPending}>{s.ssoSave}</button></div>}
+      {save.isSuccess && !dirty && <p className="x-test-ok" role="status">{s.ssoSaved}</p>}
+      {save.isError && <p className="x-error" role="alert">{s.saveError}</p>}
+    </form>}
+  </section>
+}
+
 export default function Settings() {
   const s = useSettingsStrings()
   return <>
@@ -117,5 +209,6 @@ export default function Settings() {
     <RoutingSection />
     <LanguageSection />
     <AccountSection />
+    <SsoSection />
   </>
 }

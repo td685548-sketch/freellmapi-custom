@@ -268,8 +268,14 @@ function cookieSpecificity(cookie: Record<string, unknown>): number {
 
 export function extractCookieCredential(raw: string, providerId?: string): string {
   let trimmed = raw.trim()
+  if (/^LLM\|[^|\s]+\|[^|\s]+$/.test(trimmed)) {
+    return sanitizeCookiePart(trimmed)
+  }
   if (/^(?:Cookie|Authorization):\s*/i.test(trimmed)) {
     trimmed = trimmed.replace(/^(?:Cookie|Authorization):\s*/i, '').replace(/^Bearer\s+/i, '').trim()
+  }
+  if (/^LLM\|[^|\s]+\|[^|\s]+$/.test(trimmed)) {
+    return sanitizeCookiePart(trimmed)
   }
   if ((trimmed.startsWith('[') && trimmed.endsWith(']')) || (trimmed.startsWith('{') && trimmed.endsWith('}'))) {
     try {
@@ -331,7 +337,7 @@ export function parseBulkCredentialLines(
       let entryLabel = ''
       let rawKey = line
       const pipeIdx = line.indexOf('|')
-      if (pipeIdx > 0) {
+      if (pipeIdx > 0 && !/^LLM\|/i.test(line)) {
         entryLabel = line.slice(0, pipeIdx).trim()
         rawKey = line.slice(pipeIdx + 1).trim()
       }
@@ -429,8 +435,30 @@ function LegacyConnectAccountDialog({ provider, account, onClose }: {
 
   const isDirectCredential = method === 'api_key' || method === 'cookie'
   const isCookieMethod = method === 'cookie'
+  const isFreeKeyless = provider.category === 'free'
+  const isCloudJsonProvider = provider.id === 'vertex' || provider.id === 'vertex-partner' || provider.id === 'bedrock' || provider.id === 'bedrock-xai'
   const cookieGuide = isCookieMethod ? WEB_COOKIE_GUIDES[provider.id] : undefined
   const oauthCliGuide = !isCookieMethod && isDirectCredential ? OAUTH_CLI_GUIDES[provider.id] : undefined
+
+  async function handleConnectFree() {
+    if (busy) return
+    setError('')
+    setBusy(true)
+    try {
+      const resolvedPoolId = poolChoice === '' ? undefined : poolChoice === 'none' ? null : Number(poolChoice)
+      await accountsApi.connectFree({
+        provider: provider.id,
+        label: label.trim() || `${provider.name} (Free)`,
+        ...(proxyUrl.trim() ? { proxyUrl: proxyUrl.trim() } : {}),
+        ...(resolvedPoolId !== undefined ? { proxyPoolId: resolvedPoolId } : {}),
+      })
+      if (active.current) connected()
+    } catch (cause) {
+      if (active.current) setError(cause instanceof Error ? cause.message : s.callbackError)
+    } finally {
+      if (active.current) setBusy(false)
+    }
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault()
@@ -552,6 +580,23 @@ function LegacyConnectAccountDialog({ provider, account, onClose }: {
           </div>
         </div>
       )}
+      {isCloudJsonProvider && (
+        <div className="x-notice" style={{ display: 'grid', gap: 6 }}>
+          <span>
+            {provider.id.startsWith('vertex')
+              ? 'Paste Google Service Account JSON, ADC JSON (authorized_user), or raw Vertex API key.'
+              : 'Paste AWS IAM JSON ({ accessKeyId, secretAccessKey, region, sessionToken? }) or accessKeyId:secretAccessKey[:region[:sessionToken]].'}
+          </span>
+        </div>
+      )}
+      {isFreeKeyless && !account && (
+        <div className="x-notice" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+          <span>No API key needed — connect the zero-auth free lane in one click.</span>
+          <button type="button" className="x-button x-primary x-small" disabled={busy} onClick={() => void handleConnectFree()}>
+            Connect Free (No API Key)
+          </button>
+        </div>
+      )}
       {error && <div className="x-error" role="alert">{error}</div>}
       {!attempt ? <form onSubmit={submit} className="x-form">
         {!account && provider.authMethods.length > 1 && <fieldset className="x-methods"><legend>{s.method}</legend>
@@ -583,33 +628,54 @@ function LegacyConnectAccountDialog({ provider, account, onClose }: {
         <label>{s.name}<input id="x-account-label" name="label" autoFocus maxLength={100} value={label} placeholder={s.namePlaceholder} onChange={event => setLabel(event.target.value)} disabled={busy} required /></label>
         {provider.id === 'custom' && <label>{s.baseUrl}<input id="x-account-base-url" name="baseUrl" type="url" value={baseUrl} placeholder="https://api.example.com/v1" onChange={event => setBaseUrl(event.target.value)} disabled={busy} required /></label>}
         {isDirectCredential && (
-          bulkMode || isCookieMethod || oauthCliGuide ? (
-            <label>
-              {bulkMode ? `${s.credential} (1 per line, or Label | Key)` : isCookieMethod ? s.cookieCredential : s.oauthCliCredential}
-              <textarea
-                id="x-account-credential"
-                name="credential"
-                rows={bulkMode ? 5 : 3}
-                value={key}
-                onChange={event => setKey(event.target.value)}
-                placeholder={
-                  bulkMode
-                    ? 'Account 1 | sk-...\nAccount 2 | sk-...'
-                    : isCookieMethod
-                      ? (cookieGuide?.placeholder ?? s.cookieCredentialPlaceholder)
-                      : (oauthCliGuide?.placeholder ?? s.oauthCliPlaceholder)
-                }
-                disabled={busy}
-                required
-                style={{ fontFamily: 'var(--x-mono)', fontSize: '0.84rem', resize: 'vertical' }}
-              />
-            </label>
+          bulkMode || isCookieMethod || oauthCliGuide || isCloudJsonProvider ? (
+            <div style={{ display: 'grid', gap: 8 }}>
+              {isCloudJsonProvider && (
+                <label>
+                  Upload JSON credential file
+                  <input
+                    type="file"
+                    accept=".json,application/json"
+                    disabled={busy}
+                    onChange={event => {
+                      const file = event.target.files?.[0]
+                      if (!file) return
+                      if (file.size > 65536) { setError('Credential file exceeds 64 KiB.'); return }
+                      void file.text().then(text => { if (active.current) setKey(text) }).catch(() => setError('Could not read file.'))
+                      event.target.value = ''
+                    }}
+                  />
+                </label>
+              )}
+              <label>
+                {bulkMode ? `${s.credential} (1 per line, or Label | Key)` : isCookieMethod ? s.cookieCredential : isCloudJsonProvider ? 'Credential JSON or Key' : s.oauthCliCredential}
+                <textarea
+                  id="x-account-credential"
+                  name="credential"
+                  rows={bulkMode || isCloudJsonProvider ? 5 : 3}
+                  value={key}
+                  onChange={event => setKey(event.target.value)}
+                  placeholder={
+                    bulkMode
+                      ? 'Account 1 | sk-...\nAccount 2 | sk-...'
+                      : isCookieMethod
+                        ? (cookieGuide?.placeholder ?? s.cookieCredentialPlaceholder)
+                        : isCloudJsonProvider
+                          ? (provider.id.startsWith('vertex') ? '{"type":"service_account","project_id":"..."}' : 'AKIA...:secret:us-east-1')
+                          : (oauthCliGuide?.placeholder ?? s.oauthCliPlaceholder)
+                  }
+                  disabled={busy}
+                  required
+                  style={{ fontFamily: 'var(--x-mono)', fontSize: '0.84rem', resize: 'vertical' }}
+                />
+              </label>
+            </div>
           ) : (
             <label>{s.credential}<input id="x-account-credential" name="credential" type="password" autoComplete="new-password" value={key} onChange={event => setKey(event.target.value)} placeholder={s.credentialPlaceholder} disabled={busy} required /></label>
           )
         )}
         {isDirectCredential && <label>{s.accountProxy}<input id="x-account-proxy" name="proxyUrl" value={proxyUrl} onChange={event => setProxyUrl(event.target.value)} placeholder={s.accountProxyPlaceholder} disabled={busy} /></label>}
-        {isDirectCredential && <label>{p.accountPool}<select id="x-account-pool" name="proxyPoolId" value={poolChoice} onChange={event => setPoolChoice(event.target.value)} disabled={busy}><option value="">{p.accountPoolAuto}</option><option value="none">{p.accountPoolNone}</option>{poolEntries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}{entry.enabled ? '' : ` (${p.disabled})`}</option>)}</select><span className="x-caption">{p.accountPoolHint}</span></label>}
+        {isDirectCredential && <label>{p.accountPool}<select id="x-account-pool" name="proxyPoolId" value={poolChoice} onChange={event => setPoolChoice(event.target.value)} disabled={busy}><option value="">{p.accountPoolAuto}</option><option value="none">{p.accountPoolNone}</option><option value="-1">Auto-Rotate Pool</option>{poolEntries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}{entry.enabled ? '' : ` (${p.disabled})`}</option>)}</select><span className="x-caption">{p.accountPoolHint}</span></label>}
         <p className="x-security"><ShieldCheck size={16} />{s.encrypted}</p>
         <div className="x-dialog-actions"><button type="button" className="x-button" onClick={onClose}>{s.cancel}</button><button className="x-button x-primary" disabled={busy}>{busy && <LoaderCircle size={16} className="x-spin" />}{busy ? s.connecting : isDirectCredential ? s.addAccount : s.signIn}</button></div>
       </form> : <div className="x-auth-wait">
@@ -626,6 +692,14 @@ function LegacyConnectAccountDialog({ provider, account, onClose }: {
   </Dialog>
 }
 
+const SUBSCRIPTION_PROVIDER_IDS = new Set([
+  'codex', 'claude', 'gemini-cli', 'kiro',
+  'antigravity', 'grok-cli', 'codebuddy-cn', 'codebuddy-intl', 'cline', 'clinepass',
+  'zed', 'cursor', 'xiaomi-mimo', 'kimchi', 'trae', 'windsurf', 'gitlab',
+  'kimi', 'kilocode', 'muse', 'nous', 'qwen', 'iflow', 'xai',
+  'minimax-code', 'minimax-code-global', 'qoder', 'qoder-cn', 'glm',
+])
+
 export function ConnectAccountDialog(props: { provider: AccountProvider; account?: ProviderAccount; onClose: () => void }) {
-  return ['codex', 'claude', 'gemini-cli', 'kiro'].includes(props.provider.id) ? <SubscriptionConnectDialog {...props} /> : <LegacyConnectAccountDialog {...props} />
+  return SUBSCRIPTION_PROVIDER_IDS.has(props.provider.id) ? <SubscriptionConnectDialog {...props} /> : <LegacyConnectAccountDialog {...props} />
 }
