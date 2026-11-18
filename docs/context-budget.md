@@ -18,14 +18,11 @@ chat inference surfaces:
 - `POST /v1/responses`
 - `POST /v1beta/models/{model}:generateContent` and `:streamGenerateContent`
 
-The following paths intentionally keep their existing behavior even when Context
-Policy is enabled (no budget fitting, no `X-FreeLLM-Context` header, and no
-summary window boundary updates):
+The following paths use simplified or dedicated handling even when Context Policy is enabled:
 
-- Server-side MCP tool-loop takeover requests
-- Multi-agent Orchestrator (`flow:<slug>`) runs
-- Quick answers (short-circuited without calling a model)
-- Ollama compatibility endpoints under `/api` (no client-profile gate)
+- **Server-side MCP tool-loop requests & Multi-agent Orchestrator (`flow:<slug>`)**: Apply `compactLoopMessagesForBudget` (`server/src/custom/context-budget/loop-guard.ts`) before every multi-round model step to compact oversized older `role: "tool"` outputs and drop oldest completed tool rounds atomically while preserving the newest tool-call batch intact.
+- **Quick answers**: Short-circuited without calling an upstream model.
+- **Ollama compatibility endpoints under `/api`**: No client-profile gate.
 
 ## Two-Phase Assembly Pipeline
 
@@ -68,11 +65,13 @@ other scripts `/ 3`), plus 4 tokens per message framing overhead, configurable
 `imageTokens` per image block (default `765`), and JSON-serialized tool schemas.
 
 When providers report real `input_tokens` differing from the `chars / 4` fallback
-heuristic, `report.ts` updates an in-memory per-platform exponential moving
-average (`alpha = 0.1`, clamped to `[0.75, 1.6]`). During dispatch fitting, the
-segment multiplier is clamped to `Math.max(1.0, factor)` so conservative budget
-ceilings are never relaxed below raw estimates, while persisted reports and
-error statistics use the full calibrated estimate.
+heuristic, `report.ts` updates a per-platform exponential moving average
+(`alpha = 0.1`, clamped to `[0.75, 1.6]`) persisted in SQLite `settings`
+(`custom_context_calibration_v1`, debounced writes loaded lazily at startup) so
+learned multipliers survive restarts. During dispatch fitting, the segment
+multiplier is clamped to `Math.max(1.0, factor)` so conservative budget ceilings
+are never relaxed below raw estimates, while persisted reports and error
+statistics use the full calibrated estimate.
 
 ## Presets and Policy Configuration
 
@@ -133,10 +132,17 @@ for OpenAI Chat / Responses, `invalid_request_error` for Anthropic Messages,
 - **Context Preview**: `GET /api/client-profiles/:id/conversations/:conversationId/context-preview`
   (also accessible from the **Preview context** button in the Conversations card)
   simulates the next turn without calling any upstream provider, showing a target
-  model simulator (`?model=platform:model_id`), visual token-budget allocation bar,
+  model simulator (`?model=platform:model_id`), optional sample user query
+  simulator (`?query=...` running Knowledge retrieval, minimum score filtering,
+  and 80% 5-word shingle deduplication), visual token-budget allocation bar,
   per-segment tokens, first-200-character previews, drop reasons (`budget`,
-  `block_alignment`, `leading_assistant`, `max_messages`), and summary boundary
-  progress (`coversThroughMessageId`, `pendingFoldMessages`).
+  `block_alignment`, `leading_assistant`, `max_messages`, `shingle_dedup`,
+  `min_score`), and summary boundary progress (`coversThroughMessageId`,
+  `pendingFoldMessages`).
+- **Proactive Usage Alerts**: Repeated `context_budget_exceeded` rejections
+  (3+ in 15 minutes) and sustained high trimming rates (10+ requests in 15 minutes
+  with `>= 80%` trimmed) emit rate-limited `context_budget` alerts through
+  `services/usage-alerts.ts` (server log, webhook, and notification email).
 - **Time-Windowed Statistics (`7d` / `30d` / `90d`)**: `GET /api/client-profiles/:id/context-stats?days=7` (`1`–`90`)
   aggregates average input tokens, average budget, trimmed request rate, tokens saved,
   estimator error percentiles (`p50Pct`, `p95Pct`, `within15PctRate`), and expandable
@@ -171,10 +177,10 @@ and no server-side summary is generated or stored.
 
 ## Known Limitations
 
-- **Approximate estimation**: Script-weighted character ratios and in-memory EMA
+- **Approximate estimation**: Script-weighted character ratios and persisted EMA
   calibration do not run model-specific BPE tokenizers; safety margins (`10%` by
-  default) account for minor tokenizer variance, and calibration multipliers reset
-  on process restart.
+  default) account for minor tokenizer variance while learned calibration
+  multipliers persist in SQLite across restarts.
 - **Streaming header timing**: HTTP response headers (`X-FreeLLM-Context`) reflect
   the last dispatch attempt before headers commit to the client. In rare cases
   where a fallback happens after stream headers are already flushed, the header

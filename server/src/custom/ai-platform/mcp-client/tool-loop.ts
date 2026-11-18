@@ -14,6 +14,7 @@ import {
 } from '@freellmapi/shared/ai-platform-mcp.js';
 import { getDb } from '../../../db/index.js';
 import { hasEnabledToolsModel, resolveRoutingChain } from '../../../services/router.js';
+import { compactLoopMessagesForBudget } from '../../context-budget/loop-guard.js';
 import { callGateway, type LoopbackRequest } from '../loopback.js';
 import { toolsForScope } from './bindings.js';
 import type { LoopSafeParams } from './messages.js';
@@ -203,8 +204,16 @@ export async function runToolLoop(
     }
     rounds += 1;
 
-    const gwRes = await gateway(req, {
+    const guarded = compactLoopMessagesForBudget({
       messages: conversation,
+      model: input.model,
+      profileId: input.scope.kind === 'profile' ? Number(input.scope.id) : undefined,
+      tools: combinedTools,
+      maxOutputTokens: input.params?.maxTokens,
+    });
+
+    const gwRes = await gateway(req, {
+      messages: guarded.messages,
       model: input.model,
       ...(combinedTools.length > 0 ? { tools: combinedTools } : {}),
       ...(input.params?.maxTokens !== undefined ? { maxTokens: input.params.maxTokens } : {}),

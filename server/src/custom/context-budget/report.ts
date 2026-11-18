@@ -4,6 +4,7 @@ import { getDb } from '../../db/index.js';
 import type { RequestTrace } from '../../lib/attempt-trace.js';
 import { getRequestTrace } from '../../lib/attempt-trace.js';
 import { getClientContext } from '../../lib/client-context.js';
+import { noteContextReportOutcome } from './alerts.js';
 import { recordCalibrationSample } from './estimate.js';
 import { pruneOrphanPolicies } from './policy.js';
 import { getRegistry } from './registry.js';
@@ -153,6 +154,14 @@ export function persistReportOnFinish(req: Request, res: Response): void {
           const baselineTokens = registry.uncalibratedTokens ?? summary.estimatedTokens;
           recordCalibrationSample(platform, reqRow.input_tokens, baselineTokens);
         }
+
+        noteContextReportOutcome(profileId, {
+          histDropped: summary.histDropped,
+          kbDropped: summary.kbDropped,
+          clientDropped: summary.clientDropped,
+          budget: summary.budget,
+          estimatedTokens: summary.estimatedTokens,
+        });
       } catch {
         // Non-fatal: report persistence and calibration must never disrupt completed requests.
       }

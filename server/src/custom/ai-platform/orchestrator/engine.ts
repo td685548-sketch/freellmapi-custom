@@ -27,6 +27,7 @@ import {
 import { getDb, getUnifiedApiKey } from '../../../db/index.js';
 import { decrypt } from '../../../lib/crypto.js';
 import { extractInferenceToken } from '../../../middleware/user-rate-limit.js';
+import { compactLoopMessagesForBudget } from '../../context-budget/loop-guard.js';
 import { isPillarEnabled } from '../flags.js';
 import { callGateway, GatewayCallError, type LoopbackRequest } from '../loopback.js';
 import { maskText } from '../masking.js';
@@ -1235,6 +1236,14 @@ async function runAgentLoop(params: {
     }
 
     const modelStartedAt = Date.now();
+    const guardedContext = compactLoopMessagesForBudget({
+      messages: agentCtx.conversation,
+      model: currentAgent.model,
+      profileId: profileId > 0 ? profileId : undefined,
+      tools: agentCtx.tools,
+      maxOutputTokens: currentAgent.maxOutputTokens ?? undefined,
+    });
+    const outboundMessages = guardedContext.messages;
     let gwRes: {
       message: ChatMessage;
       finishReason: string;
@@ -1245,7 +1254,7 @@ async function runAgentLoop(params: {
     try {
       gwRes = await deps.callGateway(req, {
         model: currentAgent.model,
-        messages: agentCtx.conversation,
+        messages: outboundMessages,
         ...(agentCtx.tools.length > 0 ? { tools: agentCtx.tools } : {}),
         ...(currentAgent.maxOutputTokens != null
           ? { maxTokens: currentAgent.maxOutputTokens }

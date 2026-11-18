@@ -8,6 +8,7 @@ import { geminiContentsToMessages, geminiToolsToChatTools, type GeminiInboundReq
 import { parseAllowedModels } from '../../services/profile-usage.js';
 import { renderPrompt } from '../ai-platform/prompts/render.js';
 import type { Wire } from '../ai-platform/wire/detect.js';
+import { noteContextBudgetExceeded } from './alerts.js';
 import { estimateTextTokens } from './estimate.js';
 import { computeEffectiveBudget } from './fit.js';
 import { getContextPolicyDefault, resolveContextPolicy } from './policy.js';
@@ -613,6 +614,9 @@ export function checkMandatoryBudget(req: Request, res: Response, wire?: Wire | 
 
   const budget = registry.provisionalBudget;
   if (budget !== null && mandatoryTokens > budget) {
+    if (profileId !== undefined) {
+      noteContextBudgetExceeded(profileId, mandatoryTokens, budget);
+    }
     return sendBudgetExceeded(res, wire, budget, mandatoryTokens);
   }
   return true;
