@@ -225,6 +225,7 @@ export interface SupportSetupChatRequest {
   tenantId?: number | null;
   targetMode?: 'create_tenant' | 'update_tenant';
   locale?: 'vi' | 'en';
+  currentPath?: string;
   messages: SupportSetupChatMessage[];
   requirementsHint?: Partial<SupportSetupRequirements>;
   baseProposalId?: string;

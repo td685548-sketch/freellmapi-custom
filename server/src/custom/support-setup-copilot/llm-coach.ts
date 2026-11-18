@@ -24,6 +24,7 @@ import {
   resolveCandidateRoutes,
   type CandidateRoute,
 } from '../x-gateway/router.js';
+import { buildPlatformPromptSection } from './platform-guide.js';
 
 export interface GatewayLoopbackContext {
   host: string;
@@ -48,6 +49,7 @@ export interface LlmCoachTurnInput {
   messages: SupportSetupChatMessage[];
   locale: 'vi' | 'en';
   targetMode: 'create_tenant' | 'update_tenant';
+  currentPath?: string;
   diagnostic: SupportSetupTenantDiagnostic | null;
   extracted: SupportSetupRequirements;
   canCreateTenant?: boolean;
@@ -82,7 +84,7 @@ const VI_DIACRITIC_RE =
   /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i;
 
 const VI_UNACCENTED_CONVERSATIONAL_RE =
-  /\b(?:xin\s+chao|chao\s+ban|minh|toi\s+(?:dang|muon|can|co|chua|khong)|minh\s+(?:dang|muon|can|co|chua|khong|moi)|ben\s+(?:minh|toi|em)|va\s+muon|(?:muon|can)\s+(?:setup|thiet\s+lap|cai\s+dat|tu\s+van|lam)|ban\s+(?:co\s+the|lam\s+duoc|biết|biet|oi)|co\s+the\s+(?:lam|noi|giup)|lam\s+gi\s+ma|tieng\s+viet|giup\s+(?:toi|minh|ban)|cho\s+(?:toi|minh|ban)|cua\s+(?:toi|minh|ban)|lam\s+sao|nhu\s+the\s+nao|thiet\s+lap|cai\s+dat|huong\s+dan|duoc\s+khong|tuy\s+ban|lam\s+luon|mac\s+dinh|chua\s+co|khong\s+co|sao\s+(?:tra\s+loi|cung\s+nhac|hoi)|cam\s+on|nhe|nha|luon\s+di|ke\s+hoach)\b/i;
+  /\b(?:xin\s+chao|chao\s+ban|minh|toi\s+(?:dang|muon|can|co|chua|khong)|minh\s+(?:dang|muon|can|co|chua|khong|moi)|ben\s+(?:minh|toi|em)|va\s+muon|(?:muon|can)\s+(?:setup|thiet\s+lap|cai\s+dat|tu\s+van|lam)|ban\s+(?:co\s+the|lam\s+duoc|biết|biet|oi)|co\s+the\s+(?:lam|noi|giup)|lam\s+gi\s+ma|la\s+gi|lam\s+gi|de\s+lam\s+gi|dung\s+de|dung\s+sao|web\s+nay|trang\s+(?:web\s+)?nay|he\s+thong\s+nay|ung\s+dung\s+nay|nen\s+tang\s+nay|muc\s+nay|man\s+hinh\s+nay|gioi\s+thieu|khac\s+nhau|khac\s+gi|tieng\s+viet|giup\s+(?:toi|minh|ban)|cho\s+(?:toi|minh|ban)|cua\s+(?:toi|minh|ban)|lam\s+sao|nhu\s+the\s+nao|thiet\s+lap|cai\s+dat|huong\s+dan|duoc\s+khong|tuy\s+ban|lam\s+luon|mac\s+dinh|chua\s+co|khong\s+co|sao\s+(?:tra\s+loi|cung\s+nhac|hoi)|cam\s+on|nhe|nha|luon\s+di|ke\s+hoach)\b/i;
 
 const TOOL_MARKUP_RE =
   /<support_tool_call[\s\S]*?<\/support_tool_call>|<support_tool_result[\s\S]*?<\/support_tool_result>|<\/?support_tool_(?:call|result)[^>]*>/gi;
@@ -447,6 +449,7 @@ export function buildHumanCoachSystemPrompt(params: {
   messages: readonly SupportSetupChatMessage[];
   locale: 'vi' | 'en';
   targetMode: 'create_tenant' | 'update_tenant';
+  currentPath?: string;
   diagnostic: SupportSetupTenantDiagnostic | null;
   extracted: SupportSetupRequirements;
   canCreateTenant?: boolean;
@@ -456,6 +459,7 @@ export function buildHumanCoachSystemPrompt(params: {
     messages,
     locale,
     targetMode,
+    currentPath,
     diagnostic,
     extracted,
     canCreateTenant = true,
@@ -549,12 +553,16 @@ export function buildHumanCoachSystemPrompt(params: {
     '}',
   ].join('\n');
 
+  const platformSection = buildPlatformPromptSection(currentPath, locale);
+
   return [
     personaBlock,
     '',
     antiRepetitionBlock,
     '',
     securityAndContextBlock,
+    '',
+    platformSection,
     '',
     SUPPORT_PLAYBOOK_CONCISE_REFERENCE,
     '',

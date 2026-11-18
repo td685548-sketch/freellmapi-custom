@@ -52,7 +52,7 @@ import {
 import './support-setup-copilot.css';
 
 const CLIENT_VI_MARKER_RE =
-  /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]|\b(?:tieng\s+viet|xin\s+chao|chao\s+ban|toi\s+(?:dang|muon|can|co|chua|khong)|minh\s+(?:dang|muon|can|co|chua|khong|moi)|ben\s+(?:minh|toi|em)|va\s+muon|(?:muon|can)\s+(?:setup|thiet\s+lap|cai\s+dat|tu\s+van|lam)|ban\s+co\s+the|ban\s+lam\s+duoc|lam\s+gi\s+ma|co\s+the\s+(?:lam|noi|giup)|giup\s+toi|giup\s+minh|lam\s+sao|thiet\s+lap|cai\s+dat|huong\s+dan|chua\s+co|khong\s+co|sao\s+(?:tra\s+loi|cung\s+nhac|hoi)|tu\s+van|len\s+ke\s+hoach|len\s+ban\s+mau)\b/i;
+  /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]|\b(?:tieng\s+viet|xin\s+chao|chao\s+ban|toi\s+(?:dang|muon|can|co|chua|khong)|minh\s+(?:dang|muon|can|co|chua|khong|moi)|ben\s+(?:minh|toi|em)|va\s+muon|(?:muon|can)\s+(?:setup|thiet\s+lap|cai\s+dat|tu\s+van|lam)|ban\s+co\s+the|ban\s+lam\s+duoc|lam\s+gi\s+ma|la\s+gi|lam\s+gi|de\s+lam\s+gi|dung\s+de|dung\s+sao|web\s+nay|trang\s+(?:web\s+)?nay|he\s+thong\s+nay|ung\s+dung\s+nay|nen\s+tang\s+nay|muc\s+nay|man\s+hinh\s+nay|gioi\s+thieu|lay\s+api\s*keys?|khac\s+nhau|khac\s+gi|co\s+the\s+(?:lam|noi|giup)|giup\s+toi|giup\s+minh|lam\s+sao|thiet\s+lap|cai\s+dat|huong\s+dan|chua\s+co|khong\s+co|sao\s+(?:tra\s+loi|cung\s+nhac|hoi)|tu\s+van|len\s+ke\s+hoach|len\s+ban\s+mau)\b/i;
 
 interface ChatTurn {
   id: string;
@@ -151,7 +151,9 @@ export function SupportSetupCopilot() {
     canCreateTenant || Boolean(activeTenantDiag?.steps.some((st) => st.canEdit));
 
   const resolvedTargetMode: 'create_tenant' | 'update_tenant' =
-    targetSelection === 'new' || !activeTenantDiag ? 'create_tenant' : 'update_tenant';
+    canCreateTenant && (targetSelection === 'new' || !activeTenantDiag)
+      ? 'create_tenant'
+      : 'update_tenant';
   const resolvedTenantId =
     resolvedTargetMode === 'update_tenant' && activeTenantDiag ? activeTenantDiag.tenant.id : null;
 
@@ -173,6 +175,7 @@ export function SupportSetupCopilot() {
         tenantId: resolvedTenantId,
         targetMode: resolvedTargetMode,
         locale: payload.effectiveLocale ?? uiLocale,
+        currentPath: location.pathname,
         messages: payload.nextTurns.slice(-20).map((t) => ({ role: t.role, content: t.content })),
         requirementsHint: payload.requirementsHint,
         baseProposalId: lastProposalId,
