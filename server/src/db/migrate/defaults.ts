@@ -109,6 +109,7 @@ import * as customSemanticCache from '../migrations/20261118_110000_custom_seman
 import * as customThoughtSignatures from '../migrations/20261118_110000_custom_thought_signatures.js';
 import * as customLearnedCapsModelsDev from '../migrations/20261118_120000_custom_learned_caps_models_dev.js';
 import * as customAccountWeightsCircuit from '../migrations/20261118_130000_custom_account_weights_circuit.js';
+import * as customPromptEvalCanary from '../migrations/20261118_140000_custom_prompt_eval_canary.js';
 
 export interface MigrationModule {
   up(db: Db): void;
@@ -310,4 +311,5 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: '20261118_110000_custom_thought_signatures.ts', module: customThoughtSignatures },
   { filename: '20261118_120000_custom_learned_caps_models_dev.ts', module: customLearnedCapsModelsDev },
   { filename: '20261118_130000_custom_account_weights_circuit.ts', module: customAccountWeightsCircuit },
+  { filename: '20261118_140000_custom_prompt_eval_canary.ts', module: customPromptEvalCanary },
 ];

@@ -1,4 +1,4 @@
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import {
   PROMPT_LIMITS,
   PROMPT_VAR_NAME_REGEX,
@@ -9,6 +9,12 @@ import { getDb } from '../../../db/index.js';
 import { getClientContext } from '../../../lib/client-context.js';
 import type { GateProfile } from '../../../services/profile-usage.js';
 import { isPillarEnabled } from '../flags.js';
+import { isInternalCall } from '../loopback.js';
+import {
+  recordCanaryOutcome,
+  selectPromptVariant,
+  type SelectedPromptVariant,
+} from './canary.js';
 import {
   getPublishedPrompt,
   resolveActivePromptVariant,
@@ -23,10 +29,13 @@ export interface PromptRequestContext {
   endUserName: string;
   language: string;
   callerVars: Record<string, string>;
+  conversationId: string | null;
   selectedPrompt: ActivePromptVariant | null;
+  variantSelection?: SelectedPromptVariant;
 }
 
 const requestPromptContexts = new WeakMap<object, PromptRequestContext>();
+const trackedCanaryResponses = new WeakSet<Response>();
 
 function firstHeaderValue(raw: string | string[] | undefined): string | undefined {
   return Array.isArray(raw) ? raw[0] : raw;
@@ -123,6 +132,7 @@ export function capturePromptRequestContext(
   req: Request,
   profile: GateProfile & { name?: string },
   endUser: string | null,
+  res?: Response,
 ): void {
   const ctx = getClientContext();
   const profileName =
@@ -130,11 +140,43 @@ export function capturePromptRequestContext(
       ? sanitizeVariableValue(profile.name.trim())
       : lookupProfileName(profile.id);
   const resolvedEndUser = endUser ?? ctx.endUser ?? null;
+  const sanitizedEndUser = resolvedEndUser ? sanitizeVariableValue(resolvedEndUser) : null;
+  const rawConv = firstHeaderValue(req.headers['x-conversation-id']);
+  const conversationId =
+    typeof rawConv === 'string' && rawConv.trim().length > 0
+      ? sanitizeVariableValue(rawConv.trim())
+      : null;
+
+  const scope = { kind: 'profile' as const, id: String(profile.id) };
+  const selection = selectPromptVariant(scope, {
+    conversationId,
+    endUser: sanitizedEndUser,
+  });
+
+  const targetRes = res ?? (req as Request & { res?: Response }).res;
+  if (targetRes && !targetRes.headersSent && (selection.canaryActive || selection.version !== null)) {
+    targetRes.setHeader?.('X-FreeLLM-Prompt-Variant', selection.headerValue);
+  }
+  if (
+    targetRes &&
+    selection.canaryActive &&
+    isInternalCall(req) === null &&
+    !trackedCanaryResponses.has(targetRes)
+  ) {
+    trackedCanaryResponses.add(targetRes);
+    const startedAt = Date.now();
+    targetRes.once?.('finish', () => {
+      recordCanaryOutcome(scope, selection.variant, {
+        latencyMs: Date.now() - startedAt,
+        error: (targetRes.statusCode ?? 200) >= 400,
+      });
+    });
+  }
 
   let selectedPrompt: ActivePromptVariant | null = null;
   try {
     selectedPrompt = resolveActivePromptVariant(
-      { kind: 'profile', id: String(profile.id) },
+      scope,
       extractAbStickySeed(req, resolvedEndUser),
     );
   } catch {
@@ -144,11 +186,13 @@ export function capturePromptRequestContext(
   requestPromptContexts.set(ctx, {
     profileId: profile.id,
     profileName,
-    endUser: resolvedEndUser ? sanitizeVariableValue(resolvedEndUser) : null,
+    endUser: sanitizedEndUser,
     endUserName: extractEndUserName(req),
     language: extractCallerLanguage(req),
     callerVars: parseCallerVarsHeader(req.headers['x-freellm-vars']),
+    conversationId,
     selectedPrompt,
+    variantSelection: selection,
   });
 }
 
@@ -157,7 +201,12 @@ export function capturePromptRequestContext(
  */
 export function getCapturedPromptHeader(): string | null {
   try {
-    const sel = requestPromptContexts.get(getClientContext())?.selectedPrompt;
+    const captured = requestPromptContexts.get(getClientContext());
+    if (!captured) return null;
+    if (captured.variantSelection?.canaryActive && captured.variantSelection.version !== null) {
+      return `v${captured.variantSelection.version}:${captured.variantSelection.variant}`;
+    }
+    const sel = captured.selectedPrompt;
     if (!sel) return null;
     return `v${sel.version}:${sel.variant}`;
   } catch {
@@ -167,8 +216,8 @@ export function getCapturedPromptHeader(): string | null {
 
 /**
  * Renders a profile system prompt template for the current request context.
- * Applies A/B draft variant overrides captured in Slot 5 when configured.
- * Returns `template` by exact reference when nullish, without `{{` (and not A/B-overridden), or when `prompts` pillar is off.
+ * Applies active weighted canary candidate (taking precedence when `canaryActive`) or A/B draft
+ * variant overrides captured in Slot 5 when configured.
  */
 export function renderPrompt(template: string | null | undefined): string | null | undefined {
   if (!isPillarEnabled('prompts')) return template;
@@ -176,14 +225,34 @@ export function renderPrompt(template: string | null | undefined): string | null
   try {
     const clientCtx = getClientContext();
     const captured = requestPromptContexts.get(clientCtx);
-    const abVariant = captured?.selectedPrompt ?? null;
-    const effectiveTemplate = abVariant?.variant === 'draft' ? abVariant.body : template;
+    const profileId = captured?.profileId ?? clientCtx.profileId;
+
+    let selection: SelectedPromptVariant | undefined = captured?.variantSelection;
+    if (!selection && profileId !== undefined) {
+      const fallbackEndUser =
+        captured?.endUser ?? (clientCtx.endUser ? sanitizeVariableValue(clientCtx.endUser) : null);
+      selection = selectPromptVariant(
+        { kind: 'profile', id: String(profileId) },
+        { conversationId: captured?.conversationId ?? null, endUser: fallbackEndUser },
+      );
+    }
+
+    const canarySelection =
+      selection !== undefined && selection.variant === 'canary' && selection.body !== null
+        ? selection
+        : null;
+    const abVariant = !selection?.canaryActive ? (captured?.selectedPrompt ?? null) : null;
+
+    const effectiveTemplate = canarySelection
+      ? canarySelection.body
+      : abVariant?.variant === 'draft'
+        ? abVariant.body
+        : template;
 
     if (effectiveTemplate == null || !effectiveTemplate.includes('{{')) {
       return effectiveTemplate;
     }
 
-    const profileId = captured?.profileId ?? clientCtx.profileId;
     const profileName =
       captured?.profileName ?? (profileId !== undefined ? lookupProfileName(profileId) : '');
     const endUserId =
@@ -192,8 +261,14 @@ export function renderPrompt(template: string | null | undefined): string | null
     const language = captured?.language ?? '';
     const callerVars = captured?.callerVars ?? {};
 
-    let declared: PromptVariable[] = abVariant?.variables ?? [];
-    if (!abVariant && profileId !== undefined) {
+    let declared: PromptVariable[] = [];
+    if (canarySelection) {
+      declared = canarySelection.variables;
+    } else if (abVariant) {
+      declared = abVariant.variables;
+    } else if (selection && selection.version !== null) {
+      declared = selection.variables;
+    } else if (profileId !== undefined) {
       try {
         declared = getPublishedPrompt({ kind: 'profile', id: String(profileId) })?.variables ?? [];
       } catch {
@@ -232,25 +307,49 @@ export function renderTenantSystemPrompt(
   tenant: { id: number | string; name: string; systemPrompt: string },
   userContext: { userId: string; name?: string; role?: string },
 ): string {
-  const template = tenant.systemPrompt;
-  if (!isPillarEnabled('prompts')) return template ?? '';
+  const baseTemplate = tenant.systemPrompt ?? '';
+  if (!isPillarEnabled('prompts')) return baseTemplate;
 
   try {
-    let selected: ActivePromptVariant | null = null;
-    try {
-      selected = resolveActivePromptVariant(
-        { kind: 'support_tenant', id: String(tenant.id) },
-        userContext.userId || null,
-      );
-    } catch {
-      selected = null;
+    const scope = { kind: 'support_tenant' as const, id: String(tenant.id) };
+    const userId =
+      typeof userContext.userId === 'string' ? sanitizeVariableValue(userContext.userId.trim()) : '';
+
+    const selection = selectPromptVariant(scope, { endUser: userId || null });
+    const useCanaryBody = selection.variant === 'canary' && selection.body !== null;
+
+    let abSelected: ActivePromptVariant | null = null;
+    if (!selection.canaryActive) {
+      try {
+        abSelected = resolveActivePromptVariant(scope, userContext.userId || null);
+      } catch {
+        abSelected = null;
+      }
     }
 
-    const activeTemplate = selected?.variant === 'draft' ? selected.body : template;
+    const activeTemplate = useCanaryBody
+      ? selection.body!
+      : abSelected?.variant === 'draft'
+        ? abSelected.body
+        : baseTemplate;
+
     if (!activeTemplate) return '';
     if (!activeTemplate.includes('{{')) return activeTemplate;
 
-    const declared: PromptVariable[] = selected?.variables ?? [];
+    let declared: PromptVariable[] = [];
+    if (useCanaryBody) {
+      declared = selection.variables;
+    } else if (abSelected) {
+      declared = abSelected.variables;
+    } else if (selection.version !== null) {
+      declared = selection.variables;
+    } else {
+      try {
+        declared = getPublishedPrompt(scope)?.variables ?? [];
+      } catch {
+        declared = [];
+      }
+    }
 
     const values: Record<string, string> = {
       date: new Date().toISOString().slice(0, 10),
@@ -258,9 +357,6 @@ export function renderTenantSystemPrompt(
     const tenantName =
       typeof tenant.name === 'string' ? sanitizeVariableValue(tenant.name.trim()) : '';
     if (tenantName) values.profile_name = tenantName;
-
-    const userId =
-      typeof userContext.userId === 'string' ? sanitizeVariableValue(userContext.userId.trim()) : '';
     if (userId) values.end_user_id = userId;
 
     const userName =
@@ -273,6 +369,6 @@ export function renderTenantSystemPrompt(
       '[prompts] renderTenantSystemPrompt failed:',
       err instanceof Error ? err.message : err,
     );
-    return template ?? '';
+    return baseTemplate;
   }
 }
