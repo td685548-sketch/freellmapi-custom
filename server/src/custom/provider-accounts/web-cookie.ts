@@ -30,6 +30,7 @@ import {
 import {
   fetchChatGptWebAccessToken,
   normalizeChatGptWebCookie,
+  probeChatGptWebSentinelPrepare,
 } from './chatgpt-web-image.js';
 import { isMetaLlamaKey, looksLikeCookieHeader, looksLikeHtmlDocument, normalizeCookieInput } from './cookie-format.js';
 
@@ -1081,7 +1082,19 @@ export class WebCookieProvider extends BaseProvider {
 
     try {
       const cookie = normalizeChatGptWebCookie(apiKey);
-      await fetchChatGptWebAccessToken(cookie, BROWSER_USER_AGENT, this.baseUrl, this.platform);
+      const accessToken = await fetchChatGptWebAccessToken(cookie, BROWSER_USER_AGENT, this.baseUrl, this.platform);
+      // A session can still mint an access token while every chat fails at
+      // Sentinel prepare (expired token), so probe prepare as well. This only
+      // fetches a prepare_token — no conversation is started and no
+      // proof-of-work is solved — so the probe stays cheap enough for health
+      // checks. A 401/403 here means the account cannot chat at all.
+      await probeChatGptWebSentinelPrepare({
+        baseUrl: this.baseUrl,
+        accessToken,
+        cookie,
+        userAgent: BROWSER_USER_AGENT,
+        platform: this.platform,
+      });
       return true;
     } catch (err) {
       const status = (err as { status?: unknown } | null)?.status;

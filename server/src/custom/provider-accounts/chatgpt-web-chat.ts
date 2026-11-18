@@ -13,8 +13,8 @@ import type { ChatMessage, Platform } from '@freellmapi/shared/types.js';
 import { contentToString } from '../../lib/content.js';
 import { proxyFetch } from '../../lib/proxy.js';
 import {
-  fetchChatGptWebAccessToken,
   fetchSentinelHeaders,
+  fetchUsableChatGptWebAccessToken,
   normalizeChatGptWebCookie,
 } from './chatgpt-web-image.js';
 import { looksLikeHtmlDocument } from './cookie-format.js';
@@ -401,7 +401,7 @@ export async function runChatGptWebChat(opts: ChatGptWebChatOptions): Promise<st
   const platform: Platform = opts.platform ?? 'custom';
   const cookie = normalizeChatGptWebCookie(opts.credential);
 
-  const accessToken = await fetchChatGptWebAccessToken(cookie, userAgent, baseUrl, platform, opts.signal);
+  const accessToken = await fetchUsableChatGptWebAccessToken(cookie, userAgent, baseUrl, platform, opts.signal);
   if (opts.signal?.aborted) throw new ChatGptWebChatError('Request aborted', 499);
 
   const sentinel = await fetchSentinelHeaders({ baseUrl, accessToken, cookie, userAgent, platform, signal: opts.signal });

@@ -24,6 +24,15 @@ const DOWNLOAD_TIMEOUT_MS = 90_000;
 const CONTENT_POLICY_RE =
   /(content policy|violat(?:es|ed|ion)|can't create|cannot create|i can't generate|i cannot generate|not able to create|unable to create|safety)/i;
 
+/** A token expiring within this margin is treated as expired: Sentinel would 401 it mid-turn. */
+const ACCESS_TOKEN_EXPIRY_MARGIN_MS = 120_000;
+
+/** Actionable message surfaced when the web session can no longer mint a usable token. */
+const SESSION_EXPIRED_MESSAGE = 'ChatGPT Web session expired — refresh the web session cookie';
+
+/** Upstream markers for an expired access token (401 body from Sentinel). */
+const TOKEN_EXPIRED_RE = /token_expired|authentication token is expired/i;
+
 const DEFAULT_TIMEZONE = 'UTC';
 const DEFAULT_TZ_OFFSET_MIN = 0;
 
@@ -188,6 +197,60 @@ export async function fetchChatGptWebAccessToken(
   return body.accessToken;
 }
 
+/**
+ * `exp` (ms since epoch) of a JWT access token, or null when the token is
+ * opaque / has no numeric `exp`. Only reads the expiry — never verifies the
+ * signature, the token is already trusted because it came from /api/auth/session.
+ */
+export function getChatGptWebAccessTokenExpiryMs(accessToken: string): number | null {
+  const parts = accessToken.split('.');
+  if (parts.length !== 3) return null;
+  try {
+    const payload = JSON.parse(
+      Buffer.from(parts[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'),
+    ) as { exp?: unknown };
+    return typeof payload.exp === 'number' && Number.isFinite(payload.exp) ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+/** True when the token is already expired or expires within `marginMs`. Unknown expiry never counts as expiring. */
+export function isChatGptWebAccessTokenExpiringSoon(
+  accessToken: string,
+  marginMs: number = ACCESS_TOKEN_EXPIRY_MARGIN_MS,
+): boolean {
+  const expiresAt = getChatGptWebAccessTokenExpiryMs(accessToken);
+  return expiresAt !== null && expiresAt - Date.now() < marginMs;
+}
+
+/**
+ * Exchange the cookie for an access token that is still usable. The session
+ * endpoint can hand back a token that is already expired (or about to be), so
+ * a token expiring within the safety margin triggers exactly one re-exchange;
+ * if the session still only mints near-expiry tokens, the session itself is
+ * dead and the caller gets an actionable error instead of a Sentinel 401.
+ */
+export async function fetchUsableChatGptWebAccessToken(
+  cookie: string,
+  userAgent: string,
+  baseUrl: string,
+  platform: Platform,
+  signal?: AbortSignal,
+): Promise<string> {
+  const first = await fetchChatGptWebAccessToken(cookie, userAgent, baseUrl, platform, signal);
+  if (!isChatGptWebAccessTokenExpiringSoon(first)) return first;
+  const second = await fetchChatGptWebAccessToken(cookie, userAgent, baseUrl, platform, signal);
+  if (!isChatGptWebAccessTokenExpiringSoon(second)) return second;
+  throw new ChatGptWebImageError(SESSION_EXPIRED_MESSAGE, 401);
+}
+
+/** True when an error is a Sentinel 401 caused by an expired access token (as opposed to any other 401). */
+function isTokenExpiredError(error: unknown): boolean {
+  const err = error as { status?: unknown; message?: unknown } | null;
+  return err?.status === 401 && typeof err.message === 'string' && TOKEN_EXPIRED_RE.test(err.message);
+}
+
 /** Sentinel's 32-bit hash: FNV-1a with three avalanche rounds, 8 hex chars. */
 export function sentinelHash(input: string): string {
   let h = 0x811c9dc5;
@@ -290,7 +353,106 @@ function sentinelRequest(
   );
 }
 
-/** Run Sentinel prepare -> requirements and return the headers /backend-api needs. */
+/** Read a Sentinel JSON response, translating blocks and failures into typed errors. */
+async function readSentinelJson(res: Response, path: string): Promise<Record<string, any>> {
+  const text = await res.text().catch(() => '');
+  if (res.status === 403 || /<!doctype|<html/i.test(text.trimStart())) {
+    throw new ChatGptWebImageError(
+      `ChatGPT ${path} was blocked by Cloudflare/Sentinel (HTTP ${res.status || 403}); configure a residential/SOCKS5 proxy on this account or refresh your cf_clearance/session cookies`,
+      403,
+    );
+  }
+  if (!res.ok) {
+    throw new ChatGptWebImageError(`ChatGPT ${path} failed (HTTP ${res.status}) ${text.slice(0, 200)}`, res.status || 502);
+  }
+  try {
+    return JSON.parse(text) as Record<string, any>;
+  } catch {
+    throw new ChatGptWebImageError(`ChatGPT ${path} returned invalid JSON`, 502);
+  }
+}
+
+/** Run the Sentinel prepare step once and return its prepare_token. */
+async function runSentinelPrepare({
+  baseUrl,
+  accessToken,
+  cookie,
+  userAgent,
+  platform,
+  signal,
+}: {
+  baseUrl: string;
+  accessToken: string;
+  cookie?: string;
+  userAgent: string;
+  platform: Platform;
+  signal?: AbortSignal;
+}): Promise<string> {
+  const prepared = await readSentinelJson(
+    await sentinelRequest(
+      `${baseUrl}/backend-api/sentinel/chat-requirements/prepare`,
+      {
+        Authorization: `Bearer ${accessToken}`,
+        'User-Agent': userAgent,
+        Origin: baseUrl,
+        Referer: `${baseUrl}/`,
+        ...(cookie ? { Cookie: cookie } : {}),
+        [SENTINEL_HEADERS.prepare]: buildPrepareToken(userAgent),
+      },
+      platform,
+      signal,
+    ),
+    '/backend-api/sentinel/chat-requirements/prepare',
+  );
+  if (typeof prepared.prepare_token !== 'string' || !prepared.prepare_token) {
+    throw new ChatGptWebImageError('ChatGPT sentinel prepare returned no prepare_token', 502);
+  }
+  return prepared.prepare_token;
+}
+
+/**
+ * Lightweight Sentinel probe for health checks: only the prepare step, no
+ * conversation and no proof-of-work. Throws a 401 when the token is expired
+ * (mapped to the actionable session message) so `validateKey` can mark the
+ * account unhealthy instead of reporting it healthy while every chat fails.
+ */
+export async function probeChatGptWebSentinelPrepare({
+  baseUrl,
+  accessToken,
+  cookie,
+  userAgent,
+  platform,
+  signal,
+}: {
+  baseUrl: string;
+  accessToken: string;
+  cookie?: string;
+  userAgent: string;
+  platform: Platform;
+  signal?: AbortSignal;
+}): Promise<void> {
+  try {
+    await runSentinelPrepare({ baseUrl, accessToken, cookie, userAgent, platform, signal });
+  } catch (err) {
+    if (isTokenExpiredError(err)) {
+      throw new ChatGptWebImageError(SESSION_EXPIRED_MESSAGE, 401);
+    }
+    throw err;
+  }
+}
+
+/**
+ * Run Sentinel prepare -> requirements and return the headers /backend-api needs.
+ *
+ * A 401 `token_expired` from either step means the access token the session
+ * just minted was already dead (or died between the exchange and prepare).
+ * In that case the token is re-exchanged once from the same cookie and the
+ * whole prepare -> requirements sequence runs once more — never more, and
+ * never for other 401s, 403 Cloudflare blocks, or 429s. If the retry also
+ * fails with an expired token, the caller gets an actionable session-expired
+ * error (still status 401, so the failover/cooldown layers keep recognising
+ * it as an auth failure) instead of the raw upstream body.
+ */
 export async function fetchSentinelHeaders({
   baseUrl,
   accessToken,
@@ -306,64 +468,53 @@ export async function fetchSentinelHeaders({
   platform: Platform;
   signal?: AbortSignal;
 }): Promise<Record<string, string>> {
-  const base: Record<string, string> = {
-    Authorization: `Bearer ${accessToken}`,
-    'User-Agent': userAgent,
-    Origin: baseUrl,
-    Referer: `${baseUrl}/`,
-    ...(cookie ? { Cookie: cookie } : {}),
+  const attempt = async (token: string): Promise<Record<string, string>> => {
+    const base: Record<string, string> = {
+      Authorization: `Bearer ${token}`,
+      'User-Agent': userAgent,
+      Origin: baseUrl,
+      Referer: `${baseUrl}/`,
+      ...(cookie ? { Cookie: cookie } : {}),
+    };
+    const prepareToken = await runSentinelPrepare({ baseUrl, accessToken: token, cookie, userAgent, platform, signal });
+
+    const requirements = await readSentinelJson(
+      await sentinelRequest(
+        `${baseUrl}/backend-api/sentinel/chat-requirements`,
+        { ...base, [SENTINEL_HEADERS.prepare]: prepareToken },
+        platform,
+        signal,
+      ),
+      '/backend-api/sentinel/chat-requirements',
+    );
+
+    const tokens: Record<string, string> = {};
+    if (typeof requirements.token === 'string') tokens[SENTINEL_HEADERS.requirements] = requirements.token;
+    if (requirements.proofofwork?.required) {
+      tokens[SENTINEL_HEADERS.proof] = solveProofOfWork({
+        seed: String(requirements.proofofwork.seed ?? ''),
+        difficulty: String(requirements.proofofwork.difficulty ?? ''),
+        userAgent,
+      });
+    }
+    return tokens;
   };
-  const readJson = async (res: Response, path: string): Promise<Record<string, any>> => {
-    const text = await res.text().catch(() => '');
-    if (res.status === 403 || /<!doctype|<html/i.test(text.trimStart())) {
-      throw new ChatGptWebImageError(
-        `ChatGPT ${path} was blocked by Cloudflare/Sentinel (HTTP ${res.status || 403}); configure a residential/SOCKS5 proxy on this account or refresh your cf_clearance/session cookies`,
-        403,
-      );
-    }
-    if (!res.ok) {
-      throw new ChatGptWebImageError(`ChatGPT ${path} failed (HTTP ${res.status}) ${text.slice(0, 200)}`, res.status || 502);
-    }
+
+  try {
+    return await attempt(accessToken);
+  } catch (err) {
+    if (!isTokenExpiredError(err)) throw err;
+    if (!cookie) throw new ChatGptWebImageError(SESSION_EXPIRED_MESSAGE, 401);
+    const freshAccessToken = await fetchUsableChatGptWebAccessToken(cookie, userAgent, baseUrl, platform, signal);
     try {
-      return JSON.parse(text) as Record<string, any>;
-    } catch {
-      throw new ChatGptWebImageError(`ChatGPT ${path} returned invalid JSON`, 502);
+      return await attempt(freshAccessToken);
+    } catch (retryErr) {
+      if (isTokenExpiredError(retryErr)) {
+        throw new ChatGptWebImageError(SESSION_EXPIRED_MESSAGE, 401);
+      }
+      throw retryErr;
     }
-  };
-
-  const prepared = await readJson(
-    await sentinelRequest(
-      `${baseUrl}/backend-api/sentinel/chat-requirements/prepare`,
-      { ...base, [SENTINEL_HEADERS.prepare]: buildPrepareToken(userAgent) },
-      platform,
-      signal,
-    ),
-    '/backend-api/sentinel/chat-requirements/prepare',
-  );
-  if (typeof prepared.prepare_token !== 'string' || !prepared.prepare_token) {
-    throw new ChatGptWebImageError('ChatGPT sentinel prepare returned no prepare_token', 502);
   }
-
-  const requirements = await readJson(
-    await sentinelRequest(
-      `${baseUrl}/backend-api/sentinel/chat-requirements`,
-      { ...base, [SENTINEL_HEADERS.prepare]: prepared.prepare_token },
-      platform,
-      signal,
-    ),
-    '/backend-api/sentinel/chat-requirements',
-  );
-
-  const tokens: Record<string, string> = {};
-  if (typeof requirements.token === 'string') tokens[SENTINEL_HEADERS.requirements] = requirements.token;
-  if (requirements.proofofwork?.required) {
-    tokens[SENTINEL_HEADERS.proof] = solveProofOfWork({
-      seed: String(requirements.proofofwork.seed ?? ''),
-      difficulty: String(requirements.proofofwork.difficulty ?? ''),
-      userAgent,
-    });
-  }
-  return tokens;
 }
 
 function authHeaders(ctx: ImageContext): Record<string, string> {
@@ -768,7 +919,7 @@ export async function generateChatGptWebImage(opts: ChatGptWebImageOptions): Pro
   const platform: Platform = (opts.platform && opts.platform !== 'custom') ? opts.platform : ('chatgpt-web' as Platform);
   const cookie = normalizeChatGptWebCookie(opts.credential);
 
-  const accessToken = await fetchChatGptWebAccessToken(cookie, userAgent, baseUrl, platform, opts.signal);
+  const accessToken = await fetchUsableChatGptWebAccessToken(cookie, userAgent, baseUrl, platform, opts.signal);
   if (opts.signal?.aborted) throw new Error('Request aborted');
 
   const sentinel = await fetchSentinelHeaders({ baseUrl, accessToken, cookie, userAgent, platform, signal: opts.signal });
