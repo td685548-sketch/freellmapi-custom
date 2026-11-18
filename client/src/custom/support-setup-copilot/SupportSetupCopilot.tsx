@@ -14,6 +14,7 @@ import {
   Circle,
   ClipboardList,
   Copy,
+  Lock,
   Maximize2,
   Minimize2,
   RotateCcw,
@@ -127,6 +128,8 @@ export function SupportSetupCopilot() {
   const tenants = statusData?.tenants ?? [];
   const activeTenantDiag = statusData?.activeTenant ?? null;
   const canCreateTenant = Boolean(statusData?.canCreateTenant);
+  const canEditAnyStep =
+    canCreateTenant || Boolean(activeTenantDiag?.steps.some((st) => st.canEdit));
 
   const resolvedTargetMode: 'create_tenant' | 'update_tenant' =
     targetSelection === 'new' || !activeTenantDiag ? 'create_tenant' : 'update_tenant';
@@ -515,14 +518,23 @@ export function SupportSetupCopilot() {
                 </select>
               </div>
 
-              <button
-                type="button"
-                className="ssc-link-btn"
-                onClick={() => setBriefOpen((v) => !v)}
-              >
-                <ClipboardList size={13} />
-                <span>{s.briefToggle}</span>
-              </button>
+              {canEditAnyStep ? (
+                <button
+                  type="button"
+                  className="ssc-link-btn"
+                  onClick={() => setBriefOpen((v) => !v)}
+                >
+                  <ClipboardList size={13} />
+                  <span>{s.briefToggle}</span>
+                </button>
+              ) : (
+                <span
+                  className="ssc-status-pill ssc-status-pill--restricted"
+                  data-testid="support-setup-readonly-badge"
+                >
+                  {s.readOnlyBadge}
+                </span>
+              )}
             </div>
 
             {activeTenantDiag && (
@@ -562,13 +574,17 @@ export function SupportSetupCopilot() {
                     ? s.stepComplete
                     : step.status === 'partial'
                       ? s.stepPartial
-                      : s.stepMissing;
+                      : step.status === 'restricted'
+                        ? s.stepRestricted
+                        : s.stepMissing;
                 const Icon =
                   step.status === 'complete'
                     ? CheckCircle2
                     : step.status === 'partial'
                       ? AlertCircle
-                      : Circle;
+                      : step.status === 'restricted'
+                        ? Lock
+                        : Circle;
                 return (
                   <div className="ssc-roadmap-item" key={step.stepId}>
                     <div className="ssc-roadmap-main">
@@ -583,21 +599,23 @@ export function SupportSetupCopilot() {
                         {uiLocale === 'vi' ? step.summaryVi : step.summaryEn}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      className="ssc-link-btn"
-                      onClick={() => openStepRoute(step)}
-                    >
-                      <span>{s.stepOpen}</span>
-                      <ArrowUpRight size={12} />
-                    </button>
+                    {step.canView !== false && step.status !== 'restricted' && (
+                      <button
+                        type="button"
+                        className="ssc-link-btn"
+                        onClick={() => openStepRoute(step)}
+                      >
+                        <span>{s.stepOpen}</span>
+                        <ArrowUpRight size={12} />
+                      </button>
+                    )}
                   </div>
                 );
               })}
             </div>
           )}
 
-          {briefOpen && (
+          {briefOpen && canEditAnyStep && (
             <div className="ssc-brief" data-testid="support-setup-brief">
               <div style={{ fontSize: 11.5, fontWeight: 600 }}>{s.briefHeading}</div>
               <div className="ssc-brief-grid">
@@ -726,15 +744,17 @@ export function SupportSetupCopilot() {
                 <h3>{s.welcomeTitle}</h3>
                 <p>{s.welcomeDescription}</p>
                 <div className="ssc-starters">
-                  <button
-                    type="button"
-                    className="ssc-starter-btn"
-                    onClick={() => sendMessage(s.starterAutoSetupPrompt)}
-                  >
-                    <Wand2 size={14} />
-                    <span>{s.starterAutoSetup}</span>
-                  </button>
-                  {activeTenantDiag && (
+                  {canEditAnyStep && (
+                    <button
+                      type="button"
+                      className="ssc-starter-btn"
+                      onClick={() => sendMessage(s.starterAutoSetupPrompt)}
+                    >
+                      <Wand2 size={14} />
+                      <span>{s.starterAutoSetup}</span>
+                    </button>
+                  )}
+                  {activeTenantDiag && canEditAnyStep && (
                     <button
                       type="button"
                       className="ssc-starter-btn"
@@ -792,30 +812,36 @@ export function SupportSetupCopilot() {
                       <CheckCircle2 size={15} />
                       <span>{s.deploySuccessTitle}</span>
                     </div>
-                    <div>
-                      <strong>{s.embedLabel}:</strong>
-                    </div>
-                    <pre className="ssc-snippet">{turn.applyResult.diagnostic.embedSnippet}</pre>
+                    {turn.applyResult.diagnostic.embedSnippet && (
+                      <>
+                        <div>
+                          <strong>{s.embedLabel}:</strong>
+                        </div>
+                        <pre className="ssc-snippet">{turn.applyResult.diagnostic.embedSnippet}</pre>
+                      </>
+                    )}
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                      <button
-                        type="button"
-                        className="ssc-btn"
-                        onClick={() => {
-                          void copyText(turn.applyResult!.diagnostic.embedSnippet).then((ok) => {
-                            if (ok) {
-                              setCopiedId(turn.applyResult!.proposalId);
-                              setTimeout(() => setCopiedId(null), 1800);
-                            }
-                          });
-                        }}
-                      >
-                        <Copy size={12} />
-                        <span>
-                          {copiedId === turn.applyResult.proposalId
-                            ? s.copiedSnippet
-                            : s.copySnippet}
-                        </span>
-                      </button>
+                      {turn.applyResult.diagnostic.embedSnippet && (
+                        <button
+                          type="button"
+                          className="ssc-btn"
+                          onClick={() => {
+                            void copyText(turn.applyResult!.diagnostic.embedSnippet).then((ok) => {
+                              if (ok) {
+                                setCopiedId(turn.applyResult!.proposalId);
+                                setTimeout(() => setCopiedId(null), 1800);
+                              }
+                            });
+                          }}
+                        >
+                          <Copy size={12} />
+                          <span>
+                            {copiedId === turn.applyResult.proposalId
+                              ? s.copiedSnippet
+                              : s.copySnippet}
+                          </span>
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="ssc-btn ssc-btn--primary"

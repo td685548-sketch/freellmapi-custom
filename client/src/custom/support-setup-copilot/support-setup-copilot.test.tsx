@@ -411,4 +411,80 @@ describe('SupportSetupCopilot widget', () => {
     expect(appliedCard).not.toBeNull();
     expect(appliedCard?.textContent).toContain('/thruline/v1/support/widget.js');
   });
+
+  it('enforces read-only and restricted-step UI boundaries for limited-permission accounts', async () => {
+    const base = sampleStatus(true);
+    const readOnlyStatus: SupportSetupStatusResponse = {
+      ...base,
+      canCreateTenant: false,
+      tenants: [
+        {
+          ...base.tenants[0]!,
+          canViewSteps: ['tenant_ai'],
+          canEditSteps: [],
+        },
+      ],
+      activeTenant: {
+        ...base.activeTenant!,
+        completedSteps: 1,
+        embedSnippet: '',
+        steps: base.activeTenant!.steps.map((st) =>
+          st.stepId === 'tenant_ai'
+            ? { ...st, canView: true, canEdit: false }
+            : {
+                ...st,
+                status: 'restricted',
+                canView: false,
+                canEdit: false,
+                summaryEn: 'Restricted',
+                summaryVi: 'Giới hạn quyền — tài khoản của bạn chưa có quyền xem mục này.',
+              },
+        ),
+      },
+    };
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.endsWith('/api/user/session')) {
+          return json({
+            userId: 9,
+            email: 'viewer@example.com',
+            role: 'member',
+            isPrimary: false,
+            permissions: [],
+          });
+        }
+        if (url.includes('/api/support-setup-copilot/status')) {
+          return json(readOnlyStatus);
+        }
+        return json({});
+      }),
+    );
+
+    mount('/tenant-portal', 'vi');
+    await flush();
+
+    const launcher = container.querySelector('[data-testid="support-setup-copilot-launcher"]') as HTMLButtonElement;
+    expect(launcher).not.toBeNull();
+    act(() => launcher.click());
+    await flush();
+
+    // Read-only badge shown instead of Quick Business Brief toggle
+    expect(container.querySelector('[data-testid="support-setup-readonly-badge"]')).not.toBeNull();
+
+    // Only the Guide starter button is rendered (auto-setup starters hidden)
+    const starters = container.querySelectorAll('.ssc-starter-btn');
+    expect(starters).toHaveLength(1);
+    expect(starters[0]?.textContent).toContain('Hướng dẫn');
+
+    // Open roadmap: restricted steps show 'Giới hạn quyền' and omit the 'Mở trang' button
+    const roadmapToggle = container.querySelector('[data-testid="support-setup-roadmap-toggle"]') as HTMLButtonElement;
+    act(() => roadmapToggle.click());
+    await flush();
+
+    const roadmap = container.querySelector('[data-testid="support-setup-roadmap"]');
+    expect(roadmap?.textContent).toContain('Giới hạn quyền');
+    expect(roadmap?.querySelectorAll('.ssc-link-btn')).toHaveLength(1);
+  });
 });

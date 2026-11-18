@@ -342,6 +342,12 @@
   color: var(--ssc-red);
 }
 
+.ssc-status-pill--restricted {
+  background: var(--ssc-bg-alt);
+  color: var(--ssc-muted);
+  border: 1px solid var(--ssc-border);
+}
+
 .ssc-brief {
   padding: 10px 14px;
   border-bottom: 1px solid var(--ssc-border);

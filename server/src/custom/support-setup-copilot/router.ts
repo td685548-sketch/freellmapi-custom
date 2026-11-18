@@ -1,5 +1,6 @@
 import {
   SUPPORT_SETUP_STEP_IDS,
+  type SupportSetupProposal,
   type SupportSetupStatusResponse,
   type SupportSetupStepId,
 } from '@freellmapi/shared/support-setup-copilot.js';
@@ -18,6 +19,7 @@ import {
   listCopilotModelOptions,
   resolveCopilotUserScope,
   resolvePublicServerOrigin,
+  type CopilotUserScope,
 } from './diagnostics.js';
 import { applySupportSetupProposal } from './executor.js';
 import { runSupportSetupCopilotTurn } from './playbook.js';
@@ -92,6 +94,44 @@ const applyBodySchema = z
   })
   .strict();
 
+function reprojectPendingProposalsForScope(
+  proposals: SupportSetupProposal[],
+  scope: CopilotUserScope,
+): SupportSetupProposal[] {
+  const projected: SupportSetupProposal[] = [];
+  for (const proposal of proposals) {
+    let liveCanEdit: Set<SupportSetupStepId>;
+    if (proposal.targetMode === 'create_tenant') {
+      if (!scope.canCreateTenant) continue;
+      liveCanEdit = new Set<SupportSetupStepId>(SUPPORT_SETUP_STEP_IDS);
+    } else {
+      if (!proposal.tenantId) continue;
+      const entry = scope.tenants.find((t) => t.tenant.id === proposal.tenantId);
+      if (!entry || entry.canEditSteps.size === 0) continue;
+      liveCanEdit = entry.canEditSteps;
+    }
+
+    const nextSteps = proposal.steps.map((step) => {
+      const canApply = liveCanEdit.has(step.stepId);
+      return canApply
+        ? { ...step, canApply: true }
+        : {
+            ...step,
+            canApply: false,
+            enabledByDefault: false,
+            highlightsEn: [],
+            highlightsVi: [],
+            payload: {},
+          };
+    });
+
+    if (nextSteps.some((s) => s.canApply)) {
+      projected.push({ ...proposal, steps: nextSteps });
+    }
+  }
+  return projected;
+}
+
 // GET /api/support-setup-copilot/status
 supportSetupCopilotRouter.get('/status', (req: Request, res: Response) => {
   const user = (req as Request & { user?: SessionUser }).user!;
@@ -122,28 +162,38 @@ supportSetupCopilotRouter.get('/status', (req: Request, res: Response) => {
 
   const serverOrigin = resolvePublicServerOrigin(req);
   const activeTenant = activeEntry
-    ? buildTenantSetupDiagnostic(activeEntry.tenant, activeEntry.canEditSteps, serverOrigin)
+    ? buildTenantSetupDiagnostic(activeEntry.tenant, activeEntry.canEditSteps, serverOrigin, {
+        canViewSteps: activeEntry.canViewSteps,
+        isPlatformOperator: scope.isPlatformOperator,
+      })
     : null;
+
+  const rawPending = listPendingProposalsForUser(
+    user.userId,
+    activeTenant ? activeTenant.tenant.id : null,
+  );
 
   const payload: SupportSetupStatusResponse = {
     ok: true,
     visible: true,
     canCreateTenant: scope.canCreateTenant,
     availableModels: listCopilotModelOptions(),
-    tenants: scope.tenants.map((entry) => ({
-      id: entry.tenant.id,
-      name: entry.tenant.name,
-      slug: entry.tenant.slug,
-      publicKey: entry.tenant.publicKey,
-      enabled: entry.tenant.enabled,
-      defaultModel: entry.tenant.defaultModel,
-      canEditSteps: [...entry.canEditSteps] as SupportSetupStepId[],
-    })),
+    tenants: scope.tenants.map((entry) => {
+      const canSeeKey =
+        entry.canViewSteps.has('runtime_policy') || entry.canViewSteps.has('tenant_ai');
+      return {
+        id: entry.tenant.id,
+        name: entry.tenant.name,
+        slug: entry.tenant.slug,
+        publicKey: canSeeKey ? entry.tenant.publicKey : '',
+        enabled: entry.tenant.enabled,
+        defaultModel: entry.canViewSteps.has('tenant_ai') ? entry.tenant.defaultModel : '',
+        canViewSteps: [...entry.canViewSteps] as SupportSetupStepId[],
+        canEditSteps: [...entry.canEditSteps] as SupportSetupStepId[],
+      };
+    }),
     activeTenant,
-    pendingProposals: listPendingProposalsForUser(
-      user.userId,
-      activeTenant ? activeTenant.tenant.id : null,
-    ),
+    pendingProposals: reprojectPendingProposalsForScope(rawPending, scope),
   };
 
   res.json(payload);
@@ -201,7 +251,10 @@ supportSetupCopilotRouter.post('/chat', async (req: Request, res: Response, next
 
     const serverOrigin = resolvePublicServerOrigin(req);
     const diagnostic = scopedEntry
-      ? buildTenantSetupDiagnostic(scopedEntry.tenant, scopedEntry.canEditSteps, serverOrigin)
+      ? buildTenantSetupDiagnostic(scopedEntry.tenant, scopedEntry.canEditSteps, serverOrigin, {
+          canViewSteps: scopedEntry.canViewSteps,
+          isPlatformOperator: scope.isPlatformOperator,
+        })
       : null;
 
     const response = await runSupportSetupCopilotTurn({
