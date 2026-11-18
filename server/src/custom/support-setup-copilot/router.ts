@@ -102,6 +102,7 @@ const chatBodySchema = z
     tenantId: z.number().int().positive().nullable().optional(),
     targetMode: z.enum(['create_tenant', 'update_tenant']).optional(),
     locale: z.enum(['vi', 'en']).optional(),
+    currentPath: z.string().trim().max(240).optional(),
     messages: z.array(chatMessageSchema).min(1).max(30),
     requirementsHint: requirementsHintSchema.optional(),
     baseProposalId: z.string().trim().min(1).max(128).optional(),
@@ -253,8 +254,15 @@ supportSetupCopilotRouter.post('/chat', async (req: Request, res: Response, next
       );
     }
 
-    const { tenantId, targetMode, locale = 'vi', messages, requirementsHint, baseProposalId } =
-      parsed.data;
+    const {
+      tenantId,
+      targetMode,
+      locale = 'vi',
+      currentPath,
+      messages,
+      requirementsHint,
+      baseProposalId,
+    } = parsed.data;
 
     let scopedEntry = null;
     if (tenantId !== undefined && tenantId !== null) {
@@ -285,6 +293,7 @@ supportSetupCopilotRouter.post('/chat', async (req: Request, res: Response, next
       tenantId: scopedEntry?.tenant.id ?? null,
       targetMode,
       locale,
+      currentPath,
       requirementsHint,
       baseProposalId,
       diagnostic,

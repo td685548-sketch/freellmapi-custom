@@ -488,8 +488,8 @@ describe('SupportSetupCopilot widget', () => {
     expect(roadmap?.querySelectorAll('.ssc-link-btn')).toHaveLength(1);
   });
 
-  it('auto-switches Copilot UI to Vietnamese when user types Vietnamese under an English dashboard locale', async () => {
-    const chatPayloads: Array<{ locale?: string }> = [];
+  it('auto-switches Copilot UI to Vietnamese when user types Vietnamese under an English dashboard locale and forwards currentPath', async () => {
+    const chatPayloads: Array<{ locale?: string; currentPath?: string }> = [];
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string, init?: RequestInit) => {
@@ -500,14 +500,16 @@ describe('SupportSetupCopilot widget', () => {
           return json(sampleStatus(true));
         }
         if (url.endsWith('/api/support-setup-copilot/chat')) {
-          chatPayloads.push(JSON.parse(String(init?.body ?? '{}')) as { locale?: string });
+          chatPayloads.push(
+            JSON.parse(String(init?.body ?? '{}')) as { locale?: string; currentPath?: string },
+          );
           const resp: SupportSetupChatResponse = {
             ok: true,
             replyLocale: 'vi',
             reply: 'Dạ hoàn toàn được ạ — mình giao tiếp bằng tiếng Việt 100% nhé!',
             intent: 'guide',
             missingQuestions: [],
-            suggestedQuickReplies: ['Hoàn thiện cấu hình tiêu chuẩn cho tenant hiện tại'],
+            suggestedQuickReplies: ['Trang này dùng để làm gì?'],
             proposal: null,
             modelUsed: null,
             usedFallback: true,
@@ -533,7 +535,7 @@ describe('SupportSetupCopilot widget', () => {
     const textarea = container.querySelector('.ssc-composer textarea') as HTMLTextAreaElement;
     const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
     act(() => {
-      setter?.call(textarea, 'bạn có thể nói tiếng việt không');
+      setter?.call(textarea, 'web nay dung de lam gi');
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
       textarea.dispatchEvent(new Event('change', { bubbles: true }));
     });
@@ -544,6 +546,7 @@ describe('SupportSetupCopilot widget', () => {
     await flush();
 
     expect(chatPayloads[0]?.locale).toBe('vi');
+    expect(chatPayloads[0]?.currentPath).toBe('/thruline/providers');
     expect(container.querySelector('h2')?.textContent).toBe('Trợ lý Setup AI Support');
     expect(container.querySelector('[data-testid="support-setup-lang-toggle"]')?.textContent).toBe('VI');
     expect(container.textContent).toContain('giao tiếp bằng tiếng Việt 100%');

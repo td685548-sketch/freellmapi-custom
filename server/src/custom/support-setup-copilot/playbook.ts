@@ -45,6 +45,7 @@ import {
   type GatewayLoopbackContext,
   type LlmCoachOutput,
 } from './llm-coach.js';
+import { matchPlatformKnowledgeQuestion } from './platform-guide.js';
 import { createSetupProposal, getSetupProposalForUser } from './store.js';
 
 export { parseLlmCoachResponse, type GatewayLoopbackContext, type LlmCoachOutput };
@@ -273,6 +274,9 @@ export function extractRequirementsFromMessages(
     if (!text || !text.trim()) continue;
     const trimmed = text.trim();
     const act = classifyHumanConversationalAct(trimmed);
+    if (act === 'platform_guide') {
+      continue;
+    }
 
     // Brand extraction (allow explicit brand in a later turn to update earlier brand)
     const explicitBrandMarker =
@@ -482,7 +486,7 @@ const VI_DIACRITIC_RE =
   /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i;
 
 const VI_UNACCENTED_PHRASE_RE =
-  /\b(?:xin\s+chao|chao\s+ban|toi\s+(?:dang|muon|can|co|chua|khong)|minh\s+(?:dang|muon|can|co|chua|khong|moi)|ben\s+(?:minh|toi|em)|va\s+muon|(?:muon|can)\s+(?:setup|thiet\s+lap|cai\s+dat|tu\s+van|lam)|ban\s+co\s+the|ban\s+lam\s+duoc|lam\s+gi\s+ma|co\s+the\s+(?:lam|noi|giup)|tieng\s+viet|giup\s+toi|giup\s+minh|cho\s+toi|cho\s+minh|cua\s+toi|cua\s+minh|lam\s+sao|nhu\s+the\s+nao|thiet\s+lap|cai\s+dat|huong\s+dan|buoc\s*[1-7]|duoc\s+khong|tuy\s+ban|lam\s+luon|mac\s+dinh|chua\s+co|khong\s+co|sao\s+(?:tra\s+loi|cung\s+nhac|hoi)|hoi\s+nhieu|nhu\s+may|cam\s+on|ban\s+la\s+ai|ban\s+oi|cung\s+nhac|tu\s+van|len\s+ke\s+hoach|len\s+ban\s+mau|trien\s+luon|ok\s+ban)\b/i;
+  /\b(?:xin\s+chao|chao\s+ban|toi\s+(?:dang|muon|can|co|chua|khong)|minh\s+(?:dang|muon|can|co|chua|khong|moi)|ben\s+(?:minh|toi|em)|va\s+muon|(?:muon|can)\s+(?:setup|thiet\s+lap|cai\s+dat|tu\s+van|lam)|ban\s+co\s+the|ban\s+lam\s+duoc|lam\s+gi\s+ma|la\s+(?:cai\s+)?gi|lam\s+gi|de\s+lam\s+gi|dung\s+de|dung\s+sao|dung\s+the\s+nao|day\s+la\s+(?:trang|web|website|he\s+thong|ung\s+dung|nen\s+tang|muc|man\s+hinh|cho|tab|cong\s+cu)|hoat\s+dong\s+(?:sao|ra\s+sao|kieu\s+gi|the\s+nao|nhu\s+the\s+nao)|ra\s+sao|kieu\s+gi|cho\s+nay|web\s+nay|trang\s+(?:web\s+)?nay|he\s+thong\s+nay|ung\s+dung\s+nay|nen\s+tang\s+nay|muc\s+nay|man\s+hinh\s+nay|gioi\s+thieu|lay\s+api\s*keys?|ket\s+noi|cau\s+hinh|o\s+dau|khac\s+nhau|khac\s+gi|tai\s+khoan|co\s+the\s+(?:lam|noi|giup)|tieng\s+viet|giup\s+toi|giup\s+minh|cho\s+toi|cho\s+minh|cua\s+toi|cua\s+minh|lam\s+sao|nhu\s+the\s+nao|thiet\s+lap|cai\s+dat|huong\s+dan|buoc\s*[1-7]|duoc\s+khong|tuy\s+ban|lam\s+luon|mac\s+dinh|chua\s+co|khong\s+co|sao\s+(?:tra\s+loi|cung\s+nhac|hoi)|hoi\s+nhieu|nhu\s+may|cam\s+on|ban\s+la\s+ai|ban\s+oi|cung\s+nhac|tu\s+van|len\s+ke\s+hoach|len\s+ban\s+mau|trien\s+luon|ok\s+ban)\b/i;
 
 const EXPLICIT_SPEAK_VI_RE =
   /\b(?:speak|talk\s+in|reply\s+in|use|switch\s+to)\s+vietnamese\b|(?:nói|dùng|trả\s+lời|giao\s+tiếp|chat)\s*(?:bằng\s*)?tiếng\s*việt|tieng\s+viet\s+(?:khong|duoc\s+khong|nhe|di)/i;
@@ -491,7 +495,7 @@ const EXPLICIT_SPEAK_EN_RE =
   /^(?:please\s+)?(?:can\s+you\s+)?(?:speak|talk\s+in|reply\s+in|switch\s+to)\s+english\b|(?:nói|trả\s+lời\s+bằng)\s+tiếng\s+anh\s+(?:với\s+(?:tôi|mình)|nhé|đi)/i;
 
 const EN_SENTENCE_MARKER_RE =
-  /\b(?:how\s+do|how\s+to|can\s+you|could\s+you|please|set\s+up|configure|explain|my\s+(?:shop|store|company|business|tenant)|auto-complete|standard\s+defaults|hello|hi\s+there|what\s+is|what\s+can\s+you|who\s+are\s+you|support\s+hours|onboarding|collect\s+customer)\b/i;
+  /\b(?:how\s+do|how\s+to|can\s+you|could\s+you|please|set\s+up|configure|explain|tell\s+me\s+about|difference\s+between|my\s+(?:shop|store|company|business|tenant)|auto-complete|standard\s+defaults|hello|hi\s+there|what\s+is|what\s+does|what\s+are|what\s+can\s+you|who\s+are\s+you|support\s+hours|onboarding|collect\s+customer)\b/i;
 
 /**
  * Automatically detects the user's preferred conversation language ('vi' | 'en')
@@ -1203,6 +1207,7 @@ export async function runSupportSetupCopilotTurn(params: {
   tenantId?: number | null;
   targetMode?: 'create_tenant' | 'update_tenant';
   locale?: 'vi' | 'en';
+  currentPath?: string;
   requirementsHint?: Partial<SupportSetupRequirements>;
   baseProposalId?: string;
   diagnostic: SupportSetupTenantDiagnostic | null;
@@ -1214,6 +1219,7 @@ export async function runSupportSetupCopilotTurn(params: {
     messages,
     tenantId,
     locale: uiLocale = 'vi',
+    currentPath,
     requirementsHint,
     baseProposalId,
     diagnostic,
@@ -1255,10 +1261,14 @@ export async function runSupportSetupCopilotTurn(params: {
     /tạo\s*(?:mới|thêm)\s*(?:1\s*|một\s*)?(?:tenant|con\s*ai|ai\s*support)|create\s+(?:a\s+)?(?:brand-?new|new)\s+(?:tenant|ai\s+support)/i.test(
       latestUserMessage,
     );
+  const latestPlatformMatch = matchPlatformKnowledgeQuestion(latestUserMessage, currentPath);
 
   // Strict RBAC boundary: if a non-operator explicitly asks to create a brand-new tenant,
   // refuse cleanly without creating a tenant OR silently mutating another tenant.
-  if (!scope.canCreateTenant && (params.targetMode === 'create_tenant' || latestCreatePhrase)) {
+  if (
+    !scope.canCreateTenant &&
+    (latestCreatePhrase || (params.targetMode === 'create_tenant' && !latestPlatformMatch))
+  ) {
     const assignedHintVi =
       scope.tenants.length > 0 && scope.tenants.some((t) => t.canEditSteps.size > 0)
         ? ` Bạn có thể chọn tenant được phân quyền (**${scope.tenants[0]!.tenant.name}**) để cập nhật các bước trong phạm vi quyền của mình.`
@@ -1322,6 +1332,7 @@ export async function runSupportSetupCopilotTurn(params: {
     const readOnlyDialogue = buildHumanDialogueTurn({
       messages,
       locale,
+      currentPath,
       diagnostic,
       activeTenantName: effectiveTenant?.name ?? diagnostic?.tenant.name ?? null,
       targetMode,
@@ -1329,16 +1340,38 @@ export async function runSupportSetupCopilotTurn(params: {
       canEditAny: false,
       hasBaseProposal: false,
     });
+    const readOnlyLlm =
+      readOnlyDialogue.act === 'platform_guide'
+        ? await runHumanLikeLlmCoach({
+            messages,
+            locale,
+            targetMode,
+            currentPath,
+            diagnostic,
+            extracted: {},
+            canCreateTenant: false,
+            canEditSteps: canEditSet,
+            gatewayLoopback,
+          })
+        : null;
+    const useReadOnlyLlm = Boolean(
+      readOnlyLlm?.output.reply &&
+        (readOnlyLlm.output.intent === 'guide' || !readOnlyLlm.output.intent) &&
+        !STIFF_NUMBERED_FORM_RE.test(readOnlyLlm.output.reply),
+    );
     return {
       ok: true,
       replyLocale: locale,
-      reply: readOnlyDialogue.reply,
+      reply: useReadOnlyLlm ? readOnlyLlm!.output.reply : readOnlyDialogue.reply,
       intent: 'guide',
       missingQuestions: [],
-      suggestedQuickReplies: readOnlyDialogue.suggestedQuickReplies,
+      suggestedQuickReplies:
+        useReadOnlyLlm && readOnlyLlm?.output.suggestedQuickReplies?.length
+          ? readOnlyLlm.output.suggestedQuickReplies.slice(0, 4)
+          : readOnlyDialogue.suggestedQuickReplies,
       proposal: null,
-      modelUsed: null,
-      usedFallback: true,
+      modelUsed: useReadOnlyLlm ? (readOnlyLlm?.modelUsed ?? null) : null,
+      usedFallback: !useReadOnlyLlm,
     };
   }
 
@@ -1354,6 +1387,7 @@ export async function runSupportSetupCopilotTurn(params: {
     messages,
     locale,
     targetMode,
+    currentPath,
     diagnostic,
     extracted,
     canCreateTenant: scope.canCreateTenant,
@@ -1361,9 +1395,10 @@ export async function runSupportSetupCopilotTurn(params: {
     gatewayLoopback,
   });
 
-  const mergedRequirements = llm?.output.extractedRequirements
-    ? extractRequirementsFromMessages([], extracted, llm.output.extractedRequirements, locale)
-    : extracted;
+  const mergedRequirements =
+    !latestPlatformMatch && llm?.output.extractedRequirements
+      ? extractRequirementsFromMessages([], extracted, llm.output.extractedRequirements, locale)
+      : extracted;
 
   const explicitBriefSubmitted = Boolean(
     requirementsHint &&
@@ -1375,13 +1410,14 @@ export async function runSupportSetupCopilotTurn(params: {
   const isProposalRefinementTurn = Boolean(
     baseProposalId &&
       ['business_context', 'affirmation_proceed', 'no_website_reassurance'].includes(
-        classifyHumanConversationalAct(latestUserMessage),
+        classifyHumanConversationalAct(latestUserMessage, currentPath),
       ),
   );
 
   const humanTurn = buildHumanDialogueTurn({
     messages,
     locale,
+    currentPath,
     requirements: mergedRequirements,
     diagnostic,
     activeTenantName: effectiveTenant?.name ?? diagnostic?.tenant.name ?? null,
@@ -1430,10 +1466,12 @@ export async function runSupportSetupCopilotTurn(params: {
     humanTurn.act !== 'roadmap_guide';
 
   if (intent === 'guide') {
+    const llmMatchesGuideIntent =
+      humanTurn.act === 'platform_guide'
+        ? llm?.output.intent === 'guide' || !llm?.output.intent
+        : llm?.output.intent !== 'propose_setup';
     const useLlmGuideReply = Boolean(
-      llm?.output.reply &&
-        llm.output.intent !== 'propose_setup' &&
-        !llmReplyHasStiffNumberedForm,
+      llm?.output.reply && llmMatchesGuideIntent && !llmReplyHasStiffNumberedForm,
     );
     return {
       ok: true,
@@ -1446,8 +1484,8 @@ export async function runSupportSetupCopilotTurn(params: {
           ? llm.output.suggestedQuickReplies.slice(0, 4)
           : humanTurn.suggestedQuickReplies,
       proposal: null,
-      modelUsed: llm?.modelUsed ?? null,
-      usedFallback: !llm,
+      modelUsed: useLlmGuideReply ? (llm?.modelUsed ?? null) : null,
+      usedFallback: !useLlmGuideReply,
     };
   }
 
@@ -1471,8 +1509,8 @@ export async function runSupportSetupCopilotTurn(params: {
           ? llm.output.suggestedQuickReplies.slice(0, 4)
           : humanTurn.suggestedQuickReplies,
       proposal: null,
-      modelUsed: llm?.modelUsed ?? null,
-      usedFallback: !llm,
+      modelUsed: useLlmGatherReply ? (llm?.modelUsed ?? null) : null,
+      usedFallback: !useLlmGatherReply,
     };
   }
 

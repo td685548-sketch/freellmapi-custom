@@ -6,6 +6,10 @@ import type {
   SupportSetupStepId,
   SupportSetupTenantDiagnostic,
 } from '@freellmapi/shared/support-setup-copilot.js';
+import {
+  buildPlatformExpertReply,
+  matchPlatformKnowledgeQuestion,
+} from './platform-guide.js';
 
 export type HumanConversationalAct =
   | 'frustration_pushback'
@@ -15,6 +19,7 @@ export type HumanConversationalAct =
   | 'affirmation_proceed'
   | 'greeting'
   | 'thanks'
+  | 'platform_guide'
   | 'step_question'
   | 'roadmap_guide'
   | 'business_context';
@@ -57,6 +62,7 @@ export interface OpenDomainTopicInsight {
 export interface HumanDialogueTurnParams {
   messages: readonly SupportSetupChatMessage[];
   locale: 'vi' | 'en';
+  currentPath?: string | null;
   requirements?: SupportSetupRequirements;
   diagnostic?: SupportSetupTenantDiagnostic | null;
   activeTenantName?: string | null;
@@ -898,6 +904,11 @@ export function extractOpenDomainTopic(
   const trimmed = text.trim();
   if (!trimmed) return null;
 
+  // Never treat questions about this platform/website or current screen as a customer business domain
+  if (matchPlatformKnowledgeQuestion(trimmed)) {
+    return null;
+  }
+
   // 1. Check curated rich domain profiles first (covers boardgame, cafe, sneaker, yoga, studio, Chinese course, accounting, etc.)
   for (const profile of CURATED_DOMAINS) {
     if (profile.re.test(trimmed)) {
@@ -937,7 +948,13 @@ export function extractOpenDomainTopic(
       cleanedCore.length >= 2 &&
       cleanedCore.length <= 55 &&
       !GENERIC_NON_DOMAIN_PHRASE_RE.test(cleanedCore) &&
-      !/^(?:ai\s+support|support\s+ai|chatbot|con\s+ai|tenant)\b/i.test(cleanedCore)
+      !/^(?:ai\s+support|support\s+ai|chatbot|con\s+ai|tenant)\b/i.test(cleanedCore) &&
+      !/^(?:này|nay|đó|do|kia|ấy|ay|hiện\s+tại|hien\s+tai|đang\s+mở|dang\s+mo)\b/i.test(
+        cleanedCore,
+      ) &&
+      !/\b(?:làm\s+gì|lam\s+gi|là\s+gì|la\s+gi|để\s+làm\s+gì|de\s+lam\s+gi|dùng\s+sao|dung\s+sao)\b/i.test(
+        cleanedCore,
+      )
     ) {
       return buildOpenPhraseInsight(channel, cleanedCore, false);
     }
@@ -1280,12 +1297,19 @@ const AUTO_DO_IT_PHRASE_RE =
  * Classifies a human user's message into a warm conversational act so pushback, capability
  * questions, hesitation, greetings, and quick affirmations never trigger stiff intake forms.
  */
-export function classifyHumanConversationalAct(text: string): HumanConversationalAct {
+export function classifyHumanConversationalAct(
+  text: string,
+  currentPath?: string | null,
+): HumanConversationalAct {
   const trimmed = (text || '').trim();
   if (!trimmed) return 'business_context';
 
   if (THANKS_RE.test(trimmed)) return 'thanks';
   if (GREETING_RE.test(trimmed)) return 'greeting';
+
+  if (matchPlatformKnowledgeQuestion(trimmed, currentPath)) {
+    return 'platform_guide';
+  }
 
   // If the user explicitly asks to draft/proceed right now (without complaining first), honor proceed
   if (SHORT_AFFIRMATION_RE.test(trimmed) || PROCEED_OR_DRAFT_NOW_RE.test(trimmed)) {
@@ -1634,7 +1658,7 @@ export function buildHumanDialogueTurn(
     locale,
   );
 
-  const act = classifyHumanConversationalAct(latestUserMessage);
+  const act = classifyHumanConversationalAct(latestUserMessage, params.currentPath);
   const focusedStepId = act === 'step_question' ? matchSpecificStepQuestion(latestUserMessage) : null;
 
   const isReadOnly = !canEditAny && !canCreateTenant;
@@ -2031,6 +2055,33 @@ export function buildHumanDialogueTurn(
       extractedRequirements,
       topic,
     };
+  }
+
+  // 5A. Platform / website / current-page / feature expertise ("web này làm gì?", "trang này dùng để làm gì?", "what does this website do?")
+  if (act === 'platform_guide') {
+    const platformMatch = matchPlatformKnowledgeQuestion(latestUserMessage, params.currentPath);
+    if (platformMatch) {
+      const expert = buildPlatformExpertReply({
+        match: platformMatch,
+        locale,
+        currentPath: params.currentPath,
+        diagnostic,
+        canCreateTenant,
+        canEditAny,
+        priorAssistantMessages,
+      });
+      return {
+        act,
+        intent: 'guide',
+        shouldProposeNow: false,
+        focusedStepId: null,
+        reply: expert.reply,
+        missingQuestions: [],
+        suggestedQuickReplies: expert.suggestedQuickReplies,
+        extractedRequirements,
+        topic,
+      };
+    }
   }
 
   // 5. Focused single-step question
