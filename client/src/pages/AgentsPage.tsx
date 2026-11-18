@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useUserSession } from '@/custom/use-session'
 import { PersonalKeyPanel } from '@/custom/PersonalKeyPanel'
+import { IdeConfigPackagerCard } from '@/custom/scenario-routing/IdeConfigPackagerCard'
 import {
   Card,
   CardAction,
@@ -105,6 +106,8 @@ export default function AgentsPage() {
           </Button>
         ) : undefined}
       />
+
+      <IdeConfigPackagerCard />
 
       <section className="mb-6 rounded-3xl border bg-card p-5">
         <h2 className="text-sm font-medium">{t('agents.quickstartTitle')}</h2>

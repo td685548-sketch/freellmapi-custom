@@ -7,6 +7,8 @@ import { CopyButton } from '@/components/copy-button'
 import { toast } from '@/lib/toast'
 import type { UserApiKey } from '../../../shared/user-access'
 import { useCustomT } from './i18n/use-custom-t'
+import { ScenarioRouterPanel, ScenarioTokensSavedBanner } from './scenario-routing/ScenarioRouterPanel'
+import { IdeConfigPackagerCard } from './scenario-routing/IdeConfigPackagerCard'
 
 /** Personal gateway keys for accounts that cannot reveal the shared gateway key.
  *  Secrets are stored hashed, so the full key is only ever visible right after it
@@ -57,6 +59,11 @@ export function PersonalKeyPanel() {
         <Button size="sm" variant="outline" disabled={mint.isPending} onClick={() => mint.mutate(label)}>
           {mint.isPending ? tc('Generating…') : active.length === 0 ? tc('Generate my API key') : tc('Generate another key')}
         </Button>
+      </div>
+      <div className="pt-2 space-y-3">
+        <ScenarioTokensSavedBanner />
+        <ScenarioRouterPanel compact hideTelemetryBanner />
+        <IdeConfigPackagerCard initialRawKey={created} compact />
       </div>
     </div>
   )
