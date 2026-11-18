@@ -7723,7 +7723,7 @@ export function resolveXGatewayProvider(
 
   const catalogEntry = getXGatewayProvider(normalized);
   if (catalogEntry?.category === 'oauth' && !X_GATEWAY_OAUTH_EXECUTORS.has(normalized)) return undefined;
-  if (normalized === 'claude') return new AnthropicWireProvider({ name: catalogEntry?.name ?? 'Claude', baseUrl: trimmedUrl ?? 'https://api.anthropic.com/v1', timeoutMs: 120_000, extraHeaders });
+  if (normalized === 'claude') return new AnthropicWireProvider({ providerId: normalized, name: catalogEntry?.name ?? 'Claude', baseUrl: trimmedUrl ?? 'https://api.anthropic.com/v1', timeoutMs: 120_000, extraHeaders });
   if (
     normalized === 'opencode'
     || normalized === 'opencode-zen'
@@ -7855,6 +7855,7 @@ export function resolveXGatewayProvider(
     if (customNode && effectiveUrl) {
       if (customNode.type === 'anthropic-compatible') {
         return new AnthropicWireProvider({
+          providerId: normalized,
           name: customNode.name,
           baseUrl: effectiveUrl,
           timeoutMs: 120_000,
@@ -7888,6 +7889,7 @@ export function resolveXGatewayProvider(
       effectiveUrl.includes('/anthropic/v1'))
   ) {
     return new AnthropicWireProvider({
+      providerId: normalized,
       name: catalogEntry?.name ?? normalized,
       baseUrl: effectiveUrl,
       timeoutMs: 120_000,

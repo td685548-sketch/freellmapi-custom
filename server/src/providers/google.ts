@@ -15,6 +15,13 @@ import { recordQuotaObservationsFromResponse, type QuotaObservationContext } fro
 import { providerTimeoutMs, streamStallTimeoutMs } from '../lib/provider-timeout.js';
 import { sanitizeForGemini } from '../lib/gemini-wire.js';
 import { resolveMaxTokens } from '../lib/sampling-params.js';
+import {
+  buildThoughtSignatureNamespace,
+  getStoredThoughtSignatureProvenance,
+  recallGeminiThoughtSignature,
+  recordForeignSignaturesStripped,
+  storeGeminiThoughtSignature,
+} from '../custom/x-gateway/thinking-store.js';
 
 export { sanitizeForGemini } from '../lib/gemini-wire.js';
 
@@ -47,20 +54,9 @@ function googleHttpError(res: Response, body: any) {
 // opaque tool ids. Strictly additive: a cache miss yields exactly the previous
 // behavior (the request may 400 and fail over, as before). Bounded with a TTL so
 // it can't grow unbounded.
-const THOUGHT_SIG_TTL_MS = 30 * 60 * 1000; // 30 min — longer than any single tool loop
-const THOUGHT_SIG_MAX = 5000;
-const thoughtSigCache = new Map<string, { sig: string; exp: number }>();
-
-function canonicalThoughtSigArgs(args: unknown): string {
-  if (typeof args === 'string') {
-    try { return JSON.stringify(JSON.parse(args)); } catch { return args; }
-  }
-  return JSON.stringify(args ?? {});
-}
-
-function thoughtSigCallKey(name: string | undefined, args: unknown): string | undefined {
-  if (!name) return undefined;
-  return `call:${name}:${canonicalThoughtSigArgs(args)}`;
+interface ThoughtSigScope {
+  namespace: string;
+  modelId: string;
 }
 
 // Fallback for functionCall parts that have neither a client-preserved nor a
@@ -91,35 +87,41 @@ function noteDummyThoughtSignature(name: string | undefined): void {
   );
 }
 
-function rememberThoughtSigKey(key: string | undefined, sig: string | undefined): void {
-  if (!key || !sig) return;
-  // Cheap eviction: when full, drop the oldest insertion (Map preserves order).
-  if (thoughtSigCache.size >= THOUGHT_SIG_MAX) {
-    const oldest = thoughtSigCache.keys().next().value;
-    if (oldest !== undefined) thoughtSigCache.delete(oldest);
-  }
-  thoughtSigCache.set(key, { sig, exp: Date.now() + THOUGHT_SIG_TTL_MS });
+function rememberThoughtSig(
+  callId: string | undefined,
+  sig: string | undefined,
+  name?: string,
+  args?: unknown,
+  scope?: ThoughtSigScope,
+): void {
+  if (!sig) return;
+  storeGeminiThoughtSignature({
+    namespace: scope?.namespace,
+    model: scope?.modelId ?? 'gemini',
+    provider: 'google',
+    toolCallId: callId,
+    signature: sig,
+    name,
+    callArgs: args,
+  });
 }
 
-function rememberThoughtSig(callId: string | undefined, sig: string | undefined, name?: string, args?: unknown): void {
-  rememberThoughtSigKey(callId ? `id:${callId}` : undefined, sig);
-  rememberThoughtSigKey(thoughtSigCallKey(name, args), sig);
-}
-
-function recallThoughtSigKey(key: string | undefined): string | undefined {
-  if (!key) return undefined;
-  const hit = thoughtSigCache.get(key);
-  if (!hit) return undefined;
-  if (hit.exp < Date.now()) {
-    thoughtSigCache.delete(key);
-    return undefined;
-  }
-  return hit.sig;
-}
-
-function recallThoughtSig(callId: string | undefined, name?: string, args?: unknown): string | undefined {
-  return recallThoughtSigKey(callId ? `id:${callId}` : undefined)
-    ?? recallThoughtSigKey(thoughtSigCallKey(name, args));
+function recallThoughtSig(
+  callId: string | undefined,
+  name?: string,
+  args?: unknown,
+  scope?: ThoughtSigScope,
+): string | undefined {
+  return (
+    recallGeminiThoughtSignature({
+      namespace: scope?.namespace,
+      model: scope?.modelId ?? 'gemini',
+      provider: 'google',
+      toolCallId: callId,
+      name,
+      callArgs: args,
+    }) ?? undefined
+  );
 }
 
 interface GeminiPart {
@@ -435,7 +437,10 @@ async function userContentToParts(content: ChatMessage['content']): Promise<Gemi
 // Translate OpenAI messages to Gemini format. Content may arrive as a string,
 // null, or the OpenAI multimodal array envelope. System/assistant/tool messages
 // flatten to text; user messages additionally carry images as inlineData parts.
-async function toGeminiContents(messages: ChatMessage[]): Promise<{
+async function toGeminiContents(
+  messages: ChatMessage[],
+  sigScope?: ThoughtSigScope,
+): Promise<{
   contents: GeminiContent[];
   systemInstruction?: { parts: Array<{ text: string }> };
 }> {
@@ -470,7 +475,15 @@ async function toGeminiContents(messages: ChatMessage[]): Promise<{
           // sentinel so a signature-less replay still passes the strict 400
           // check (parallel calls get it on every part — harmless, since the
           // sentinel means "skip validation").
-          const known = call.thought_signature ?? recallThoughtSig(call.id, call.function.name, call.function.arguments);
+          let clientSig = call.thought_signature;
+          if (clientSig) {
+            const prov = getStoredThoughtSignatureProvenance(clientSig);
+            if (prov?.modelFamily && prov.modelFamily !== 'gemini') {
+              clientSig = undefined;
+              recordForeignSignaturesStripped(1);
+            }
+          }
+          const known = clientSig ?? recallThoughtSig(call.id, call.function.name, call.function.arguments, sigScope);
           if (!known) noteDummyThoughtSignature(call.function.name);
           const sig = known ?? DUMMY_THOUGHT_SIGNATURE;
           parts.push({
@@ -524,7 +537,11 @@ async function toGeminiContents(messages: ChatMessage[]): Promise<{
   };
 }
 
-function extractToolCalls(parts: GeminiPart[] | undefined, firstIndex = 0): ChatToolCall[] {
+function extractToolCalls(
+  parts: GeminiPart[] | undefined,
+  firstIndex = 0,
+  sigScope?: ThoughtSigScope,
+): ChatToolCall[] {
   const calls: ChatToolCall[] = [];
   if (!parts) return calls;
 
@@ -537,7 +554,7 @@ function extractToolCalls(parts: GeminiPart[] | undefined, firstIndex = 0): Chat
     // Cache the signature keyed by the id we hand the client, so when the client
     // echoes this call back (without the signature, as OpenAI format requires)
     // we can re-attach it and Gemini accepts the history.
-    rememberThoughtSig(id, part.thoughtSignature, part.functionCall.name, args);
+    rememberThoughtSig(id, part.thoughtSignature, part.functionCall.name, args, sigScope);
     calls.push({
       id,
       type: 'function',
@@ -600,7 +617,15 @@ export class GoogleProvider extends BaseProvider {
     options?: CompletionOptions,
     quotaContext?: QuotaObservationContext,
   ): Promise<ChatCompletionResponse> {
-    const translated = await toGeminiContents(messages);
+    const sigScope: ThoughtSigScope = {
+      namespace: buildThoughtSignatureNamespace({
+        accountId: quotaContext?.providerAccountId,
+        keyId: quotaContext?.keyId,
+        apiKey,
+      }),
+      modelId,
+    };
+    const translated = await toGeminiContents(messages, sigScope);
     const request = contentsForModel(modelId, translated.contents, translated.systemInstruction);
 
     const tools = toGeminiTools(options?.tools);
@@ -646,7 +671,7 @@ export class GoogleProvider extends BaseProvider {
     const data = await res.json() as GeminiResponse;
     const candidate = data.candidates?.[0];
     const parts = candidate?.content?.parts;
-    const toolCalls = extractToolCalls(parts);
+    const toolCalls = extractToolCalls(parts, 0, sigScope);
     const text = extractText(parts);
     const reasoningContent = extractReasoningContent(parts);
 
@@ -683,7 +708,15 @@ export class GoogleProvider extends BaseProvider {
     options?: CompletionOptions,
     quotaContext?: QuotaObservationContext,
   ): AsyncGenerator<ChatCompletionChunk> {
-    const translated = await toGeminiContents(messages);
+    const sigScope: ThoughtSigScope = {
+      namespace: buildThoughtSignatureNamespace({
+        accountId: quotaContext?.providerAccountId,
+        keyId: quotaContext?.keyId,
+        apiKey,
+      }),
+      modelId,
+    };
+    const translated = await toGeminiContents(messages, sigScope);
     const request = contentsForModel(modelId, translated.contents, translated.systemInstruction);
 
     const tools = toGeminiTools(options?.tools);
@@ -797,7 +830,7 @@ export class GoogleProvider extends BaseProvider {
 
           const text = extractText(parts);
           const reasoningContent = extractReasoningContent(parts);
-          const toolCalls = extractToolCalls(parts, nextToolIndex).filter(call => {
+          const toolCalls = extractToolCalls(parts, nextToolIndex, sigScope).filter(call => {
             const key = `${call.id}:${call.function.name}:${call.function.arguments}`;
             if (seenToolCallKeys.has(key)) return false;
             seenToolCallKeys.add(key);

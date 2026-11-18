@@ -40,6 +40,9 @@ scripts/backup.mjs
 # Local 9Router reference clone
 /9router/
 
+# Local reference repositories cloned for architectural research (never tracked)
+/references/
+
 
 
 # --- GitHub compliance (see docs/LOCAL_TOOLS_AND_COMPLIANCE.md) ---

@@ -104,7 +104,9 @@ import * as customTenantRbac from '../migrations/20261118_043000_custom_tenant_r
 import * as customMcpChatContinuation from '../migrations/20261118_090000_custom_mcp_chat_continuation.js';
 import * as customSupportSetupCopilot from '../migrations/20261118_093000_custom_support_setup_copilot.js';
 import * as customPromptEvalAndAb from '../migrations/20261118_100000_custom_prompt_eval_and_ab.js';
+import * as customAiSemanticCache from '../migrations/20261118_100000_custom_semantic_cache.js';
 import * as customSemanticCache from '../migrations/20261118_110000_custom_semantic_cache.js';
+import * as customThoughtSignatures from '../migrations/20261118_110000_custom_thought_signatures.js';
 import * as customLearnedCapsModelsDev from '../migrations/20261118_120000_custom_learned_caps_models_dev.js';
 
 export interface MigrationModule {
@@ -302,6 +304,8 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: '20261118_090000_custom_mcp_chat_continuation.ts', module: customMcpChatContinuation },
   { filename: '20261118_093000_custom_support_setup_copilot.ts', module: customSupportSetupCopilot },
   { filename: '20261118_100000_custom_prompt_eval_and_ab.ts', module: customPromptEvalAndAb },
+  { filename: '20261118_100000_custom_semantic_cache.ts', module: customAiSemanticCache },
   { filename: '20261118_110000_custom_semantic_cache.ts', module: customSemanticCache },
+  { filename: '20261118_110000_custom_thought_signatures.ts', module: customThoughtSignatures },
   { filename: '20261118_120000_custom_learned_caps_models_dev.ts', module: customLearnedCapsModelsDev },
 ];

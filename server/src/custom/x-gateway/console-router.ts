@@ -21,6 +21,11 @@ import {
 } from './config.js';
 import { resetRouteHealth } from './router.js';
 import {
+  clearThinkingContinuityStore,
+  getThinkingContinuitySnapshot,
+  setThinkingContinuityMode,
+} from './thinking-store.js';
+import {
   listXGatewayClientKeys,
   mintXGatewayClientKey,
   revokeXGatewayClientKey,
@@ -256,6 +261,32 @@ xGatewayConsoleRouter.put('/routing-health', (req, res) => {
     resetRouteHealth();
   }
   res.json({ penaltyTtlMinutes: getRouteHealthTtlMinutes() });
+});
+
+const thinkingContinuitySchema = z.object({
+  mode: z.enum(['enabled', 'bypass']),
+}).strict();
+
+const thinkingContinuityClearSchema = z.object({
+  memoryOnly: z.boolean().optional(),
+  resetDiagnostics: z.boolean().optional(),
+}).strict();
+
+xGatewayConsoleRouter.get('/thinking-continuity', (_req, res) => {
+  res.json(getThinkingContinuitySnapshot());
+});
+
+xGatewayConsoleRouter.put('/thinking-continuity', (req, res) => {
+  requireUserId(req);
+  const body = parse(thinkingContinuitySchema, req.body);
+  setThinkingContinuityMode(body.mode);
+  res.json(getThinkingContinuitySnapshot());
+});
+
+xGatewayConsoleRouter.post('/thinking-continuity/clear', (req, res) => {
+  requireUserId(req);
+  const body = parse(thinkingContinuityClearSchema, req.body ?? {});
+  res.json(clearThinkingContinuityStore(body));
 });
 
 xGatewayConsoleRouter.get('/pricing', (_req, res) => {

@@ -24,6 +24,7 @@ import { subscriptionApi } from '../subscription-api'
 import { useXStrings } from '../strings'
 import { AccountLoadState } from '../components/AccountLoadState'
 import { useXGatewayCopy } from '../copy'
+import { useProviderIcons } from '../provider-icons'
 import type { AccountProvider } from '../../../../../shared/x-accounts'
 
 const PROVIDER_ICON_FILES: Record<string, string> = {
@@ -47,15 +48,27 @@ const PROVIDER_ICON_FILES: Record<string, string> = {
 const NO_ICON_PROVIDERS = new Set(['custom', 'runcrate'])
 const failedIconIds = new Set<string>()
 
-export function getProviderIconSrc(providerId: string): string | null {
+export function getProviderIconFile(providerId: string): string | null {
   const id = providerId.trim().toLowerCase()
   if (!id || NO_ICON_PROVIDERS.has(id) || failedIconIds.has(id)) return null
-  const file = PROVIDER_ICON_FILES[id] ?? `${id}.png`
-  return `/providers/${file}`
+  return PROVIDER_ICON_FILES[id] ?? `${id}.png`
+}
+
+export function getProviderIconSrc(providerId: string): string | null {
+  const file = getProviderIconFile(providerId)
+  return file ? `/providers/${file}` : null
 }
 
 export function ProviderMark({ id, name }: { id: string; name?: string }) {
-  const src = getProviderIconSrc(id)
+  const file = getProviderIconFile(id)
+  const { icons, failed } = useProviderIcons()
+  const src = file
+    ? icons
+      ? (icons[file.toLowerCase()] ?? null)
+      : failed
+        ? `/providers/${file}`
+        : null
+    : null
   const [errored, setErrored] = useState(false)
   const colors: Record<string, string> = { openrouter: 'violet', 'github-copilot': 'slate', groq: 'orange', google: 'blue', nvidia: 'green', mistral: 'orange', anthropic: 'sand', custom: 'slate' }
   if (src && !errored) {
