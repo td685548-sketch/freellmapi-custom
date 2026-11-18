@@ -381,6 +381,21 @@ describe('Spec 039: Scenario-Based Auto-Routing & 1-Click IDE Config Packager', 
       });
       expect(standardTurn.scenario).toBe('default');
 
+      // Script-weighted estimate: Vietnamese and CJK text must NOT be
+      // undercounted at chars/4, or long-context routing never triggers.
+      const vietnameseTurn = classifyScenarioRequest({
+        model: 'auto',
+        messages: [{ role: 'user', content: 'à'.repeat(100) }],
+      });
+      // 100 accented chars = 40 tokens; chars/4 would have said 25.
+      expect(vietnameseTurn.estimatedInputTokens).toBe(40);
+      const cjkTurn = classifyScenarioRequest({
+        model: 'auto',
+        messages: [{ role: 'user', content: '你好世界'.repeat(10) }],
+      });
+      // 40 CJK chars = 40 tokens; chars/4 would have said 10.
+      expect(cjkTurn.estimatedInputTokens).toBe(40);
+
       // Sub-millisecond performance check
       const t0 = performance.now();
       for (let i = 0; i < 100; i++) {

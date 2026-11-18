@@ -16,7 +16,7 @@ import { getClientContext, noteRequestTokens } from '../lib/client-context.js';
 import { getDb } from '../db/index.js';
 import { resolveAuth, prependSystemPrompt, type ResolvedAuth } from '../lib/system-prompt.js';
 import { applyOutputSavers } from '../custom/output-savers/apply.js';
-import { contentToString, estimateInputTokens, messageHasImage, normalizeOutboundContent, sanitizeResponse } from '../lib/content.js';
+import { contentToString, estimateImageTokens, estimateInputTokens, messageHasImage, normalizeOutboundContent, sanitizeResponse } from '../lib/content.js';
 import { routeOutputBudget } from '../lib/output-cap.js';
 import { resolveTaskType } from '../lib/task-type.js';
 import { normalizeMessageImages } from '../lib/image-normalize.js';
@@ -2208,7 +2208,8 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   // bytes (see lib/image-normalize.ts). Mutates the image blocks in place.
   await normalizeMessageImages(messages);
 
-  // Token estimation is intentionally a heuristic (~4 chars per token). Used
+  // Token estimation is intentionally a heuristic (script-weighted character
+  // ratios — see estimateTextTokens in lib/content.ts — not chars/4). Used
   // for routing decisions (skip a model whose budget is too small) and for
   // streaming bookkeeping where the provider doesn't echo a final usage count.
   // Non-streaming requests reconcile against the provider's real `usage` block;
@@ -2220,7 +2221,9 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   // clear message when none is enabled, rather than silently dropping the image
   // or surfacing the generic "all models exhausted" error (#118, #125). Add a
   // rough per-image token cost so budget routing isn't skewed by content the
-  // heuristic above (text-only) can't see.
+  // heuristic above (text-only) can't see. The cost is IMAGE_TOKENS_PER_IMAGE
+  // from lib/content.ts — the same 765 the context-budget estimator uses —
+  // not the flat 1000 this site used to charge.
   const hasImage = messageHasImage(messages);
   if (hasImage && !hasEnabledVisionModel()) {
     res.status(422).json({
@@ -2233,15 +2236,15 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
     });
     return;
   }
-  const IMAGE_TOKEN_ESTIMATE = 1000;
   const imageCount = messages.reduce((n, m) =>
     n + (Array.isArray(m.content) ? m.content.filter(b => (b as { type?: string })?.type === 'image_url' || (b as { type?: string })?.type === 'image').length : 0), 0);
+  const imageTokens = estimateImageTokens(imageCount);
   // The reserved output is capped (routingReserveTokens, #470) so an oversized
   // client max_tokens can't starve routing; input + images count in full. The
   // reserve is threaded to the router separately: it is exact and must not be
   // inflated by the context-window safety margin (#956 review).
   const outputReserve = routingReserveTokens(max_tokens);
-  const estimatedTotal = estimatedInputTokens + imageCount * IMAGE_TOKEN_ESTIMATE + outputReserve;
+  const estimatedTotal = estimatedInputTokens + imageTokens + outputReserve;
 
   // Tool-bearing requests must route to a model that emits STRUCTURED
   // tool_calls. A model without real function-calling support serializes the
@@ -2266,7 +2269,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   // ceiling; a request with no max_tokens gets its output capped to the
   // remainder instead. Sits before the Fusion branch so fan-out inherits the
   // capped max_tokens too.
-  const budgetCheck = applyTokenBudget(estimatedInputTokens + imageCount * IMAGE_TOKEN_ESTIMATE, max_tokens);
+  const budgetCheck = applyTokenBudget(estimatedInputTokens + imageTokens, max_tokens);
   if (budgetCheck.rejection) {
     res.status(413).json({
       error: { message: tokenBudgetMessage(budgetCheck.rejection), type: 'invalid_request_error', code: 'request_token_budget' },
@@ -3016,7 +3019,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
           // TTFB window.
           if (clientGone && mode !== 'passthrough' && heldText.trim().length === 0 && completedCalls.length === 0) {
             if (headersSentEarly) {
-              noteRequestTokens(estimatedInputTokens + injectedHandoffTokens + imageCount * IMAGE_TOKEN_ESTIMATE + totalOutputTokens);
+              noteRequestTokens(estimatedInputTokens + injectedHandoffTokens + imageTokens + totalOutputTokens);
             }
             console.log(`[Proxy] client disconnected before first token from ${route.displayName} — dropping attempt without benching`);
             return 'committed';
@@ -3088,8 +3091,8 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
           // and the accounting fallback after it, so a client that reads the
           // frame and the row this request writes can never disagree. Images
           // are billed at the same flat per-image estimate the routing budget
-          // uses (the chars/4 pass sees text only).
-          const estimatedPromptTokens = estimatedInputTokens + injectedHandoffTokens + imageCount * IMAGE_TOKEN_ESTIMATE;
+          // uses (the text-only estimate sees text only).
+          const estimatedPromptTokens = estimatedInputTokens + injectedHandoffTokens + imageTokens;
           if (usageChunk) {
             writeChunk(usageChunk);
           } else {
@@ -3171,7 +3174,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         } catch (streamErr: any) {
           if (isClientAbortError(streamErr)) {
             if (headerSent || headersSentEarly) {
-              noteRequestTokens(estimatedInputTokens + injectedHandoffTokens + imageCount * IMAGE_TOKEN_ESTIMATE + totalOutputTokens);
+              noteRequestTokens(estimatedInputTokens + injectedHandoffTokens + imageTokens + totalOutputTokens);
             }
             throw streamErr;
           }

@@ -1,4 +1,5 @@
 import type { ChatMessage } from '@freellmapi/shared/types.js';
+import { estimateTextTokens } from '../../lib/content.js';
 import type { ToolCallOrigin } from './types.js';
 
 export function textContent(message: ChatMessage): string | null {
@@ -20,8 +21,19 @@ export function messageChars(messages: ChatMessage[]): number {
   }, 0);
 }
 
+/**
+ * @deprecated Chars alone carry no script information, so chars/4 undercounts
+ * Vietnamese (~1 token / 2.5 chars) and CJK (~1 token / 1 char). Kept for
+ * callers that only have a character count; prefer estimateTokensForMessages()
+ * (script-weighted, same estimator as routing) whenever the text is available.
+ */
 export function estimateTokensFromChars(chars: number): number {
   return Math.ceil(chars / 4);
+}
+
+/** Script-weighted token estimate for a message list (see lib/content.ts). */
+export function estimateTokensForMessages(messages: ChatMessage[]): number {
+  return estimateTextTokens(allMessageText(messages));
 }
 
 export function buildToolCallOrigins(messages: ChatMessage[]): Map<string, ToolCallOrigin> {
