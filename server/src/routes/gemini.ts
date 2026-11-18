@@ -3,7 +3,7 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { buildModelListing, type NormalizedModel } from '../services/model-listing.js';
 import { extractApiToken } from './proxy.js';
-import { resolveAuth, prependSystemPrompt, type ResolvedAuth } from '../lib/system-prompt.js';
+import { isGeminiQueryKeyAllowed, resolveAuth, prependSystemPrompt, type ResolvedAuth } from '../lib/system-prompt.js';
 import { applyOutputSavers } from '../custom/output-savers/apply.js';
 import { runInboundChat, type InboundChatWire } from '../lib/inbound-chat.js';
 import {
@@ -48,13 +48,17 @@ function sendError(res: Response, status: number, message: string, code = 'INVAL
 // Resolves both credential kinds (#411): unified key as before; a
 // client-profile key (sk-cp-*) authenticates inference only and carries its
 // server-enforced system prompt (injected by handleGenerate below).
+//
+// Query-string credentials (?key=) are NOT accepted by default: the key
+// lands in shell history, reverse-proxy access logs, and Referer headers.
+// Use the x-goog-api-key header (or a Bearer token) instead. Legacy Gemini
+// CLI clients that cannot send a header may opt back in explicitly with
+// GEMINI_ALLOW_QUERY_KEY=1 — the flag is read per request.
 function authenticate(req: Request, res: Response): ResolvedAuth | null {
-  const queryKey = typeof req.query.key === 'string' ? req.query.key.trim() : '';
-  if (queryKey) {
-    // Query credentials are a Gemini compatibility escape hatch and are
-    // intentionally scoped to this router. Warn because URLs commonly land in
-    // shell history, reverse-proxy logs, and referrer telemetry.
-    console.warn('[Gemini] API key supplied in ?key=; prefer x-goog-api-key to avoid URL leakage');
+  const rawQueryKey = typeof req.query.key === 'string' ? req.query.key.trim() : '';
+  const queryKey = isGeminiQueryKeyAllowed() ? rawQueryKey : '';
+  if (rawQueryKey && !isGeminiQueryKeyAllowed()) {
+    console.warn('[Gemini] ?key= credential ignored (disabled by default); use x-goog-api-key or set GEMINI_ALLOW_QUERY_KEY=1');
   }
   const googHeader = req.headers['x-goog-api-key'];
   const googKey = (Array.isArray(googHeader) ? googHeader[0] : googHeader)?.trim() || '';

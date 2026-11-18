@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import type { Request } from 'express';
 import type { ChatMessage } from '@freellmapi/shared/types.js';
 import { getDb, getUnifiedApiKey } from '../db/index.js';
 import { validateUserApiKey, USER_KEY_PREFIX } from '../services/user-keys.js';
@@ -37,6 +38,25 @@ export function mintClientProfileKey(): string {
 // timing-independent of the secret's bytes.
 export function hashClientProfileKey(key: string): string {
   return crypto.createHash('sha256').update(key).digest('hex');
+}
+
+// True when the request arrived through /v1/t/:token and the URL token was
+// verified (routes/url-tokens.ts sets the flag after validation). The
+// middleware injects the real unified key into the Authorization header so
+// downstream routers work unchanged — so a handler that gates on "the
+// unified key" MUST check this flag instead of trusting the header, or a
+// chat-scoped URL token reads the install-wide /v1/usage ledger.
+export function isUrlTokenAuthenticated(req: Request): boolean {
+  return (req as Request & { urlTokenAuthenticated?: boolean }).urlTokenAuthenticated === true;
+}
+
+// Query-string credentials (?key=) leak into shell history, reverse-proxy
+// logs, and Referer headers, so the Gemini router ignores them by default.
+// Set GEMINI_ALLOW_QUERY_KEY=1 only for legacy Gemini CLI clients that
+// cannot send x-goog-api-key; the flag is read per request so tests and
+// operators can toggle it without a restart.
+export function isGeminiQueryKeyAllowed(): boolean {
+  return process.env.GEMINI_ALLOW_QUERY_KEY === '1';
 }
 
 export type ResolvedAuth =

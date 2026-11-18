@@ -247,6 +247,7 @@ describe('migration round trip', () => {
         '20261118_180000_custom_assistant_workspace.ts',
         '20261118_190000_custom_scenario_routing.ts',
         '20261118_200000_custom_quota_vouchers_topups.ts',
+        '20261119_010000_custom_url_token_expiry.ts',
       ]);
     } finally {
       db.close();

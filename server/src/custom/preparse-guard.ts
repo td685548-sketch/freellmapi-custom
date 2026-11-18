@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 import { getDb } from '../db/index.js';
-import { resolveAuth } from '../lib/system-prompt.js';
+import { isGeminiQueryKeyAllowed, resolveAuth } from '../lib/system-prompt.js';
 import { extractApiToken } from '../routes/proxy.js';
 import { validateSession } from '../services/auth.js';
 
@@ -45,10 +45,14 @@ function sessionToken(req: Request): string | undefined {
 }
 
 /** Read-only check of a `/v1/t/<token>/...` URL token (no last_used_at write). */
+/* Mirrors validateUrlToken() in services/url-tokens.ts, including expiry:
+ * expires_at IS NULL only for pre-expiry-migration tokens (grandfathered). */
 function validUrlToken(token: string): boolean {
   if (!token) return false;
   const hash = crypto.createHash('sha256').update(token).digest('hex');
-  const row = getDb().prepare('SELECT id FROM url_tokens WHERE token_hash = ? AND revoked_at IS NULL').get(hash);
+  const row = getDb().prepare(
+    'SELECT id FROM url_tokens WHERE token_hash = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > datetime(\'now\'))',
+  ).get(hash);
   return Boolean(row);
 }
 
@@ -64,8 +68,11 @@ function classify(path: string): Route {
 function hasCredential(req: Request, route: Route): boolean {
   try {
     if (route === 'url-token') return validUrlToken(req.path.split('/')[3] ?? '');
+    // ?key= counts as a credential here only when the Gemini query-key
+    // escape hatch is explicitly enabled (GEMINI_ALLOW_QUERY_KEY=1); the
+    // Gemini router itself ignores ?key= by default (routes/gemini.ts).
     const apiToken = extractApiToken(req)
-      ?? (req.path.startsWith('/v1beta') && typeof req.query.key === 'string' ? req.query.key.trim() : undefined);
+      ?? (isGeminiQueryKeyAllowed() && req.path.startsWith('/v1beta') && typeof req.query.key === 'string' ? req.query.key.trim() : undefined);
     if (apiToken && resolveAuth(apiToken)) return true;
     // The dashboard and the Ollama wire share /api; accept either credential.
     return validateSession(sessionToken(req)) !== null;
