@@ -1,3 +1,4 @@
+import type { SupportRuntimePolicy } from '@freellmapi/shared/support-runtime.js';
 import {
   SUPPORT_SETUP_STEP_IDS,
   type SupportSetupApplyResponse,
@@ -12,6 +13,11 @@ import {
   type SupportSetupWidgetPayload,
 } from '@freellmapi/shared/support-setup-copilot.js';
 import type { SessionUser } from '../../services/auth.js';
+import {
+  assertTenantPermission,
+  isPlatformTenantOperator,
+  listSafeTenantModelOptions,
+} from '../tenant-portal/store.js';
 import { appendSupportAuditLog } from '../x-gateway/support-enterprise-router.js';
 import {
   createSupportEvidenceSource,
@@ -104,6 +110,14 @@ async function syncEvidencePackBestEffort(
   }
 }
 
+function buildAllowedTenantModelSet(currentDefaultModel?: string): Set<string> {
+  return new Set<string>([
+    'auto',
+    ...listSafeTenantModelOptions().map((m) => m.id),
+    ...(currentDefaultModel ? [currentDefaultModel] : []),
+  ]);
+}
+
 export async function applySupportSetupProposal(params: {
   user: SessionUser;
   proposalId: string;
@@ -149,9 +163,12 @@ export async function applySupportSetupProposal(params: {
     throw new SupportSetupCopilotError(403, 'forbidden', 'Support setup access denied.');
   }
 
+  const actorIsOperator = isPlatformTenantOperator(user);
   let canEditSet: Set<SupportSetupStepId>;
+  let canViewSet: Set<SupportSetupStepId>;
+
   if (proposal.targetMode === 'create_tenant') {
-    if (!scope.canCreateTenant) {
+    if (!scope.canCreateTenant || !actorIsOperator) {
       throw new SupportSetupCopilotError(
         403,
         'forbidden',
@@ -159,6 +176,7 @@ export async function applySupportSetupProposal(params: {
       );
     }
     canEditSet = new Set<SupportSetupStepId>(SUPPORT_SETUP_STEP_IDS);
+    canViewSet = new Set<SupportSetupStepId>(SUPPORT_SETUP_STEP_IDS);
   } else {
     if (!proposal.tenantId) {
       throw new SupportSetupCopilotError(400, 'invalid_proposal', 'Target tenantId is missing.');
@@ -172,6 +190,14 @@ export async function applySupportSetupProposal(params: {
       );
     }
     canEditSet = entry.canEditSteps;
+    canViewSet = entry.canViewSteps;
+    if (canEditSet.size === 0) {
+      throw new SupportSetupCopilotError(
+        403,
+        'forbidden',
+        'Your account has read-only access on this Support Tenant and cannot deploy changes.',
+      );
+    }
   }
 
   const stepMap = new Map(proposal.steps.map((s) => [s.stepId, s]));
@@ -210,19 +236,35 @@ export async function applySupportSetupProposal(params: {
   const stepResults: SupportSetupStepApplyResult[] = [];
   let targetTenant: SupportTenant;
 
-  // Step 1: tenant_ai (create or update)
   const tenantAiStep = stepMap.get('tenant_ai');
+  const runtimeStep = stepMap.get('runtime_policy');
+
+  // Step 1: tenant_ai (create or update)
   if (selectedLookup.has('tenant_ai') && tenantAiStep) {
     const payload = tenantAiStep.payload as unknown as SupportSetupTenantAiPayload;
     if (proposal.targetMode === 'create_tenant') {
+      if (!actorIsOperator) {
+        throw new SupportSetupCopilotError(
+          403,
+          'forbidden',
+          'Permission denied: creating Support Tenants requires Platform Operator privileges.',
+        );
+      }
       const existingSlugs = new Set(listSupportTenants().map((t) => t.slug.toLowerCase()));
       const uniqueSlug = sanitizeSlug(payload.slug || payload.name, existingSlugs);
+      const runtimePayload = runtimeStep?.payload as SupportSetupRuntimePayload | undefined;
+      const initialOrigins =
+        selectedLookup.has('runtime_policy') &&
+        Array.isArray(runtimePayload?.allowedOrigins) &&
+        runtimePayload.allowedOrigins.length > 0
+          ? runtimePayload.allowedOrigins
+          : ['*'];
       const created = createSupportTenant({
         name: payload.name,
         slug: uniqueSlug,
         defaultModel: payload.defaultModel || 'auto',
         systemPrompt: payload.systemPrompt,
-        allowedOrigins: payload.allowedOrigins,
+        allowedOrigins: initialOrigins,
         allowGuest: payload.allowGuest,
         rolesConfig: DEFAULT_SUPPORT_ROLES,
         createdBy: user.userId,
@@ -235,11 +277,23 @@ export async function applySupportSetupProposal(params: {
         detailVi: `Đã tạo tenant "${targetTenant.name}" (${targetTenant.slug}).`,
       });
     } else {
+      const access = assertTenantPermission(user, proposal.tenantId!, 'edit_tenant_ai');
+      const requestedModel = payload.defaultModel || access.tenant.defaultModel || 'auto';
+      if (!actorIsOperator) {
+        const safeModels = buildAllowedTenantModelSet(access.tenant.defaultModel);
+        if (!safeModels.has(requestedModel)) {
+          throw new SupportSetupCopilotError(
+            403,
+            'forbidden',
+            `Model '${requestedModel}' is not permitted for Tenant Portal accounts.`,
+          );
+        }
+      }
+      // Strictly never touch allowedOrigins here — CORS origins require edit_tenant_integration (Step 7).
       targetTenant = updateSupportTenant(proposal.tenantId!, {
         name: payload.name,
-        defaultModel: payload.defaultModel,
+        defaultModel: requestedModel,
         systemPrompt: payload.systemPrompt,
-        allowedOrigins: payload.allowedOrigins,
         allowGuest: payload.allowGuest,
         enabled: true,
       });
@@ -263,6 +317,7 @@ export async function applySupportSetupProposal(params: {
   // Step 2: knowledge_masking
   const kbStep = stepMap.get('knowledge_masking');
   if (selectedLookup.has('knowledge_masking') && kbStep) {
+    assertTenantPermission(user, targetTenant.id, 'edit_tenant_knowledge');
     const payload = kbStep.payload as unknown as SupportSetupKnowledgeMaskingPayload;
     const tid = String(targetTenant.id);
     const existingDocs = listSupportKnowledgeDocs(tid);
@@ -283,7 +338,11 @@ export async function applySupportSetupProposal(params: {
       upsertedCount += 1;
     }
 
-    const evidenceSynced = await syncEvidencePackBestEffort(targetTenant, payload);
+    // Evidence library (/knowledge-library) requires Platform Operator (edit_x_settings);
+    // never execute Evidence store writes for non-operator Tenant Portal accounts.
+    const evidenceSynced = actorIsOperator
+      ? await syncEvidencePackBestEffort(targetTenant, payload)
+      : false;
     updateSupportMaskingPolicy(tid, {
       enabled: payload.masking.enabled,
       builtinDetectors: payload.masking.builtinDetectors,
@@ -308,6 +367,7 @@ export async function applySupportSetupProposal(params: {
   // Step 3: guardrails_quotas
   const guardrailsStep = stepMap.get('guardrails_quotas');
   if (selectedLookup.has('guardrails_quotas') && guardrailsStep) {
+    assertTenantPermission(user, targetTenant.id, 'edit_tenant_guardrails');
     const payload = guardrailsStep.payload as unknown as SupportSetupGuardrailsPayload;
     updateSupportGuardrailPolicy(String(targetTenant.id), {
       enabled: payload.enabled,
@@ -337,6 +397,7 @@ export async function applySupportSetupProposal(params: {
   // Step 4: output_controls
   const outputStep = stepMap.get('output_controls');
   if (selectedLookup.has('output_controls') && outputStep) {
+    assertTenantPermission(user, targetTenant.id, 'edit_tenant_guardrails');
     const payload = outputStep.payload as unknown as SupportSetupOutputControlsPayload;
     const currentOut = getSupportOutputPolicy(targetTenant.id);
     saveSupportOutputPolicy({
@@ -367,6 +428,7 @@ export async function applySupportSetupProposal(params: {
   // Step 5: widget_appearance
   const widgetStep = stepMap.get('widget_appearance');
   if (selectedLookup.has('widget_appearance') && widgetStep) {
+    assertTenantPermission(user, targetTenant.id, 'edit_tenant_widget');
     const payload = widgetStep.payload as unknown as SupportSetupWidgetPayload;
     const currentWidget = getSupportDeskWidgetConfig(targetTenant.id);
     updateSupportDeskWidgetConfig(
@@ -396,6 +458,7 @@ export async function applySupportSetupProposal(params: {
   // Step 6: sla_routing
   const slaStep = stepMap.get('sla_routing');
   if (selectedLookup.has('sla_routing') && slaStep) {
+    assertTenantPermission(user, targetTenant.id, 'edit_tenant_widget');
     const payload = slaStep.payload as unknown as SupportSetupSlaRoutingPayload;
     const currentSla = getSupportDeskSlaPolicy(targetTenant.id);
     updateSupportDeskSlaPolicy(
@@ -422,19 +485,51 @@ export async function applySupportSetupProposal(params: {
     });
   }
 
-  // Step 7: runtime_policy
-  const runtimeStep = stepMap.get('runtime_policy');
+  // Step 7: runtime_policy (and CORS allowedOrigins — gated strictly by edit_tenant_integration)
   if (selectedLookup.has('runtime_policy') && runtimeStep) {
+    assertTenantPermission(user, targetTenant.id, 'edit_tenant_integration');
     const payload = runtimeStep.payload as unknown as SupportSetupRuntimePayload;
-    if (!selectedLookup.has('tenant_ai') && tenantAiStep) {
-      const tenantPayload = tenantAiStep.payload as unknown as SupportSetupTenantAiPayload;
-      if (Array.isArray(tenantPayload.allowedOrigins) && tenantPayload.allowedOrigins.length > 0) {
-        targetTenant = updateSupportTenant(targetTenant.id, {
-          allowedOrigins: tenantPayload.allowedOrigins,
-        });
+    const legacyAiPayload = tenantAiStep?.payload as SupportSetupTenantAiPayload | undefined;
+    const nextOrigins =
+      Array.isArray(payload.allowedOrigins) && payload.allowedOrigins.length > 0
+        ? payload.allowedOrigins
+        : Array.isArray(legacyAiPayload?.allowedOrigins) && legacyAiPayload.allowedOrigins.length > 0
+          ? legacyAiPayload.allowedOrigins
+          : undefined;
+
+    if (!actorIsOperator && Array.isArray(payload.allowedModels)) {
+      const safeModels = buildAllowedTenantModelSet(targetTenant.defaultModel);
+      for (const modelId of payload.allowedModels) {
+        if (!safeModels.has(modelId)) {
+          throw new SupportSetupCopilotError(
+            403,
+            'forbidden',
+            `Model '${modelId}' is not permitted in runtime allowedModels for Tenant Portal accounts.`,
+          );
+        }
       }
     }
-    updateSupportRuntimePolicy(targetTenant.id, payload);
+
+    if (nextOrigins) {
+      targetTenant = updateSupportTenant(targetTenant.id, {
+        allowedOrigins: nextOrigins,
+      });
+    }
+
+    const runtimePatch: Partial<SupportRuntimePolicy> = {
+      allowedModels: payload.allowedModels,
+      ...(proposal.targetMode === 'create_tenant' && payload.toolPolicies !== undefined
+        ? { toolPolicies: payload.toolPolicies }
+        : {}),
+      maxCompletionTokens: payload.maxCompletionTokens,
+      maxModelCalls: payload.maxModelCalls,
+      maxToolCalls: payload.maxToolCalls,
+      maxContextChars: payload.maxContextChars,
+      maxToolResultChars: payload.maxToolResultChars,
+      maxHistoryMessages: payload.maxHistoryMessages,
+    };
+    updateSupportRuntimePolicy(targetTenant.id, runtimePatch);
+
     stepResults.push({
       stepId: 'runtime_policy',
       status: 'applied',
@@ -479,7 +574,11 @@ export async function applySupportSetupProposal(params: {
     { appliedSteps, stepResults },
   );
 
-  const diagnostic = buildTenantSetupDiagnostic(finalTenant, canEditSet, serverOrigin);
+  const diagnostic = buildTenantSetupDiagnostic(finalTenant, canEditSet, serverOrigin, {
+    canViewSteps: canViewSet,
+    isPlatformOperator: scope.isPlatformOperator,
+  });
+  const canExposePublicKey = canViewSet.has('runtime_policy') || canViewSet.has('tenant_ai');
 
   return {
     ok: true,
@@ -489,7 +588,7 @@ export async function applySupportSetupProposal(params: {
       id: finalTenant.id,
       name: finalTenant.name,
       slug: finalTenant.slug,
-      publicKey: finalTenant.publicKey,
+      publicKey: canExposePublicKey ? finalTenant.publicKey : '',
     },
     stepResults,
     diagnostic,

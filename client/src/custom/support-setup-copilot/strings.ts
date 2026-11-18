@@ -21,6 +21,8 @@ export interface SupportSetupCopilotStrings {
   stepComplete: string;
   stepPartial: string;
   stepMissing: string;
+  stepRestricted: string;
+  readOnlyBadge: string;
   briefToggle: string;
   briefHeading: string;
   briefBrandLabel: string;
@@ -90,6 +92,8 @@ const en: SupportSetupCopilotStrings = {
   stepComplete: 'Ready',
   stepPartial: 'Partial',
   stepMissing: 'Missing',
+  stepRestricted: 'Restricted',
+  readOnlyBadge: 'Read-only access',
   briefToggle: 'Quick Business Brief',
   briefHeading: 'Share quick details so AI can build your setup plan',
   briefBrandLabel: 'Brand / Service Name',
@@ -177,6 +181,8 @@ const vi: SupportSetupCopilotStrings = {
   stepComplete: 'Hoàn tất',
   stepPartial: 'Cơ bản',
   stepMissing: 'Chưa bật',
+  stepRestricted: 'Giới hạn quyền',
+  readOnlyBadge: 'Chế độ Chỉ xem',
   briefToggle: 'Phiếu thông tin nhanh',
   briefHeading: 'Điền nhanh thông tin để AI thiết kế kế hoạch setup cho bạn',
   briefBrandLabel: 'Tên thương hiệu / Dịch vụ',

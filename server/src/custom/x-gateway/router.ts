@@ -15,6 +15,19 @@ import { resolveSystemOneComboOrder } from './systemone-router.js';
 import { executeJudgeFusion } from './combo-fusion.js';
 import { getAccountCooldown } from '../provider-accounts/auto-ping.js';
 import {
+  acquireAccountGates,
+  isSemaphoreError,
+} from '../provider-accounts/semaphore.js';
+import {
+  getAccountResiliencePolicy,
+  isCredentialDraining,
+  orderAccountsByWeightAndLoad,
+} from '../provider-accounts/weights.js';
+import {
+  getRefreshCircuitState,
+  isInPersistedRefreshBackoff,
+} from '../provider-accounts/refresh-circuit.js';
+import {
   clearAutoSessionRoute,
   getAutoSessionRoute,
   resetAutoSessionCache,
@@ -69,10 +82,19 @@ import {
 import { runInGatewayScope } from './context.js';
 import { xGatewayProtocolsRouter } from './protocols.js';
 import { preprocessGatewayMessages } from './token-savers-pipeline.js';
+import {
+  captureGatewayThinkingResponse,
+  prepareGatewayThinkingRequest,
+} from './thinking-normalize.js';
 import { xSupportPublicRouter } from './support-router.js';
 import { xSupportEnterprisePublicRouter } from './support-enterprise-router.js';
 import { xSupportGovernancePublicRouter } from './support-governance-router.js';
 import { xSupportServiceDeskPublicRouter } from './support-service-desk-router.js';
+import { evaluateGatewaySmartRoute } from './intent-router.js';
+import {
+  applyLearnedCapsToDispatch,
+  learnCapsFromUpstreamError,
+} from './learned-caps.js';
 
 export const xGatewayRouter = Router();
 
@@ -306,10 +328,39 @@ function finalizeCandidateRoutes(
   retryAfterMs?: number;
 } {
   const filtered = filterCandidatesByCooldown(candidates);
+  if (filtered.available.length === 0) {
+    return {
+      candidates: [],
+      ...extra,
+      ...(filtered.allRateLimited ? { allRateLimited: true, retryAfterMs: filtered.retryAfterMs } : {}),
+    };
+  }
+  const nowMs = Date.now();
+  const ordered = orderAccountsByWeightAndLoad(filtered.available, { nowMs });
+  if (ordered.length === 0) {
+    let minCircuitMs = Number.POSITIVE_INFINITY;
+    let sawBackoffCandidate = false;
+    for (const candidate of filtered.available) {
+      const policy = getAccountResiliencePolicy(candidate.account.id);
+      if (isCredentialDraining(policy.weight)) continue;
+      const circuit = getRefreshCircuitState(candidate.account.id, nowMs);
+      if (circuit.inBackoff) {
+        sawBackoffCandidate = true;
+        minCircuitMs = Math.min(minCircuitMs, circuit.remainingMs);
+      }
+    }
+    if (sawBackoffCandidate) {
+      return {
+        candidates: [],
+        ...extra,
+        allRateLimited: true,
+        retryAfterMs: Number.isFinite(minCircuitMs) ? minCircuitMs : 0,
+      };
+    }
+  }
   return {
-    candidates: filtered.available,
+    candidates: ordered,
     ...extra,
-    ...(filtered.allRateLimited ? { allRateLimited: true, retryAfterMs: filtered.retryAfterMs } : {}),
   };
 }
 
@@ -780,27 +831,89 @@ function resolveCandidateByTarget(target: string, fallbackList: CandidateRoute[]
   return fallbackList[0];
 }
 
+async function acquireCandidateSemaphore(
+  candidate: Pick<CandidateRoute, 'account' | 'modelId'>,
+  signal?: AbortSignal,
+): Promise<() => void> {
+  const policy = getAccountResiliencePolicy(candidate.account.id);
+  return acquireAccountGates({
+    provider: candidate.account.provider,
+    accountId: candidate.account.id,
+    model: candidate.modelId,
+    accountMaxConcurrency: policy.maxConcurrency,
+    maxQueueSize: policy.maxQueueSize,
+    failFast: policy.failFast,
+    signal: signal ?? null,
+  });
+}
+
 async function executeRouteChatCompletion(
   candidate: CandidateRoute,
   msgs: ChatMessage[],
   opts: CompletionOptions,
+  rawBody?: Record<string, unknown>,
+  isFailover = false,
 ): Promise<{ candidate: CandidateRoute; completion: ChatCompletionResponse; latencyMs: number }> {
   const { account, modelId } = candidate;
   const provider = resolveAccountProvider(account);
   if (!provider) throw new Error(`Provider '${account.provider}' is not available.`);
   const credential = decrypt(account.encrypted_key, account.iv, account.auth_tag);
   const effectiveProxy = resolveXGatewayAccountProxy(account);
+  const prepared = prepareGatewayThinkingRequest({
+    messages: msgs,
+    options: opts,
+    provider: account.provider,
+    modelId,
+    accountId: account.id,
+    isFailover,
+  });
+  const capTarget = { provider: account.provider, modelId, endpointScope: account.base_url };
+  const initialDispatch = applyLearnedCapsToDispatch(capTarget, prepared.options, rawBody);
+  const releaseSemaphore = await acquireCandidateSemaphore(candidate, opts.signal);
   const startedAt = Date.now();
-  const completion = await withQuotaTracking(account, modelId, effectiveProxy, () =>
-    provider.chatCompletion(
-      credential,
-      msgs,
-      modelId,
-      opts,
-      { platform: account.platform, keyId: account.id, modelId },
-    ),
-  );
-  return { candidate, completion, latencyMs: Date.now() - startedAt };
+  try {
+    try {
+      const completion = await withQuotaTracking(account, modelId, effectiveProxy, () =>
+        provider.chatCompletion(
+          credential,
+          prepared.messages,
+          modelId,
+          initialDispatch.options,
+          { platform: account.platform, keyId: account.id, modelId },
+        ),
+      );
+      captureGatewayThinkingResponse({
+        toolCalls: completion.choices?.[0]?.message?.tool_calls,
+        provider: account.provider,
+        modelId: completion.model || modelId,
+        accountId: account.id,
+      });
+      return { candidate, completion, latencyMs: Date.now() - startedAt };
+    } catch (err) {
+      const learned = learnCapsFromUpstreamError(capTarget, err);
+      if (!learned.learned || opts.signal?.aborted) throw err;
+      const retriedDispatch = applyLearnedCapsToDispatch(capTarget, initialDispatch.options, rawBody);
+      const retryStartedAt = Date.now();
+      const completion = await withQuotaTracking(account, modelId, effectiveProxy, () =>
+        provider.chatCompletion(
+          credential,
+          prepared.messages,
+          modelId,
+          retriedDispatch.options,
+          { platform: account.platform, keyId: account.id, modelId },
+        ),
+      );
+      captureGatewayThinkingResponse({
+        toolCalls: completion.choices?.[0]?.message?.tool_calls,
+        provider: account.provider,
+        modelId: completion.model || modelId,
+        accountId: account.id,
+      });
+      return { candidate, completion, latencyMs: Date.now() - retryStartedAt };
+    }
+  } finally {
+    releaseSemaphore();
+  }
 }
 
 export function applyGatewaySavers(req: Request, messages: ChatMessage[]): {
@@ -901,7 +1014,26 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
       return false;
     });
     const modality: CandidateModality = hasImage ? 'vision' : 'chat';
-    const resolvedAliasLower = resolveXGatewayModelAlias(requestedModel).toLowerCase();
+    const rawSubagentHdr = req.headers['x-agent-scenario'] ?? req.headers['x-claude-code-subagent'];
+    const subagentHint = typeof rawSubagentHdr === 'string'
+      ? rawSubagentHdr
+      : Array.isArray(rawSubagentHdr) && typeof rawSubagentHdr[0] === 'string'
+        ? rawSubagentHdr[0]
+        : null;
+    const resolvedAlias = resolveXGatewayModelAlias(requestedModel);
+    const smartRoute = evaluateGatewaySmartRoute({
+      requestedModel: resolvedAlias,
+      messages,
+      rawBody: body,
+      thinkingEffort,
+      subagentHint,
+    });
+    if (smartRoute) {
+      res.setHeader('X-Smart-Route-Intent', smartRoute.classification.intent);
+      res.setHeader('X-Smart-Route-Scenario', smartRoute.classification.scenario);
+    }
+    const effectiveModelForRouting = smartRoute?.overridden ? smartRoute.effectiveModel : requestedModel;
+    const resolvedAliasLower = resolveXGatewayModelAlias(effectiveModelForRouting).toLowerCase();
     const isAutoModel = resolvedAliasLower === 'auto' || resolvedAliasLower.startsWith('auto:');
     const rawHeaderSession = req.headers['x-session-id'];
     const headerSession = typeof rawHeaderSession === 'string'
@@ -939,9 +1071,12 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
           a => a.id === pinned.accountId && a.provider === pinned.providerId && isWithinAccountCaps(a),
         );
         const inCooldown = getAccountCooldown(pinned.accountId, pinned.modelId).inCooldown;
+        const pinnedPolicy = getAccountResiliencePolicy(pinned.accountId);
+        const resilienceOk =
+          !isCredentialDraining(pinnedPolicy.weight) && !isInPersistedRefreshBackoff(pinned.accountId);
         const modelDisabled = resolveRouteModel(pinned.providerId, pinned.modelId).disabled;
         const modalityOk = !isNonChatModel({ id: pinned.modelId });
-        if (usableAccount && !inCooldown && !modelDisabled && modalityOk) {
+        if (usableAccount && !inCooldown && resilienceOk && !modelDisabled && modalityOk) {
           candidates = [{ account: usableAccount, modelId: pinned.modelId }];
           usingAutoSticky = true;
           stickyAttempted = { accountId: pinned.accountId, modelId: pinned.modelId };
@@ -958,13 +1093,17 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
       allRateLimited?: boolean;
       retryAfterMs?: number;
     } => {
+      let primary = resolveCandidateRoutes(effectiveModelForRouting, modality);
+      if (smartRoute?.overridden && (primary.notFoundError || primary.candidates.length === 0)) {
+        primary = resolveCandidateRoutes(requestedModel, modality);
+      }
       const {
         candidates: rawCandidates,
         notFoundError,
         combo: resolvedCombo,
         allRateLimited: resolvedAllRateLimited,
         retryAfterMs: resolvedRetryAfterMs,
-      } = resolveCandidateRoutes(requestedModel, modality);
+      } = primary;
       if (notFoundError) {
         return { resolved: [], notFoundError, combo: resolvedCombo };
       }
@@ -1094,8 +1233,8 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
     }
 
     /** One non-streaming attempt, isolated so fusion can run in parallel. */
-    const attemptNonStream = (candidate: CandidateRoute, signal: AbortSignal) =>
-      executeRouteChatCompletion(candidate, messages, { ...options, signal });
+    const attemptNonStream = (candidate: CandidateRoute, signal: AbortSignal, isFailover = false) =>
+      executeRouteChatCompletion(candidate, messages, { ...options, signal }, body, isFailover);
 
     const succeedNonStream = (result: Awaited<ReturnType<typeof attemptNonStream>>) => {
       const { account, modelId } = result.candidate;
@@ -1151,15 +1290,20 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
               const provider = resolveAccountProvider(judgeUsed.account);
               if (!provider) throw new Error(`Provider '${judgeUsed.account.provider}' is not available.`);
               const credential = decrypt(judgeUsed.account.encrypted_key, judgeUsed.account.iv, judgeUsed.account.auth_tag);
-              const stream = provider.streamChatCompletion(
-                credential,
-                judgeMessages,
-                judgeUsed.modelId,
-                { ...options, signal: controller.signal },
-                { platform: judgeUsed.account.platform, keyId: judgeUsed.account.id, modelId: judgeUsed.modelId },
-              );
-              for await (const chunk of stream) {
-                yield chunk;
+              const releaseJudgeSem = await acquireCandidateSemaphore(judgeUsed, controller.signal);
+              try {
+                const stream = provider.streamChatCompletion(
+                  credential,
+                  judgeMessages,
+                  judgeUsed.modelId,
+                  { ...options, signal: controller.signal },
+                  { platform: judgeUsed.account.platform, keyId: judgeUsed.account.id, modelId: judgeUsed.modelId },
+                );
+                for await (const chunk of stream) {
+                  yield chunk;
+                }
+              } finally {
+                releaseJudgeSem();
               }
             },
           });
@@ -1285,9 +1429,11 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
           const errMsg = sanitizeProviderErrorMessage(err instanceof Error ? err.message : 'Fusion attempt failed');
           for (let i = 0; i < fusionCandidates.length; i += 1) {
             const candidate = fusionCandidates[i];
-            const classification = recordCandidateFailure(candidate.account.id, candidate.modelId, err);
-            if (!classification.requestScoped) {
-              recordRouteOutcome(healthKey(candidate), { error: true });
+            if (!isSemaphoreError(err)) {
+              const classification = recordCandidateFailure(candidate.account.id, candidate.modelId, err);
+              if (!classification.requestScoped) {
+                recordRouteOutcome(healthKey(candidate), { error: true });
+              }
             }
             endUsageRequest(fusionTokens[i], {
               status: 'error',
@@ -1314,7 +1460,7 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
       if (!isStream) {
         const activeToken = beginUsageRequest(account.provider, modelId, fromPlayground);
         try {
-          const result = await attemptNonStream(candidate, controller.signal);
+          const result = await attemptNonStream(candidate, controller.signal, candidateIdx > 0);
           recordRouteOutcome(healthKey(candidate), { latencyMs: result.latencyMs });
           recordCandidateSuccess(account.id, modelId);
           if (isAutoModel && autoSessionId) {
@@ -1332,11 +1478,13 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
             cancelUsageRequest(activeToken);
             return;
           }
-          const classification = recordCandidateFailure(account.id, modelId, err);
-          if (classification.requestScoped) {
-            skippedProviders.add(account.provider);
-          } else {
-            recordRouteOutcome(healthKey(candidate), { error: true });
+          if (!isSemaphoreError(err)) {
+            const classification = recordCandidateFailure(account.id, modelId, err);
+            if (classification.requestScoped) {
+              skippedProviders.add(account.provider);
+            } else {
+              recordRouteOutcome(healthKey(candidate), { error: true });
+            }
           }
           if (isAutoModel && autoSessionId) clearAutoSessionRoute(autoSessionId, modality);
           if (usingAutoSticky && candidateIdx === 0) expandStickyFallbacks();
@@ -1388,21 +1536,47 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
       const attemptController = new AbortController();
       const attemptSignal = AbortSignal.any([controller.signal, attemptController.signal]);
 
+      let releaseSemaphore: (() => void) | null = null;
+      const capTarget = { provider: account.provider, modelId, endpointScope: account.base_url };
       try {
+        releaseSemaphore = await acquireCandidateSemaphore(candidate, attemptSignal);
         await withQuotaTracking(account, modelId, effectiveProxy, async () => {
-          const stream = provider.streamChatCompletion(
-            credential,
+          const preparedStream = prepareGatewayThinkingRequest({
             messages,
+            options: { ...options, signal: attemptSignal },
+            provider: account.provider,
             modelId,
-            { ...options, signal: attemptSignal },
-            { platform: account.platform, keyId: account.id, modelId },
-          );
-          const peek = await peekStreamForContent(stream, {
-            signal: controller.signal,
-            timeoutMs: peekTimeoutMs,
-            allowReasoningOnlyOnClose: !hasFallback,
-            onTimeout: () => attemptController.abort(new Error('Stream first-content peek timeout')),
+            accountId: account.id,
+            isFailover: candidateIdx > 0,
           });
+          const openPeekedStream = async () => {
+            const dispatched = applyLearnedCapsToDispatch(
+              capTarget,
+              preparedStream.options,
+              body,
+            );
+            const stream = provider.streamChatCompletion(
+              credential,
+              preparedStream.messages,
+              modelId,
+              dispatched.options,
+              { platform: account.platform, keyId: account.id, modelId },
+            );
+            return peekStreamForContent(stream, {
+              signal: controller.signal,
+              timeoutMs: peekTimeoutMs,
+              allowReasoningOnlyOnClose: !hasFallback,
+              onTimeout: () => attemptController.abort(new Error('Stream first-content peek timeout')),
+            });
+          };
+          let peek;
+          try {
+            peek = await openPeekedStream();
+          } catch (streamOpenErr) {
+            const learned = learnCapsFromUpstreamError(capTarget, streamOpenErr);
+            if (!learned.learned || controller.signal.aborted) throw streamOpenErr;
+            peek = await openPeekedStream();
+          }
           if (controller.signal.aborted) return;
 
           res.setHeader('Content-Type', 'text/event-stream');
@@ -1424,6 +1598,15 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
             if (controller.signal.aborted) return;
             if (chunk.usage?.prompt_tokens != null) promptTokens = chunk.usage.prompt_tokens;
             if (chunk.usage?.completion_tokens != null) completionTokens = chunk.usage.completion_tokens;
+            const deltaToolCalls = chunk.choices?.[0]?.delta?.tool_calls;
+            if (Array.isArray(deltaToolCalls) && deltaToolCalls.some(tc => tc?.thought_signature)) {
+              captureGatewayThinkingResponse({
+                toolCalls: deltaToolCalls,
+                provider: account.provider,
+                modelId: chunk.model || modelId,
+                accountId: account.id,
+              });
+            }
             res.write(`data: ${JSON.stringify(chunk)}\n\n`);
           }
           if (controller.signal.aborted) return;
@@ -1460,11 +1643,13 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
           cancelUsageRequest(activeToken);
           return;
         }
-        const classification = recordCandidateFailure(account.id, modelId, err);
-        if (classification.requestScoped) {
-          skippedProviders.add(account.provider);
-        } else {
-          recordRouteOutcome(healthKey(candidate), { error: true });
+        if (!isSemaphoreError(err)) {
+          const classification = recordCandidateFailure(account.id, modelId, err);
+          if (classification.requestScoped) {
+            skippedProviders.add(account.provider);
+          } else {
+            recordRouteOutcome(healthKey(candidate), { error: true });
+          }
         }
         if (isAutoModel && autoSessionId) clearAutoSessionRoute(autoSessionId, modality);
         const errMsg = sanitizeProviderErrorMessage(err instanceof Error ? err.message : 'Stream interrupted');
@@ -1502,6 +1687,8 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
         });
         lastError = err;
         continue;
+      } finally {
+        releaseSemaphore?.();
       }
     }
 
@@ -1528,6 +1715,17 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
         model: firstCandidate.modelId,
         errorMessage: message,
       });
+    }
+    if (isSemaphoreError(lastError)) {
+      res.setHeader('Retry-After', '1');
+      res.status(429).json({
+        error: {
+          message,
+          type: 'rate_limit_error',
+          code: lastError.code.toLowerCase(),
+        },
+      });
+      return;
     }
     res.status(502).json({
       error: { message, type: 'upstream_error' },
@@ -2004,7 +2202,9 @@ export async function handleXGatewaySearch(req: Request, res: Response): Promise
     let lastError: unknown = null;
     for (const candidate of searchCandidates) {
       const startedAt = Date.now();
+      let releaseSearchSem: (() => void) | null = null;
       try {
+        releaseSearchSem = await acquireCandidateSemaphore(candidate, controller.signal);
         const providerId = normalizeXGatewayProviderId(candidate.account.provider) ?? candidate.account.provider.toLowerCase();
         const credential = decrypt(candidate.account.encrypted_key, candidate.account.iv, candidate.account.auth_tag);
         const outcome = NATIVE_SEARCH_PROVIDERS.has(providerId)
@@ -2025,17 +2225,32 @@ export async function handleXGatewaySearch(req: Request, res: Response): Promise
         return;
       } catch (err) {
         if (clientGone) return;
-        const classification = recordCandidateFailure(candidate.account.id, candidate.modelId, err);
-        if (!classification.requestScoped) {
-          recordRouteOutcome(healthKey(candidate), { error: true });
+        if (!isSemaphoreError(err)) {
+          const classification = recordCandidateFailure(candidate.account.id, candidate.modelId, err);
+          if (!classification.requestScoped) {
+            recordRouteOutcome(healthKey(candidate), { error: true });
+          }
         }
         lastError = err;
+      } finally {
+        releaseSearchSem?.();
       }
     }
 
     if (clientGone) return;
     if (controller.signal.aborted) {
       res.status(504).json({ error: { message: 'Search timed out.', type: 'timeout_error' } });
+      return;
+    }
+    if (isSemaphoreError(lastError)) {
+      res.setHeader('Retry-After', '1');
+      res.status(429).json({
+        error: {
+          message: sanitizeProviderErrorMessage(lastError.message),
+          type: 'rate_limit_error',
+          code: lastError.code.toLowerCase(),
+        },
+      });
       return;
     }
     res.status(502).json({

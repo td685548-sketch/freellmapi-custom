@@ -19,6 +19,19 @@ export default defineConfig(({ mode }) => {
         '@': path.resolve(__dirname, './src'),
       },
     },
+    build: {
+      rolldownOptions: {
+        output: {
+          codeSplitting: {
+            minSize: 20_000,
+            groups: [
+              { name: 'vendor-icons', test: /node_modules[\\/]lucide-react/ },
+              { name: 'vendor-ui', test: /node_modules[\\/](?:@base-ui|@tanstack|react(?:-dom|-router)?(?:[\\/]|$))/ },
+            ],
+          },
+        },
+      },
+    },
     server: {
       proxy: {
         // Force IPv4 — on Windows + Node 17+, `localhost` resolves to ::1 first,

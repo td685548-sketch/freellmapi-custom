@@ -46,7 +46,8 @@ export interface SupportSetupRequirements {
 
 export interface SupportSetupStepDiagnostic {
   stepId: SupportSetupStepId;
-  status: 'complete' | 'partial' | 'missing';
+  status: 'complete' | 'partial' | 'missing' | 'restricted';
+  canView?: boolean;
   canEdit: boolean;
   summaryEn: string;
   summaryVi: string;
@@ -78,7 +79,7 @@ export interface SupportSetupTenantAiPayload {
   slug: string;
   defaultModel: string;
   systemPrompt: string;
-  allowedOrigins: string[];
+  allowedOrigins?: string[];
   allowGuest: boolean;
   enabled: boolean;
 }
@@ -144,7 +145,16 @@ export interface SupportSetupSlaRoutingPayload {
   routingRules: SupportDeskRoutingRule[];
 }
 
-export type SupportSetupRuntimePayload = SupportRuntimePolicy;
+export interface SupportSetupRuntimePayload extends Partial<SupportRuntimePolicy> {
+  allowedOrigins?: string[];
+  allowedModels: string[];
+  maxCompletionTokens: number;
+  maxModelCalls: number;
+  maxToolCalls: number;
+  maxContextChars: number;
+  maxToolResultChars: number;
+  maxHistoryMessages: number;
+}
 
 export interface SupportSetupStepPayloadMap {
   tenant_ai: SupportSetupTenantAiPayload;
@@ -192,6 +202,7 @@ export interface SupportSetupStatusTenantItem {
   publicKey: string;
   enabled: boolean;
   defaultModel: string;
+  canViewSteps?: SupportSetupStepId[];
   canEditSteps: SupportSetupStepId[];
 }
 

@@ -23,10 +23,12 @@ import { McpServers } from './pages/McpServers';
 import { OutputGuard } from './pages/OutputGuard';
 import { Overview } from './pages/Overview';
 import { PromptCache } from './pages/PromptCache';
+import { SemanticCache } from './pages/SemanticCache';
 import { Prompts } from './pages/Prompts';
 import { Runs } from './pages/Runs';
 import { AdminCustomerAiPanel } from '../customer-ai/AdminCustomerAiPanel';
 import { KNOWLEDGE_NAV_HEADING } from './knowledge-strings';
+import { SEMANTIC_CACHE_NAV_HEADING } from './semantic-cache-strings';
 import {
   NAV_AI_PLATFORM,
   PAGE_TITLE,
@@ -232,6 +234,11 @@ function AiPlatformShell({
                 {tc(PROMPT_CACHE_HEADING)}
               </NavLink>
             )}
+            {canPromptCache && (
+              <NavLink to={`${BASE}/semantic-cache`} className={tabClass}>
+                {tc(SEMANTIC_CACHE_NAV_HEADING)}
+              </NavLink>
+            )}
             {canFlows && (
               <NavLink to={`${BASE}/flows`} className={tabClass}>
                 {tc(FLOWS_HEADING)}
@@ -293,6 +300,18 @@ function AiPlatformShell({
             element={
               canPromptCache ? (
                 <PromptCache />
+              ) : (
+                <div>
+                  <p className="text-sm text-muted-foreground">{tc(NO_ACCESS)}</p>
+                </div>
+              )
+            }
+          />
+          <Route
+            path="semantic-cache"
+            element={
+              canPromptCache ? (
+                <SemanticCache />
               ) : (
                 <div>
                   <p className="text-sm text-muted-foreground">{tc(NO_ACCESS)}</p>

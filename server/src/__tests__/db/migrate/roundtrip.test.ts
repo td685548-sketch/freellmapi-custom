@@ -236,7 +236,11 @@ describe('migration round trip', () => {
         '20261118_090000_custom_mcp_chat_continuation.ts',
         '20261118_093000_custom_support_setup_copilot.ts',
         '20261118_100000_custom_prompt_eval_and_ab.ts',
+        '20261118_100000_custom_semantic_cache.ts',
         '20261118_110000_custom_semantic_cache.ts',
+        '20261118_110000_custom_thought_signatures.ts',
+        '20261118_120000_custom_learned_caps_models_dev.ts',
+        '20261118_130000_custom_account_weights_circuit.ts',
         '20261118_140000_custom_prompt_eval_canary.ts',
       ]);
     } finally {

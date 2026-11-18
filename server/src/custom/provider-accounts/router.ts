@@ -28,6 +28,7 @@ import {
   getModelAliases,
   getProviderModelConfig,
   getUsableXGatewayKeys,
+  invalidateXGatewayKeyCache,
   listAccountRowsForBatchTest,
   listAccounts,
   listCustomProviderNodes,
@@ -47,6 +48,27 @@ import {
 import {
   attemptAction, cancelAccountAuth, completeAccountAuth, pollAccountAuth, startAccountAuth, type AccountActor,
 } from './attempts.js';
+import type {
+  AccountResiliencePolicy,
+  AccountSemaphoreSnapshot,
+} from '@freellmapi/shared/account-resilience.js';
+import {
+  getAccountSemaphoreSnapshot,
+  getAccountSemaphoreStats,
+  resetAccountGates,
+  syncAccountGateCap,
+  unblockAccountGates,
+} from './semaphore.js';
+import {
+  defaultAccountResiliencePolicy,
+  listAccountResiliencePolicies,
+  upsertAccountResiliencePolicy,
+  validateCredentialWeight,
+  validateMaxConcurrency,
+  validateMaxQueueSize,
+} from './weights.js';
+import { clearRefreshCircuit } from './refresh-circuit.js';
+import { clearOAuthRefreshStateForAccount } from './oauth-lifecycle.js';
 
 export const providerAccountsRouter = Router();
 providerAccountsRouter.use(requireAuth, requirePermission('use_x_gateway'));
@@ -139,6 +161,12 @@ const validateNodeSchema = z.object({
 const pingModelSchema = z.object({
   model: z.string().trim().min(1).max(200),
 }).strict();
+const resiliencePatchSchema = z.object({
+  weight: z.unknown().optional(),
+  maxConcurrency: z.unknown().optional(),
+  maxQueueSize: z.unknown().optional(),
+  failFast: z.boolean().optional(),
+}).strict().refine(b => Object.keys(b).length > 0);
 const emptySchema = z.object({}).strict();
 
 function parse<T>(schema: z.ZodType<T>, input: unknown): T {
@@ -294,7 +322,11 @@ providerAccountsRouter.post('/bulk', requirePermission('add_keys'), async (req: 
 
 providerAccountsRouter.post('/bulk-delete', requirePermission('delete_keys'), (req: SessionRequest, res) => {
   const body = parse(bulkDeleteSchema, req.body);
+  const existingRows = listAccountRowsForBatchTest({ accountIds: body.accountIds });
   const deleted = bulkDeleteAccounts(body.accountIds);
+  for (const row of existingRows) {
+    resetAccountGates(row.provider, row.id);
+  }
   res.json({ ok: true, deleted });
 });
 
@@ -872,6 +904,28 @@ providerAccountsRouter.post('/catalog-sync', requireModelCatalogEdit, (_req, res
   res.json(syncXGatewayCatalog());
 });
 
+providerAccountsRouter.get('/resilience', requirePermission('view_keys'), (req, res) => {
+  const providerFilter =
+    typeof req.query.providerId === 'string' && req.query.providerId.trim()
+      ? req.query.providerId.trim()
+      : undefined;
+  const rows = listAccountRowsForBatchTest(providerFilter ? { providerId: providerFilter } : {});
+  const accountIds = rows.map(r => r.id);
+  const policyMap = listAccountResiliencePolicies(accountIds);
+  const policies: Record<number, AccountResiliencePolicy> = {};
+  const semaphores: Record<number, AccountSemaphoreSnapshot> = {};
+  for (const row of rows) {
+    const policy = policyMap.get(row.id) ?? defaultAccountResiliencePolicy(row.id);
+    policies[row.id] = policy;
+    semaphores[row.id] = getAccountSemaphoreSnapshot(row.provider, row.id, policy.maxConcurrency);
+  }
+  res.json({
+    policies,
+    semaphores,
+    gates: getAccountSemaphoreStats(),
+  });
+});
+
 providerAccountsRouter.post('/auth/:provider/start', async (req: SessionRequest, res) => {
   const provider = parse(z.enum(['openrouter', 'github-copilot']), req.params.provider);
   const body = parse(startSchema, req.body);
@@ -909,10 +963,44 @@ providerAccountsRouter.patch('/:id', requirePermission('edit_keys'), (req, res) 
   const updated = updateAccount(accountId, patch);
   res.json({ id: updated.id, label: updated.label, enabled: updated.enabled === 1 });
 });
+providerAccountsRouter.put('/:id/resilience', requirePermission('edit_keys'), (req, res) => {
+  const accountId = id(req);
+  const row = accountRow(accountId);
+  const body = parse(resiliencePatchSchema, req.body ?? {});
+  const policy = upsertAccountResiliencePolicy(accountId, {
+    ...(body.weight !== undefined ? { weight: validateCredentialWeight(body.weight) } : {}),
+    ...(body.maxConcurrency !== undefined ? { maxConcurrency: validateMaxConcurrency(body.maxConcurrency) } : {}),
+    ...(body.maxQueueSize !== undefined ? { maxQueueSize: validateMaxQueueSize(body.maxQueueSize) } : {}),
+    ...(body.failFast !== undefined ? { failFast: body.failFast } : {}),
+  });
+  syncAccountGateCap(row.provider, row.id, policy.maxConcurrency);
+  invalidateXGatewayKeyCache();
+  res.json({
+    ok: true,
+    policy,
+    semaphore: getAccountSemaphoreSnapshot(row.provider, row.id, policy.maxConcurrency),
+  });
+});
+providerAccountsRouter.post('/:id/resilience/reset-circuit', requirePermission('edit_keys'), (req, res) => {
+  const accountId = id(req);
+  const row = accountRow(accountId);
+  parse(emptySchema, req.body ?? {});
+  clearOAuthRefreshStateForAccount(accountId);
+  const policy = clearRefreshCircuit(accountId);
+  unblockAccountGates(row.provider, accountId);
+  invalidateXGatewayKeyCache();
+  res.json({
+    ok: true,
+    policy,
+    semaphore: getAccountSemaphoreSnapshot(row.provider, accountId, policy.maxConcurrency),
+  });
+});
 providerAccountsRouter.delete('/:id', requirePermission('delete_keys'), (req, res) => {
   const accountId = id(req);
   parse(emptySchema, req.body ?? {});
+  const row = accountRow(accountId);
   deleteAccount(accountId);
+  resetAccountGates(row.provider, accountId);
   res.json({ ok: true, id: accountId });
 });
 providerAccountsRouter.post('/:id/test', requirePermission('test_keys'), async (req, res) => {

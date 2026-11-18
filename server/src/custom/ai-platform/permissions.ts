@@ -73,6 +73,18 @@ export function aiPlatformPermission(method: string, path: string): Permission {
   }
   if (sub === '/prompt-cache/stats' && read) return 'view_prompt_cache';
 
+  // Semantic cache
+  if (/^\/semantic-cache\/[^/]+\/[^/]+\/settings$/.test(sub)) {
+    if (read) return 'view_prompt_cache';
+    if (upper === 'PUT') return 'edit_prompt_cache';
+    return 'manage_ai_platform';
+  }
+  if (/^\/semantic-cache\/[^/]+\/[^/]+\/stats$/.test(sub) && read) return 'view_prompt_cache';
+  if (/^\/semantic-cache\/[^/]+\/[^/]+\/flush$/.test(sub) && upper === 'POST') return 'edit_prompt_cache';
+  if (/^\/semantic-cache\/[^/]+\/[^/]+\/lookup-preview$/.test(sub) && upper === 'POST') {
+    return 'view_prompt_cache';
+  }
+
   // MCP client
   if (sub === '/mcp/servers') {
     if (read) return 'view_mcp_servers';
