@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import type { Platform } from '@freellmapi/shared/types.js';
 import { getDb, getUnifiedApiKey, isKeyStoreDecryptable } from '../db/index.js';
+import type { Db } from '../db/types.js';
 import { isEncryptionKeyInitialized } from '../lib/crypto.js';
 import { extractApiToken, timingSafeStringEqual } from './proxy.js';
 import { getProvider } from '../providers/index.js';
@@ -23,7 +24,7 @@ import { openapiSpec } from '../docs/openapi.js';
 export const statusRouter = Router();
 export const providersRouter = Router();
 
-// Cheap "is the SQLite connection answering" probe. getDb() throws before initDb
+// Cheap "can the DB take a write" probe. getDb() throws before initDb
 // has run, and prepare/get throws if the handle is closed — either way the
 // server is not serviceable, which is exactly the /livez and /readyz 503 signal.
 function isDbReachable(): boolean {
@@ -32,6 +33,33 @@ function isDbReachable(): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+// Marker that distinguishes the deliberate rollback below from a real
+// failure: the probe INSERTs a sentinel row and then throws this to roll the
+// transaction back, so the row never persists.
+const WRITE_PROBE_ROLLBACK = '__readyz_write_probe_rollback';
+
+/**
+ * Probe the DB write path: INSERT a sentinel row into `settings` inside a
+ * transaction that always rolls back. The row never persists, but the INSERT
+ * exercises the write path — a read-only file, a corrupt database, or a full
+ * disk fails here instead of only surfacing on the next dashboard save.
+ * Never throws: any failure to run the probe reads as "not writable".
+ * Both drivers (node-sqlite and Turso) roll the transaction back when the
+ * callback throws (see db/node-sqlite.ts and db/turso.ts).
+ */
+export function isDbWritable(db: Db = getDb()): boolean {
+  try {
+    const probe = db.transaction(() => {
+      db.prepare(`INSERT INTO settings (key, value) VALUES ('__readyz_write_probe', '1')`).run();
+      throw new Error(WRITE_PROBE_ROLLBACK);
+    });
+    probe();
+    return true; // unreachable: probe() always throws to roll back
+  } catch (err: any) {
+    return err?.message === WRITE_PROBE_ROLLBACK;
   }
 }
 
@@ -62,25 +90,95 @@ statusRouter.get('/livez', (_req: Request, res: Response) => {
 });
 
 // GET /readyz — readiness. 200 when at least one upstream is serviceable right
-// now (an enabled key whose status is healthy or not-yet-probed). 503 with a
-// machine-readable reason otherwise, so a meta-gateway can skip this instance
-// instead of eating a failover on every call.
+// now. "Serviceable" means PROVEN, not merely configured:
+//   - the key's status is 'healthy' AND it has a last_healthy_at stamp — a
+//     probe (or a served request) actually succeeded with it at least once.
+//     A key that merely says 'healthy' because nothing has failed it yet, or
+//     was never checked, does not count. ('unknown' keys count only before any
+//     health probe has ever run — see below.)
+//   - the key still has a route to serve: at least one enabled model of its
+//     platform that is not on an active cooldown for this key. A key whose
+//     whole catalog is benched reads as down, not ready.
+//   - the DB accepts writes (a read-only/corrupt/full database cannot serve
+//     traffic that logs requests, so it is not ready either).
+// 503 with a machine-readable reason otherwise, so a meta-gateway can skip
+// this instance instead of eating a failover on every call.
+//
+// Bootstrap exception: no health pass runs at startup — the first scheduled
+// pass is ~5 minutes after boot — so a fresh install would 503 for its first
+// minutes if 'unknown' never counted. Until any key has a last_checked_at
+// stamp (i.e. no probe has ever run on this database), unprobed
+// healthy/unknown keys count as ready, exactly as before. The moment the
+// first pass has run, 'unknown' stops counting: a key that has never proven
+// itself is no longer readiness.
 statusRouter.get('/readyz', (_req: Request, res: Response) => {
   if (!isDbReachable()) {
     res.status(503).json({ status: 'unavailable', reason: 'db_unreachable' });
     return;
   }
+  if (!isDbWritable()) {
+    res.status(503).json({ status: 'unavailable', reason: 'db_not_writable' });
+    return;
+  }
 
   const db = getDb();
+  const now = Date.now();
   const agg = db.prepare(`
     SELECT
       COUNT(*) AS enabled_keys,
-      COUNT(DISTINCT CASE WHEN status IN ('healthy', 'unknown') THEN platform END) AS ready_upstreams
+      COUNT(CASE WHEN last_checked_at IS NOT NULL THEN 1 END) AS probed_keys,
+      COUNT(CASE WHEN status = 'healthy' AND last_healthy_at IS NOT NULL THEN 1 END) AS proven_keys
     FROM api_keys
     WHERE enabled = 1
-  `).get() as { enabled_keys: number; ready_upstreams: number };
+  `).get() as { enabled_keys: number; probed_keys: number; proven_keys: number };
 
-  const readyUpstreams = agg.ready_upstreams ?? 0;
+  const enabledKeys = agg.enabled_keys ?? 0;
+  if (enabledKeys === 0) {
+    res.status(503).json({ status: 'unavailable', reason: 'no_upstreams_configured' });
+    return;
+  }
+
+  // Before any probe has ever run, count unprobed healthy/unknown keys as
+  // ready (bootstrap — see above). After that, only proven keys with a
+  // cooldown-free route count.
+  let readyUpstreams: number;
+  if ((agg.probed_keys ?? 0) === 0) {
+    const bootstrap = db.prepare(`
+      SELECT COUNT(DISTINCT platform) AS ready_upstreams
+      FROM api_keys
+      WHERE enabled = 1 AND status IN ('healthy', 'unknown')
+    `).get() as { ready_upstreams: number };
+    readyUpstreams = bootstrap.ready_upstreams ?? 0;
+  } else {
+    const proven = db.prepare(`
+      SELECT COUNT(DISTINCT k.platform) AS ready_upstreams
+      FROM api_keys k
+      WHERE k.enabled = 1
+        AND k.status = 'healthy'
+        AND k.last_healthy_at IS NOT NULL
+        AND (
+          EXISTS (
+            SELECT 1 FROM models m
+            WHERE m.platform = k.platform AND m.enabled = 1
+              AND (m.key_id IS NULL OR m.key_id = k.id)
+              AND NOT EXISTS (
+                SELECT 1 FROM rate_limit_cooldowns c
+                WHERE c.platform = k.platform AND c.model_id = m.model_id
+                  AND c.key_id = k.id AND c.expires_at_ms > ?
+              )
+          )
+          OR (
+            NOT EXISTS (SELECT 1 FROM models m2 WHERE m2.platform = k.platform AND m2.enabled = 1)
+            AND NOT EXISTS (
+              SELECT 1 FROM rate_limit_cooldowns c2
+              WHERE c2.platform = k.platform AND c2.key_id = k.id AND c2.expires_at_ms > ?
+            )
+          )
+        )
+    `).get(now, now) as { ready_upstreams: number };
+    readyUpstreams = proven.ready_upstreams ?? 0;
+  }
+
   if (readyUpstreams > 0) {
     res.json({ status: 'ok', ready_upstreams: readyUpstreams });
     return;
@@ -89,10 +187,12 @@ statusRouter.get('/readyz', (_req: Request, res: Response) => {
   // Distinguish "nothing configured" from "everything cooling down" from
   // "everything unhealthy" so the caller can act on the specific reason.
   let reason: string;
-  if ((agg.enabled_keys ?? 0) === 0) {
-    reason = 'no_upstreams_configured';
-  } else if (getSoonestCooldownExpiry() != null) {
+  if (getSoonestCooldownExpiry() != null) {
     reason = 'all_upstreams_rate_limited';
+  } else if ((agg.proven_keys ?? 0) === 0) {
+    // Probes have run but no key has ever succeeded — the pool never proved
+    // itself, which is different from "was healthy once, now down".
+    reason = 'no_upstream_ever_probed_healthy';
   } else {
     reason = 'all_upstreams_unhealthy';
   }
