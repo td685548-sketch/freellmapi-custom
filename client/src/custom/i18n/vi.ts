@@ -1888,4 +1888,8 @@ export const VI: Record<string, string> = {
   "Recent evaluation runs": "Các lần đánh giá gần đây",
   "No evaluation runs recorded yet.": "Chưa có lượt đánh giá nào được ghi nhận.",
   "Failed to run evaluation": "Chạy đánh giá thất bại",
+  "Enable semantic similarity cache": "Bật bộ nhớ đệm tương đồng ngữ nghĩa (Semantic Cache)",
+  "Semantic similarity threshold": "Ngưỡng tương đồng ngữ nghĩa",
+  "Matches paraphrased non-streaming prompts within the same profile, end-user, model, and system prompt when embeddings are configured.": "Khớp các câu hỏi diễn đạt tương tự (không stream) trong cùng profile, người dùng cuối, model và system prompt khi đã cấu hình embeddings.",
+  "Semantic entries: {entries} · Hits: {hits} · Saved tokens: {tokens}": "Mục ngữ nghĩa: {entries} · Khớp: {hits} · Token tiết kiệm: {tokens}",
 }

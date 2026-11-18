@@ -10,6 +10,7 @@ import {
   cacheMaxTemperature,
   CACHE_ENABLED_SETTING,
 } from '../services/cache.js';
+import { clearSemanticCache, getSemanticCacheStats } from '../custom/semantic-cache.js';
 
 export const cacheRouter = Router();
 
@@ -23,6 +24,7 @@ cacheRouter.get('/stats', (_req: Request, res: Response) => {
     maxEntries: cacheMaxEntries(),
     maxTemperature: cacheMaxTemperature(),
     ...stats,
+    ...getSemanticCacheStats(),
     savedTokens: stats.savedPromptTokens + stats.savedCompletionTokens,
   });
 });
@@ -45,6 +47,6 @@ cacheRouter.put('/config', (req: Request, res: Response) => {
 
 // Flush the cache (e.g. after changing keys/models, or to force fresh answers).
 cacheRouter.delete('/', (_req: Request, res: Response) => {
-  const removed = clearCache();
+  const removed = clearCache() + clearSemanticCache();
   res.json({ cleared: removed });
 });
