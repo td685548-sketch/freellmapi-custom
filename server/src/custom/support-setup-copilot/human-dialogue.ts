@@ -22,6 +22,7 @@ export type HumanConversationalAct =
   | 'platform_guide'
   | 'step_question'
   | 'roadmap_guide'
+  | 'identity_or_permissions'
   | 'business_context';
 
 export interface OpenDomainTopicInsight {
@@ -70,6 +71,12 @@ export interface HumanDialogueTurnParams {
   canCreateTenant?: boolean;
   canEditAny?: boolean;
   hasBaseProposal?: boolean;
+  /**
+   * Deterministic DB-grounded identity reply (from identity.ts). When the act
+   * is `identity_or_permissions` this exact text is returned — the LLM is
+   * never asked to answer identity questions from its own knowledge.
+   */
+  identityReply?: string;
 }
 
 export interface HumanDialogueTurnResult {
@@ -1278,6 +1285,43 @@ const NO_WEBSITE_YET_RE =
 const THANKS_RE =
   /^(?:ok\s+)?(?:cảm\s+ơn|cám\s+ơn|cam\s+on|thank\s+you|thanks|tks|cảm\s+ơn\s+(?:bạn|em|nhiều|nha|nhé)|thank\s+you\s+so\s+much)[!.?,\s]*$/i;
 
+/**
+ * The caller asking about their OWN role / permissions — e.g. "tôi có role và
+ * quyền gì", "tôi là admin hay member", "quyền của tôi là gì",
+ * "what are my permissions", "am I an admin". Checked BEFORE the roadmap /
+ * step guides (whose "là gì" patterns would otherwise swallow these), and
+ * answered deterministically from the server identity record — never by LLM.
+ *
+ * NOTE: plain `\b` is ASCII-only in JS, so it never matches next to a
+ * Vietnamese diacritic (e.g. after "có" or "quyền"). Boundaries here use
+ * Unicode-aware lookarounds over [A-Za-zÀ-ỹ0-9_] instead.
+ */
+const U = 'A-Za-zÀ-ỹ0-9_';
+const IDENTITY_OR_PERMISSIONS_RE = new RegExp(
+  [
+    `(?:tôi|mình|tui|em)\\s+(?:có|đang\\s+có)(?![${U}])[^.!?\\n]{0,60}?(?<![${U}])(?:role|quyền|quyen|quyền\\s+hạn)(?![${U}])`,
+    `(?<![${U}])(?:quyền|quyen|quyền\\s+hạn|vai\\s+trò|role)\\s+(?:của\\s+)?(?:tôi|mình|tui|em)(?![${U}])`,
+    `(?<![${U}])(?:tôi|mình|tui|em)\\s+là\\s+(?:admin|member|quản\\s+trị|quan\\s+tri|người\\s+dùng|nguoi\\s+dung)(?![${U}])`,
+    `(?<![${U}])(?:tôi|mình)\\s+(?:có\\s+)?(?:được\\s+)?(?:những\\s+)?quyền\\s+(?:gì|nào|han)(?![${U}])`,
+    `(?<![${U}])(?:tôi|mình)\\s+được\\s+(?:phép\\s+)?(?:làm\\s+)?(?:những\\s+)?(?:gì|gi)(?![${U}])`,
+    `(?<![${U}])(?:cho\\s+)?(?:tôi|mình)\\s+(?:biết\\s+)?(?:role|quyền|quyen)\\s+(?:của\\s+)?(?:tôi|mình)(?![${U}])`,
+    `\\bam\\s+i\\s+(?:an\\s+)?(?:admin|a\\s+member)\\b`,
+    `\\bwhat(?:'s|\\s+is)\\s+my\\s+role\\b`,
+    `\\bwhat\\s+are\\s+my\\s+permissions\\b`,
+    `\\bwhat\\s+(?:permissions|access|role)\\s+do\\s+i\\s+have\\b`,
+    `\\bdo\\s+i\\s+have\\s+(?:admin|permission|access)\\b`,
+    `\\bmy\\s+(?:role|permissions)\\b`,
+    `\\bshow\\s+(?:me\\s+)?my\\s+permissions\\b`,
+    `\\bcheck\\s+my\\s+(?:role|permissions)\\b`,
+    `\\bwho\\s+am\\s+i\\b`,
+  ].join('|'),
+  'i',
+);
+
+export function isIdentityOrPermissionsQuestion(text: string): boolean {
+  return IDENTITY_OR_PERMISSIONS_RE.test((text || '').trim());
+}
+
 const GREETING_RE =
   /^(?:(?:xin\s+)?(?:chào|chao)(?:\s+(?:bạn|ban|ad|em|anh|chị|ai|mình|nhé|nha))?|alo|hi|hello|hey|good\s+(?:morning|afternoon|evening)|ban\s+oi|bạn\s+ơi)[!.?,\s]*$/i;
 
@@ -1306,6 +1350,10 @@ export function classifyHumanConversationalAct(
 
   if (THANKS_RE.test(trimmed)) return 'thanks';
   if (GREETING_RE.test(trimmed)) return 'greeting';
+
+  // Identity / permissions questions are answered deterministically from the
+  // server identity record — classify them before any guide/step matcher.
+  if (isIdentityOrPermissionsQuestion(trimmed)) return 'identity_or_permissions';
 
   if (matchPlatformKnowledgeQuestion(trimmed, currentPath)) {
     return 'platform_guide';
@@ -1712,6 +1760,27 @@ export function buildHumanDialogueTurn(
           'GlowSkin Skincare shop, 7-day returns, #ec4899 pink, friendly tone',
         ];
   };
+
+  // 0. Identity / permissions — answered ONLY from the server identity record.
+  // The deterministic branch in playbook/router normally returns first; this
+  // fallback keeps the dialogue layer from ever inventing permissions.
+  if (act === 'identity_or_permissions') {
+    return {
+      act,
+      intent: 'guide',
+      shouldProposeNow: false,
+      focusedStepId: null,
+      reply:
+        params.identityReply ??
+        (locale === 'vi'
+          ? 'Mình chỉ trả lời về role và quyền từ hồ sơ hệ thống của tài khoản bạn — bấm chip “Quyền của tôi” ở trên để xem chi tiết, hoặc nhắn lại “Tôi có quyền gì?” nhé.'
+          : 'I only answer role and permission questions from your account record — tap the “My permissions” chip above to see the details, or ask me “What are my permissions?” again.'),
+      missingQuestions: [],
+      suggestedQuickReplies: buildContextualQuickReplies(),
+      extractedRequirements,
+      topic,
+    };
+  }
 
   // 1. Frustration / complaint about stiffness or repetition
   if (act === 'frustration_pushback') {

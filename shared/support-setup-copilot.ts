@@ -446,6 +446,32 @@ export interface CopilotExecuteActionResponse {
   onboarding?: CopilotOnboardingChecklist;
 }
 
+export interface CopilotWhoAmITenant {
+  id: number;
+  name: string;
+  slug: string;
+  rolePreset: string;
+  permissions: string[];
+  canViewSteps: SupportSetupStepId[];
+  canEditSteps: SupportSetupStepId[];
+}
+
+/**
+ * GET /api/support-setup-copilot/whoami — the caller's OWN identity only.
+ * Built strictly from the caller's session + custom_tenant_memberships rows;
+ * a caller never sees tenants they have no access to.
+ */
+export interface CopilotWhoAmIResponse {
+  ok: true;
+  email: string;
+  accountRole: 'admin' | 'member';
+  isPrimary: boolean;
+  isPlatformOperator: boolean;
+  canCreateTenant: boolean;
+  globalPermissions: string[];
+  tenants: CopilotWhoAmITenant[];
+}
+
 export interface SupportSetupStatusResponse {
   ok: true;
   visible: boolean;

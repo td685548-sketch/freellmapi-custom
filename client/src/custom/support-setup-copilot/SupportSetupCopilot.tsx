@@ -43,6 +43,7 @@ import type {
   CopilotOpenOnboardingActionParams,
   CopilotSwitchRoutingModeActionParams,
   CopilotUserDiagnosticReport,
+  CopilotWhoAmIResponse,
   SupportSetupApplyResponse,
   SupportSetupLanguage,
   SupportSetupProposal,
@@ -54,6 +55,7 @@ import type {
 } from '../../../../shared/support-setup-copilot';
 import {
   fetchCopilotUserDiagnostics,
+  fetchCopilotWhoAmI,
   fetchSupportSetupStatus,
   isMemberPersonalCopilotRoute,
   isSupportSetupCopilotRoute,
@@ -177,6 +179,7 @@ export function SupportSetupCopilot() {
   const [wide, setWide] = useState(false);
   const [roadmapOpen, setRoadmapOpen] = useState(false);
   const [briefOpen, setBriefOpen] = useState(false);
+  const [whoamiOpen, setWhoamiOpen] = useState(false);
   const [targetSelection, setTargetSelection] = useState<'auto' | 'new' | number>('auto');
   const [input, setInput] = useState('');
   const [turns, setTurns] = useState<ChatTurn[]>([]);
@@ -208,6 +211,15 @@ export function SupportSetupCopilot() {
 
   const statusData = statusQuery.data;
   const isTenantSetupVisible = Boolean(statusData?.visible);
+
+  // "Quyền của tôi" — the caller's own identity only, fetched on demand.
+  const whoamiQuery = useQuery<CopilotWhoAmIResponse>({
+    queryKey: ['support-setup-copilot-whoami'],
+    queryFn: () => fetchCopilotWhoAmI(),
+    enabled: canQueryStatus && whoamiOpen,
+    staleTime: 20_000,
+  });
+  const whoami = whoamiQuery.data ?? null;
   const isMemberOnlyMode =
     !isTenantSetupVisible && onMemberPersonalRoute && Boolean(statusData?.memberCopilotVisible);
   const isCopilotVisible = isTenantSetupVisible || isMemberOnlyMode;
@@ -1241,6 +1253,16 @@ export function SupportSetupCopilot() {
                     <span>{s.doctorPillLabel}</span>
                   </button>
 
+                  <button
+                    type="button"
+                    className={`ssc-pill-toggle ${whoamiOpen ? 'ssc-pill-toggle--active' : ''}`}
+                    data-testid="copilot-whoami-pill"
+                    onClick={() => setWhoamiOpen((v) => !v)}
+                  >
+                    <ShieldCheck size={13} />
+                    <span>{s.whoamiPillLabel}</span>
+                  </button>
+
                   {canEditAnyStep ? (
                     <button
                       type="button"
@@ -1302,6 +1324,15 @@ export function SupportSetupCopilot() {
                 </button>
                 <button
                   type="button"
+                  className={`ssc-pill-toggle ${whoamiOpen ? 'ssc-pill-toggle--active' : ''}`}
+                  data-testid="copilot-whoami-pill"
+                  onClick={() => setWhoamiOpen((v) => !v)}
+                >
+                  <ShieldCheck size={13} />
+                  <span>{s.whoamiPillLabel}</span>
+                </button>
+                <button
+                  type="button"
                   className="ssc-pill-toggle"
                   data-testid="copilot-onboarding-pill"
                   disabled={chatMutation.isPending}
@@ -1315,6 +1346,89 @@ export function SupportSetupCopilot() {
               </div>
             )}
           </div>
+
+          {whoamiOpen && (
+            <div className="ssc-diag-card" data-testid="copilot-whoami-card">
+              <div className="ssc-diag-head">
+                <span className="ssc-diag-title">
+                  <ShieldCheck size={13} />
+                  <span>{s.whoamiCardTitle}</span>
+                </span>
+                <button
+                  type="button"
+                  className="ssc-link-btn"
+                  onClick={() => setWhoamiOpen(false)}
+                >
+                  <span>{s.whoamiHide}</span>
+                </button>
+              </div>
+              <div className="ssc-diag-body">
+                {whoamiQuery.isPending ? (
+                  <span style={{ color: 'var(--ssc-muted)', fontSize: 11 }}>{s.thinking}</span>
+                ) : whoamiQuery.isError || !whoami ? (
+                  <span style={{ color: 'var(--ssc-muted)', fontSize: 11 }}>
+                    {whoami?.email ?? session.session?.email ?? ''}
+                  </span>
+                ) : (
+                  <>
+                    <div className="ssc-diag-metrics">
+                      <div className="ssc-diag-metric">
+                        <span className="ssc-diag-metric-label">{s.whoamiAccountRole}</span>
+                        <span className="ssc-diag-metric-val">
+                          {whoami.isPrimary
+                            ? s.whoamiRolePrimaryAdmin
+                            : whoami.accountRole === 'admin'
+                              ? s.whoamiRoleAdmin
+                              : s.whoamiRoleMember}
+                        </span>
+                      </div>
+                      <div className="ssc-diag-metric">
+                        <span className="ssc-diag-metric-label">
+                          {whoami.isPlatformOperator
+                            ? s.whoamiPlatformOperator
+                            : s.whoamiNotPlatformOperator}
+                        </span>
+                        <span className="ssc-diag-metric-val">
+                          {whoami.canCreateTenant
+                            ? s.whoamiCanCreateTenant
+                            : s.whoamiCannotCreateTenant}
+                        </span>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--ssc-muted)' }}>{whoami.email}</div>
+                    <div style={{ fontSize: 11, marginTop: 6 }}>
+                      <strong>{s.whoamiGlobalPermissions}: </strong>
+                      {whoami.globalPermissions.length === 0
+                        ? s.whoamiNoGlobalPermissions
+                        : whoami.globalPermissions.includes('*')
+                          ? s.whoamiFullAccess
+                          : whoami.globalPermissions.join(', ')}
+                    </div>
+                    <div style={{ fontSize: 11, marginTop: 6 }}>
+                      <strong>{s.whoamiTenants}: </strong>
+                      {whoami.tenants.length === 0 ? (
+                        s.whoamiNoTenants
+                      ) : (
+                        <ul style={{ margin: '4px 0 0', paddingLeft: 16 }}>
+                          {whoami.tenants.map((t) => (
+                            <li key={t.id}>
+                              <strong>
+                                {t.name} ({t.slug})
+                              </strong>{' '}
+                              — {t.rolePreset}; {t.permissions.join(', ') || '—'}
+                              <br />
+                              {s.whoamiCanViewSteps}: {t.canViewSteps.join(', ') || '—'} ·{' '}
+                              {s.whoamiCanEditSteps}: {t.canEditSteps.join(', ') || '—'}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
 
           {roadmapOpen && isTenantSetupVisible && activeTenantDiag && (
             <div className="ssc-roadmap" data-testid="support-setup-roadmap">
@@ -1546,6 +1660,21 @@ export function SupportSetupCopilot() {
                         </span>
                         <ChevronRight size={14} className="ssc-starter-arrow" aria-hidden="true" />
                       </button>
+                      <button
+                        type="button"
+                        className="ssc-starter-btn"
+                        data-testid="copilot-starter-whoami"
+                        onClick={() => sendMessage(s.starterWhoAmIPrompt)}
+                      >
+                        <span className="ssc-starter-icon" aria-hidden="true">
+                          <ShieldCheck size={15} />
+                        </span>
+                        <span className="ssc-starter-copy">
+                          <span className="ssc-starter-title">{s.starterWhoAmI}</span>
+                          <span className="ssc-starter-desc">{s.starterWhoAmIDesc}</span>
+                        </span>
+                        <ChevronRight size={14} className="ssc-starter-arrow" aria-hidden="true" />
+                      </button>
                     </>
                   ) : (
                     <>
@@ -1591,6 +1720,21 @@ export function SupportSetupCopilot() {
                         <span className="ssc-starter-copy">
                           <span className="ssc-starter-title">{s.starterOnboarding}</span>
                           <span className="ssc-starter-desc">{s.starterOnboardingDesc}</span>
+                        </span>
+                        <ChevronRight size={14} className="ssc-starter-arrow" aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        className="ssc-starter-btn"
+                        data-testid="copilot-starter-whoami"
+                        onClick={() => sendMessage(s.starterWhoAmIPrompt)}
+                      >
+                        <span className="ssc-starter-icon" aria-hidden="true">
+                          <ShieldCheck size={15} />
+                        </span>
+                        <span className="ssc-starter-copy">
+                          <span className="ssc-starter-title">{s.starterWhoAmI}</span>
+                          <span className="ssc-starter-desc">{s.starterWhoAmIDesc}</span>
                         </span>
                         <ChevronRight size={14} className="ssc-starter-arrow" aria-hidden="true" />
                       </button>

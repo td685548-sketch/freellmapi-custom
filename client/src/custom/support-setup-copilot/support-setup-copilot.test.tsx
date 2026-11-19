@@ -8,6 +8,7 @@ import { I18nProvider } from '@/i18n';
 import type {
   CopilotExecuteActionRequest,
   CopilotExecuteActionResponse,
+  CopilotWhoAmIResponse,
   SupportSetupApplyResponse,
   SupportSetupChatResponse,
   SupportSetupProposal,
@@ -475,10 +476,12 @@ describe('SupportSetupCopilot widget', () => {
     // Read-only badge shown instead of Quick Business Brief toggle
     expect(container.querySelector('[data-testid="support-setup-readonly-badge"]')).not.toBeNull();
 
-    // Only the Guide starter button is rendered (auto-setup starters hidden)
+    // Only the Guide starter button is rendered (auto-setup starters hidden);
+    // the "Tôi có quyền gì?" starter stays available to read-only accounts.
     const starters = container.querySelectorAll('.ssc-starter-btn');
-    expect(starters).toHaveLength(1);
+    expect(starters).toHaveLength(2);
     expect(starters[0]?.textContent).toContain('Hướng dẫn');
+    expect(starters[1]?.textContent).toContain('Tôi có quyền gì?');
 
     // Open roadmap: restricted steps show 'Giới hạn quyền' and omit the 'Mở trang' button
     const roadmapToggle = container.querySelector('[data-testid="support-setup-roadmap-toggle"]') as HTMLButtonElement;
@@ -1223,5 +1226,106 @@ it('renders surgical proposal badge and defaults only targeted steps to checked'
     expect(container.querySelector('[data-testid="copilot-ide-snippet"]')?.textContent).toContain(
       'opencode.ai/config.json',
     );
+  });
+
+  it('shows "Quyền của tôi" chip/card with the caller’s own role and asks "Tôi có quyền gì?"', async () => {
+    const whoami: CopilotWhoAmIResponse = {
+      ok: true,
+      email: 'tenant-configurator@example.com',
+      accountRole: 'member',
+      isPrimary: false,
+      isPlatformOperator: false,
+      canCreateTenant: false,
+      globalPermissions: ['use_x_gateway'],
+      tenants: [
+        {
+          id: 1,
+          name: 'EXE',
+          slug: 'exe',
+          rolePreset: 'ai_configurator',
+          permissions: ['tenant_ai_config', 'tenant_knowledge'],
+          canViewSteps: ['tenant_ai', 'knowledge_masking'],
+          canEditSteps: ['tenant_ai', 'knowledge_masking'],
+        },
+      ],
+    };
+    let whoamiCalls = 0;
+    const chatBodies: Array<{ messages?: Array<{ content: string }> }> = [];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith('/api/user/session')) {
+          return json({
+            userId: 2,
+            email: 'tenant-configurator@example.com',
+            role: 'member',
+            isPrimary: false,
+            permissions: ['use_x_gateway'],
+          });
+        }
+        if (url.includes('/api/support-setup-copilot/status')) {
+          return json(sampleStatus(true));
+        }
+        if (url.endsWith('/api/support-setup-copilot/whoami')) {
+          whoamiCalls += 1;
+          return json(whoami);
+        }
+        if (url.endsWith('/api/support-setup-copilot/chat')) {
+          chatBodies.push(
+            JSON.parse(String(init?.body ?? '{}')) as {
+              messages?: Array<{ content: string }>;
+            },
+          );
+          const resp: SupportSetupChatResponse = {
+            ok: true,
+            reply: 'Bạn đang đăng nhập với tenant-configurator@example.com.',
+            intent: 'guide',
+            missingQuestions: [],
+            suggestedQuickReplies: [],
+            proposal: null,
+            modelUsed: null,
+            usedFallback: true,
+          };
+          return json(resp);
+        }
+        return json({});
+      }),
+    );
+
+    mount('/thruline/support-guardrails', 'vi');
+    await flush();
+
+    const launcher = container.querySelector(
+      '[data-testid="support-setup-copilot-launcher"]',
+    ) as HTMLButtonElement;
+    act(() => launcher.click());
+    await flush();
+
+    // "Quyền của tôi" chip fetches whoami on demand and renders the card.
+    const whoamiPill = container.querySelector(
+      '[data-testid="copilot-whoami-pill"]',
+    ) as HTMLButtonElement;
+    expect(whoamiPill).not.toBeNull();
+    expect(whoamiPill.textContent).toContain('Quyền của tôi');
+    act(() => whoamiPill.click());
+    await flush();
+    expect(whoamiCalls).toBe(1);
+
+    const card = container.querySelector('[data-testid="copilot-whoami-card"]');
+    expect(card).not.toBeNull();
+    expect(card?.textContent).toContain('tenant-configurator@example.com');
+    expect(card?.textContent).toContain('Thành viên');
+    expect(card?.textContent).toContain('ai_configurator');
+    expect(card?.textContent).toContain('EXE (exe)');
+
+    // "Tôi có quyền gì?" starter sends the identity question to chat.
+    const starter = container.querySelector(
+      '[data-testid="copilot-starter-whoami"]',
+    ) as HTMLButtonElement;
+    expect(starter).not.toBeNull();
+    act(() => starter.click());
+    await flush();
+    expect(chatBodies.at(-1)?.messages?.at(-1)?.content).toBe('Tôi có quyền gì?');
   });
 });

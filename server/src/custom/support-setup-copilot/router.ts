@@ -30,6 +30,13 @@ import {
   hasDoctorOrActionVietnameseMarkers,
   matchErrorDoctorIntent,
 } from './error-doctor.js';
+import {
+  buildCallerIdentity,
+  buildIdentityReply,
+  buildWhoAmIResponse,
+  identitySuggestedQuickReplies,
+} from './identity.js';
+import { isIdentityOrPermissionsQuestion } from './human-dialogue.js';
 import { applySupportSetupProposal } from './executor.js';
 import {
   buildPlatformExpertReply,
@@ -324,6 +331,33 @@ supportSetupCopilotRouter.get('/status', (req: Request, res: Response) => {
   res.json(payload);
 });
 
+// GET /api/support-setup-copilot/whoami — the caller's OWN identity only.
+// A caller with no access to a tenant sees nothing about that tenant.
+supportSetupCopilotRouter.get('/whoami', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = (req as Request & { user?: SessionUser }).user!;
+    if (!allowAuthRequest(`setup-copilot-whoami:${user.userId}`, 40)) {
+      throw new SupportSetupCopilotError(
+        429,
+        'rate_limit_error',
+        'Too many identity requests. Please wait a moment and try again.',
+      );
+    }
+    const scope = resolveCopilotUserScope(user);
+    const identity = buildCallerIdentity(user, scope);
+    if (!identity) {
+      throw new SupportSetupCopilotError(
+        401,
+        'authentication_required',
+        'Authentication required.',
+      );
+    }
+    res.json(buildWhoAmIResponse(identity));
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/support-setup-copilot/diagnostics — Strictly scoped to req.user.userId
 supportSetupCopilotRouter.get('/diagnostics', (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -463,6 +497,30 @@ supportSetupCopilotRouter.post('/chat', async (req: Request, res: Response, next
         }),
       );
       return;
+    }
+
+    // 2b. Permission-aware identity (Phase 1): answer role/permissions
+    // questions DETERMINISTICALLY from the DB-grounded identity record,
+    // before the LLM and before the hasAccess gate — even members without
+    // tenant access deserve to know who they are.
+    if (isIdentityOrPermissionsQuestion(latestUserMessage)) {
+      const identity = buildCallerIdentity(user, scope);
+      if (identity) {
+        res.json({
+          ok: true,
+          replyLocale: effectiveLocale,
+          reply: buildIdentityReply(identity, effectiveLocale),
+          intent: 'guide',
+          missingQuestions: [],
+          suggestedQuickReplies: identitySuggestedQuickReplies(effectiveLocale),
+          proposal: null,
+          userDiagnostic: null,
+          actionProposal: null,
+          modelUsed: null,
+          usedFallback: true,
+        } satisfies SupportSetupChatResponse);
+        return;
+      }
     }
 
     // 3. Regular members without Support Tenant permissions:

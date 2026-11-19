@@ -32,6 +32,11 @@ import {
 } from '../cloud-entitlement/service.js';
 import { buildPlatformPromptSection } from './platform-guide.js';
 import {
+  buildAccountOnlyIdentityBlock,
+  buildIdentityPromptBlock,
+  type CopilotAgentContext,
+} from './identity.js';
+import {
   buildSystemSettingsPromptSection,
   hasAnySystemSettingPermission,
   isSupportSystemSettingId,
@@ -74,6 +79,8 @@ export interface LlmCoachTurnInput {
   canCreateTenant?: boolean;
   canEditSteps?: ReadonlySet<SupportSetupStepId>;
   gatewayLoopback?: GatewayLoopbackContext;
+  /** DB-grounded caller identity (Phase 0). When present, its trusted block is injected into the system prompt. */
+  agentContext?: CopilotAgentContext;
   /** Optional fetch override for unit/integration tests. */
   fetchImpl?: typeof fetch;
   /** Optional per-request timeout in ms (defaults to 15_000). */
@@ -507,6 +514,8 @@ export function buildHumanCoachSystemPrompt(params: {
   extracted: SupportSetupRequirements;
   canCreateTenant?: boolean;
   canEditSteps?: ReadonlySet<SupportSetupStepId>;
+  /** DB-grounded caller identity (Phase 0). Falls back to an account-only block when absent. */
+  agentContext?: CopilotAgentContext;
 }): string {
   const {
     user,
@@ -518,6 +527,7 @@ export function buildHumanCoachSystemPrompt(params: {
     extracted,
     canCreateTenant = true,
     canEditSteps,
+    agentContext,
   } = params;
 
   const editableList = canEditSteps
@@ -571,12 +581,22 @@ export function buildHumanCoachSystemPrompt(params: {
   const platformSection = buildPlatformPromptSection(currentPath, locale);
   const systemSettingsSection = buildSystemSettingsPromptSection(user, locale);
 
+  // Permission-aware identity (Phase 0): server-provided, trusted. The model
+  // must only repeat this identity and never invent permissions.
+  const identityBlock = agentContext
+    ? buildIdentityPromptBlock(agentContext)
+    : user
+      ? buildAccountOnlyIdentityBlock(user)
+      : '';
+
   return [
     personaBlock,
     '',
     antiRepetitionBlock,
     '',
     securityAndContextBlock,
+    '',
+    identityBlock,
     '',
     systemSettingsSection,
     '',
