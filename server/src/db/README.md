@@ -29,3 +29,14 @@ Built-in model catalog rows live in migrations. Add, retire, or correct default
 models with a new forward migration.
 
 Use `db:migration:status` to inspect which migration files have already run.
+
+## Synchronizing with Remote Turso Database
+
+To bidirectionally synchronize the local SQLite database with Turso (e.g. Render cloud deployments):
+
+```sh
+npm run db:sync
+```
+
+This runs a topological-dependency-aware bidirectional sync that respects foreign key constraints, performs automated safety snapshot backups, resolves conflicting records by timestamp, and synchronizes `sqlite_sequence` auto-increment counters.
+
