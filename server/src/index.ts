@@ -62,7 +62,14 @@ async function main() {
   measureStartup('database_init', () => initDb(config.dbPath ?? undefined));
   applyLocalSqlitePerformancePragmas(getDb());
   const stopSupportWorker = startWorkerLifecycle();
-  applyDeclarativeConfigFromEnv();
+  // applyDeclarativeConfigFromEnv() already degrades a broken config to a
+  // warning + skip, but this is the last line of defence: a regression in
+  // that guard must never brick boot (restart loop, dashboard down) again.
+  try {
+    applyDeclarativeConfigFromEnv();
+  } catch (err) {
+    console.warn(`[config] declarative config skipped — booting with the existing database: ${err instanceof Error ? err.message : err}`);
+  }
   // After initDb: the unknown-model half of this check reads the catalog.
   warnOnRoutingOverrideDrift();
 

@@ -150,10 +150,22 @@ interface NormalizedCustomModel {
 
 function readConfigFromEnv(): { source: string; value: unknown } | null {
   const inline = process.env.FREEAPI_CONFIG_JSON?.trim();
-  if (inline) return { source: 'FREEAPI_CONFIG_JSON', value: JSON.parse(inline) };
+  if (inline) {
+    try {
+      return { source: 'FREEAPI_CONFIG_JSON', value: JSON.parse(inline) };
+    } catch (err) {
+      throw new Error(`invalid JSON in FREEAPI_CONFIG_JSON: ${err instanceof Error ? err.message : err}`);
+    }
+  }
 
   const configPath = process.env.FREEAPI_CONFIG_PATH?.trim();
-  if (configPath) return { source: configPath, value: JSON.parse(fs.readFileSync(configPath, 'utf8')) };
+  if (configPath) {
+    try {
+      return { source: configPath, value: JSON.parse(fs.readFileSync(configPath, 'utf8')) };
+    } catch (err) {
+      throw new Error(`could not read ${configPath}: ${err instanceof Error ? err.message : err}`);
+    }
+  }
 
   return null;
 }
@@ -566,17 +578,47 @@ export async function activateConfiguredLicense(key: string): Promise<void> {
   }
 }
 
+function emptyDeclarativeConfigResult(): DeclarativeConfigResult {
+  return { applied: false, admin: false, license: false, keys: 0, customModels: 0, models: 0, fallback: 0, routing: false, warnings: [] };
+}
+
+/**
+ * Boot-time entry point. Unlike the direct applyDeclarativeConfig() call —
+ * which still throws on an invalid schema so tests and scripts fail loudly —
+ * this must NEVER throw: it runs in main() before the HTTP listener starts,
+ * so one stray comma in FREEAPI_CONFIG_JSON (or a bad routing.strategy, or a
+ * missing FREEAPI_CONFIG_PATH file) used to put the server into a restart
+ * loop and kill the dashboard entirely. A broken declarative config is now
+ * logged as a warning and skipped; the server boots with the DB as-is, the
+ * same degrade-to-warning contract per-entry problems already had (#600).
+ * The raw config value is never logged — it may contain API keys.
+ */
 export function applyDeclarativeConfigFromEnv(): DeclarativeConfigResult {
-  const loaded = readConfigFromEnv();
-  if (!loaded) {
-    return { applied: false, admin: false, license: false, keys: 0, customModels: 0, models: 0, fallback: 0, routing: false, warnings: [] };
+  let loaded: { source: string; value: unknown } | null;
+  try {
+    loaded = readConfigFromEnv();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const warning = `could not read declarative config — skipping it and booting with the existing database: ${message}`;
+    console.warn(`[config] ${warning}`);
+    return { ...emptyDeclarativeConfigResult(), warnings: [warning] };
   }
-  const result = applyDeclarativeConfig(loaded.value, loaded.source);
-  console.log(
-    `[config] applied ${loaded.source}: ${result.keys} keys, ${result.customModels} custom models, ` +
-      `${result.models} model edits, ${result.fallback} fallback rows${result.routing ? ', routing' : ''}` +
-      `${result.admin ? ', admin account created' : ''}${result.license ? ', license activation started' : ''}` +
-      `${result.warnings.length > 0 ? `, ${result.warnings.length} entries skipped` : ''}`,
-  );
-  return result;
+  if (!loaded) {
+    return emptyDeclarativeConfigResult();
+  }
+  try {
+    const result = applyDeclarativeConfig(loaded.value, loaded.source);
+    console.log(
+      `[config] applied ${loaded.source}: ${result.keys} keys, ${result.customModels} custom models, ` +
+        `${result.models} model edits, ${result.fallback} fallback rows${result.routing ? ', routing' : ''}` +
+        `${result.admin ? ', admin account created' : ''}${result.license ? ', license activation started' : ''}` +
+        `${result.warnings.length > 0 ? `, ${result.warnings.length} entries skipped` : ''}`,
+    );
+    return result;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const warning = `invalid declarative config from ${loaded.source} — skipping it and booting with the existing database: ${message}`;
+    console.warn(`[config] ${warning}`);
+    return { ...emptyDeclarativeConfigResult(), warnings: [warning] };
+  }
 }
