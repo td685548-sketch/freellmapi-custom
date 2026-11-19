@@ -3230,6 +3230,54 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
     "baseUrl": "https://runtime.us-east-1.kiro.dev/generateAssistantResponse",
     "models": [
       {
+        "id": "claude-sonnet-4.5",
+        "name": "Claude Sonnet 4.5"
+      },
+      {
+        "id": "claude-opus-4.5",
+        "name": "Claude Opus 4.5"
+      },
+      {
+        "id": "claude-haiku-4.5",
+        "name": "Claude Haiku 4.5"
+      },
+      {
+        "id": "claude-sonnet-4.5-thinking",
+        "name": "Claude Sonnet 4.5 (Thinking)"
+      },
+      {
+        "id": "claude-sonnet-4.5-agentic",
+        "name": "Claude Sonnet 4.5 (Agentic)"
+      },
+      {
+        "id": "claude-sonnet-4.5-thinking-agentic",
+        "name": "Claude Sonnet 4.5 (Thinking + Agentic)"
+      },
+      {
+        "id": "claude-opus-4.5-thinking",
+        "name": "Claude Opus 4.5 (Thinking)"
+      },
+      {
+        "id": "claude-opus-4.5-agentic",
+        "name": "Claude Opus 4.5 (Agentic)"
+      },
+      {
+        "id": "claude-opus-4.5-thinking-agentic",
+        "name": "Claude Opus 4.5 (Thinking + Agentic)"
+      },
+      {
+        "id": "claude-haiku-4.5-thinking",
+        "name": "Claude Haiku 4.5 (Thinking)"
+      },
+      {
+        "id": "claude-haiku-4.5-agentic",
+        "name": "Claude Haiku 4.5 (Agentic)"
+      },
+      {
+        "id": "claude-haiku-4.5-thinking-agentic",
+        "name": "Claude Haiku 4.5 (Thinking + Agentic)"
+      },
+      {
         "id": "claude-opus-5.5",
         "name": "Claude Opus 5.5"
       },
@@ -3294,32 +3342,8 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
         "name": "Claude Opus 4.7 (Thinking + Agentic)"
       },
       {
-        "id": "claude-opus-4.5",
-        "name": "Claude Opus 4.5"
-      },
-      {
-        "id": "claude-opus-4.5-thinking",
-        "name": "Claude Opus 4.5 (Thinking)"
-      },
-      {
-        "id": "claude-opus-4.5-agentic",
-        "name": "Claude Opus 4.5 (Agentic)"
-      },
-      {
-        "id": "claude-opus-4.5-thinking-agentic",
-        "name": "Claude Opus 4.5 (Thinking + Agentic)"
-      },
-      {
         "id": "claude-sonnet-5",
         "name": "Claude Sonnet 5"
-      },
-      {
-        "id": "claude-sonnet-4.5",
-        "name": "Claude Sonnet 4.5"
-      },
-      {
-        "id": "claude-haiku-4.5",
-        "name": "Claude Haiku 4.5"
       },
       {
         "id": "deepseek-3.2",
@@ -3354,14 +3378,6 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
         "name": "Claude Sonnet 5 (Thinking)"
       },
       {
-        "id": "claude-sonnet-4.5-thinking",
-        "name": "Claude Sonnet 4.5 (Thinking)"
-      },
-      {
-        "id": "claude-haiku-4.5-thinking",
-        "name": "Claude Haiku 4.5 (Thinking)"
-      },
-      {
         "id": "gpt-5.6-sol-thinking",
         "name": "GPT 5.6 Sol (Thinking)"
       },
@@ -3378,14 +3394,6 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
         "name": "Claude Sonnet 5 (Agentic)"
       },
       {
-        "id": "claude-sonnet-4.5-agentic",
-        "name": "Claude Sonnet 4.5 (Agentic)"
-      },
-      {
-        "id": "claude-haiku-4.5-agentic",
-        "name": "Claude Haiku 4.5 (Agentic)"
-      },
-      {
         "id": "gpt-5.6-sol-agentic",
         "name": "GPT 5.6 Sol (Agentic)"
       },
@@ -3400,14 +3408,6 @@ export const X_GATEWAY_PROVIDERS: readonly XGatewayCatalogProvider[] = [
       {
         "id": "claude-sonnet-5-thinking-agentic",
         "name": "Claude Sonnet 5 (Thinking + Agentic)"
-      },
-      {
-        "id": "claude-sonnet-4.5-thinking-agentic",
-        "name": "Claude Sonnet 4.5 (Thinking + Agentic)"
-      },
-      {
-        "id": "claude-haiku-4.5-thinking-agentic",
-        "name": "Claude Haiku 4.5 (Thinking + Agentic)"
       },
       {
         "id": "gpt-5.6-sol-thinking-agentic",

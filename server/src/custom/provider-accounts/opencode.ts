@@ -46,7 +46,9 @@ const BASE62_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuv
 const SESSION_PREFIX_MASK = (1n << 48n) - 1n;
 export const OPENCODE_SESSION_RE = /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/;
 
-const OPENCODE_OVERLOAD_ATTEMPTS = 8;
+// Capped so a slow/overloaded free tier cannot eat the whole playground
+// first-token budget (25s TTFT) in retries before the router can fail over.
+const OPENCODE_OVERLOAD_ATTEMPTS = 4;
 const OPENCODE_OVERLOAD_BASE_MS = 800;
 const OPENCODE_OVERLOAD_MAX_MS = 4000;
 const OPENCODE_OVERLOAD_RE = /overloaded/i;
