@@ -10,6 +10,7 @@ import { applyGeneratedFiles, printDryRunDiff } from './config-files.js';
 import { detectChatGptClient } from './detect.js';
 import { getTool, tools } from './tools.js';
 import { resolveLaunchModel, type ResolvedModel } from './models.js';
+import { gatewayRootUrl } from './url.js';
 import { DOCTOR_TOOLS, diagnose, exitCodeFor, formatReport, type ToolReport } from './doctor.js';
 import { keysHelp, runKeys, type KeyCommandOptions } from './keys.js';
 import type { CatalogModel, GenerateContext } from './types.js';
@@ -18,10 +19,6 @@ interface CliOptions extends KeyCommandOptions {
   apiKey?: string;
   profile: string;
   model?: string;
-}
-
-function rootUrl(url: string): string {
-  return url.trim().replace(/\/+$/, '').replace(/\/v1$/i, '');
 }
 
 function validateProfile(profile: string): string {
@@ -163,7 +160,7 @@ async function promptForKey(provider = false): Promise<string> {
 async function catalog(url: string, apiKey: string, availableOnly = true): Promise<CatalogModel[]> {
   let response: Response;
   try {
-    response = await fetch(`${rootUrl(url)}/v1/models${availableOnly ? '?available=true' : ''}`, {
+    response = await fetch(`${gatewayRootUrl(url)}/v1/models${availableOnly ? '?available=true' : ''}`, {
       headers: { Authorization: `Bearer ${apiKey}` },
       signal: AbortSignal.timeout(10_000),
     });
@@ -173,7 +170,7 @@ async function catalog(url: string, apiKey: string, availableOnly = true): Promi
       : undefined;
     const reason = cause ?? (error instanceof Error ? error.message : String(error));
     throw new Error(
-      `Could not reach the FreeLLMAPI gateway at ${rootUrl(url)} (${reason}). `
+      `Could not reach the FreeLLMAPI gateway at ${gatewayRootUrl(url)} (${reason}). `
       + 'Check that the server is running, or point the CLI at it with --url or FREELLMAPI_URL.',
     );
   }
@@ -287,12 +284,12 @@ async function setup(command: string, options: CliOptions): Promise<void> {
   const apiKey = options.apiKey ?? await promptForKey();
   const rosters = await catalogs(options.url, apiKey);
   // --model was parsed but never reached the generators, so `setup-x --model y`
-  // silently wrote whatever primaryModel() preferred. Validate it against the
+  // silently wrote whatever primarySetupModel() preferred. Validate it against the
   // unfiltered catalog (so an out-of-quota model is not reported as a typo)
   // and thread it through.
   const requestedModelId = resolvePinnedModel(options.model, rosters)?.id;
   const context: GenerateContext = {
-    url: rootUrl(options.url),
+    url: gatewayRootUrl(options.url),
     apiKey,
     profile: options.profile,
     models: rosters.available,
@@ -379,7 +376,7 @@ export function claudeLaunchEnv(
     env.CLAUDE_CONFIG_DIR = directory;
   }
   Object.assign(env, {
-    ANTHROPIC_BASE_URL: rootUrl(options.url),
+    ANTHROPIC_BASE_URL: gatewayRootUrl(options.url),
     ANTHROPIC_AUTH_TOKEN: apiKey,
     ANTHROPIC_MODEL: selected,
     ANTHROPIC_DEFAULT_OPUS_MODEL: selected,
@@ -420,7 +417,7 @@ export function codexArgs(url: string, selected: string): string[] {
     '-c', 'model_provider="freellmapi"',
     '-c', `model=${JSON.stringify(selected)}`,
     '-c', 'model_providers.freellmapi.name="FreeLLMAPI"',
-    '-c', `model_providers.freellmapi.base_url=${JSON.stringify(`${rootUrl(url)}/v1`)}`,
+    '-c', `model_providers.freellmapi.base_url=${JSON.stringify(`${gatewayRootUrl(url)}/v1`)}`,
     '-c', 'model_providers.freellmapi.wire_api="responses"',
     '-c', 'model_providers.freellmapi.env_key="FREELLMAPI_API_KEY"',
     '-c', 'model_providers.freellmapi.requires_openai_auth=false',
@@ -444,7 +441,7 @@ async function runDoctor(options: CliOptions): Promise<number> {
   const reports: ToolReport[] = [];
   for (const tool of requested) {
     reports.push(await diagnose(tool, {
-      expectedUrl: rootUrl(options.url),
+      expectedUrl: gatewayRootUrl(options.url),
       timeoutMs: options.timeoutMs,
     }));
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { UnknownModelError, contextWindowOf, defaultModelId, resolveLaunchModel } from './models.js';
+import { UnknownModelError, contextWindowOf, defaultModelId, primarySetupModel, resolveLaunchModel } from './models.js';
 import type { CatalogModel } from './types.js';
 
 // The distinction this module exists for: the CLI's catalog() fetches
@@ -68,6 +68,28 @@ describe('defaultModelId', () => {
 
   it('falls back to auto when nothing concrete is servable', () => {
     expect(defaultModelId([{ id: 'auto' }, { id: 'x', available: false }])).toBe('auto');
+  });
+});
+
+describe('primarySetupModel', () => {
+  it('defaults to auto, never fusion, when the catalog lists virtual models first', () => {
+    expect(primarySetupModel([
+      { id: 'auto', available: true },
+      { id: 'fusion', available: true },
+      { id: 'fast-coder', available: true },
+    ]).id).toBe('auto');
+  });
+
+  it('pins an explicit --model even when it is out of quota right now', () => {
+    expect(primarySetupModel(AVAILABLE, 'benched-model')).toEqual({ id: 'benched-model' });
+  });
+
+  it('never invents a context window for the fallback model', () => {
+    // The old tools.ts fallback was { id: 'auto', context_window: 128_000 };
+    // that number then landed in ~15 agents' config files as if published.
+    expect(primarySetupModel([])).toEqual({ id: 'auto', name: 'Auto' });
+    expect(primarySetupModel([], 'mystery-model')).toEqual({ id: 'mystery-model' });
+    expect(contextWindowOf(primarySetupModel([]))).toBeUndefined();
   });
 });
 
