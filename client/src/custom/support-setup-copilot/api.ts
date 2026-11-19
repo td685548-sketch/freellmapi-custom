@@ -3,6 +3,7 @@ import type {
   CopilotDiagnosticsResponse,
   CopilotExecuteActionRequest,
   CopilotExecuteActionResponse,
+  CopilotWhoAmIResponse,
   SupportSetupApplyRequest,
   SupportSetupApplyResponse,
   SupportSetupChatRequest,
@@ -43,6 +44,10 @@ export function isSupportSetupCopilotRoute(pathname: string): boolean {
 export function fetchSupportSetupStatus(tenantId?: number | null): Promise<SupportSetupStatusResponse> {
   const query = tenantId && tenantId > 0 ? `?tenantId=${tenantId}` : tenantId === null ? '?tenantId=new' : '';
   return apiFetch<SupportSetupStatusResponse>(`/api/support-setup-copilot/status${query}`);
+}
+
+export function fetchCopilotWhoAmI(): Promise<CopilotWhoAmIResponse> {
+  return apiFetch<CopilotWhoAmIResponse>('/api/support-setup-copilot/whoami');
 }
 
 export function fetchCopilotUserDiagnostics(windowHours = 72): Promise<CopilotDiagnosticsResponse> {

@@ -36,9 +36,15 @@ import {
   buildHumanProposalIntro,
   classifyHumanConversationalAct,
   enrichRequirementsWithOpenDomain,
+  isIdentityOrPermissionsQuestion,
   resolveDomainGuidanceFromIndustry,
   type OpenDomainTopicInsight,
 } from './human-dialogue.js';
+import {
+  buildCallerIdentity,
+  buildIdentityReply,
+  identitySuggestedQuickReplies,
+} from './identity.js';
 import {
   parseLlmCoachResponse,
   runHumanLikeLlmCoach,
@@ -1345,6 +1351,24 @@ export async function runSupportSetupCopilotTurn(params: {
     );
   const latestPlatformMatch = matchPlatformKnowledgeQuestion(latestUserMessage, currentPath);
 
+  // Permission-aware identity (Phase 1): identity/permissions questions are
+  // answered DETERMINISTICALLY from the DB-grounded identity record — never
+  // by the LLM, and before any system-settings / proposal evaluation.
+  const agentContext = buildCallerIdentity(user, scope);
+  if (agentContext && isIdentityOrPermissionsQuestion(latestUserMessage)) {
+    return {
+      ok: true,
+      replyLocale: locale,
+      reply: buildIdentityReply(agentContext, locale),
+      intent: 'guide',
+      missingQuestions: [],
+      suggestedQuickReplies: identitySuggestedQuickReplies(locale),
+      proposal: null,
+      modelUsed: null,
+      usedFallback: true,
+    };
+  }
+
   const explicitBriefSubmitted = Boolean(
     requirementsHint &&
       (requirementsHint.brandName?.trim() ||
@@ -1501,6 +1525,7 @@ export async function runSupportSetupCopilotTurn(params: {
             extracted: {},
             canCreateTenant: false,
             canEditSteps: canEditSet,
+            agentContext: agentContext ?? undefined,
             gatewayLoopback,
           })
         : null;
@@ -1564,6 +1589,7 @@ export async function runSupportSetupCopilotTurn(params: {
     extracted,
     canCreateTenant: scope.canCreateTenant,
     canEditSteps: canEditSet,
+    agentContext: agentContext ?? undefined,
     gatewayLoopback,
   });
 
@@ -1716,6 +1742,7 @@ export async function runSupportSetupCopilotTurn(params: {
     canCreateTenant: scope.canCreateTenant,
     canEditAny: canEditSet.size > 0,
     hasBaseProposal: isProposalRefinementTurn,
+    identityReply: agentContext ? buildIdentityReply(agentContext, locale) : undefined,
   });
 
   const finalRequirements = humanTurn.extractedRequirements;

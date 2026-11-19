@@ -4,7 +4,12 @@ import {
   type SupportSetupStepId,
   type SupportSetupTenantDiagnostic,
 } from '@freellmapi/shared/support-setup-copilot.js';
-import { tenantPermissionGranted, type TenantPermission } from '@freellmapi/shared/tenant-rbac.js';
+import {
+  inferTenantRolePreset,
+  tenantPermissionGranted,
+  type TenantPermission,
+  type TenantRolePresetId,
+} from '@freellmapi/shared/tenant-rbac.js';
 import type { Request } from 'express';
 import { hasPermission } from '../../middleware/requirePermission.js';
 import type { SessionUser } from '../../services/auth.js';
@@ -27,6 +32,10 @@ import { hasAnySystemSettingPermission } from './system-settings.js';
 
 export interface ScopedTenantEntry {
   tenant: SupportTenant;
+  /** Role preset as stored/granted for this user on the tenant (never inferred from another user). */
+  rolePreset: TenantRolePresetId;
+  /** Raw tenant permission grants for this user on the tenant (['*'] for platform operators). */
+  permissions: TenantPermission[];
   canViewSteps: Set<SupportSetupStepId>;
   canEditSteps: Set<SupportSetupStepId>;
 }
@@ -134,6 +143,8 @@ export function resolveCopilotUserScope(user: SessionUser | undefined): CopilotU
       isPlatformOperator: true,
       tenants: allTenants.map((tenant) => ({
         tenant,
+        rolePreset: 'tenant_owner',
+        permissions: ['*'] as TenantPermission[],
         canViewSteps: new Set<SupportSetupStepId>(SUPPORT_SETUP_STEP_IDS),
         canEditSteps: new Set<SupportSetupStepId>(SUPPORT_SETUP_STEP_IDS),
       })),
@@ -155,6 +166,8 @@ export function resolveCopilotUserScope(user: SessionUser | undefined): CopilotU
         const memberEdit = perms ? mapTenantPermissionsToEditSteps(perms) : new Set<SupportSetupStepId>();
         return {
           tenant,
+          rolePreset: inferTenantRolePreset(perms ?? []),
+          permissions: [...(perms ?? [])],
           canViewSteps: new Set<SupportSetupStepId>([
             ...THRULINE_READ_ONLY_VIEW_STEPS,
             ...memberView,
@@ -180,6 +193,8 @@ export function resolveCopilotUserScope(user: SessionUser | undefined): CopilotU
       if (canViewSteps.size === 0 && canEditSteps.size === 0) continue;
       tenants.push({
         tenant,
+        rolePreset: item.rolePreset,
+        permissions: [...item.permissions],
         canViewSteps,
         canEditSteps,
       });

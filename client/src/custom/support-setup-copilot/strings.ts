@@ -67,6 +67,27 @@ export interface SupportSetupCopilotStrings {
   starterOnboardingPrompt: string;
   doctorPillLabel: string;
   onboardingPillLabel: string;
+  whoamiPillLabel: string;
+  whoamiCardTitle: string;
+  whoamiAccountRole: string;
+  whoamiRoleAdmin: string;
+  whoamiRolePrimaryAdmin: string;
+  whoamiRoleMember: string;
+  whoamiPlatformOperator: string;
+  whoamiNotPlatformOperator: string;
+  whoamiCanCreateTenant: string;
+  whoamiCannotCreateTenant: string;
+  whoamiGlobalPermissions: string;
+  whoamiNoGlobalPermissions: string;
+  whoamiFullAccess: string;
+  whoamiTenants: string;
+  whoamiNoTenants: string;
+  whoamiCanViewSteps: string;
+  whoamiCanEditSteps: string;
+  whoamiHide: string;
+  starterWhoAmI: string;
+  starterWhoAmIDesc: string;
+  starterWhoAmIPrompt: string;
   doctorCardTitle: string;
   doctorHealthHealthy: string;
   doctorHealthDegraded: string;
@@ -197,6 +218,27 @@ const en: SupportSetupCopilotStrings = {
   starterOnboardingPrompt: 'Open 3-step member onboarding checklist',
   doctorPillLabel: 'Error Doctor',
   onboardingPillLabel: 'Onboarding {done}/3',
+  whoamiPillLabel: 'My permissions',
+  whoamiCardTitle: 'My Role & Permissions',
+  whoamiAccountRole: 'Account role',
+  whoamiRoleAdmin: 'Admin',
+  whoamiRolePrimaryAdmin: 'Primary Admin',
+  whoamiRoleMember: 'Member',
+  whoamiPlatformOperator: 'Platform operator',
+  whoamiNotPlatformOperator: 'Not a platform operator',
+  whoamiCanCreateTenant: 'Can create Support Tenants',
+  whoamiCannotCreateTenant: 'Cannot create Support Tenants',
+  whoamiGlobalPermissions: 'Global permissions',
+  whoamiNoGlobalPermissions: 'No global permissions',
+  whoamiFullAccess: 'Full access (*)',
+  whoamiTenants: 'Assigned tenants',
+  whoamiNoTenants: 'No tenant assigned — ask the main ADMIN for access.',
+  whoamiCanViewSteps: 'Can view',
+  whoamiCanEditSteps: 'Can edit',
+  whoamiHide: 'Hide',
+  starterWhoAmI: 'What are my permissions?',
+  starterWhoAmIDesc: 'See your role, tenant access & what you can edit',
+  starterWhoAmIPrompt: 'What are my permissions?',
   doctorCardTitle: 'AI Error Doctor · Account Self-Diagnostics',
   doctorHealthHealthy: 'Healthy',
   doctorHealthDegraded: 'Needs Attention',
@@ -344,6 +386,27 @@ const vi: SupportSetupCopilotStrings = {
   starterOnboardingPrompt: 'Mở hướng dẫn checklist 3 bước cho thành viên mới',
   doctorPillLabel: 'Bác sĩ Lỗi',
   onboardingPillLabel: 'Bắt đầu {done}/3',
+  whoamiPillLabel: 'Quyền của tôi',
+  whoamiCardTitle: 'Role & Quyền của tôi',
+  whoamiAccountRole: 'Vai trò tài khoản',
+  whoamiRoleAdmin: 'Quản trị viên',
+  whoamiRolePrimaryAdmin: 'Quản trị viên chính',
+  whoamiRoleMember: 'Thành viên',
+  whoamiPlatformOperator: 'Vận hành nền tảng',
+  whoamiNotPlatformOperator: 'Không phải vận hành nền tảng',
+  whoamiCanCreateTenant: 'Được tạo Support Tenant mới',
+  whoamiCannotCreateTenant: 'Không được tạo Support Tenant mới',
+  whoamiGlobalPermissions: 'Quyền toàn cục',
+  whoamiNoGlobalPermissions: 'Không có quyền toàn cục',
+  whoamiFullAccess: 'Toàn quyền (*)',
+  whoamiTenants: 'Tenant được phân quyền',
+  whoamiNoTenants: 'Chưa được phân quyền tenant nào — liên hệ ADMIN chính để được cấp quyền.',
+  whoamiCanViewSteps: 'Xem được',
+  whoamiCanEditSteps: 'Sửa được',
+  whoamiHide: 'Ẩn',
+  starterWhoAmI: 'Tôi có quyền gì?',
+  starterWhoAmIDesc: 'Xem role, tenant được giao & mục nào bạn được sửa',
+  starterWhoAmIPrompt: 'Tôi có quyền gì?',
   doctorCardTitle: 'AI Error Doctor · Chẩn đoán Tài khoản',
   doctorHealthHealthy: 'Ổn định',
   doctorHealthDegraded: 'Cần chú ý',
