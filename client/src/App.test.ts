@@ -43,4 +43,14 @@ describe('app shell heights', () => {
     expect(app).toContain('<PageSwitch />')
     expect(app).not.toContain("'/thruline/providers'")
   })
+
+  it('turns off background polling and focus refetch in the QueryClient defaults', () => {
+    // ~38 refetchIntervals (mostly 30s) used to keep firing while the tab
+    // sat in the background, and every focus return refetched stale queries.
+    // The defaults are the one place this is decided; a per-query override
+    // can still opt back in, so pin the defaults here rather than auditing
+    // every call site.
+    expect(app).toContain('refetchIntervalInBackground: false')
+    expect(app).toContain('refetchOnWindowFocus: false')
+  })
 })

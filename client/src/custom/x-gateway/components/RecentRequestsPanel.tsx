@@ -31,11 +31,7 @@ function formatAgo(iso: string) {
 }
 
 function TimeAgo({ timestamp }: { timestamp: string }) {
-  const [, setTick] = useState(0)
-  useEffect(() => {
-    const id = setInterval(() => setTick(t => t + 1), 1000)
-    return () => clearInterval(id)
-  }, [])
+  // Pure render: the tick lives in the panel, one 30s timer for all rows.
   return <>{formatAgo(timestamp)}</>
 }
 
@@ -50,6 +46,17 @@ export default function RecentRequestsPanel({
   liveConnected?: boolean
   onSelectRequest?: (req: RecentRequestItem) => void
 }) {
+  // One shared 30s timer re-renders every row's "x ago" label. Each row used
+  // to run its own 1s setInterval, so a 20-row panel kept 20 timers ticking
+  // every second; a 30s tick is plenty for labels whose finest unit is
+  // seconds ("5s ago" only needs to move once a minute past 60s, and a
+  // few-seconds staleness below that is invisible). Same shape as LogsPage's
+  // single poller: one clock, many readers.
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 30_000)
+    return () => clearInterval(id)
+  }, [])
   return (
     <section
       className="x-panel flex h-[340px] sm:h-[460px] min-w-0 flex-col overflow-hidden"

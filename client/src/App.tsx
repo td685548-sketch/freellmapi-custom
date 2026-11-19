@@ -60,9 +60,25 @@ const queryClient = new QueryClient({
   // whether a background refetch follows. Thirty seconds is shorter than any
   // poller here (refetchInterval still fires on its own clock), and mutations
   // invalidate explicitly, so nothing user-visible goes stale.
+  //
+  // Background tabs burn no requests: every poller in the app (~38
+  // refetchIntervals, mostly 30s) used to keep firing while the tab sat in
+  // the background, and every window-focus return refetched stale queries.
+  // The defaults below switch both off app-wide — a hidden tab is not being
+  // watched, so there is nothing live to keep fresh. Polling resumes on its
+  // own clock the moment the tab is visible again, and mutations still
+  // invalidate explicitly. A query that genuinely needs to poll while hidden
+  // can opt back in per query with `refetchIntervalInBackground: true`;
+  // none does today — LogsPage and ProviderAccounts already set it false
+  // explicitly, and the live views (AccountUsage, ConsoleLog) are fed by SSE
+  // while visible. Per-query `refetchOnWindowFocus` overrides (LogsPage
+  // when unpaused, SupportServiceDesk's 'always') keep working: defaults
+  // only apply where the query does not say otherwise.
   defaultOptions: {
     queries: {
       staleTime: 30_000,
+      refetchIntervalInBackground: false,
+      refetchOnWindowFocus: false,
       retry: (failureCount, error) => {
         const status = (error as ApiError | undefined)?.status
         if (status === 401 || status === 403) return false
