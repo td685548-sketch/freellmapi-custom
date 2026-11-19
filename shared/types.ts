@@ -59,179 +59,183 @@ export interface ImportSelectedResponse {
 // (see server/src/db/index.ts). HuggingFace was dropped in V4 and re-added
 // in V13 via the router.huggingface.co Inference Providers meta-router.
 // SambaNova was dropped in V23 (free tier permanently retired — 402
-// "payment method required" once the one-time $5 trial credit lapses).
-export type Platform =
-  | 'google'
-  | 'groq'
-  | 'cerebras'
+// "payment method required" once the one-time $5 trial credit lapses) and
+// removed from PLATFORMS here: V23 deleted its models/keys, the keys-route
+// allowlist already excludes it, and it has no registered adapter, so the
+// router would silently skip any of its rows. Do not re-add it without a
+// registered adapter — server/src/__tests__/providers/
+// platform-registry-parity.test.ts fails otherwise.
+export const PLATFORMS = [
+  'google',
+  'groq',
+  'cerebras',
   // Sail Research — native Responses API provider. $5 in free credits refreshes
   // monthly when a payment method is attached; usage beyond the grant is
   // pay-as-you-go. Background polling is required for its flex-only models.
-  | 'sail'
+  'sail',
   // Responses-only gateway; a shared monthly free allowance, not per model.
-  | 'aclide'
+  'aclide',
   // OpenAI-compatible chat and embeddings; one shared $1 monthly allowance.
-  | 'speka'
+  'speka',
   // Named free chat/image routes share one renewable daily account allowance.
-  | 'kenari'
-  | 'kiosapi'
+  'kenari',
+  'kiosapi',
   // Decision-only JEV adapter; promotional availability is catalog-managed.
-  | 'beatapi'
+  'beatapi',
   // Free-category chat and decisions share one weighted daily allowance.
-  | 'apinex'
+  'apinex',
   // OpenAI-compatible gateway; free models share a 30-calls/5-hour account
   // allowance on top of a site-wide pool (issue #1460).
-  | 'onomeo'
+  'onomeo',
   // OpenAI-compatible gateway; the free tier is one account-wide monthly
   // token allowance (30M, resets monthly; issue #1649).
-  | 'iteracompute'
+  'iteracompute',
   // Ongoing free research API for chat and speech recognition; catalog only.
-  | 'typhoon'
+  'typhoon',
   // Permanent free chat aliases, shared fair-use quota; signed catalog only.
-  | 'plugsky'
+  'plugsky',
   // Catalog-only free chat gateways; shared monthly/daily account allowances.
-  | 'inferbase'
-  | 'simplellm'
+  'inferbase',
+  'simplellm',
   // Selected zero-priced routes have daily/rolling quotas without a top-up;
   // signed catalog only. The public roster also includes paid/promotional IDs.
-  | 'llmtr'
+  'llmtr',
   // Catalog-managed free routes: monthly request quota / ongoing $0 models.
-  | 'gizmo'
-  | 'blockrun'
+  'gizmo',
+  'blockrun',
   // Hosted vision API: $5/workspace in recurring monthly credits, shared
   // across models. Signed catalog only; no bundled model seeds.
-  | 'moondream'
-  | 'jamai'
+  'moondream',
+  'jamai',
   // One shared renewable monthly credit allowance; signed catalog only.
-  | 'nabh'
+  'nabh',
   // Zro by MoonMath.ai: selected chat routes share daily free usage. The
   // allowance is not monthly cash credit; model rows are hosted-catalog only.
-  | 'zro'
+  'zro',
   // Daily-free video route; signed catalog only.
-  | 'novai'
-  | 'varosity'
+  'novai',
+  'varosity',
   // Native TTS and transcription; one shared renewable monthly credit grant.
-  | 'rime'
+  'rime',
   // Local personal BYOK TTS; shared monthly characters, watermarked Free audio.
-  | 'freetts'
+  'freetts',
   // Research API; chat and embeddings share a daily quota. Requests are logged.
-  | 'freeinference'
+  'freeinference',
   // Personal BYOK client; shared monthly account allowance, Telegram verification.
-  | 'freemodel'
+  'freemodel',
   // Hosted gateways; model rows are delivered by the signed catalog only.
   // ElectronHub renews weekly credits; Experiential renews monthly credits.
-  | 'electronhub'
-  | 'experiential'
+  'electronhub',
+  'experiential',
   // Catalog-managed gateways: monthly shared credits vs daily free-model quota.
-  | 'router9'
-  | 'septor'
-  | 'clod'
-  | 'speechify'
+  'router9',
+  'septor',
+  'clod',
+  'speechify',
   // Self-hosted TTS: shared 30K tokens/day and 1K API requests/month, no card.
   // Model rows arrive only through the signed, freshness-gated catalog.
-  | 'freeai'
-  | 'blaze'
+  'freeai',
+  'blaze',
   // Lucidity Composite, Api.Airforce and DreamPrompting expose daily free
   // allowances; Waterfall and Logfare publish community / fair-use tiers.
-  | 'lucidity'
-  | 'airforce'
-  | 'dreamprompting'
-  | 'waterfall'
-  | 'logfare'
+  'lucidity',
+  'airforce',
+  'dreamprompting',
+  'waterfall',
+  'logfare',
   // B.AI — OpenAI-compatible gateway. Its catalog row is a live-tested,
   // limited-time 0-credit promotion, not a recurring free allowance.
-  | 'bai'
+  'bai',
   // AnyAPI — OpenAI-compatible gateway. Free tier is $0/no card/recurring but
   // capped at 100K tokens/day over "free and basic" models only; no RPM/RPD is
   // published. Catalog rows live in the hosted catalog (premium now, free after
   // 30 days).
-  | 'anyapi'
+  'anyapi',
   // PowerTokens — OpenAI-compatible gateway (api.powertokens.ai). Free model
   // glm-4.7-flash ($0 / 1M in+out, 0 Credits). RPM/RPD unpublished. Hosted
   // catalog only (no migration seed), same as the anyapi/bai gateways.
-  | 'powertokens'
+  'powertokens',
   // AMD Radeon Cloud TokenFactory — OpenAI-compatible shared inference. Its
   // rotating public-model roster is free without consuming instance credits,
   // with recurring account-level allowance and request/concurrency controls.
-  | 'radeon'
-  | 'nvidia'
-  | 'mistral'
-  | 'sambanova'
-  | 'openrouter'
-  | 'cohere'
+  'radeon',
+  'nvidia',
+  'mistral',
+  'openrouter',
+  'cohere',
   // Web search APIs (#1174), not chat providers. Their keys serve POST
   // /v1/search (and the agents' web_search tools) through the catalog's
   // searchEngines registry; chat calls to them are rejected. See
   // SEARCH_PLATFORMS below.
-  | 'tavily'
-  | 'exa'
-  | 'firecrawl'
-  | 'linkup'
-  | 'parallel'
-  | 'serpsearch'
-  | 'keenable'
-  | 'halx'
-  | 'aisense'
-  | 'brave'
-  | 'outcrawl'
-  | 'cloudflare'
-  | 'zhipu'
-  | 'ollama'
-  | 'kilo'
-  | 'pollinations'
-  | 'llm7'
-  | 'huggingface'
+  'tavily',
+  'exa',
+  'firecrawl',
+  'linkup',
+  'parallel',
+  'serpsearch',
+  'keenable',
+  'halx',
+  'aisense',
+  'brave',
+  'outcrawl',
+  'cloudflare',
+  'zhipu',
+  'ollama',
+  'kilo',
+  'pollinations',
+  'llm7',
+  'huggingface',
   // OpenCode Zen — OpenAI-compatible gateway. Free promotional models require a
   // free (no-card) account key from opencode.ai/auth; see migrateModelsV18.
-  | 'opencode'
+  'opencode',
   // OVHcloud AI Endpoints — OpenAI-compatible, keyless anonymous tier
   // (2 req/min per IP per model); see migrateModelsV26.
-  | 'ovh'
+  'ovh',
   // Agnes AI (Sapiens AI) — OpenAI-compatible (LiteLLM + vLLM backend). Serves
   // its own proprietary Agnes models; the free key comes from
   // platform.agnes-ai.com (no card).
-  | 'agnes'
+  'agnes',
   // Reka — OpenAI-compatible. Native multimodal models (reka-edge takes
   // image/video). New accounts need prepaid credits (#1202); key from
   // platform.reka.ai.
-  | 'reka'
+  'reka',
   // SiliconFlow — OpenAI-compatible. Registered for its FREE generative-media
   // models (FLUX.1-schnell image, CosyVoice2 TTS) routed via services/media.ts;
   // chat is supported too. Key from siliconflow.com (no card).
-  | 'siliconflow'
+  'siliconflow',
   // Routeway — OpenAI-compatible aggregator. Free ':free' models ($0) on a
   // rate-limited pool (~5 rpm observed); requires a browser User-Agent (CF
   // blocks others). Key from routeway.ai (no card).
-  | 'routeway'
+  'routeway',
   // BazaarLink — OpenAI-compatible aggregator. Free 'auto:free' route picks an
   // available zero-cost model. Key from bazaarlink.ai (no card).
-  | 'bazaarlink'
+  'bazaarlink',
   // AINative Studio — OpenAI-compatible aggregator. Advertises a recurring
   // ~10M tokens/month free allocation (no card); quota unverified. Key from
   // ainative.studio.
-  | 'ainative'
+  'ainative',
   // Aion Labs — OpenAI-compatible aggregator with a no-card free API key.
   // Catalog rows live in the Oracle catalog (premium now, free after 30 days).
-  | 'aion'
+  'aion',
   // Requesty — OpenAI-compatible router with no-card free models/credits.
   // Catalog rows live in the Oracle catalog (premium now, free after 30 days).
-  | 'requesty'
+  'requesty',
   // NavyAI — OpenAI-compatible unified API. Free plan is 150K tokens/day and
   // 20 RPM; catalog rows live in the Oracle catalog (premium now, free after 30 days).
-  | 'navy'
+  'navy',
   // NaraRouter — OpenAI-compatible aggregator. Free account key from
   // router.bynara.id after Telegram channel/link verification; free-plan routes
   // reset daily and are catalog-managed (premium now, free after 30 days).
-  | 'nara'
+  'nara',
   // SEA-LION (AI Singapore) — OpenAI-compatible first-party API. Free key
   // (Google sign-in, no card, no region wall) at 10 RPM; catalog rows live in
   // the Oracle catalog (premium now, free after 30 days).
-  | 'sealion'
+  'sealion',
   // OrcaRouter — OpenAI-compatible aggregator (api.orcarouter.ai/v1). Free key
   // from orcarouter.ai (no card); recurring rate-limited free aliases at $0
   // (never fall back to paid). Catalog rows live in the Oracle catalog
   // (premium now, free after the 30-day model-age gate).
-  | 'orcarouter'
+  'orcarouter',
   // UnoRouter (unorouter.com) — OpenAI-compatible aggregator. The web app is a
   // Next.js site at unorouter.com; the API lives at api.unorouter.com/v1. Free
   // key from unorouter.com (no card); free models carry a `:free` suffix and a
@@ -240,14 +244,14 @@ export type Platform =
   // wrong key, and /v1/chat/completions 401s without a key, so default key
   // validation works. Catalog rows live in the hosted catalog (premium now,
   // free after the 30-day model-age gate).
-  | 'unorouter'
+  'unorouter',
   // xKiro (xkiro.com) — OpenAI-compatible gateway at api.xkiro.com/v1. Free key
   // from xkiro.com (no card); free plan is 5M tokens/day on its free models,
   // paid models 403 on a free key.
   // /v1/models is public (200 with no key), so key validation must probe
   // /v1/usage, which 401s on a missing/invalid ClientApiKey. Catalog rows live
   // in the hosted catalog (premium now, free after the 30-day model-age gate).
-  | 'xkiro'
+  'xkiro',
   // ModelScope (魔搭社区, Alibaba) — OpenAI-compatible inference API
   // (api-inference.modelscope.cn/v1). Free tier moved to magic-grain (魔粒)
   // metering in 2026-08: ~250 魔粒/day account-wide at ~2 魔粒 per request
@@ -256,7 +260,7 @@ export type Platform =
   // with Chinese real-name verification — tokens mint without binding, then
   // every call 401s. Catalog rows land after community testing confirms
   // per-model behavior (#581).
-  | 'modelscope'
+  'modelscope',
   // ── Chinese domestic providers (#922/#923/#924) ────────────────────────────
   // All four need Chinese real-name verification (实名认证) on the cloud account
   // before a key will serve traffic, the same wall ModelScope hits above.
@@ -268,37 +272,40 @@ export type Platform =
   // pay-as-you-go billing rather than a token pool, so the ceiling is rate
   // limits, not a balance. Baidu calls the arrangement "long-term". Real-name
   // auth (individual or enterprise) required.
-  | 'qianfan'
+  'qianfan',
   // Volcengine Ark (火山方舟, ByteDance) — OpenAI-compatible
   // (https://ark.cn-beijing.volces.com/api/v3). Individual developers get a
   // RECURRING daily per-model free reward quota (raised from 500K to 2M
   // tokens/day/model), on top of a one-time 500K new-user grant. The strongest
   // recurring free tier of the four.
-  | 'volcengine'
+  'volcengine',
   // LongCat (Meituan / 美团) — OpenAI-compatible
   // (https://api.longcat.chat/openai/v1); also exposes an Anthropic-compatible
   // surface at /anthropic. Free tier is daily; the figure quoted at platform
   // launch was 100K tokens/day. Meituan has ANNOUNCED a 50M tokens/day
   // Flash-Lite free tier but it was described as a future plan, so it is not
   // treated as live here.
-  | 'longcat'
+  'longcat',
   // iFlytek Spark (讯飞星火) — OpenAI-compatible
   // (https://spark-api-open.xf-yun.com/v1), Bearer auth using the console's
   // APIPassword (not the APIKey/APISecret pair the older WebSocket API used).
   // The Lite model (model id `lite`) is documented as free to call; iFlytek
   // does not publish a token ceiling or a QPS figure for it, so neither is
   // claimed here.
-  | 'xfyun'
+  'xfyun',
   // AI Horde — free, community-powered inference (volunteer workers) via an
   // OpenAI-compatible proxy (https://oai.aihorde.net/v1). Queue-based, so calls
   // can take tens of seconds; no tool support; usage is reported as kudos, not
   // tokens. Anonymous key `0000000000` works (lowest priority); a registered
   // aihorde.net key raises queue priority. Has a dedicated AIHordeProvider that
   // normalizes the proxy's OpenAI divergences. See issue #345.
-  | 'aihorde'
+  'aihorde',
   // User-configured OpenAI-compatible endpoint (llama.cpp, LM Studio, vLLM,
   // Ollama, any base_url). The endpoint URL lives on the api_keys row; see #117.
-  | 'custom';
+  'custom',
+] as const;
+
+export type Platform = (typeof PLATFORMS)[number];
 
 /** Platforms whose keys serve web search (POST /v1/search and the agents'
  *  web_search tools), never chat. Search engine rows arrive through the
