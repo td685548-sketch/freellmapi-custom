@@ -115,6 +115,7 @@ import * as customNotificationsAndTelegram from '../migrations/20261118_160000_c
 import * as customAssistantWorkspace from '../migrations/20261118_180000_custom_assistant_workspace.js';
 import * as customScenarioRouting from '../migrations/20261118_190000_custom_scenario_routing.js';
 import * as customQuotaVouchersTopups from '../migrations/20261118_200000_custom_quota_vouchers_topups.js';
+import * as requestAttemptsTtfbMs from '../migrations/20261119_000001_request_attempts_ttfb_ms.js';
 import * as customUrlTokenExpiry from '../migrations/20261119_010000_custom_url_token_expiry.js';
 
 export interface MigrationModule {
@@ -154,6 +155,7 @@ export const CUSTOM_MODEL_TOMBSTONES_FILENAME = '20260819_000001_custom_model_to
 export const SERVER_LOGS_FILENAME = '20260823_000001_server_logs.ts';
 export const BACKUPS_TABLE_FILENAME = '20260823_000002_backups_table.ts';
 export const ATTEMPT_KEY_LABEL_FILENAME = '20260823_000003_attempt_key_label.ts';
+export const REQUEST_ATTEMPTS_TTFB_MS_FILENAME = '20261119_000001_request_attempts_ttfb_ms.ts';
 export const PROFILE_AUTO_INCLUDE_FILENAME = '20260823_000004_profile_auto_include.ts';
 export const IDEMPOTENCY_CLAIMS_FILENAME = '20260901_000001_idempotency_claims.ts';
 export const QUOTA_OBSERVATION_LOOKUP_FILENAME = '20260901_000002_quota_observation_lookup.ts';
@@ -323,5 +325,6 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: '20261118_180000_custom_assistant_workspace.ts', module: customAssistantWorkspace },
   { filename: '20261118_190000_custom_scenario_routing.ts', module: customScenarioRouting },
   { filename: '20261118_200000_custom_quota_vouchers_topups.ts', module: customQuotaVouchersTopups },
+  { filename: REQUEST_ATTEMPTS_TTFB_MS_FILENAME, module: requestAttemptsTtfbMs },
   { filename: '20261119_010000_custom_url_token_expiry.ts', module: customUrlTokenExpiry },
 ];

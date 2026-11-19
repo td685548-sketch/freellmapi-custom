@@ -268,7 +268,7 @@ export class CodexProvider extends BaseProvider {
       method: 'POST',
       headers: this.headers(apiKey, sessionId, 'text/event-stream'),
       body: JSON.stringify(this.buildBody(messages, modelId, options)),
-    }, options?.timeoutMs ?? this.timeoutMs, { signal: options?.signal });
+    }, options?.timeoutMs ?? this.timeoutMs, { signal: options?.signal, timeoutBounds: 'headers' });
 
     if (!res.ok) {
       await res.body?.cancel();

@@ -10,7 +10,7 @@ import {
 import { checkFidelity } from './fidelity-gate.js';
 import {
   buildToolCallOrigins,
-  estimateTokensFromChars,
+  estimateTokensForMessages,
   messageChars,
   textContent,
 } from './helpers.js';
@@ -76,8 +76,7 @@ function stablePrefixIndexes(messages: ChatMessage[], enabled: boolean): Set<num
   return frozen;
 }
 
-function emptyStats(chars: number, started: number): CompressionRequestStats {
-  const tokens = estimateTokensFromChars(chars);
+function emptyStats(chars: number, tokens: number, started: number): CompressionRequestStats {
   return {
     originalChars: chars,
     compressedChars: chars,
@@ -107,7 +106,7 @@ export function compressionCacheKey(
 ): string {
   const config = options.config ?? getCompressionConfig();
   const directive = parseCompressionDirective(options.header);
-  const originalEstimate = estimateTokensFromChars(messageChars(messages));
+  const originalEstimate = estimateTokensForMessages(messages);
   let mode = options.previewMode ?? resolveCompressionMode(config, directive);
   if (
     options.previewMode === undefined
@@ -129,7 +128,11 @@ export function compressRequest(
   const config = options.config ?? getCompressionConfig();
   const directive = parseCompressionDirective(options.header);
   const originalChars = messageChars(messages);
-  const originalEstimate = estimateTokensFromChars(originalChars);
+  // Script-weighted estimate (Vietnamese/CJK aware), not chars/4: the
+  // auto-trigger threshold and the saved-tokens stats must see the same
+  // token counts routing sees, or a CJK-heavy request never triggers
+  // compression it actually needs.
+  const originalEstimate = estimateTokensForMessages(messages);
   let mode = options.previewMode ?? resolveCompressionMode(config, directive);
   const autoTriggered = options.previewMode === undefined
     && mode !== 'off'
@@ -138,7 +141,7 @@ export function compressRequest(
     && originalEstimate >= config.autoTriggerEstTokens;
   if (autoTriggered) mode = 'aggressive';
   if (mode === 'off') {
-    const stats = emptyStats(originalChars, started);
+    const stats = emptyStats(originalChars, originalEstimate, started);
     if (options.recordStats !== false) recordCompressionStats(mode, stats);
     return {
       messages,
@@ -167,9 +170,10 @@ export function compressRequest(
 
   for (const engine of getRegisteredEngines()) {
     if (!MODE_ENGINES[mode].has(engine.id)) continue;
-    // Adaptive requests stop as soon as the requested ceiling is met. Manual
-    // modes without a target still run their complete engine set.
-    if (targetTokens && messageChars(current) <= targetTokens * 4) break;
+    // Adaptive requests stop as soon as the requested ceiling is met, in
+    // tokens — the old chars/4 check stopped early on CJK/Vietnamese text
+    // whose real token count was still far above the target.
+    if (targetTokens && estimateTokensForMessages(current) <= targetTokens) break;
     const engineConfig = config.engines[engine.id] ?? { enabled: true };
     if (!engineConfig.enabled) {
       stages.push({
@@ -270,12 +274,13 @@ export function compressRequest(
   }
 
   const compressedChars = messageChars(current);
+  const estCompressedTokens = estimateTokensForMessages(current);
   const stats: CompressionRequestStats = {
     originalChars,
     compressedChars,
-    estOriginalTokens: estimateTokensFromChars(originalChars),
-    estCompressedTokens: estimateTokensFromChars(compressedChars),
-    estSavedTokens: Math.max(0, Math.floor((originalChars - compressedChars) / 4)),
+    estOriginalTokens: originalEstimate,
+    estCompressedTokens,
+    estSavedTokens: Math.max(0, originalEstimate - estCompressedTokens),
     enginesApplied,
     discardedByGate,
     durationMs: performance.now() - started,

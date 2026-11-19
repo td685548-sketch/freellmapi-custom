@@ -1,6 +1,8 @@
 services:
   freellmapi:
-    image: ghcr.io/tashfeenahmed/freellmapi:latest
+    # Published by CI as ghcr.io/<owner>/freellmapi (docker.yml IMAGE uses
+    # github.repository_owner), so the fork's image lives under its own owner.
+    image: ghcr.io/td685548-sketch/freellmapi:latest
     build:
       context: .
       dockerfile: Dockerfile

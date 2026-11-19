@@ -233,7 +233,7 @@ export class GrokCliProvider extends BaseProvider {
         body: JSON.stringify(payload),
       },
       options?.timeoutMs ?? 120_000,
-      { signal: options?.signal },
+      { signal: options?.signal, timeoutBounds: 'headers' },
     );
 
     recordQuotaObservationsFromResponse(res, {
@@ -421,7 +421,7 @@ export class CodeBuddyProvider extends BaseProvider {
       this.baseUrl,
       { method: 'POST', headers: this.buildHeaders(token), body: JSON.stringify(body) },
       options?.timeoutMs ?? 120_000,
-      { signal: options?.signal },
+      { signal: options?.signal, timeoutBounds: 'headers' },
     );
 
     recordQuotaObservationsFromResponse(res, {
@@ -602,7 +602,7 @@ export class ClineProvider extends BaseProvider {
         }),
       },
       options?.timeoutMs ?? 120_000,
-      { signal: options?.signal },
+      { signal: options?.signal, timeoutBounds: 'headers' },
     );
 
     recordQuotaObservationsFromResponse(res, {
@@ -780,7 +780,7 @@ export class ZedProvider extends BaseProvider {
         body: JSON.stringify(envelope),
       },
       options?.timeoutMs ?? 120_000,
-      { signal: options?.signal },
+      { signal: options?.signal, timeoutBounds: 'headers' },
     );
 
     recordQuotaObservationsFromResponse(res, {
@@ -1077,7 +1077,7 @@ export class CursorProvider extends BaseProvider {
       this.baseUrl,
       { method: 'POST', headers, body: frame as unknown as RequestInit['body'] },
       options?.timeoutMs ?? 120_000,
-      { signal: options?.signal },
+      { signal: options?.signal, timeoutBounds: 'headers' },
     );
 
     recordQuotaObservationsFromResponse(res, {
@@ -1335,7 +1335,7 @@ export class OAuthCompatibleProvider extends BaseProvider {
       url,
       { method: 'POST', headers: this.buildAuthHeaders(token, true), body: JSON.stringify(body) },
       options?.timeoutMs ?? 120_000,
-      { signal: options?.signal },
+      { signal: options?.signal, timeoutBounds: 'headers' },
     );
 
     recordQuotaObservationsFromResponse(res, {

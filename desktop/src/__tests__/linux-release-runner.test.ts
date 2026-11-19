@@ -19,4 +19,15 @@ describe('Linux installer runner compatibility', () => {
       expect(linux?.glob).toContain(`desktop/dist-electron/${artifact}`);
     }
   });
+
+  it('sets a Linux package maintainer so the .deb/.rpm build has one', () => {
+    // electron-builder's FPM targets fail the Linux build with
+    // "Please specify author 'email'" when neither linux.maintainer nor an
+    // author email is set (PR #154's ubuntu job died exactly here).
+    const builderConfigPath = fileURLToPath(new URL('../../electron-builder.yml', import.meta.url));
+    const config = yaml.load(readFileSync(builderConfigPath, 'utf8')) as {
+      linux?: { maintainer?: string };
+    };
+    expect(config.linux?.maintainer).toMatch(/^.+ <[^<>@\s]+@[^<>@\s]+>$/);
+  });
 });

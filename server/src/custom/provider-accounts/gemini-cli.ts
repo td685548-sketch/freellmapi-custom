@@ -263,7 +263,7 @@ export class GeminiCliProvider extends BaseProvider {
         body: JSON.stringify(body),
       },
       options?.timeoutMs ?? this.timeoutMs,
-      { signal: options?.signal },
+      { signal: options?.signal, timeoutBounds: 'headers' },
     );
 
     if (!res.ok) {

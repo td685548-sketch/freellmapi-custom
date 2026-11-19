@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { contentToString, estimateInputTokens, flattenMessageContent, messageHasImage, normalizeOutboundContent, sanitizeResponse, stripImagesFromMessages } from '../../lib/content.js';
+import { CONTEXT_POLICY_DEFAULT } from '@freellmapi/shared/context-budget.js';
+import { contentToString, countImageBlocks, estimateImageTokens, estimateInputTokens, estimateTextTokens, flattenMessageContent, IMAGE_TOKENS_PER_IMAGE, messageHasImage, normalizeOutboundContent, sanitizeResponse, stripImagesFromMessages } from '../../lib/content.js';
 import type { ChatMessage } from '@freellmapi/shared/types.js';
 
 describe('contentToString', () => {
@@ -227,5 +228,85 @@ describe('estimateInputTokens', () => {
       tool_calls: [{ id: 'c1', type: 'function', function: { name: 'Write', arguments: 'a'.repeat(795) } }],
     } as ChatMessage];
     expect(estimateInputTokens(withCall)).toBe(100 + 200);
+  });
+
+  it('counts Vietnamese (accented Latin) at ~1 token / 2.5 chars, not chars/4', () => {
+    // 100 accented chars: 100 / 2.5 = 40 tokens; chars/4 would say 25.
+    expect(estimateInputTokens([{ role: 'user', content: 'à'.repeat(100) }])).toBe(40);
+    // Real sentence: 48 chars, 14 tokens (chars/4 would say 12).
+    const sentence = 'Tôi yêu tiếng Việt rất nhiều, bạn có hiểu không?';
+    expect(estimateInputTokens([{ role: 'user', content: sentence }])).toBe(14);
+  });
+
+  it('counts CJK at ~1 token / 1 char, not chars/4', () => {
+    // 40 CJK chars: 40 tokens; chars/4 would say 10.
+    expect(estimateInputTokens([{ role: 'user', content: '你好世界'.repeat(10) }])).toBe(40);
+  });
+
+  it('counts mixed-script text with per-script ratios', () => {
+    // 'Hello, ' (7 ASCII) + 'xin chào bạn, ' (14 chars, 4 accented) +
+    // '你好世界' (4 CJK) = 10 tokens; chars/4 over the 25 chars would say 7.
+    expect(estimateInputTokens([{ role: 'user', content: 'Hello, xin chào bạn, 你好世界' }])).toBe(10);
+  });
+
+  it('counts Vietnamese tool-call arguments with the same ratios', () => {
+    const withCall: ChatMessage[] = [{
+      role: 'assistant',
+      content: null,
+      tool_calls: [{ id: 'c1', type: 'function', function: { name: 'Write', arguments: 'à'.repeat(100) } }],
+    } as ChatMessage];
+    // 'Write' (5 ASCII) + 100 accented chars = ceil((5*15 + 100*24) / 60) = 42.
+    expect(estimateInputTokens(withCall)).toBe(42);
+  });
+
+  it('counts Vietnamese tool-schema text with the same ratios', () => {
+    const tools = [{ type: 'function', function: { name: 'Read', description: 'đọc tệp tin tiếng Việt có dấu'.repeat(10), parameters: { type: 'object' } } }];
+    const counted = estimateInputTokens(messages, tools);
+    expect(counted).toBeGreaterThan(estimateInputTokens(messages, [{ type: 'function', function: { name: 'Read', description: 'x'.repeat(280), parameters: { type: 'object' } } }]));
+  });
+});
+
+describe('estimateTextTokens', () => {
+  it('is empty-safe and ASCII stays at ~4 chars per token', () => {
+    expect(estimateTextTokens('')).toBe(0);
+    expect(estimateTextTokens('a'.repeat(10))).toBe(3);
+    expect(estimateTextTokens('x'.repeat(400))).toBe(100);
+  });
+
+  it('counts accented Latin at / 2.5 and CJK at / 1', () => {
+    expect(estimateTextTokens('à'.repeat(10))).toBe(4);
+    expect(estimateTextTokens('é'.repeat(100))).toBe(40);
+    expect(estimateTextTokens('你'.repeat(10))).toBe(10);
+    expect(estimateTextTokens('안녕하세요'.repeat(4))).toBe(20);
+  });
+
+  it('counts other scripts at / 3', () => {
+    // Arabic (not ASCII / accented Latin / CJK): 30 chars -> 10 tokens.
+    expect(estimateTextTokens('ا'.repeat(30))).toBe(10);
+  });
+});
+
+describe('image token cost', () => {
+  it('charges the shared 765 tokens per image', () => {
+    expect(IMAGE_TOKENS_PER_IMAGE).toBe(765);
+    expect(estimateImageTokens(0)).toBe(0);
+    expect(estimateImageTokens(1)).toBe(765);
+    expect(estimateImageTokens(2)).toBe(1530);
+    expect(estimateImageTokens(-1)).toBe(0);
+  });
+
+  it('stays in lockstep with the context-budget policy default', () => {
+    // Routing (proxy.ts), the scenario classifier, and the context-budget
+    // estimator must never disagree about one image again (1000 vs 765).
+    expect(IMAGE_TOKENS_PER_IMAGE).toBe(CONTEXT_POLICY_DEFAULT.imageTokens);
+  });
+
+  it('counts image blocks in a content envelope', () => {
+    expect(countImageBlocks('plain text')).toBe(0);
+    expect(countImageBlocks([
+      { type: 'text', text: 'describe this' },
+      { type: 'image_url', image_url: { url: 'https://example.com/x.png' } },
+      { type: 'image', image_url: { url: 'https://example.com/y.png' } },
+    ])).toBe(2);
   });
 });

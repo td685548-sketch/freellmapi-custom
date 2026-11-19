@@ -80,7 +80,7 @@ export class MoondreamProvider extends BaseProvider {
     options: CompletionOptions | undefined, stream: boolean, quotaContext?: QuotaObservationContext): Promise<Response> {
     const res = await this.fetchWithTimeout(`${BASE_URL}/chat/completions`, {
       method: 'POST', headers: this.headers(apiKey), body: JSON.stringify(this.body(messages, modelId, options, stream)),
-    }, options?.timeoutMs ?? providerTimeoutMs(this.platform, 60_000),
+    }, options?.timeoutMs ?? providerTimeoutMs(this.platform),
     { signal: options?.signal, timeoutBounds: stream ? 'headers' : 'request' });
     this.record(res, 'chat/completions', quotaContext, modelId);
     if (!res.ok) {
@@ -112,7 +112,7 @@ export class MoondreamProvider extends BaseProvider {
     options?: CompletionOptions, quotaContext?: QuotaObservationContext): AsyncGenerator<ChatCompletionChunk> {
     const res = await this.request(apiKey, messages, modelId, options, true, quotaContext);
     let finished = false;
-    for await (const chunk of this.readSseStream(res, { firstByteTimeoutMs: options?.timeoutMs ?? providerTimeoutMs(this.platform, 60_000) })) {
+    for await (const chunk of this.readSseStream(res, { firstByteTimeoutMs: options?.timeoutMs ?? providerTimeoutMs(this.platform) })) {
       checkModel(modelId, chunk.model);
       if (!Array.isArray(chunk.choices)) throw upstreamError('returned an invalid stream chunk');
       for (const choice of chunk.choices) {

@@ -611,7 +611,7 @@ export class VertexProvider extends BaseProvider {
       url,
       { method: 'POST', headers, body: JSON.stringify(bodyPayload) },
       options?.timeoutMs ?? this.timeoutMs,
-      { signal: options?.signal },
+      { signal: options?.signal, timeoutBounds: 'headers' },
     );
 
     recordQuotaObservationsFromResponse(res, {

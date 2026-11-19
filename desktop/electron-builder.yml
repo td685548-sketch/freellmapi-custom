@@ -16,8 +16,8 @@ files:
 # attaches the files itself. See #703.
 publish:
   provider: github
-  owner: tashfeenahmed
-  repo: freellmapi
+  owner: td685548-sketch
+  repo: freellmapi-custom
 asar: true
 # Linux chrome-sandbox must be mode 4755 (setuid) in the .deb; otherwise
 # Electron aborts at launch (#1229). Path is relative to desktop/.
@@ -73,6 +73,12 @@ win:
   # electron-builder converts a >=256px PNG to .ico at build time.
   icon: assets/appicon_1024.png
 linux:
+  # electron-builder's FPM targets (.deb/.rpm) require a package maintainer and
+  # fail the Linux build with "Please specify author 'email'" without one
+  # (PR #154's ubuntu job died exactly here). The author block in
+  # desktop/package.json carries no email, so set it here explicitly, using
+  # the GitHub noreply address so no personal email is published.
+  maintainer: "td685548-sketch <253470643+td685548-sketch@users.noreply.github.com>"
   category: Development;Utility;
   icon: assets/appicon_1024.png # electron-builder can automatically scale PNGs
   target:

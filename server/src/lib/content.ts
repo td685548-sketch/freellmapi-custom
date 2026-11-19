@@ -33,20 +33,99 @@ export function contentToString(content: unknown): string {
   return '';
 }
 
-// Rough input-token count (~4 chars per token) used for routing and budget
-// checks: message text, assistant tool-call arguments, and the tool schemas
-// the request carries. Tool schemas go upstream on every turn and count
-// against the provider's context window and TPM ceiling. An agent client like
-// Claude Code sends ~16k tokens of them next to ~4k of messages, so leaving
-// them out routed its requests to models they could never fit (a Groq 8k-TPM
-// model answered 413 to an "estimated" 4k request that was really 17.7k).
+// Flat per-image token cost shared by routing (routes/proxy.ts), the
+// scenario classifier, and the context-budget estimator. It must stay equal
+// to CONTEXT_POLICY_DEFAULT.imageTokens in @freellmapi/shared/context-budget
+// (pinned by server/src/__tests__/lib/content.test.ts); the old routing
+// constant was 1000 while the budget default was 765, so the same image
+// cost 1000 tokens at routing time and 765 at budget time.
+export const IMAGE_TOKENS_PER_IMAGE = 765;
+
+export function estimateImageTokens(imageCount: number): number {
+  if (!Number.isFinite(imageCount) || imageCount <= 0) return 0;
+  return Math.floor(imageCount) * IMAGE_TOKENS_PER_IMAGE;
+}
+
+// Count image blocks ({ type: 'image_url' } / { type: 'image' }) in a
+// message content envelope.
+export function countImageBlocks(content: unknown): number {
+  if (!Array.isArray(content)) return 0;
+  let count = 0;
+  for (const block of content) {
+    const type = (block as { type?: string } | null | undefined)?.type;
+    if (type === 'image_url' || type === 'image') count += 1;
+  }
+  return count;
+}
+
+function isAccentedLatin(cp: number): boolean {
+  return (
+    (cp >= 0x00c0 && cp <= 0x024f) ||
+    (cp >= 0x1e00 && cp <= 0x1eff) ||
+    (cp >= 0x0300 && cp <= 0x036f)
+  );
+}
+
+function isCjkOrKanaOrHangul(cp: number): boolean {
+  return (
+    (cp >= 0x1100 && cp <= 0x11ff) ||
+    (cp >= 0x3000 && cp <= 0x30ff) ||
+    (cp >= 0x3130 && cp <= 0x318f) ||
+    (cp >= 0x31f0 && cp <= 0x31ff) ||
+    (cp >= 0x3400 && cp <= 0x4dbf) ||
+    (cp >= 0x4e00 && cp <= 0x9fff) ||
+    (cp >= 0xac00 && cp <= 0xd7af) ||
+    (cp >= 0xf900 && cp <= 0xfaff) ||
+    (cp >= 0xff00 && cp <= 0xffef) ||
+    (cp >= 0x20000 && cp <= 0x2fa1f)
+  );
+}
+
+/**
+ * Estimate token count for plain text using script-weighted character ratios:
+ * ASCII / 4, accented Latin / 2.5, CJK/Kana/Hangul / 1, other scripts / 3.
+ *
+ * Single source of truth for the heuristic: the old chars/4 rule undercounted
+ * Vietnamese (diacritics ≈ 1 token / 2.5 chars) by ~40% and CJK (≈ 1 token /
+ * 1 char) by ~4x, so those requests routed to models whose context/TPM budget
+ * they could never fit. Previously this lived in custom/context-budget and
+ * only ran when the context budget was enabled; it now backs the always-on
+ * routing estimate, compression stats, and the budget estimator alike.
+ */
+export function estimateTextTokens(text: string): number {
+  if (!text) return 0;
+  // Accumulate scaled integers (LCM of 4, 2.5, 1, 3 is 60) to avoid float drift.
+  let weightedSum = 0;
+  for (let i = 0; i < text.length; ) {
+    const cp = text.codePointAt(i)!;
+    i += cp > 0xffff ? 2 : 1;
+    if (cp <= 0x7f) {
+      weightedSum += 15;
+    } else if (isAccentedLatin(cp)) {
+      weightedSum += 24;
+    } else if (isCjkOrKanaOrHangul(cp)) {
+      weightedSum += 60;
+    } else {
+      weightedSum += 20;
+    }
+  }
+  return weightedSum === 0 ? 0 : Math.floor((weightedSum + 59) / 60);
+}
+
+// Rough input-token count used for routing and budget checks: message text,
+// assistant tool-call arguments, and the tool schemas the request carries.
+// Text is counted with the script-weighted estimateTextTokens() above (not
+// chars/4); image blocks are NOT counted here — callers that can see them
+// add estimateImageTokens(countImageBlocks(...)) themselves (routes/proxy.ts
+// does; custom/context-budget's estimateMessagesTokens() does), so the two
+// must never be summed twice for the same request.
 export function estimateInputTokens(messages: ChatMessage[], tools?: readonly unknown[]): number {
   const messageTokens = messages.reduce((sum, m) => {
     const calls = (m.tool_calls ?? [])
-      .reduce((n, call) => n + call.function.name.length + call.function.arguments.length, 0);
-    return sum + Math.ceil((contentToString(m.content).length + calls) / 4);
+      .reduce((n, call) => n + estimateTextTokens(call.function.name + call.function.arguments), 0);
+    return sum + estimateTextTokens(contentToString(m.content)) + calls;
   }, 0);
-  const toolTokens = tools && tools.length > 0 ? Math.ceil(JSON.stringify(tools).length / 4) : 0;
+  const toolTokens = tools && tools.length > 0 ? estimateTextTokens(JSON.stringify(tools)) : 0;
   return messageTokens + toolTokens;
 }
 

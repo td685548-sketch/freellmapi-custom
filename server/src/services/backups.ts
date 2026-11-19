@@ -17,7 +17,10 @@ const LAST_RUN_SETTING = 'backup_last_run_day';
 // Manual dumps are the operator's own intent and pre-restore snapshots are
 // the only undo for a restore, so neither is ever auto-deleted; only the two
 // sources the software creates by itself are bounded, by count. `0` disables
-// the prune (the "documented opt-out" the issue asks for).
+// the prune (the "documented opt-out" the issue asks for). Pre-migration
+// snapshots (server/src/db/migration-snapshot.ts) join the never-pruned set:
+// they are the only undo for a migration, and a migration that goes wrong is
+// exactly when the operator reaches for the newest one, not the newest ten.
 const DEFAULT_AUTO_DUMP_RETENTION = 10;
 export const AUTO_DUMP_SOURCES: ReadonlySet<string> = new Set(['scheduled', 'pre-update']);
 
@@ -33,7 +36,7 @@ export function getAutoDumpRetention(): number {
  *  path would misread. Restore refuses anything it does not know. */
 const DUMP_FORMAT = 1;
 
-export const BACKUP_SOURCES = ['manual', 'scheduled', 'pre-restore', 'pre-update'] as const;
+export const BACKUP_SOURCES = ['manual', 'scheduled', 'pre-restore', 'pre-update', 'pre-migration'] as const;
 export type BackupSource = (typeof BACKUP_SOURCES)[number];
 
 export interface BackupSchedule {

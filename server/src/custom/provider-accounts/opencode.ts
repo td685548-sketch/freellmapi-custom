@@ -635,7 +635,7 @@ export class OpenCodeProvider extends BaseProvider {
         url,
         { method: 'POST', headers, body: JSON.stringify(body) },
         options?.timeoutMs ?? this.timeoutMs,
-        { signal: options?.signal },
+        { signal: options?.signal, timeoutBounds: 'headers' },
       );
 
       if (this.variant === 'opencode' && (res.status === 429 || res.status === 403)) {

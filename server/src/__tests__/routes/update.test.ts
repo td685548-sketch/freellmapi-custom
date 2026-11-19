@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import express from 'express';
 import type { Express } from 'express';
 import http from 'node:http';
-import { createUpdateRouter } from '../../routes/update.js';
+import { createUpdateRouter, DEFAULT_UPDATE_REPOSITORY, resolveUpdateRepository } from '../../routes/update.js';
 
 const LOCAL_SHA = '0123456789abcdef0123456789abcdef01234567';
 const REMOTE_SHA = '89abcdef0123456789abcdef0123456789abcdef';
@@ -128,7 +128,7 @@ describe('Update API', () => {
         checkedAt: '2026-07-28T14:00:00.000Z',
       });
       expect(fetchMock).toHaveBeenCalledWith(
-        `https://api.github.com/repos/tashfeenahmed/freellmapi/compare/${LOCAL_SHA}...main`,
+        `https://api.github.com/repos/td685548-sketch/freellmapi-custom/compare/${LOCAL_SHA}...main`,
         expect.any(Object),
       );
     });
@@ -136,7 +136,7 @@ describe('Update API', () => {
     it('prefers a validated packaged-build identity and truncates commit messages', async () => {
       const longMessage = 'x'.repeat(250);
       const fetchMock = vi.fn(async (url: string | URL | RequestInfo) => (String(url).includes('/releases/latest')
-        ? response({ tag_name: 'v0.12.0', html_url: 'https://github.com/tashfeenahmed/freellmapi/releases/tag/v0.12.0' })
+        ? response({ tag_name: 'v0.12.0', html_url: 'https://github.com/td685548-sketch/freellmapi-custom/releases/tag/v0.12.0' })
         : response(compareBody('ahead', longMessage))));
       const execMock = vi.fn(async () => ({ stdout: `${REMOTE_SHA}\n` }));
       const { app } = createTestApp({
@@ -191,7 +191,7 @@ describe('Update API', () => {
           if (String(url).includes('/releases/latest')) {
             return response({
               tag_name: 'v0.11.0',
-              html_url: 'https://github.com/tashfeenahmed/freellmapi/releases/tag/v0.11.0',
+              html_url: 'https://github.com/td685548-sketch/freellmapi-custom/releases/tag/v0.11.0',
             });
           }
           return response(compareBody('identical'));
@@ -205,7 +205,7 @@ describe('Update API', () => {
 
         expect(result.body).toMatchObject({ status: 'current', installation });
         expect(fetchMock).toHaveBeenCalledWith(
-          `https://api.github.com/repos/tashfeenahmed/freellmapi/compare/${LOCAL_SHA}...v0.11.0`,
+          `https://api.github.com/repos/td685548-sketch/freellmapi-custom/compare/${LOCAL_SHA}...v0.11.0`,
           expect.any(Object),
         );
         // 'identical' against the tag: no update offered for untagged main commits.
@@ -217,7 +217,7 @@ describe('Update API', () => {
           if (String(url).includes('/releases/latest')) {
             return response({
               tag_name: 'v0.12.0',
-              html_url: 'https://github.com/tashfeenahmed/freellmapi/releases/tag/v0.12.0',
+              html_url: 'https://github.com/td685548-sketch/freellmapi-custom/releases/tag/v0.12.0',
             });
           }
           return response(compareBody('ahead'));
@@ -254,7 +254,7 @@ describe('Update API', () => {
           if (String(url).includes('/releases/latest')) {
             return response({
               tag_name: 'v0.11.0',
-              html_url: 'https://github.com/tashfeenahmed/freellmapi/releases/tag/v0.11.0',
+              html_url: 'https://github.com/td685548-sketch/freellmapi-custom/releases/tag/v0.11.0',
             });
           }
           return response({ message: 'rate limited' }, 403);
@@ -324,7 +324,7 @@ describe('Update API', () => {
       });
       expect(fetchMock).toHaveBeenNthCalledWith(
         2,
-        'https://github.com/tashfeenahmed/freellmapi/commits/main.atom',
+        'https://github.com/td685548-sketch/freellmapi-custom/commits/main.atom',
         expect.any(Object),
       );
     });
@@ -789,4 +789,56 @@ describe('Update API', () => {
       expect((await httpGet(plain, '/api/update/status')).body).not.toHaveProperty('selfUpdate');
     });
   });
+
+  describe('update repository (fork identity)', () => {
+    it('defaults to the fork, not upstream', () => {
+      expect(DEFAULT_UPDATE_REPOSITORY).toBe('td685548-sketch/freellmapi-custom');
+      expect(resolveUpdateRepository({})).toBe('td685548-sketch/freellmapi-custom');
+    });
+
+    it('checks the fork SHA against the fork, never upstream', async () => {
+      const fetchMock = vi.fn(async () => response(compareBody('identical')));
+      const { app } = createTestApp({ fetch: fetchMock });
+
+      const result = await httpGet(app, '/api/update/check');
+
+      expect(result.status).toBe(200);
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://api.github.com/repos/td685548-sketch/freellmapi-custom/compare/'
+          + `${LOCAL_SHA}...main`,
+        expect.any(Object),
+      );
+      // No request may ever go to the upstream repository.
+      for (const [url] of fetchMock.mock.calls) {
+        expect(String(url)).not.toContain('tashfeenahmed');
+      }
+    });
+
+    it('honours FREELLMAPI_UPDATE_REPO for a differently-named fork', async () => {
+      const fetchMock = vi.fn(async () => response(compareBody('identical')));
+      const { app } = createTestApp({
+        env: { FREELLMAPI_UPDATE_REPO: 'someone-else/my-fork' },
+        fetch: fetchMock,
+      });
+
+      await httpGet(app, '/api/update/check');
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        `https://api.github.com/repos/someone-else/my-fork/compare/${LOCAL_SHA}...main`,
+        expect.any(Object),
+      );
+    });
+
+    it('falls back to the fork on an invalid FREELLMAPI_UPDATE_REPO', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        expect(resolveUpdateRepository({ FREELLMAPI_UPDATE_REPO: 'not a repo' }))
+          .toBe('td685548-sketch/freellmapi-custom');
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('invalid FREELLMAPI_UPDATE_REPO'));
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  });
 });
+
