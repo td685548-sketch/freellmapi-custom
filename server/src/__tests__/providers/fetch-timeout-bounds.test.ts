@@ -38,7 +38,6 @@ function mockFetch(signalAwareBody: (signal: AbortSignal | undefined) => Readabl
 }
 
 function abortableStream(signal: AbortSignal | undefined, enqueue: (controller: ReadableStreamDefaultController<Uint8Array>) => void): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder();
   return new ReadableStream<Uint8Array>({
     start(controller) {
       if (signal?.aborted) {
