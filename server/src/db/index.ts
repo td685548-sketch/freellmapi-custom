@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'url';
-import { runMigrationsSync } from './migrate/runner.js';
+import { getMigrationStatuses, runMigrationsSync } from './migrate/runner.js';
 import { initEncryptionKey, isEncryptionKeyInitialized, probeStoredSecrets } from '../lib/crypto.js';
 import { restrictAllToOwner, restrictDirToOwner } from '../lib/file-permissions.js';
 import { nodeSqliteFactory } from './node-sqlite.js';
@@ -223,6 +223,15 @@ export function initDb(
       process.exit(1);
     }
   }
+
+  // Schema version at boot: how many migrations are applied and which is the
+  // latest. A boot that silently runs (or skips) migrations is how a
+  // half-migrated database goes unnoticed until a query fails.
+  const appliedMigrations = getMigrationStatuses(db).filter(status => status.status === 'applied');
+  console.log(
+    `[db] schema version: ${appliedMigrations.length} migrations applied, ` +
+      `latest ${appliedMigrations[appliedMigrations.length - 1]?.filename ?? '(none)'}`,
+  );
 
   if (!isEncryptionKeyInitialized()) initEncryptionKey(db);
 

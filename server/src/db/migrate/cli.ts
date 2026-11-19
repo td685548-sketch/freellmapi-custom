@@ -6,6 +6,8 @@ import { fileURLToPath } from 'url';
 import type { Db } from '../types.js';
 import { connectDb } from '../index.js';
 import { getMigrationStatuses, runMigrations } from './runner.js';
+import { setBeforeMigrationsHook } from './runner.js';
+import { snapshotBeforeMigrations } from '../migration-snapshot.js';
 
 type Command = 'up' | 'down' | 'fresh' | 'status' | 'create';
 
@@ -23,6 +25,10 @@ async function main(): Promise<void> {
   }
 
   const db = connectDb();
+
+  // Same pre-migration snapshot as a server boot (see index.ts): a manual
+  // `db:migration:up` deserves the same safety net.
+  setBeforeMigrationsHook(snapshotBeforeMigrations);
 
   switch (command) {
     case 'up':
