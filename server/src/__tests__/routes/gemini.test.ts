@@ -69,6 +69,40 @@ describe('native Gemini /v1beta surface', () => {
 
   afterEach(() => vi.restoreAllMocks());
 
+  it('ignores ?key= by default: a query credential alone must not authenticate', async () => {
+    // The key would otherwise leak into shell history, proxy access logs,
+    // and Referer headers. Header auth still works on the same route.
+    const viaQuery = await request(app, 'GET', `/v1beta/models?key=${getUnifiedApiKey()}`);
+    expect(viaQuery.status).toBe(401);
+    expect(viaQuery.body.error?.status).toBe('UNAUTHENTICATED');
+
+    const viaQueryGenerate = await request(
+      app,
+      'POST',
+      `/v1beta/models/gemini-2.5-flash:generateContent?key=${getUnifiedApiKey()}`,
+      { contents: [{ role: 'user', parts: [{ text: 'hello' }] }] },
+    );
+    expect(viaQueryGenerate.status).toBe(401);
+
+    const viaHeader = await request(app, 'GET', '/v1beta/models', undefined, {
+      'x-goog-api-key': getUnifiedApiKey(),
+    });
+    expect(viaHeader.status).toBe(200);
+  });
+
+  it('accepts ?key= again only with the explicit GEMINI_ALLOW_QUERY_KEY=1 flag', async () => {
+    process.env.GEMINI_ALLOW_QUERY_KEY = '1';
+    try {
+      const viaQuery = await request(app, 'GET', `/v1beta/models?key=${getUnifiedApiKey()}`);
+      expect(viaQuery.status).toBe(200);
+    } finally {
+      delete process.env.GEMINI_ALLOW_QUERY_KEY;
+    }
+    // Flag off again: back to 401.
+    const viaQueryOff = await request(app, 'GET', `/v1beta/models?key=${getUnifiedApiKey()}`);
+    expect(viaQueryOff.status).toBe(401);
+  });
+
   it('lists Gemini-shaped models with x-goog-api-key auth', async () => {
     const response = await request(app, 'GET', '/v1beta/models', undefined, {
       'x-goog-api-key': getUnifiedApiKey(),
@@ -105,7 +139,7 @@ describe('native Gemini /v1beta surface', () => {
     const response = await request(
       app,
       'POST',
-      `/v1beta/models/gemini-2.5-flash:generateContent?key=${getUnifiedApiKey()}`,
+      '/v1beta/models/gemini-2.5-flash:generateContent',
       {
         systemInstruction: { parts: [{ text: 'Be concise' }] },
         contents: [{ role: 'user', parts: [{ text: 'hello' }] }],
@@ -118,6 +152,7 @@ describe('native Gemini /v1beta surface', () => {
         }],
         generationConfig: { temperature: 0.2, maxOutputTokens: 64 },
       },
+      { 'x-goog-api-key': getUnifiedApiKey() },
     );
 
     expect(response.status).toBe(200);

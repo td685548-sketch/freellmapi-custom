@@ -14,7 +14,7 @@ urlTokenRouter.use((req: Request, res: Response, next: NextFunction) => {
   if (!validateUrlToken(token)) {
     res.status(401).json({
       error: {
-        message: 'Invalid or revoked URL token',
+        message: 'Invalid, revoked or expired URL token',
         type: 'authentication_error',
       },
     });

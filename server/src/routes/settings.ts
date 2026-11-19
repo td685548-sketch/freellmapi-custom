@@ -232,12 +232,17 @@ settingsRouter.get('/url-tokens', (_req: Request, res: Response) => {
 });
 
 settingsRouter.post('/url-tokens', (req: Request, res: Response) => {
-  const parsed = z.object({ label: z.string().max(120).optional() }).safeParse(req.body);
+  const parsed = z.object({
+    label: z.string().max(120).optional(),
+    // Lifetime in days (1..3650). Omitted: the URL_TOKEN_TTL_DAYS default
+    // (90 days). There is no "never expires" option for new tokens.
+    expiresInDays: z.number().int().min(1).max(3650).optional(),
+  }).safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: { message: 'Invalid URL token label', type: 'invalid_request_error' } });
+    res.status(400).json({ error: { message: 'Invalid URL token label or expiresInDays (1..3650)', type: 'invalid_request_error' } });
     return;
   }
-  res.status(201).json(mintUrlToken(parsed.data.label ?? ''));
+  res.status(201).json(mintUrlToken(parsed.data.label ?? '', { expiresInDays: parsed.data.expiresInDays }));
 });
 
 settingsRouter.delete('/url-tokens/:id', (req: Request, res: Response) => {

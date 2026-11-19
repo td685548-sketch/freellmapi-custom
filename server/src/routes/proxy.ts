@@ -14,7 +14,7 @@ import { runImageGeneration, runVideoGeneration, runSpeech, runTranscription, Me
 import multer from 'multer';
 import { getClientContext, noteRequestTokens } from '../lib/client-context.js';
 import { getDb } from '../db/index.js';
-import { resolveAuth, prependSystemPrompt, type ResolvedAuth } from '../lib/system-prompt.js';
+import { resolveAuth, prependSystemPrompt, isUrlTokenAuthenticated, type ResolvedAuth } from '../lib/system-prompt.js';
 import { applyOutputSavers } from '../custom/output-savers/apply.js';
 import { contentToString, estimateImageTokens, estimateInputTokens, messageHasImage, normalizeOutboundContent, sanitizeResponse } from '../lib/content.js';
 import { routeOutputBudget } from '../lib/output-cap.js';
@@ -591,8 +591,9 @@ proxyRouter.get('/usage', (req: Request, res: Response) => {
   // — which is precisely why it must not pass a unified-key gate. The token is
   // handed to a headerless client (a teammate, a widget, a phone app); the
   // ledger behind this route is every provider key's spend. Same reasoning as
-  // the client-profile refusal below.
-  if ((req as Request & { urlTokenAuthenticated?: boolean }).urlTokenAuthenticated) {
+  // the client-profile refusal below. URL tokens are chat-scoped by design:
+  // isUrlTokenAuthenticated() is the single check for that scope here.
+  if (isUrlTokenAuthenticated(req)) {
     res.status(403).json({ error: { message: 'Usage is only available to the unified API key', type: 'permission_error' } });
     return;
   }

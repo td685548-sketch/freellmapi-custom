@@ -4,6 +4,7 @@ import path from 'path';
 import Database from 'better-sqlite3';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { getDb, initDb } from '../../db/index.js';
+import { DEFAULT_MIGRATIONS } from '../../db/migrate/defaults.js';
 import { snapshotBeforeMigrations } from '../../db/migration-snapshot.js';
 import { getMigrationStatuses, runMigrationsSync, setBeforeMigrationsHook } from '../../db/migrate/runner.js';
 import { down as rollbackQuotaVouchers } from '../../db/migrations/20261118_200000_custom_quota_vouchers_topups.js';
@@ -181,7 +182,13 @@ describe('pre-migration snapshot hook', () => {
     try {
       const lines = log.mock.calls.map(call => String(call[0]));
       const version = lines.find(line => line.includes('schema version'));
-      expect(version).toMatch(/schema version: \d+ migrations applied, latest 20261118_200000_custom_quota_vouchers_topups\.ts/);
+      // The boot log names the newest registered migration; derive it from
+      // the registry instead of hardcoding so the next migration does not
+      // break this test again.
+      const latest = DEFAULT_MIGRATIONS[DEFAULT_MIGRATIONS.length - 1].filename;
+      expect(version).toMatch(
+        new RegExp(`schema version: \\d+ migrations applied, latest ${latest.replace('.', '\\.')}`),
+      );
     } finally {
       getDb().close?.();
     }

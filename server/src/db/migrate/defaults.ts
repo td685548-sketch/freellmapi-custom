@@ -116,6 +116,7 @@ import * as customAssistantWorkspace from '../migrations/20261118_180000_custom_
 import * as customScenarioRouting from '../migrations/20261118_190000_custom_scenario_routing.js';
 import * as customQuotaVouchersTopups from '../migrations/20261118_200000_custom_quota_vouchers_topups.js';
 import * as requestAttemptsTtfbMs from '../migrations/20261119_000001_request_attempts_ttfb_ms.js';
+import * as customUrlTokenExpiry from '../migrations/20261119_010000_custom_url_token_expiry.js';
 
 export interface MigrationModule {
   up(db: Db): void;
@@ -325,4 +326,5 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: '20261118_190000_custom_scenario_routing.ts', module: customScenarioRouting },
   { filename: '20261118_200000_custom_quota_vouchers_topups.ts', module: customQuotaVouchersTopups },
   { filename: REQUEST_ATTEMPTS_TTFB_MS_FILENAME, module: requestAttemptsTtfbMs },
+  { filename: '20261119_010000_custom_url_token_expiry.ts', module: customUrlTokenExpiry },
 ];
