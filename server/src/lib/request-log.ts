@@ -216,9 +216,9 @@ export function persistRequestAttempts(trace: RequestTrace): void {
     const CHUNK_SIZE = 50;
     for (let i = 0; i < records.length; i += CHUNK_SIZE) {
       const chunk = records.slice(i, i + CHUNK_SIZE);
-      const placeholders = chunk.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+      const placeholders = chunk.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
       const sql = `
-        INSERT INTO request_attempts (request_id, ordinal, platform, model_id, key_ordinal, key_label, outcome, start_offset_ms, duration_ms, error_summary)
+        INSERT INTO request_attempts (request_id, ordinal, platform, model_id, key_ordinal, key_label, outcome, start_offset_ms, duration_ms, ttfb_ms, error_summary)
         VALUES ${placeholders}
       `;
       const values: unknown[] = [];
@@ -233,6 +233,7 @@ export function persistRequestAttempts(trace: RequestTrace): void {
           r.outcome,
           r.startOffsetMs,
           r.durationMs,
+          r.ttfbMs ?? null,
           r.errorSummary,
         );
       }

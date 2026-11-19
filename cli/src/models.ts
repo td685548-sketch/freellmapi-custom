@@ -26,6 +26,31 @@ export function contextWindowOf(model: CatalogModel): number | undefined {
 }
 
 /**
+ * The setup generators' default model: the model a generated config file
+ * pins. An explicit `--model` wins; otherwise `auto` — the router picking
+ * the best model per request — is the right default for a long-lived config.
+ * Never fall back to `fusion` (multi-model fan-out) by accident.
+ *
+ * This used to live in tools.ts as `primaryModel`, where its last-resort
+ * fallback invented `{ context_window: 128_000 }` for the `auto` model. That
+ * number was then written into ~15 coding agents' config files as if the
+ * catalog had published it. The fallback here carries no window at all:
+ * callers use `contextWindowOf()` and omit the field when it is undefined.
+ */
+export function primarySetupModel(models: CatalogModel[], requestedId?: string): CatalogModel {
+  // An explicit --model wins over every heuristic below. It is validated
+  // against the UNFILTERED catalog before we get here, so an id absent from
+  // `models` (the available-only roster) is a real, registered model that is
+  // merely out of quota right now — pin it anyway rather than silently writing
+  // a different model into the user's config.
+  if (requestedId) return models.find(model => model.id === requestedId) ?? { id: requestedId };
+  return models.find(model => model.id === 'auto')
+    ?? models.find(model => model.id !== 'fusion' && model.available !== false)
+    ?? models.find(model => model.id !== 'fusion')
+    ?? { id: 'auto', name: 'Auto' };
+}
+
+/**
  * The launcher's default when the caller did not pin one: the first servable
  * concrete model, falling back to `auto`.
  *

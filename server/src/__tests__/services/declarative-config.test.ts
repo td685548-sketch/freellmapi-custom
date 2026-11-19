@@ -184,13 +184,129 @@ describe('declarative config import', () => {
     expect((getDb().prepare("SELECT COUNT(*) AS n FROM api_keys WHERE platform = 'kilo'").get() as { n: number }).n).toBe(1);
   });
 
-  it('genuinely malformed config still fails loudly', () => {
+  it('genuinely malformed config still fails loudly on the direct call, but never bricks boot via FromEnv', () => {
     expect(() => applyDeclarativeConfig({ keys: [{ platform: 'groq' }], nonsense: true }))
       .toThrow(/invalid declarative config/);
     expect(() => applyDeclarativeConfig({ keys: [{ platform: 'unknown-platform', key: 'x' }] }))
       .toThrow(/unknown provider platform/);
+    // Boot path: malformed JSON is a warning + skip, not a throw (see below).
     process.env.FREEAPI_CONFIG_JSON = '{ not json';
-    expect(() => applyDeclarativeConfigFromEnv()).toThrow();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect(() => applyDeclarativeConfigFromEnv()).not.toThrow();
+      expect(applyDeclarativeConfigFromEnv().applied).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+// Boot resilience: a top-level declarative-config problem used to throw out
+// of main() (server/src/index.ts) and put the install in a restart loop with
+// the dashboard dead. The boot path must now degrade to warning + skip and
+// boot with the DB as-is, for every failure mode: bad JSON, a wrong field
+// name, a bad routing.strategy enum, an unreadable config file, and even an
+// otherwise-valid config whose apply fails part-way (unknown platform).
+describe('declarative config boot resilience', () => {
+  beforeAll(() => {
+    process.env.ENCRYPTION_KEY = '0'.repeat(64);
+    initDb(':memory:');
+  });
+
+  beforeEach(() => {
+    delete process.env.FREEAPI_CONFIG_JSON;
+    delete process.env.FREEAPI_CONFIG_PATH;
+    getDb().prepare('DELETE FROM api_keys').run();
+  });
+
+  afterEach(() => restoreEnv());
+
+  function groqKeyCount() {
+    return (getDb().prepare("SELECT COUNT(*) AS n FROM api_keys WHERE platform = 'groq'").get() as { n: number }).n;
+  }
+
+  it('survives malformed JSON syntax and boots with the existing DB', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      process.env.FREEAPI_CONFIG_JSON = '{ "keys": [ { "platform": "groq", ';
+      const result = applyDeclarativeConfigFromEnv();
+      expect(result.applied).toBe(false);
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings[0]).toContain('FREEAPI_CONFIG_JSON');
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('[config]'));
+      expect(groqKeyCount()).toBe(0);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('survives an unknown top-level field (strict schema) without applying anything', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      process.env.FREEAPI_CONFIG_JSON = JSON.stringify({
+        keys: [{ platform: 'groq', key: 'gsk_config_key', label: 'config' }],
+        nonsense: true,
+      });
+      const result = applyDeclarativeConfigFromEnv();
+      expect(result.applied).toBe(false);
+      expect(result.warnings[0]).toContain('nonsense');
+      // Top-level validation is all-or-nothing: the valid key next to the
+      // bad field is not applied either — the whole config is skipped.
+      expect(groqKeyCount()).toBe(0);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('survives an invalid routing.strategy enum value', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      process.env.FREEAPI_CONFIG_JSON = JSON.stringify({
+        keys: [{ platform: 'groq', key: 'gsk_config_key', label: 'config' }],
+        routing: { strategy: 'turbo' },
+      });
+      const result = applyDeclarativeConfigFromEnv();
+      expect(result.applied).toBe(false);
+      expect(result.warnings[0]).toContain('routing.strategy');
+      expect(groqKeyCount()).toBe(0);
+      expect(getRoutingStrategy()).not.toBe('turbo' as never);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('survives a missing FREEAPI_CONFIG_PATH file', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      process.env.FREEAPI_CONFIG_PATH = '/definitely/not/a/real/config.json';
+      const result = applyDeclarativeConfigFromEnv();
+      expect(result.applied).toBe(false);
+      expect(result.warnings).toHaveLength(1);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not read declarative config'));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('survives a config whose apply fails (unknown platform) and a valid config still applies afterwards', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      process.env.FREEAPI_CONFIG_JSON = JSON.stringify({
+        keys: [{ platform: 'unknown-platform', key: 'x' }],
+      });
+      const bad = applyDeclarativeConfigFromEnv();
+      expect(bad.applied).toBe(false);
+      expect(bad.warnings[0]).toContain('unknown provider platform');
+
+      process.env.FREEAPI_CONFIG_JSON = JSON.stringify({
+        keys: [{ platform: 'groq', key: 'gsk_config_key', label: 'config' }],
+      });
+      const good = applyDeclarativeConfigFromEnv();
+      expect(good.applied).toBe(true);
+      expect(groqKeyCount()).toBe(1);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

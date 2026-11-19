@@ -17,6 +17,7 @@ import {
 } from '../../services/compression/preservation.js';
 import {
   compressRequest,
+  compressionCacheKey,
   _clearPrefixFreezeForTesting,
 } from '../../services/compression/pipeline.js';
 import {
@@ -50,7 +51,9 @@ describe('compression configuration', () => {
     initDb(':memory:');
   });
 
-  it('uses setting → env → off precedence and persists complete engine defaults', () => {
+  it('uses setting → env → standard precedence and persists complete engine defaults', () => {
+    // No setting, no env var: the default mode is standard.
+    expect(getCompressionConfig().mode).toBe('standard');
     process.env.FREELLMAPI_COMPRESSION = 'lossless';
     expect(getCompressionConfig().mode).toBe('lossless');
     const saved = setCompressionConfig({
@@ -357,6 +360,35 @@ describe('compression engines', () => {
     expect(JSON.stringify(stats)).not.toContain('hello');
   });
 
+  it('compressionCacheKey agrees with compressRequest across modes, headers, and the auto-trigger', () => {
+    const messages = [msg('user', 'hello world')];
+    for (const mode of ['off', 'lossless', 'standard', 'aggressive'] as const) {
+      const cfg = config(mode);
+      expect(compressionCacheKey(messages, { config: cfg }))
+        .toBe(compressRequest(messages, { config: cfg, recordStats: false }).cacheKey);
+      expect(compressionCacheKey(messages, { config: cfg, header: 'off' }))
+        .toBe(compressRequest(messages, { config: cfg, header: 'off', recordStats: false }).cacheKey);
+    }
+    // Auto-trigger: a long prompt over the threshold flips lossless →
+    // aggressive in both, so the early cache key matches the pipeline's.
+    const payload = 'unprotected context line\n'.repeat(400);
+    const cfg = config('lossless', { autoTriggerEstTokens: 100 });
+    const long = [msg('user', payload)];
+    expect(compressRequest(long, { config: cfg, recordStats: false }).mode).toBe('aggressive');
+    expect(compressionCacheKey(long, { config: cfg }))
+      .toBe(compressRequest(long, { config: cfg, recordStats: false }).cacheKey);
+    // A header that lowers the mode lowers the fingerprint in both.
+    expect(compressionCacheKey(long, { config: cfg, header: 'lossless' }))
+      .toBe(compressRequest(long, { config: cfg, header: 'lossless', recordStats: false }).cacheKey);
+    // Script-weighted auto-trigger: 300 accented chars are only 75 tokens
+    // at chars/4 (below the 100 threshold) but 120 tokens script-weighted,
+    // so both the helper and the pipeline must flip to aggressive.
+    const vietnamese = [msg('user', 'à'.repeat(300))];
+    expect(compressRequest(vietnamese, { config: cfg, recordStats: false }).mode).toBe('aggressive');
+    expect(compressionCacheKey(vietnamese, { config: cfg }))
+      .toBe(compressRequest(vietnamese, { config: cfg, recordStats: false }).cacheKey);
+  });
+
   it('keeps compression modes/config versions isolated in response-cache keys', () => {
     const messages = [msg('user', 'same prompt')];
     expect(computeCacheKey({ model: 'auto', messages, compression: 'off:v1' }))
@@ -447,5 +479,58 @@ describe('compression engines', () => {
     const numbersStarted = performance.now();
     call(numberLines.join('\n'));
     expect(performance.now() - numbersStarted).toBeLessThan(250 * slack);
+  });
+});
+
+describe('script-aware token estimates', () => {
+  it('estimates Vietnamese text at ~1 token / 2.5 chars, not chars/4', () => {
+    const result = compressRequest([msg('user', 'à'.repeat(100))], {
+      config: config('off'),
+      recordStats: false,
+    });
+    // 100 accented chars = 40 tokens; chars/4 would have said 25.
+    expect(result.stats.estOriginalTokens).toBe(40);
+    expect(result.stats.estCompressedTokens).toBe(40);
+    expect(result.stats.estSavedTokens).toBe(0);
+  });
+
+  it('estimates CJK text at ~1 token / 1 char, not chars/4', () => {
+    const result = compressRequest([msg('user', '你好世界'.repeat(10))], {
+      config: config('off'),
+      recordStats: false,
+    });
+    // 40 CJK chars = 40 tokens; chars/4 would have said 10.
+    expect(result.stats.estOriginalTokens).toBe(40);
+    expect(result.stats.estCompressedTokens).toBe(40);
+    expect(result.stats.estSavedTokens).toBe(0);
+  });
+
+  it('keeps ASCII text at ~4 chars per token', () => {
+    const result = compressRequest([msg('user', 'x'.repeat(400))], {
+      config: config('off'),
+      recordStats: false,
+    });
+    expect(result.stats.estOriginalTokens).toBe(100);
+  });
+
+  it('reports saved tokens from the script-weighted estimates', () => {
+    const block = [
+      'Tiếng Việt có dấu rất khó đếm token chính xác khi dùng chars chia bốn.',
+      'Câu văn dài với nhiều nguyên âm có dấu để vượt ngưỡng khối trùng lặp.',
+      'Dòng thứ ba cũng dài và có dấu để engine dedup nhận diện được khối.',
+    ].join('\n');
+    const result = compressRequest([
+      msg('user', `${block}\n\ncâu hỏi một`),
+      msg('user', `${block}\n\ncâu hỏi hai`),
+    ], { config: config('lossless'), recordStats: false });
+    // The second copy is deduped, so something was saved — and the saving
+    // is the difference of the two script-weighted estimates, not chars/4.
+    expect(result.stats.estSavedTokens).toBeGreaterThan(0);
+    expect(result.stats.estSavedTokens).toBe(
+      result.stats.estOriginalTokens - result.stats.estCompressedTokens,
+    );
+    expect(result.stats.estOriginalTokens).toBeGreaterThan(
+      Math.ceil(result.stats.originalChars / 4),
+    );
   });
 });

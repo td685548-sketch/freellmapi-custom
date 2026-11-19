@@ -22,7 +22,7 @@ import { startCloudflareCall, type CloudflareNeuronCall } from '../services/clou
 // well over the 15s fetch default before the first byte (live sweep
 // 2026-07-11: repeated 15s aborts). Matches zhipu/agnes/ollama bumps.
 // PROVIDER_TIMEOUT_CLOUDFLARE overrides (#547).
-const CHAT_TIMEOUT_MS = providerTimeoutMs('cloudflare', 60_000);
+const CHAT_TIMEOUT_MS = providerTimeoutMs('cloudflare');
 const GLM_47_FLASH_TIMEOUT_MS = 200_000;
 
 export class CloudflareProvider extends BaseProvider {
@@ -160,9 +160,9 @@ export class CloudflareProvider extends BaseProvider {
         ...extendedBodyParams(this.platform, options),
         stream: true,
       }),
-      // Default 'headers' bounds: the deadline dies at response headers, and
+      // Explicit 'headers' bounds: the deadline dies at response headers, and
       // the client signal + stall watchdog own the stream from there.
-    }, this.timeoutFor(modelId, options?.timeoutMs), { signal: options?.signal });
+    }, this.timeoutFor(modelId, options?.timeoutMs), { signal: options?.signal, timeoutBounds: 'headers' });
     recordQuotaObservationsFromResponse(res, {
       platform: this.platform,
       keyId: quotaContext?.keyId,

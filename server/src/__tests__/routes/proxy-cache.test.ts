@@ -164,6 +164,35 @@ describe('Response cache (proxy integration)', () => {
     expect(counter.calls).toBe(1);
   });
 
+  it('a cache hit skips compression: no X-FreeLLM-Compress header on the replay', async () => {
+    const counter = mockGroq('the answer is four');
+
+    const first = await chat();
+    expect(first.status).toBe(200);
+    // The miss ran compression, so the header is present.
+    expect(first.headers.get('x-freellm-compress')).not.toBeNull();
+    expect(counter.calls).toBe(1);
+
+    const second = await chat();
+    expect(second.status).toBe(200);
+    expect(second.headers.get('x-freellm-cache')).toBe('HIT');
+    // The hit short-circuits before compression, so no compression header.
+    expect(second.headers.get('x-freellm-compress')).toBeNull();
+    expect(counter.calls).toBe(1);
+  });
+
+  it('requests differing only in the output-saver header never collide', async () => {
+    const counter = mockGroq('saved');
+    await chat(); // plain → MISS, populates
+    const saver = await chat({}, { 'X-FreeLLM-Saver': 'caveman:lite' });
+    expect(saver.headers.get('x-freellm-cache')).toBe('MISS');
+    expect(counter.calls).toBe(2);
+    // But an exact repeat with the same saver header is still a HIT.
+    const repeat = await chat({}, { 'X-FreeLLM-Saver': 'caveman:lite' });
+    expect(repeat.headers.get('x-freellm-cache')).toBe('HIT');
+    expect(counter.calls).toBe(2);
+  });
+
   it('does not record rate-limit usage for a cache hit (quota preserved)', async () => {
     mockGroq('four');
     await chat();
@@ -223,7 +252,7 @@ describe('Response cache (proxy integration)', () => {
   });
 
   it('X-FreeLLM-Cache: on forces caching even when the cache is globally off', async () => {
-    process.env.RESPONSE_CACHE = '';
+    process.env.RESPONSE_CACHE = '0';
     try {
       const counter = mockGroq('forced-on');
       const first = await chat({}, { 'X-FreeLLM-Cache': 'on' });
@@ -308,7 +337,7 @@ describe('Response cache (proxy integration)', () => {
   });
 
   it('retains nothing when the cache is off: a stream buffers no frames', async () => {
-    process.env.RESPONSE_CACHE = '';
+    process.env.RESPONSE_CACHE = '0';
     try {
       const counter = mockGroq('uncached');
       const first = await chat({ stream: true });

@@ -78,6 +78,12 @@ describe('formatAttemptDetail', () => {
     expect(formatAttemptDetail([record()])).toBe('groq/llama-3.3-70b key1=rate_limited t=0+11ms');
   });
 
+  it('includes per-attempt TTFB when the attempt proved it was alive', () => {
+    expect(formatAttemptDetail([record({ ttfbMs: 250 })])).toBe(
+      'groq/llama-3.3-70b key1=rate_limited t=0+11ms ttfb=250ms',
+    );
+  });
+
   it('carries the per-hop timing that the trail cannot express', () => {
     const value = formatAttemptDetail([
       record({ startOffsetMs: 0, durationMs: 39_000 }),

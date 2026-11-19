@@ -44,7 +44,7 @@ const ANON_KEY = '0000000000';
 const MIN_MAX_TOKENS = 16;
 const DEFAULT_MAX_TOKENS = 512;
 // PROVIDER_TIMEOUT_AIHORDE overrides (#547).
-const HORDE_TIMEOUT_MS = providerTimeoutMs('aihorde', 120000);
+const HORDE_TIMEOUT_MS = providerTimeoutMs('aihorde');
 
 /** Rough token estimate (~4 chars/token) used only to fill usage when the proxy
  * returns kudos instead of token counts. Good enough for analytics, never

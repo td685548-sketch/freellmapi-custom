@@ -189,7 +189,7 @@ interface AttemptTraceRecord {
 | Endpoint | Purpose |
 |----------|---------|
 | `GET /livez` | Process alive (k8s liveness) |
-| `GET /readyz` | Ready to serve (DB + at least one healthy provider) |
+| `GET /readyz` | Ready to serve (DB readable + writable, at least one proven-healthy provider key with a cooldown-free route; `unknown` keys count only before the first health pass) |
 | `GET /api/health` | Full status: `{status, degraded, providers: [{platform, healthy, totalKeys, usableKeys, status}], catalog: {version, tier, lastSync}}` |
 
 - Degraded mode reported via `degradation.getDegradationStatus()`.
@@ -259,7 +259,7 @@ interface AttemptTraceRecord {
 | `RESPONSE_CACHE` | `0` | Enable response cache (opt-in) |
 | `REQUEST_MAX_TOKENS_BUDGET` | `0` (off) | Per-request token ceiling |
 | `FALLBACK_TIME_BUDGET_MS` | `45000` | Retry budget (affects exhaustion) |
-| `MAX_CONSECUTIVE_UPSTREAM_FAILS` | `0` (off) | Circuit breaker threshold |
+| `MAX_CONSECUTIVE_UPSTREAM_FAILS` | `6` | Circuit breaker threshold |
 | `EXPOSE_FALLBACK_DETAIL_HEADER` | `0` | Opt-in X-Fallback-Detail |
 | `COOLDOWN_PROBE_DISABLED` | `0` | Kill switch for probe job |
 

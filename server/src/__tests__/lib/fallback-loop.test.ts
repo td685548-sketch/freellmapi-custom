@@ -28,6 +28,11 @@ import {
   msUntilNextUtcMidnight,
   msUntilNextPacificMidnight,
   getFallbackTimeBudgetMs,
+  getFallbackRetryDelayMs,
+  resolveRetryDelayMs,
+  isRetryDelayableError,
+  FALLBACK_RETRY_DELAY_BASE_MS,
+  FALLBACK_RETRY_DELAY_MAX_MS,
   DEFAULT_FALLBACK_TIME_BUDGET_MS,
   AUTH_FAILURE_COOLDOWN_MS,
   EMPTY_COMPLETION_STREAK_LIMIT,
@@ -37,6 +42,7 @@ import {
   type FallbackHooks,
   type FallbackState,
 } from '../../lib/fallback-loop.js';
+import { DEFAULT_MAX_CONSECUTIVE_UPSTREAM_FAILS } from '../../lib/guardrails.js';
 import {
   isKeyAuthError,
   isDailyQuotaExhaustedError,
@@ -615,23 +621,43 @@ describe('runFallbackLoop: dispatch outcome contract', () => {
 
 describe('runFallbackLoop: circuit-breaker guardrail (max_consecutive_upstream_fails)', () => {
   const retryable429 = () => Object.assign(new Error('429 Too Many Requests'), { status: 429 });
+  // 5xx classifies as 'upstream_error', which has no unanimous aggregate
+  // diagnosis of its own, so a breaker trip over a 5xx trail renders the
+  // generic 503 breaker body. (An all-429 trail keeps its 429 — see below.)
+  const retryable500 = () => Object.assign(new Error('500 Internal Server Error'), { status: 500 });
 
-  it('is off by default: a doomed chain still runs to the attempt cap', async () => {
+  it('is off when the limit is explicitly 0: a doomed chain still runs to the attempt cap', async () => {
     const onExhausted = vi.fn();
     const dispatch = vi.fn(async () => { throw retryable429(); });
 
-    await runFallbackLoop(hooksSkeleton({ maxRetries: 5, dispatch, onExhausted }));
+    await runFallbackLoop(hooksSkeleton({ maxRetries: 5, breakerLimit: 0, dispatch, onExhausted, sleep: async () => {} }));
 
     expect(dispatch).toHaveBeenCalledTimes(5);
     expect(onExhausted).toHaveBeenCalledTimes(1);
     expect(onExhausted.mock.calls[0][0].status).toBe(429); // ordinary exhaustion, no breaker
   });
 
+  it('is on by default at 6: a doomed chain stops after six hops without any configuration', async () => {
+    const onExhausted = vi.fn();
+    const dispatch = vi.fn(async () => { throw retryable500(); });
+
+    await runFallbackLoop(hooksSkeleton({ maxRetries: 20, dispatch, onExhausted, sleep: async () => {} }));
+
+    expect(DEFAULT_MAX_CONSECUTIVE_UPSTREAM_FAILS).toBe(6);
+    expect(dispatch).toHaveBeenCalledTimes(6);
+    expect(onExhausted).toHaveBeenCalledTimes(1);
+    const [body, info] = onExhausted.mock.calls[0];
+    expect(body.kind).toBe('unavailable');
+    expect(body.status).toBe(503);
+    expect(body.message).toContain('6 consecutive upstream failures');
+    expect(info.attempts).toHaveLength(6);
+  });
+
   it('trips after N consecutive retryable failures and renders a 503 with the trail', async () => {
     const onExhausted = vi.fn();
-    const dispatch = vi.fn(async () => { throw retryable429(); });
+    const dispatch = vi.fn(async () => { throw retryable500(); });
 
-    await runFallbackLoop(hooksSkeleton({ maxRetries: 20, breakerLimit: 3, dispatch, onExhausted }));
+    await runFallbackLoop(hooksSkeleton({ maxRetries: 20, breakerLimit: 3, dispatch, onExhausted, sleep: async () => {} }));
 
     expect(dispatch).toHaveBeenCalledTimes(3); // stopped at the limit, not the cap
     expect(onExhausted).toHaveBeenCalledTimes(1);
@@ -642,6 +668,28 @@ describe('runFallbackLoop: circuit-breaker guardrail (max_consecutive_upstream_f
     expect(body.message).toContain('circuit-breaker');
     expect(body.message).toContain('3 consecutive upstream failures');
     expect(body.message).toContain('Attempt trail:');
+    expect(info.attempts).toHaveLength(3);
+    expect(info.timedOut).toBe(false);
+  });
+
+  it('an all-rate-limited trip keeps the 429 diagnosis instead of the breaker 503', async () => {
+    // Regression test for CI run #337 (PR #147): the breaker default-on at 6
+    // shadowed a unanimous 429 trail with a generic 503, breaking the
+    // fallback-detail-header exhaustion contract (expected 429). The breaker
+    // still stops the rotation early; only the rendered status keeps the
+    // more specific rate-limit diagnosis, with the early stop disclosed.
+    const onExhausted = vi.fn();
+    const dispatch = vi.fn(async () => { throw retryable429(); });
+
+    await runFallbackLoop(hooksSkeleton({ maxRetries: 20, breakerLimit: 3, dispatch, onExhausted, sleep: async () => {} }));
+
+    expect(dispatch).toHaveBeenCalledTimes(3); // breaker stopped the rotation
+    expect(onExhausted).toHaveBeenCalledTimes(1);
+    const [body, info] = onExhausted.mock.calls[0];
+    expect(body.kind).toBe('rate_limit');
+    expect(body.status).toBe(429);
+    expect(body.code).toBe('rate_limit_exceeded');
+    expect(body.message).toContain('circuit-breaker');
     expect(info.attempts).toHaveLength(3);
     expect(info.timedOut).toBe(false);
   });
@@ -707,10 +755,127 @@ describe('runFallbackLoop: circuit-breaker guardrail (max_consecutive_upstream_f
       return 'done' as const;
     });
 
-    await runFallbackLoop(hooksSkeleton({ maxRetries: 20, breakerLimit: 3, dispatch, onExhausted }));
+    await runFallbackLoop(hooksSkeleton({ maxRetries: 20, breakerLimit: 3, dispatch, onExhausted, sleep: async () => {} }));
 
     expect(dispatch).toHaveBeenCalledTimes(3);
     expect(onExhausted).not.toHaveBeenCalled();
+  });
+});
+
+describe('runFallbackLoop: inter-hop backoff on 429/5xx', () => {
+  const retryable429 = () => Object.assign(new Error('429 Too Many Requests'), { status: 429 });
+  const retryable503 = () => Object.assign(new Error('503 Service Unavailable'), { status: 503 });
+  const noJitter = () => 0;
+  const maxJitter = () => 0.99;
+
+  it('isRetryDelayableError only flags 429/5xx', () => {
+    expect(isRetryDelayableError(retryable429())).toBe(true);
+    expect(isRetryDelayableError(retryable503())).toBe(true);
+    expect(isRetryDelayableError(Object.assign(new Error('Bad Gateway'), { status: 502 }))).toBe(true);
+    expect(isRetryDelayableError(new Error('429 Too Many Requests'))).toBe(true);
+    expect(isRetryDelayableError(new Error('upstream 503 Service Unavailable'))).toBe(true);
+    expect(isRetryDelayableError(Object.assign(new Error('Unauthorized'), { status: 401 }))).toBe(false);
+    expect(isRetryDelayableError(Object.assign(new Error('Bad Request'), { status: 400 }))).toBe(false);
+    expect(isRetryDelayableError(Object.assign(new Error('Not Found'), { status: 404 }))).toBe(false);
+    expect(isRetryDelayableError(new Error('boom'))).toBe(false);
+  });
+
+  it('getFallbackRetryDelayMs grows 100 → 200 → 400 → 500 and caps there', () => {
+    expect(getFallbackRetryDelayMs(0, retryable429(), noJitter)).toBe(100);
+    expect(getFallbackRetryDelayMs(1, retryable429(), noJitter)).toBe(200);
+    expect(getFallbackRetryDelayMs(2, retryable429(), noJitter)).toBe(400);
+    expect(getFallbackRetryDelayMs(3, retryable429(), noJitter)).toBe(500);
+    expect(getFallbackRetryDelayMs(10, retryable429(), noJitter)).toBe(500);
+    expect(getFallbackRetryDelayMs(0, retryable503(), noJitter)).toBe(100);
+  });
+
+  it('jitter adds at most 100ms and never pushes the delay past the 500ms cap', () => {
+    expect(getFallbackRetryDelayMs(0, retryable429(), maxJitter)).toBe(199);
+    expect(getFallbackRetryDelayMs(2, retryable429(), maxJitter)).toBe(499);
+    expect(getFallbackRetryDelayMs(3, retryable429(), maxJitter)).toBe(500);
+    expect(FALLBACK_RETRY_DELAY_BASE_MS).toBe(100);
+    expect(FALLBACK_RETRY_DELAY_MAX_MS).toBe(500);
+  });
+
+  it('returns 0 for non-429/5xx failures', () => {
+    const auth = Object.assign(new Error('Unauthorized'), { status: 401 });
+    const format = Object.assign(new Error('Fake ignored response_format'), { skipBench: true });
+    expect(getFallbackRetryDelayMs(0, auth, noJitter)).toBe(0);
+    expect(getFallbackRetryDelayMs(0, format, noJitter)).toBe(0);
+    expect(getFallbackRetryDelayMs(0, new Error('boom'), noJitter)).toBe(0);
+  });
+
+  it('honors a short Retry-After exactly and ignores a long one', () => {
+    const short = Object.assign(new Error('429 Too Many Requests'), { status: 429, retryAfterMs: 50 });
+    expect(getFallbackRetryDelayMs(0, short, noJitter)).toBe(50);
+    const medium = Object.assign(new Error('429 Too Many Requests'), { status: 429, retryAfterMs: 150 });
+    expect(getFallbackRetryDelayMs(1, medium, noJitter)).toBe(150);
+    const long = Object.assign(new Error('429 Too Many Requests'), { status: 429, retryAfterMs: 60_000 });
+    expect(getFallbackRetryDelayMs(0, long, noJitter)).toBe(100);
+  });
+
+  it('resolveRetryDelayMs only waits when the budget affords four times the delay, and returns 0 once it is tight', () => {
+    const base = { failedAttempt: 0, err: retryable429(), budgetMs: 0, startedAtMs: 1000, random: noJitter };
+    expect(resolveRetryDelayMs(base)).toBe(100); // budget disabled: full backoff
+    expect(resolveRetryDelayMs({ ...base, budgetMs: 45_000, nowMs: 1100 })).toBe(100);
+    expect(resolveRetryDelayMs({ ...base, budgetMs: 1000, startedAtMs: 1000, nowMs: 1100 })).toBe(100);
+    // 50ms left cannot afford a 100ms wait: skip it so the next hop keeps its shot.
+    expect(resolveRetryDelayMs({ ...base, budgetMs: 200, startedAtMs: 1000, nowMs: 1150 })).toBe(0);
+    expect(resolveRetryDelayMs({ ...base, budgetMs: 200, startedAtMs: 1000, nowMs: 1200 })).toBe(0);
+    expect(resolveRetryDelayMs({ ...base, budgetMs: 200, startedAtMs: 1000, nowMs: 1300 })).toBe(0);
+    expect(resolveRetryDelayMs({ ...base, err: new Error('boom') })).toBe(0);
+  });
+
+  it('sleeps between hops on 429s (once per failed hop except the last) and never on success', async () => {
+    const onExhausted = vi.fn();
+    const sleep = vi.fn(async () => {});
+    const dispatch = vi.fn(async () => { throw retryable429(); });
+
+    await runFallbackLoop(hooksSkeleton({ maxRetries: 4, breakerLimit: 0, dispatch, onExhausted, sleep }));
+
+    expect(dispatch).toHaveBeenCalledTimes(4);
+    expect(sleep).toHaveBeenCalledTimes(3); // no sleep after the final hop
+    for (const [ms] of sleep.mock.calls) {
+      expect(ms).toBeGreaterThanOrEqual(100);
+      expect(ms).toBeLessThanOrEqual(500);
+    }
+    expect(onExhausted).toHaveBeenCalledTimes(1);
+  });
+
+  it('sleeps once when the first hop 429s and the second succeeds', async () => {
+    const onExhausted = vi.fn();
+    const sleep = vi.fn(async () => {});
+    let calls = 0;
+    const dispatch = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) throw retryable429();
+      return 'done' as const;
+    });
+
+    await runFallbackLoop(hooksSkeleton({ maxRetries: 5, breakerLimit: 0, dispatch, onExhausted, sleep }));
+
+    expect(dispatch).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(sleep.mock.calls[0][0]).toBeGreaterThanOrEqual(100);
+    expect(onExhausted).not.toHaveBeenCalled();
+  });
+
+  it('does not sleep for auth rotations or skipBench format failures', async () => {
+    const sleep = vi.fn(async () => {});
+    let calls = 0;
+    const dispatch = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) throw Object.assign(new Error('Unauthorized'), { status: 401 });
+      if (calls === 2) throw Object.assign(new Error('Fake ignored response_format'), { skipBench: true });
+      return 'done' as const;
+    });
+
+    await runFallbackLoop(hooksSkeleton({
+      maxRetries: 5, breakerLimit: 0, dispatch, onExhausted: vi.fn(), sleep,
+    }));
+
+    expect(dispatch).toHaveBeenCalledTimes(3);
+    expect(sleep).not.toHaveBeenCalled();
   });
 });
 
@@ -1029,5 +1194,45 @@ describe('retryable quota errors with token counts', () => {
       expect(state.skipModels.has(route.modelDbId)).toBe(false);
     }
     expect(state.skipPlatforms.has('fake')).toBe(false);
+  });
+});
+
+describe('runFallbackLoop: per-attempt TTFB', () => {
+  it('records ttfbMs from the first disarmHedge call and null when the attempt dies first', async () => {
+    const { registerAttemptTraceObserver } = await import('../../lib/attempt-trace.js');
+    const seen: Array<import('../../lib/attempt-trace.js').AttemptTraceRecord[]> = [];
+    const unregister = registerAttemptTraceObserver((records) => { seen.push([...records]); });
+    try {
+      // Attempt 0: streaming dispatch proves alive, then succeeds.
+      // Attempt 1 (after a retryable failure): dies before any first byte.
+      let calls = 0;
+      await runFallbackLoop(hooksSkeleton({
+        maxRetries: 2,
+        route: () => fakeRoute(),
+        dispatch: async (_route, _attempt, ctx) => {
+          calls += 1;
+          if (calls === 1) {
+            ctx.disarmHedge();
+            return 'done';
+          }
+          throw Object.assign(new Error('boom'), { status: 500 });
+        },
+      }));
+      // The successful first attempt ends the loop, so run a second loop for
+      // the never-alive case.
+      await runFallbackLoop(hooksSkeleton({
+        maxRetries: 1,
+        route: () => fakeRoute(),
+        dispatch: async () => { throw Object.assign(new Error('boom'), { status: 500 }); },
+      }));
+    } finally {
+      unregister();
+    }
+    expect(seen.length).toBe(2);
+    expect(seen[0]).toHaveLength(1);
+    expect(typeof seen[0][0].ttfbMs).toBe('number');
+    expect(seen[0][0].ttfbMs).toBeGreaterThanOrEqual(0);
+    expect(seen[1]).toHaveLength(1);
+    expect(seen[1][0].ttfbMs).toBeNull();
   });
 });

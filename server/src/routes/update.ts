@@ -7,8 +7,27 @@ import { getAppVersion } from '../lib/app-version.js';
 
 const execFileAsync = promisify(nodeExecFile);
 
-const REPOSITORY = 'tashfeenahmed/freellmapi';
-const RELEASES_URL = `https://github.com/${REPOSITORY}/releases`;
+/**
+ * The repository the update checker compares against. This is a fork of
+ * upstream FreeLLMAPI, so the default is the fork — checking upstream would
+ * compare the install's SHA against commits it will never contain and offer
+ * "updates" that replace the fork with upstream. Override with
+ * FREELLMAPI_UPDATE_REPO=owner/repo for a differently-named fork; an invalid
+ * value is ignored with a warning and the fork default is used.
+ */
+export const DEFAULT_UPDATE_REPOSITORY = 'td685548-sketch/freellmapi-custom';
+const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
+export function resolveUpdateRepository(env: NodeJS.ProcessEnv): string {
+  const raw = env.FREELLMAPI_UPDATE_REPO?.trim();
+  if (!raw) return DEFAULT_UPDATE_REPOSITORY;
+  if (REPOSITORY_PATTERN.test(raw)) return raw;
+  console.warn(
+    `[update] ignoring invalid FREELLMAPI_UPDATE_REPO ${JSON.stringify(raw)}; ` +
+      `using ${DEFAULT_UPDATE_REPOSITORY}`,
+  );
+  return DEFAULT_UPDATE_REPOSITORY;
+}
 const CACHE_TTL_MS = 5 * 60 * 1000;
 /**
  * The automatic release check is opt-in (see UPDATE_CHECK_SETTING), and even
@@ -356,6 +375,8 @@ export function createUpdateRouter(options: UpdateRouterOptions = {}): Router {
   const autoCheckEnabled = options.autoCheckEnabled ?? isAutoUpdateCheckEnabled;
   const updateCheckDisabled = env.FREELLMAPI_UPDATE_CHECK?.trim().toLowerCase() === 'off';
   const githubToken = env.FREELLMAPI_UPDATE_GITHUB_TOKEN?.trim();
+  const repository = resolveUpdateRepository(env);
+  const releasesUrl = `https://github.com/${repository}/releases`;
   // docker-compose.yml's opt-in `autoupdate` profile runs a Watchtower sidecar
   // with only its token-protected update endpoint enabled; these point at it.
   const selfUpdateUrl = env.FREELLMAPI_SELF_UPDATE_URL?.trim().replace(/\/+$/, '');
@@ -438,7 +459,7 @@ export function createUpdateRouter(options: UpdateRouterOptions = {}): Router {
       }
     }
 
-    const url = `https://api.github.com/repos/${REPOSITORY}/compare/${currentIdentity.sha}...${compareTarget}`;
+    const url = `https://api.github.com/repos/${repository}/compare/${currentIdentity.sha}...${compareTarget}`;
     const response = await fetchImpl(url, {
       headers: githubHeaders('application/vnd.github+json'),
       signal: AbortSignal.timeout(10_000),
@@ -453,7 +474,7 @@ export function createUpdateRouter(options: UpdateRouterOptions = {}): Router {
       if (releaseOnly) {
         throw new Error(`GitHub compare request returned HTTP ${response.status}`);
       }
-      const atomResponse = await fetchImpl(`https://github.com/${REPOSITORY}/commits/main.atom`, {
+      const atomResponse = await fetchImpl(`https://github.com/${repository}/commits/main.atom`, {
         headers: {
           Accept: 'application/atom+xml',
           'User-Agent': 'freellmapi-update-checker',
@@ -515,7 +536,7 @@ export function createUpdateRouter(options: UpdateRouterOptions = {}): Router {
   }
 
   async function performReleaseCheck(): Promise<LatestRelease> {
-    const response = await fetchImpl(`https://api.github.com/repos/${REPOSITORY}/releases/latest`, {
+    const response = await fetchImpl(`https://api.github.com/repos/${repository}/releases/latest`, {
       headers: githubHeaders('application/vnd.github+json'),
       signal: AbortSignal.timeout(10_000),
     });
@@ -532,9 +553,9 @@ export function createUpdateRouter(options: UpdateRouterOptions = {}): Router {
     // The release notes are rendered as Markdown in the dashboard, so the body
     // is capped rather than trusted at whatever length GitHub returns, and the
     // link is only honoured when it points back at this repository.
-    const htmlUrl = typeof body.html_url === 'string' && body.html_url.startsWith(`${RELEASES_URL}/`)
+    const htmlUrl = typeof body.html_url === 'string' && body.html_url.startsWith(`${releasesUrl}/`)
       ? body.html_url
-      : RELEASES_URL;
+      : releasesUrl;
 
     return {
       tagName: body.tag_name.trim().slice(0, MAX_TAG_LENGTH),

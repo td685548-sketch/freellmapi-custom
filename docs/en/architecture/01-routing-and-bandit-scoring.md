@@ -202,7 +202,7 @@ The shared loop (`lib/fallback-loop.ts`) drives every surface (`/v1/chat/complet
 - **Max 20 retries** (configurable).
 - **Wall-clock retry budget** (default 45s, setting `fallback_time_budget_ms`). Stops starting new attempts after budget; first retry always allowed.
 - **Hedging** (1d2226a): when budget expires mid-attempt, `abortInFlight()` cancels the upstream fetch instead of waiting for a stall.
-- **Circuit breaker**: `max_consecutive_upstream_fails` (default 0 = off) stops the loop with 503 when the pool looks unhealthy.
+- **Circuit breaker**: `max_consecutive_upstream_fails` (default 6; 0 disables) stops the loop with 503 when the pool looks unhealthy.
 - **Per-attempt trail**: `X-Fallback-Trail` header + `X-Fallback-Detail` (opt-in) with timings and redacted error summaries.
 - **Synchronous exhaustion** (zero upstream calls): `RouteError.diagnostics` carries one line per considered model with the reason it could not serve (no key, cooldown, provider cap, rpm/rpd, tpm/tpd, context too small, …). `summarizeExhaustion()` rolls this into a client-safe bucketed message (e.g. "All models exhausted: 5 routes checked (3 rate-limited or on cooldown, 2 no usable key configured). Add more API keys or wait for rate limits to reset. Soonest reset ~2m.").
 

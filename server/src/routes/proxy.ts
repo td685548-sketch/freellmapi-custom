@@ -16,7 +16,7 @@ import { getClientContext, noteRequestTokens } from '../lib/client-context.js';
 import { getDb } from '../db/index.js';
 import { resolveAuth, prependSystemPrompt, type ResolvedAuth } from '../lib/system-prompt.js';
 import { applyOutputSavers } from '../custom/output-savers/apply.js';
-import { contentToString, estimateInputTokens, messageHasImage, normalizeOutboundContent, sanitizeResponse } from '../lib/content.js';
+import { contentToString, estimateImageTokens, estimateInputTokens, messageHasImage, normalizeOutboundContent, sanitizeResponse } from '../lib/content.js';
 import { routeOutputBudget } from '../lib/output-cap.js';
 import { resolveTaskType } from '../lib/task-type.js';
 import { normalizeMessageImages } from '../lib/image-normalize.js';
@@ -41,7 +41,7 @@ import { inferQuotaPoolKey, type QuotaObservationContext } from '../services/pro
 import { isUnifyEnabled, getModelGroups, resolveRequestedIdForDispatch } from '../services/model-groups.js';
 import { buildModelListing, servableContextWindow, type NormalizedModel, onInvalidateModelListing } from '../services/model-listing.js';
 import { claudeFamilyDiscoveryEntries, resolveListedClaudeAlias } from '../services/anthropic-map.js';
-import { compressRequest, formatCompressionHeader } from '../services/compression/pipeline.js';
+import { compressRequest, compressionCacheKey, formatCompressionHeader } from '../services/compression/pipeline.js';
 import { applyDecisionRouting, routingStrategyHeader } from '../services/routing-decision.js';
 import { startStreamKeepalive, streamKeepaliveMs } from '../lib/stream-keepalive.js';
 import { contextRoutingTokens, fitContextForRoute } from '../custom/context-budget/hooks.js';
@@ -2051,6 +2051,138 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
       cacheControlPrefixLength = index + 1;
     }
   });
+  // ── Response cache (services/cache.ts) ──
+  // Exact-match cache, looked up BEFORE compression, image normalization and
+  // token estimation, so a hit short-circuits the whole pipeline without
+  // spending any provider quota. The key is computed on the ORIGINAL
+  // (normalized) messages plus the compression config fingerprint
+  // (compressionCacheKey mirrors compressRequest's resolved mode, including
+  // the auto-trigger), so a hit skips the compression pass entirely and a
+  // miss compresses exactly as before. Everything that rewrites the upstream
+  // prompt after the key is computed is keyed explicitly — the
+  // server-enforced system prompt and the output-saver header — and the
+  // key is v5 (see computeCacheKey), so entries cached under the old
+  // compressed-messages key simply miss once and are re-populated.
+  // A hit also short-circuits the vision/tools/budget gates below: it
+  // spends no provider quota and no vision/model capacity, and the cached
+  // answer was produced when the request passed those gates. Fusion
+  // requests always miss here (their key carries model 'fusion', which
+  // nothing ever stores under) and fall through to the fusion branch.
+  // Only requests at a cacheable temperature are eligible; a per-request
+  // `X-FreeLLM-Cache` header can force or bypass. On by default via
+  // RESPONSE_CACHE / the response_cache_enabled setting.
+  const cacheDirective = parseCacheDirective(req.headers['x-freellm-cache'], req.headers['cache-control']);
+  const clientCtx = getClientContext();
+  const urlTokenScope = (req as Request & { urlTokenScope?: string }).urlTokenScope;
+  const authScope = urlTokenScope
+    ? `url_token:${urlTokenScope}`
+    : auth.kind === 'profile'
+      ? `profile:${auth.profileId}`
+      : auth.kind === 'user'
+        ? `user:${auth.userId}`
+        : clientCtx.userId !== undefined
+          ? `unified_user:${clientCtx.userId}`
+          : 'unified';
+  const restrictionSignature = clientCtx.allowedModels && clientCtx.allowedModels.size > 0
+    ? [...clientCtx.allowedModels].sort().join(',')
+    : undefined;
+  // Streaming requests participate in the cache too: same canonical key (the
+  // request content is identical), but hits are looked up in the streaming
+  // store and replayed as SSE rather than JSON (see below).
+  const baseCacheParams = {
+    model: requestedModel,
+    messages,
+    temperature,
+    top_p,
+    max_tokens,
+    tools,
+    tool_choice,
+    parallel_tool_calls,
+    // Normalized stop (providerSafeStop), i.e. what is actually forwarded.
+    stop,
+    // The knobs below are NOT in chatCompletionSchema, so zod strips them
+    // from parsed.data; read them from the raw body. They still change what
+    // answer the client is asking for, so requests differing only in one of
+    // them must never collide on a cached entry. Explicit null is coerced
+    // to undefined (dropped from the key) to match how the proxy treats
+    // null-valued optional knobs as absent.
+    response_format: req.body?.response_format ?? undefined,
+    n: req.body?.n ?? undefined,
+    seed: req.body?.seed ?? undefined,
+    top_k: req.body?.top_k ?? undefined,
+    min_p: req.body?.min_p ?? undefined,
+    presence_penalty: req.body?.presence_penalty ?? undefined,
+    frequency_penalty: req.body?.frequency_penalty ?? undefined,
+    repetition_penalty: req.body?.repetition_penalty ?? undefined,
+    logit_bias: req.body?.logit_bias ?? undefined,
+    logprobs: req.body?.logprobs ?? undefined,
+    top_logprobs: req.body?.top_logprobs ?? undefined,
+    // Normalized reasoning knob (flat field or object form) — a different
+    // effort asks for a different answer, so it must never collide.
+    reasoning_effort: samplingParams.reasoning_effort ?? undefined,
+    // Fingerprint of the resolved compression mode + config (see above) —
+    // the key is on the original messages, so this is what distinguishes
+    // compression settings.
+    compression: compressionCacheKey(messages, {
+      header: req.headers['x-freellm-compress'],
+      tools,
+      cacheControlPrefixLength,
+    }),
+    // Rewrites applied after the key is computed (see above).
+    systemPrompt: auth.systemPrompt ?? undefined,
+    saver: req.headers['x-freellm-saver'] ?? undefined,
+    authScope,
+    restrictionSignature,
+  };
+  const cacheKey = (cacheActive(cacheDirective) && isCacheableTemperature(temperature))
+    ? computeCacheKey(baseCacheParams)
+    : null;
+  let pendingSemantic: PendingSemanticEntry | null = null;
+  if (cacheKey) {
+    if (stream) {
+      // Streaming hit: replay the captured SSE frame sequence verbatim —
+      // same zero-quota rationale as a JSON hit, with first-byte semantics
+      // preserved (the frames include the leading content chunks, so the
+      // first token arrives immediately).
+      const streamHit = getCachedStreamResponse(cacheKey);
+      if (streamHit) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Routed-Via', 'cache');
+        res.setHeader('X-FreeLLM-Cache', 'HIT');
+        res.write(streamHit.sse);
+        res.end();
+        return;
+      }
+    } else {
+      const hit = getCachedResponse(cacheKey);
+      if (hit) {
+        // A hit consumes NO provider quota, so recordRequest/recordTokens are
+        // deliberately skipped and the reply is not re-logged as provider usage.
+        // The savings are reported separately by GET /api/cache/stats.
+        res.setHeader('X-Routed-Via', 'cache');
+        res.setHeader('X-FreeLLM-Cache', 'HIT');
+        res.json(withExecutionId(hit.body, requestGroupId));
+        return;
+      }
+      const semanticLookup = await lookupSemanticCache({
+        ...baseCacheParams,
+        cacheDirective,
+        stream: false,
+        endUser: clientCtx.endUser ?? undefined,
+      });
+      if (semanticLookup.hit) {
+        res.setHeader('X-Routed-Via', 'semantic-cache');
+        res.setHeader('X-FreeLLM-Cache', 'SEMANTIC-HIT');
+        res.setHeader('X-FreeLLM-Cache-Similarity', semanticLookup.hit.similarity.toFixed(4));
+        res.json(withExecutionId(semanticLookup.hit.body, requestGroupId));
+        return;
+      }
+      pendingSemantic = semanticLookup.pending;
+    }
+  }
+
   const compressionResult = compressRequest(messages, {
     header: req.headers['x-freellm-compress'],
     tools,
@@ -2076,7 +2208,8 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   // bytes (see lib/image-normalize.ts). Mutates the image blocks in place.
   await normalizeMessageImages(messages);
 
-  // Token estimation is intentionally a heuristic (~4 chars per token). Used
+  // Token estimation is intentionally a heuristic (script-weighted character
+  // ratios — see estimateTextTokens in lib/content.ts — not chars/4). Used
   // for routing decisions (skip a model whose budget is too small) and for
   // streaming bookkeeping where the provider doesn't echo a final usage count.
   // Non-streaming requests reconcile against the provider's real `usage` block;
@@ -2088,7 +2221,9 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   // clear message when none is enabled, rather than silently dropping the image
   // or surfacing the generic "all models exhausted" error (#118, #125). Add a
   // rough per-image token cost so budget routing isn't skewed by content the
-  // heuristic above (text-only) can't see.
+  // heuristic above (text-only) can't see. The cost is IMAGE_TOKENS_PER_IMAGE
+  // from lib/content.ts — the same 765 the context-budget estimator uses —
+  // not the flat 1000 this site used to charge.
   const hasImage = messageHasImage(messages);
   if (hasImage && !hasEnabledVisionModel()) {
     res.status(422).json({
@@ -2101,15 +2236,15 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
     });
     return;
   }
-  const IMAGE_TOKEN_ESTIMATE = 1000;
   const imageCount = messages.reduce((n, m) =>
     n + (Array.isArray(m.content) ? m.content.filter(b => (b as { type?: string })?.type === 'image_url' || (b as { type?: string })?.type === 'image').length : 0), 0);
+  const imageTokens = estimateImageTokens(imageCount);
   // The reserved output is capped (routingReserveTokens, #470) so an oversized
   // client max_tokens can't starve routing; input + images count in full. The
   // reserve is threaded to the router separately: it is exact and must not be
   // inflated by the context-window safety margin (#956 review).
   const outputReserve = routingReserveTokens(max_tokens);
-  const estimatedTotal = estimatedInputTokens + imageCount * IMAGE_TOKEN_ESTIMATE + outputReserve;
+  const estimatedTotal = estimatedInputTokens + imageTokens + outputReserve;
 
   // Tool-bearing requests must route to a model that emits STRUCTURED
   // tool_calls. A model without real function-calling support serializes the
@@ -2134,7 +2269,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   // ceiling; a request with no max_tokens gets its output capped to the
   // remainder instead. Sits before the Fusion branch so fan-out inherits the
   // capped max_tokens too.
-  const budgetCheck = applyTokenBudget(estimatedInputTokens + imageCount * IMAGE_TOKEN_ESTIMATE, max_tokens);
+  const budgetCheck = applyTokenBudget(estimatedInputTokens + imageTokens, max_tokens);
   if (budgetCheck.rejection) {
     res.status(413).json({
       error: { message: tokenBudgetMessage(budgetCheck.rejection), type: 'invalid_request_error', code: 'request_token_budget' },
@@ -2291,116 +2426,6 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
       }
     }
     return;
-  }
-
-  // ── Response cache (services/cache.ts) ──
-  // Opt-in exact-match cache. An identical earlier request is replayed from an
-  // in-memory LRU without spending any provider quota. Computed here, after
-  // message + sampling-param normalization but before any routing/session work,
-  // so a hit short-circuits the whole pipeline. Only NON-streaming requests at a
-  // cacheable temperature are eligible (v1 scope: streaming always bypasses); a
-  // per-request `X-FreeLLM-Cache` header can force or bypass. Off unless enabled
-  // via the RESPONSE_CACHE env var or the response_cache_enabled setting.
-  const cacheDirective = parseCacheDirective(req.headers['x-freellm-cache'], req.headers['cache-control']);
-  const clientCtx = getClientContext();
-  const urlTokenScope = (req as Request & { urlTokenScope?: string }).urlTokenScope;
-  const authScope = urlTokenScope
-    ? `url_token:${urlTokenScope}`
-    : auth.kind === 'profile'
-      ? `profile:${auth.profileId}`
-      : auth.kind === 'user'
-        ? `user:${auth.userId}`
-        : clientCtx.userId !== undefined
-          ? `unified_user:${clientCtx.userId}`
-          : 'unified';
-  const restrictionSignature = clientCtx.allowedModels && clientCtx.allowedModels.size > 0
-    ? [...clientCtx.allowedModels].sort().join(',')
-    : undefined;
-  // Streaming requests participate in the cache too: same canonical key (the
-  // request content is identical), but hits are looked up in the streaming
-  // store and replayed as SSE rather than JSON (see below).
-  const baseCacheParams = {
-    model: requestedModel,
-    messages,
-    temperature,
-    top_p,
-    max_tokens,
-    tools,
-    tool_choice,
-    parallel_tool_calls,
-    // Normalized stop (providerSafeStop), i.e. what is actually forwarded.
-    stop,
-    // The knobs below are NOT in chatCompletionSchema, so zod strips them
-    // from parsed.data; read them from the raw body. They still change what
-    // answer the client is asking for, so requests differing only in one of
-    // them must never collide on a cached entry. Explicit null is coerced
-    // to undefined (dropped from the key) to match how the proxy treats
-    // null-valued optional knobs as absent.
-    response_format: req.body?.response_format ?? undefined,
-    n: req.body?.n ?? undefined,
-    seed: req.body?.seed ?? undefined,
-    top_k: req.body?.top_k ?? undefined,
-    min_p: req.body?.min_p ?? undefined,
-    presence_penalty: req.body?.presence_penalty ?? undefined,
-    frequency_penalty: req.body?.frequency_penalty ?? undefined,
-    repetition_penalty: req.body?.repetition_penalty ?? undefined,
-    logit_bias: req.body?.logit_bias ?? undefined,
-    logprobs: req.body?.logprobs ?? undefined,
-    top_logprobs: req.body?.top_logprobs ?? undefined,
-    // Normalized reasoning knob (flat field or object form) — a different
-    // effort asks for a different answer, so it must never collide.
-    reasoning_effort: samplingParams.reasoning_effort ?? undefined,
-    compression: compressionResult.cacheKey,
-    authScope,
-    restrictionSignature,
-  };
-  const cacheKey = (cacheActive(cacheDirective) && isCacheableTemperature(temperature))
-    ? computeCacheKey(baseCacheParams)
-    : null;
-  let pendingSemantic: PendingSemanticEntry | null = null;
-  if (cacheKey) {
-    if (stream) {
-      // Streaming hit: replay the captured SSE frame sequence verbatim —
-      // same zero-quota rationale as a JSON hit, with first-byte semantics
-      // preserved (the frames include the leading content chunks, so the
-      // first token arrives immediately).
-      const streamHit = getCachedStreamResponse(cacheKey);
-      if (streamHit) {
-        res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control', 'no-cache');
-        res.setHeader('Connection', 'keep-alive');
-        res.setHeader('X-Routed-Via', 'cache');
-        res.setHeader('X-FreeLLM-Cache', 'HIT');
-        res.write(streamHit.sse);
-        res.end();
-        return;
-      }
-    } else {
-      const hit = getCachedResponse(cacheKey);
-      if (hit) {
-        // A hit consumes NO provider quota, so recordRequest/recordTokens are
-        // deliberately skipped and the reply is not re-logged as provider usage.
-        // The savings are reported separately by GET /api/cache/stats.
-        res.setHeader('X-Routed-Via', 'cache');
-        res.setHeader('X-FreeLLM-Cache', 'HIT');
-        res.json(withExecutionId(hit.body, requestGroupId));
-        return;
-      }
-      const semanticLookup = await lookupSemanticCache({
-        ...baseCacheParams,
-        cacheDirective,
-        stream: false,
-        endUser: clientCtx.endUser ?? undefined,
-      });
-      if (semanticLookup.hit) {
-        res.setHeader('X-Routed-Via', 'semantic-cache');
-        res.setHeader('X-FreeLLM-Cache', 'SEMANTIC-HIT');
-        res.setHeader('X-FreeLLM-Cache-Similarity', semanticLookup.hit.similarity.toFixed(4));
-        res.json(withExecutionId(semanticLookup.hit.body, requestGroupId));
-        return;
-      }
-      pendingSemantic = semanticLookup.pending;
-    }
   }
 
   // ── Idempotency-Key (services/idempotency.ts) ──
@@ -2994,7 +3019,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
           // TTFB window.
           if (clientGone && mode !== 'passthrough' && heldText.trim().length === 0 && completedCalls.length === 0) {
             if (headersSentEarly) {
-              noteRequestTokens(estimatedInputTokens + injectedHandoffTokens + imageCount * IMAGE_TOKEN_ESTIMATE + totalOutputTokens);
+              noteRequestTokens(estimatedInputTokens + injectedHandoffTokens + imageTokens + totalOutputTokens);
             }
             console.log(`[Proxy] client disconnected before first token from ${route.displayName} — dropping attempt without benching`);
             return 'committed';
@@ -3066,8 +3091,8 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
           // and the accounting fallback after it, so a client that reads the
           // frame and the row this request writes can never disagree. Images
           // are billed at the same flat per-image estimate the routing budget
-          // uses (the chars/4 pass sees text only).
-          const estimatedPromptTokens = estimatedInputTokens + injectedHandoffTokens + imageCount * IMAGE_TOKEN_ESTIMATE;
+          // uses (the text-only estimate sees text only).
+          const estimatedPromptTokens = estimatedInputTokens + injectedHandoffTokens + imageTokens;
           if (usageChunk) {
             writeChunk(usageChunk);
           } else {
@@ -3149,7 +3174,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         } catch (streamErr: any) {
           if (isClientAbortError(streamErr)) {
             if (headerSent || headersSentEarly) {
-              noteRequestTokens(estimatedInputTokens + injectedHandoffTokens + imageCount * IMAGE_TOKEN_ESTIMATE + totalOutputTokens);
+              noteRequestTokens(estimatedInputTokens + injectedHandoffTokens + imageTokens + totalOutputTokens);
             }
             throw streamErr;
           }

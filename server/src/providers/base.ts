@@ -221,14 +221,15 @@ export interface ProviderFetchOptions {
    * also aborts body reads and stream iteration through undici. */
   signal?: AbortSignal;
   /** What the per-attempt timeout bounds:
-   *  - 'headers' (default, historical): the abort timer dies the moment
-   *    response HEADERS arrive — right for streams, whose body legitimately
-   *    outlives any fixed deadline (readSseStream's stall watchdog owns
-   *    mid-stream hangs, the client signal owns "nobody is listening").
-   *  - 'request': the deadline stays armed across the body read too, so a 200
-   *    whose body never finishes aborts at timeoutMs instead of hanging
-   *    res.json() forever. Use for non-streaming calls, which read the whole
-   *    body as one unit. */
+   *  - 'request' (default): the deadline stays armed across the body read
+   *    too, so a 200 whose body never finishes aborts at timeoutMs instead of
+   *    hanging res.json() forever. Use for non-streaming calls, which read the
+   *    whole body as one unit — and for any call that does not opt out.
+   *  - 'headers': the abort timer dies the moment response HEADERS arrive —
+   *    right for streams, whose body legitimately outlives any fixed deadline
+   *    (readSseStream's stall watchdog owns mid-stream hangs, the client
+   *    signal owns "nobody is listening"). Streaming call sites must pass
+   *    this explicitly; omitting it now bounds the whole request. */
   timeoutBounds?: 'headers' | 'request';
 }
 
@@ -237,7 +238,7 @@ export interface SseStreamOptions {
   /** The chat timeout the adapter gave fetchWithTimeout for this request
    * (options.timeoutMs override included). Becomes the first-byte grace
    * budget, floored at the stall budget — see firstByteBudgetMs. Defaults to
-   * fetchWithTimeout's own default, providerTimeoutMs(platform, 15000). */
+   * fetchWithTimeout's own default, providerTimeoutMs(platform). */
   firstByteTimeoutMs?: number;
   /** Mid-stream inactivity budget; defaults to streamStallTimeoutMs(platform)
    * (per-platform env > global env > 90s). 0 disables the watchdog. */
@@ -382,9 +383,11 @@ export abstract class BaseProvider {
   protected async fetchWithTimeout(
     url: string,
     init: RequestInit,
-    // Adapters that don't pass a timeout inherit the platform's env override
-    // (PROVIDER_TIMEOUT_<PLATFORM>, issue #547) over the historical 15s.
-    timeoutMs = providerTimeoutMs(this.platform, 15000),
+    // Adapters that don't pass a timeout inherit the platform's built-in
+    // default from provider-timeout.ts (60s for most platforms, 180s NVIDIA,
+    // 120s Ollama Cloud / AI Horde / custom), overridable per platform via
+    // PROVIDER_TIMEOUT_<PLATFORM>.
+    timeoutMs = providerTimeoutMs(this.platform),
     fetchOpts?: ProviderFetchOptions,
   ): Promise<Response> {
     const signals: AbortSignal[] = [];
@@ -397,19 +400,19 @@ export abstract class BaseProvider {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       signals.push(controller.signal);
-      if (fetchOpts?.timeoutBounds === 'request') {
-        // Whole-request deadline: stays armed across the body read, so a 200
-        // whose body never finishes aborts res.json() at timeoutMs instead of
-        // hanging forever. Never cleared — firing after the response is fully
-        // consumed is a no-op — and unref'd so a spent request's leftover
-        // deadline can't hold the process open.
-        timer.unref?.();
-      } else {
-        // Historical header-only deadline: disarmed the moment response
-        // HEADERS arrive (see finally). Streams need this — an SSE body
-        // legitimately outlives any fixed deadline, and mid-stream hangs are
-        // owned by the stall watchdog (readSseStream) + the client signal.
+      if (fetchOpts?.timeoutBounds === 'headers') {
+        // Header-only deadline, for streams only: disarmed the moment
+        // response HEADERS arrive (see finally). An SSE body legitimately
+        // outlives any fixed deadline, and mid-stream hangs are owned by the
+        // stall watchdog (readSseStream) + the client signal.
         headerTimer = timer;
+      } else {
+        // Whole-request deadline (the default): stays armed across the body
+        // read, so a 200 whose body never finishes aborts res.json() at
+        // timeoutMs instead of hanging forever. Never cleared — firing after
+        // the response is fully consumed is a no-op — and unref'd so a spent
+        // request's leftover deadline can't hold the process open.
+        timer.unref?.();
       }
     }
 
@@ -423,7 +426,7 @@ export abstract class BaseProvider {
 
     try {
       // requestType='chat' + timeoutMs makes the AbortError message read
-      // `<platform>, chat, 15s` for triage from the requests.error column.
+      // `<platform>, chat, 60s` for triage from the requests.error column.
       return await proxyFetch(url, signal ? { ...init, signal } : init, this.platform, 'chat', timeoutMs);
     } finally {
       if (headerTimer !== undefined) clearTimeout(headerTimer);
@@ -534,9 +537,9 @@ export abstract class BaseProvider {
     const inactivityTimeoutMs = opts?.stallTimeoutMs ?? streamStallTimeoutMs(this.platform);
     // First-byte grace (#584): adapters pass the same chat timeout they gave
     // fetchWithTimeout; the fallback mirrors fetchWithTimeout's own default so
-    // adapters that never tuned either stay on max(15s-or-env, stall) — i.e.
-    // exactly the stall budget they had before.
-    const chatTimeoutMs = opts?.firstByteTimeoutMs ?? providerTimeoutMs(this.platform, 15000);
+    // adapters that never tuned either stay on max(platform default, stall) —
+    // i.e. exactly the stall budget they had before for fast platforms.
+    const chatTimeoutMs = opts?.firstByteTimeoutMs ?? providerTimeoutMs(this.platform);
     const firstByteMs = this.firstByteBudgetMs(chatTimeoutMs, inactivityTimeoutMs);
 
     const decoder = new TextDecoder();

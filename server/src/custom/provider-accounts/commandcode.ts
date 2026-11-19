@@ -416,7 +416,7 @@ export class CommandCodeProvider extends BaseProvider {
         this.generateUrl,
         { method: 'POST', headers, body: payload },
         options?.timeoutMs ?? this.timeoutMs,
-        { signal: options?.signal },
+        { signal: options?.signal, timeoutBounds: 'headers' },
       );
 
       recordQuotaObservationsFromResponse(res, {

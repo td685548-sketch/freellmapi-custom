@@ -93,7 +93,7 @@ export const CONTEXT_PRESETS: Record<ContextPresetKey, ContextPresetValues> = {
     knowledgeSharePct: 25,
     dropBlockTurns: 4,
     summarize: true,
-    clientHistoryMode: 'passthrough',
+    clientHistoryMode: 'trim_on_overflow',
     knowledgeMinScore: null,
   },
   max_context: {
@@ -123,7 +123,7 @@ export const CONTEXT_POLICY_LIMITS = {
 } as const;
 
 export const CONTEXT_POLICY_DEFAULT: ContextPolicyDefault = {
-  enabled: false,
+  enabled: true,
   preset: 'balanced',
   fallbackWindowTokens: 8192,
   imageTokens: 765,

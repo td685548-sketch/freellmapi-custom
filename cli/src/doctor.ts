@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { stripGatewaySuffix } from './url.js';
 
 // 'elsewhere' is not decoration. Without it the first real run of this command
 // reported `OK claude: routed` for a Claude Code pinned to api.anthropic.com —
@@ -73,7 +74,7 @@ export interface GatewayProbe {
  */
 export function normalizeUrl(url: string): string {
   const trimmed = url.trim();
-  const lexical = (): string => trimmed.replace(/\/+$/, '').replace(/\/v1$/i, '').toLowerCase();
+  const lexical = (): string => stripGatewaySuffix(trimmed).toLowerCase();
   let parsed: URL;
   try {
     parsed = new URL(trimmed);
@@ -86,7 +87,7 @@ export function normalizeUrl(url: string): string {
   // `3000/v1` under a `localhost:` scheme, and rebuilding it from parts would
   // produce nonsense. An empty host is the tell.
   if (!parsed.host) return lexical();
-  const prefix = parsed.pathname.replace(/\/+$/, '').replace(/\/v1$/i, '');
+  const prefix = stripGatewaySuffix(parsed.pathname);
   return `${parsed.protocol.toLowerCase()}//${parsed.host.toLowerCase()}${prefix}`;
 }
 

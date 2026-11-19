@@ -1,8 +1,19 @@
 import type { ChatMessage } from '@freellmapi/shared/types.js';
 import { getSetting, setSetting } from '../../db/index.js';
-import { contentToString, estimateInputTokens } from '../../lib/content.js';
+import {
+  contentToString,
+  countImageBlocks,
+  estimateInputTokens,
+  estimateTextTokens,
+  IMAGE_TOKENS_PER_IMAGE,
+} from '../../lib/content.js';
 
-const DEFAULT_IMAGE_TOKENS = 765;
+// Re-exported so existing importers (fit, gate, preview, registry, segments,
+// knowledge-inject) keep importing the script-weighted estimator from here;
+// the implementation lives in lib/content.ts.
+export { estimateTextTokens };
+
+const DEFAULT_IMAGE_TOKENS = IMAGE_TOKENS_PER_IMAGE;
 const MESSAGE_OVERHEAD_TOKENS = 4;
 
 const CALIBRATION_ALPHA = 0.1;
@@ -99,65 +110,6 @@ function scheduleCalibrationFlush(): void {
   }
 }
 
-function isAccentedLatin(cp: number): boolean {
-  return (
-    (cp >= 0x00c0 && cp <= 0x024f) ||
-    (cp >= 0x1e00 && cp <= 0x1eff) ||
-    (cp >= 0x0300 && cp <= 0x036f)
-  );
-}
-
-function isCjkOrKanaOrHangul(cp: number): boolean {
-  return (
-    (cp >= 0x1100 && cp <= 0x11ff) ||
-    (cp >= 0x3000 && cp <= 0x30ff) ||
-    (cp >= 0x3130 && cp <= 0x318f) ||
-    (cp >= 0x31f0 && cp <= 0x31ff) ||
-    (cp >= 0x3400 && cp <= 0x4dbf) ||
-    (cp >= 0x4e00 && cp <= 0x9fff) ||
-    (cp >= 0xac00 && cp <= 0xd7af) ||
-    (cp >= 0xf900 && cp <= 0xfaff) ||
-    (cp >= 0xff00 && cp <= 0xffef) ||
-    (cp >= 0x20000 && cp <= 0x2fa1f)
-  );
-}
-
-function countImageBlocks(content: unknown): number {
-  if (!Array.isArray(content)) return 0;
-  let count = 0;
-  for (const block of content) {
-    const type = (block as { type?: string } | null | undefined)?.type;
-    if (type === 'image_url' || type === 'image') {
-      count += 1;
-    }
-  }
-  return count;
-}
-
-/**
- * Estimate token count for plain text using script-weighted character ratios:
- * ASCII / 4, accented Latin / 2.5, CJK/Kana/Hangul / 1, other scripts / 3.
- */
-export function estimateTextTokens(text: string): number {
-  if (!text) return 0;
-  // Accumulate scaled integers (LCM of 4, 2.5, 1, 3 is 60) to avoid float drift.
-  let weightedSum = 0;
-  for (let i = 0; i < text.length; ) {
-    const cp = text.codePointAt(i)!;
-    i += cp > 0xffff ? 2 : 1;
-    if (cp <= 0x7f) {
-      weightedSum += 15;
-    } else if (isAccentedLatin(cp)) {
-      weightedSum += 24;
-    } else if (isCjkOrKanaOrHangul(cp)) {
-      weightedSum += 60;
-    } else {
-      weightedSum += 20;
-    }
-  }
-  return weightedSum === 0 ? 0 : Math.floor((weightedSum + 59) / 60);
-}
-
 /**
  * Estimate token count for a single ChatMessage, including message framing
  * overhead, text content, image blocks, and assistant tool calls.
@@ -210,8 +162,9 @@ export function estimateMessagesTokens(
 }
 
 /**
- * Compute the legacy chars/4 heuristic token count matching `lib/content.ts`
- * so report comparisons can detect responses without real provider usage.
+ * Token estimate for a message list using the shared script-weighted
+ * estimator (lib/content.ts), so report comparisons can detect responses
+ * without real provider usage.
  */
 export function heuristicTokens(messages: ChatMessage[], tools?: readonly unknown[]): number {
   return estimateInputTokens(messages, tools);

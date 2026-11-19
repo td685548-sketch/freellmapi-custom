@@ -61,6 +61,11 @@ function scenario(plan: Attempt[], overrides: Partial<FallbackHooks> = {}) {
       return 'done';
     }),
     abortInFlight: vi.fn(() => controller.abort(newHedgeAbortError())),
+    // The inter-hop 429/5xx backoff sleeps on a real setTimeout, which fake
+    // timers would never advance inside the fixed advanceTimersByTimeAsync
+    // windows below. These tests are about TTFB budgets, not the backoff
+    // (covered in fallback-loop.test.ts), so stub the sleep out.
+    sleep: async () => {},
     logFailure: vi.fn(),
     onFatal: vi.fn(),
     onExhausted: vi.fn(),

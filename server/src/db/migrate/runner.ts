@@ -8,6 +8,34 @@ import { DEFAULT_MIGRATIONS, type MigrationModule } from './defaults.js';
 export type MigrationDirection = 'up' | 'down';
 export type MigrationState = 'applied' | 'pending';
 
+/**
+ * Hook run before pending migrations are applied. Registered by the entry
+ * points that own a database (server/src/index.ts, the migration CLI) so the
+ * migration engine itself stays free of backup machinery: the hook takes the
+ * snapshot (server/src/db/migration-snapshot.ts), the runner only decides
+ * when — before an 'up' run that actually has pending migrations. A hook
+ * failure never blocks the migration; the runner logs it and carries on.
+ * Tests reset it with setBeforeMigrationsHook(null).
+ */
+export type BeforeMigrationsHook = (db: Db) => void;
+
+let beforeMigrationsHook: BeforeMigrationsHook | null = null;
+
+export function setBeforeMigrationsHook(hook: BeforeMigrationsHook | null): void {
+  beforeMigrationsHook = hook;
+}
+
+function runBeforeMigrationsHook(db: Db): void {
+  if (!beforeMigrationsHook) return;
+  try {
+    beforeMigrationsHook(db);
+  } catch (err) {
+    console.warn(
+      `[migrations] pre-migration snapshot failed (${err instanceof Error ? err.message : String(err)}) — continuing without one`,
+    );
+  }
+}
+
 export interface MigrationRunnerOptions {
   migrationsDir?: string;
   migrationFileExtension?: '.ts' | '.js';
@@ -109,10 +137,10 @@ async function runPendingMigrations(
   options: MigrationRunnerOptions,
 ): Promise<void> {
   const applied = getAppliedMigrations(db);
+  const pending = records.filter(record => !applied.has(record.filename));
+  if (pending.length > 0) runBeforeMigrationsHook(db);
 
-  for (const record of records) {
-    if (applied.has(record.filename)) continue;
-
+  for (const record of pending) {
     const migration = await loadMigrationModule(record, options);
     const applyMigration = db.transaction(() => {
       migration.up(db);
@@ -155,9 +183,10 @@ function runPendingMigrationsSync(
   records: readonly MigrationRecord[],
 ): void {
   const applied = getAppliedMigrations(db);
+  const pending = records.filter(record => !applied.has(record.filename));
+  if (pending.length > 0) runBeforeMigrationsHook(db);
 
-  for (const record of records) {
-    if (applied.has(record.filename)) continue;
+  for (const record of pending) {
     if (!record.module) throw new Error(`Migration ${record.filename} cannot run synchronously`);
 
     const applyMigration = db.transaction(() => {

@@ -33,7 +33,7 @@ export class KiroProvider extends BaseProvider {
           'x-amz-sso-bearer': auth.accessToken,
           'x-amzn-kiro-agent-mode': 'spec', ...(resolvedProfileArn ? { 'x-amzn-codewhisperer-profile-arn': resolvedProfileArn } : {}),
         }, body: JSON.stringify(body),
-      }, options?.timeoutMs ?? 120_000, { signal: options?.signal });
+      }, options?.timeoutMs ?? 120_000, { signal: options?.signal, timeoutBounds: 'headers' });
     };
     let response = await sendInference(profileArn);
     if (!response.ok) {

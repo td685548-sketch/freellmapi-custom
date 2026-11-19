@@ -280,6 +280,22 @@ describe('exhaustedRetryError honest terminal statuses', () => {
     expect(body.message).toContain('circuit-breaker');
   });
 
+  it('precedence: a breaker stop over a UNANIMOUS rate-limit pool keeps the 429', () => {
+    // Regression test for CI run #337 (PR #147): the breaker default-on at 6
+    // shadowed an all-429 trail with a generic 503. The unanimous 429
+    // diagnosis outranks the breaker, like all-auth/all-413 above; the early
+    // stop is disclosed in the message instead of changing the status.
+    const body = exhaustedRetryError(Object.assign(new Error('429 Too Many Requests'), { status: 429 }), 20, {
+      attempts: record(['rate_limited', 'rate_limited', 'rate_limited']),
+      breakerFails: 3,
+    });
+    expect(body.status).toBe(429);
+    expect(body.kind).toBe('rate_limit');
+    expect(body.code).toBe('rate_limit_exceeded');
+    expect(body.message).toContain('circuit-breaker');
+    expect(body.message).toContain('All models rate-limited after 3 attempts');
+  });
+
   it('legacy zero-attempt shape keeps the 429 contract', () => {
     const body = exhaustedRetryError(new Error('429 Too Many Requests'), 20);
     expect(body.status).toBe(429);

@@ -1,5 +1,5 @@
-// Request-level guardrails: two hard limits, both OFF by default so an
-// unconfigured install behaves exactly as before.
+// Request-level guardrails: one hard limit OFF by default (the token budget)
+// and one ON by default (the consecutive-failure circuit breaker, 6).
 //
 //  1. request_max_tokens_budget — a per-request token-cost ceiling. Pre-flight:
 //     estimated input (plus the flat per-image estimate) plus the requested
@@ -14,7 +14,11 @@
 //     with a 503 instead of grinding through the remaining candidates of a
 //     pool that is failing across the board (the observed worst case for a
 //     doomed chain was 38.8s of serial retries; the wall-clock budget bounds
-//     the time, this bounds the wasted attempts/quota).
+//     the time, this bounds the wasted attempts/quota). ON by default at 6:
+//     a chain that has burned six hops on 429/5xx/auth failures is not going
+//     to be saved by hop seven, and every extra hop is quota and latency
+//     spent on a pool that is failing across the board. An operator who wants
+//     the old grind-to-the-cap behaviour sets it to 0 explicitly.
 //
 // Ported from @coffcoe's fork (coffcoe/freellmapi@e5024d53) and adapted to the
 // unified fallback loop: the original patched each surface's copy of the retry
@@ -23,14 +27,20 @@
 //
 // Precedence mirrors the response cache and the fallback time budget: the
 // settings-table value wins when present (runtime-tunable, no restart), then
-// the env var, then the default (0 = disabled).
+// the env var, then the default (0 = disabled for the token budget,
+// DEFAULT_MAX_CONSECUTIVE_UPSTREAM_FAILS for the breaker).
 
 import { getSetting } from '../db/index.js';
 
 export const REQUEST_MAX_TOKENS_BUDGET_SETTING = 'request_max_tokens_budget';
 export const MAX_CONSECUTIVE_UPSTREAM_FAILS_SETTING = 'max_consecutive_upstream_fails';
 
-function readGuardrailValue(settingKey: string, envKey: string): number {
+/** Circuit-breaker threshold for an unconfigured install. 0 would disable
+ *  it; 6 stops a doomed chain after six wasted hops while still giving a
+ *  healthy pool (which rarely fails six in a row) its full failover ladder. */
+export const DEFAULT_MAX_CONSECUTIVE_UPSTREAM_FAILS = 6;
+
+function readGuardrailValue(settingKey: string, envKey: string, fallback = 0): number {
   let stored: string | undefined;
   try {
     stored = getSetting(settingKey);
@@ -42,7 +52,7 @@ function readGuardrailValue(settingKey: string, envKey: string): number {
     const n = Number(raw);
     if (Number.isInteger(n) && n >= 0) return n;
   }
-  return 0;
+  return fallback;
 }
 
 /** Per-request token budget ceiling; 0 = disabled. */
@@ -50,9 +60,10 @@ export function getRequestMaxTokensBudget(): number {
   return readGuardrailValue(REQUEST_MAX_TOKENS_BUDGET_SETTING, 'REQUEST_MAX_TOKENS_BUDGET');
 }
 
-/** Consecutive-upstream-failure breaker threshold; 0 = disabled. */
+/** Consecutive-upstream-failure breaker threshold; 0 = disabled (explicit opt-out).
+ *  Defaults to DEFAULT_MAX_CONSECUTIVE_UPSTREAM_FAILS when nothing is configured. */
 export function getMaxConsecutiveUpstreamFails(): number {
-  return readGuardrailValue(MAX_CONSECUTIVE_UPSTREAM_FAILS_SETTING, 'MAX_CONSECUTIVE_UPSTREAM_FAILS');
+  return readGuardrailValue(MAX_CONSECUTIVE_UPSTREAM_FAILS_SETTING, 'MAX_CONSECUTIVE_UPSTREAM_FAILS', DEFAULT_MAX_CONSECUTIVE_UPSTREAM_FAILS);
 }
 
 // ── Token budget (pre-flight) ────────────────────────────────────────────────

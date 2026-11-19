@@ -21,7 +21,7 @@ export class TyphoonProvider extends OpenAICompatProvider {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: '__freellmapi_key_validation__', messages: [{ role: 'user', content: 'key validation' }], max_tokens: 1, stream: false }),
-    }, providerTimeoutMs('typhoon', 30_000), { timeoutBounds: 'request' });
+    }, providerTimeoutMs('typhoon'), { timeoutBounds: 'request' });
     recordQuotaObservationsFromResponse(res, { ...quotaContext, platform: 'typhoon', endpoint: 'key-validation' });
     if ([401, 403].includes(res.status)) return this.validationResult(res);
     if (res.status === 400) {

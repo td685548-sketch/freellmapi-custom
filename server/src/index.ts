@@ -4,6 +4,8 @@ import { measureStartup, stopPerformanceMetrics } from './custom/performance/met
 import { createApp } from './app.js';
 import { initDb, getDb } from './db/index.js';
 import { endStartupBusyBudget, isTursoDatabase } from './db/turso.js';
+import { setBeforeMigrationsHook } from './db/migrate/runner.js';
+import { snapshotBeforeMigrations } from './db/migration-snapshot.js';
 import { startHealthChecker, checkAllKeys } from './services/health.js';
 import { restoreProxySettings, flushProxyCache } from './lib/proxy.js';
 import { startWakeDetect } from './lib/wake-detect.js';
@@ -53,10 +55,21 @@ async function main() {
   } else {
     await restoreDbBackupIfNeeded();
   }
+  // Snapshot the database before any pending migration runs, so a migration
+  // that goes wrong has something to roll back to. Registered here — not in
+  // initDb — so the migration engine never imports backup machinery.
+  setBeforeMigrationsHook(snapshotBeforeMigrations);
   measureStartup('database_init', () => initDb(config.dbPath ?? undefined));
   applyLocalSqlitePerformancePragmas(getDb());
   const stopSupportWorker = startWorkerLifecycle();
-  applyDeclarativeConfigFromEnv();
+  // applyDeclarativeConfigFromEnv() already degrades a broken config to a
+  // warning + skip, but this is the last line of defence: a regression in
+  // that guard must never brick boot (restart loop, dashboard down) again.
+  try {
+    applyDeclarativeConfigFromEnv();
+  } catch (err) {
+    console.warn(`[config] declarative config skipped — booting with the existing database: ${err instanceof Error ? err.message : err}`);
+  }
   // After initDb: the unknown-model half of this check reads the catalog.
   warnOnRoutingOverrideDrift();
 

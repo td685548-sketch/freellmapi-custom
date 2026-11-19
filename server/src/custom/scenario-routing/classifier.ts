@@ -14,6 +14,7 @@ import {
   type ScenarioId,
   type ScenarioWireSurface,
 } from '@freellmapi/shared/scenario-routing.js';
+import { estimateTextTokens, IMAGE_TOKENS_PER_IMAGE } from '../../lib/content.js';
 
 export interface ScenarioRoutePolicy<TContext, TDecision> {
   id: string;
@@ -37,8 +38,6 @@ export class ScenarioPolicyEngine<TContext, TDecision> {
     return undefined;
   }
 }
-
-const IMAGE_TOKEN_ESTIMATE = 1_000;
 
 const WEB_SEARCH_TOOL_NAME_RE =
   /^(?:web_?search|internet_?search|google_?search|brave_?search|tavily_?search|exa_?search|perplexity_?search|duckduckgo_?search)(?:_\d+)?$/i;
@@ -157,12 +156,23 @@ interface ExtractedPayloadFeatures {
   maxTokens: number | null;
 }
 
+const DATA_URI_RE = /data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+/g;
+
+// Strip inline base64 image payloads before token estimation: the bytes are
+// billed per image (IMAGE_TOKENS_PER_IMAGE), and counting them as ASCII text
+// inflated the estimate past 60k for a single screenshot (the scenario-routing
+// test pins this).
+function stripDataUris(str: string): string {
+  if (!str.includes('data:')) return str;
+  return str.replace(DATA_URI_RE, '[inline_image]');
+}
+
 function safeTextLengthWithoutDataUri(str: string): { chars: number; inlineImages: number } {
   if (!str.includes('data:')) {
     return { chars: str.length, inlineImages: 0 };
   }
   let inlineImages = 0;
-  const stripped = str.replace(/data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+/g, () => {
+  const stripped = str.replace(DATA_URI_RE, () => {
     inlineImages += 1;
     return '[inline_image]';
   });
@@ -172,6 +182,7 @@ function safeTextLengthWithoutDataUri(str: string): { chars: number; inlineImage
 function inspectContentNode(node: unknown): {
   textParts: string[];
   chars: number;
+  tokens: number;
   imageCount: number;
 } {
   if (typeof node === 'string') {
@@ -179,23 +190,26 @@ function inspectContentNode(node: unknown): {
     return {
       textParts: [node],
       chars: measured.chars,
+      tokens: estimateTextTokens(stripDataUris(node)),
       imageCount: measured.inlineImages,
     };
   }
   if (!node) {
-    return { textParts: [], chars: 0, imageCount: 0 };
+    return { textParts: [], chars: 0, tokens: 0, imageCount: 0 };
   }
   if (Array.isArray(node)) {
     const textParts: string[] = [];
     let chars = 0;
+    let tokens = 0;
     let imageCount = 0;
     for (const item of node) {
       const sub = inspectContentNode(item);
       if (sub.textParts.length > 0) textParts.push(...sub.textParts);
       chars += sub.chars;
+      tokens += sub.tokens;
       imageCount += sub.imageCount;
     }
-    return { textParts, chars, imageCount };
+    return { textParts, chars, tokens, imageCount };
   }
   if (typeof node === 'object') {
     const obj = node as Record<string, unknown>;
@@ -207,38 +221,43 @@ function inspectContentNode(node: unknown): {
       type === 'computer_screenshot' ||
       obj.image_url !== undefined
     ) {
-      return { textParts: [], chars: 0, imageCount: 1 };
+      return { textParts: [], chars: 0, tokens: 0, imageCount: 1 };
     }
     const textParts: string[] = [];
     let chars = 0;
+    let tokens = 0;
     let imageCount = 0;
     if (typeof obj.text === 'string') {
       const measured = safeTextLengthWithoutDataUri(obj.text);
       textParts.push(obj.text);
       chars += measured.chars;
+      tokens += estimateTextTokens(stripDataUris(obj.text));
       imageCount += measured.inlineImages;
     }
     if (typeof obj.input_text === 'string') {
       const measured = safeTextLengthWithoutDataUri(obj.input_text);
       textParts.push(obj.input_text);
       chars += measured.chars;
+      tokens += estimateTextTokens(stripDataUris(obj.input_text));
       imageCount += measured.inlineImages;
     }
     if (obj.content !== undefined) {
       const sub = inspectContentNode(obj.content);
       textParts.push(...sub.textParts);
       chars += sub.chars;
+      tokens += sub.tokens;
       imageCount += sub.imageCount;
     }
     if (obj.output !== undefined) {
       const sub = inspectContentNode(obj.output);
       textParts.push(...sub.textParts);
       chars += sub.chars;
+      tokens += sub.tokens;
       imageCount += sub.imageCount;
     }
-    return { textParts, chars, imageCount };
+    return { textParts, chars, tokens, imageCount };
   }
-  return { textParts: [], chars: 0, imageCount: 0 };
+  return { textParts: [], chars: 0, tokens: 0, imageCount: 0 };
 }
 
 function detectWebSearchTools(body: Record<string, unknown>): boolean {
@@ -320,20 +339,20 @@ function extractFeatures(
   const requestedModel = typeof body.model === 'string' ? body.model.trim() : '';
   const systemParts: string[] = [];
   let lastUserText = '';
-  let totalChars = 0;
+  let totalTokens = 0;
   let imageCount = 0;
 
   if (body.system !== undefined) {
     const sys = inspectContentNode(body.system);
     systemParts.push(...sys.textParts);
-    totalChars += sys.chars;
+    totalTokens += sys.tokens;
     imageCount += sys.imageCount;
   }
 
   if (typeof body.instructions === 'string') {
     const inst = safeTextLengthWithoutDataUri(body.instructions);
     systemParts.push(body.instructions);
-    totalChars += inst.chars;
+    totalTokens += estimateTextTokens(stripDataUris(body.instructions));
     imageCount += inst.inlineImages;
   }
 
@@ -343,7 +362,7 @@ function extractFeatures(
       const msg = rawMsg as Record<string, unknown>;
       const role = typeof msg.role === 'string' ? msg.role.toLowerCase() : '';
       const inspected = inspectContentNode(msg.content);
-      totalChars += inspected.chars;
+      totalTokens += inspected.tokens;
       imageCount += inspected.imageCount;
 
       if (Array.isArray(msg.tool_calls)) {
@@ -352,8 +371,8 @@ function extractFeatures(
           const fn = (tc as Record<string, unknown>).function;
           if (fn && typeof fn === 'object') {
             const fnRec = fn as Record<string, unknown>;
-            if (typeof fnRec.name === 'string') totalChars += fnRec.name.length;
-            if (typeof fnRec.arguments === 'string') totalChars += fnRec.arguments.length;
+            if (typeof fnRec.name === 'string') totalTokens += estimateTextTokens(fnRec.name);
+            if (typeof fnRec.arguments === 'string') totalTokens += estimateTextTokens(fnRec.arguments);
           }
         }
       }
@@ -370,7 +389,7 @@ function extractFeatures(
     if (typeof body.input === 'string') {
       const inp = safeTextLengthWithoutDataUri(body.input);
       lastUserText = body.input;
-      totalChars += inp.chars;
+      totalTokens += estimateTextTokens(stripDataUris(body.input));
       imageCount += inp.inlineImages;
     } else if (Array.isArray(body.input)) {
       for (const rawItem of body.input) {
@@ -378,10 +397,10 @@ function extractFeatures(
         const item = rawItem as Record<string, unknown>;
         const role = typeof item.role === 'string' ? item.role.toLowerCase() : '';
         const inspected = inspectContentNode(item.content ?? item.output ?? item);
-        totalChars += inspected.chars;
+        totalTokens += inspected.tokens;
         imageCount += inspected.imageCount;
         if (typeof item.arguments === 'string') {
-          totalChars += item.arguments.length;
+          totalTokens += estimateTextTokens(item.arguments);
         }
         if (role === 'system' || role === 'developer') {
           systemParts.push(...inspected.textParts);
@@ -397,14 +416,17 @@ function extractFeatures(
   let toolTokens = 0;
   if (hasTools) {
     try {
-      toolTokens = Math.ceil(JSON.stringify(tools).length / 4);
+      toolTokens = estimateTextTokens(JSON.stringify(tools));
     } catch {
       toolTokens = tools.length * 120;
     }
   }
 
+  // Script-weighted text estimate (Vietnamese/CJK aware) plus the shared
+  // flat per-image cost — the same 765 the proxy router and the
+  // context-budget estimator charge.
   const estimatedInputTokens =
-    Math.ceil(totalChars / 4) + toolTokens + imageCount * IMAGE_TOKEN_ESTIMATE;
+    totalTokens + toolTokens + imageCount * IMAGE_TOKENS_PER_IMAGE;
 
   const systemText = systemParts.join('\n');
   const combinedSample = `${systemText.slice(0, 4_000)}\n${lastUserText.slice(-4_000)}`.toLowerCase();

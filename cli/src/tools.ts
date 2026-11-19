@@ -1,5 +1,7 @@
 import path from 'node:path';
 import { clientNotes, detectChatGptClient } from './detect.js';
+import { contextWindowOf, primarySetupModel } from './models.js';
+import { gatewayRootUrl, gatewayV1Url } from './url.js';
 import type {
   CatalogModel,
   GenerateContext,
@@ -7,43 +9,18 @@ import type {
   ToolDefinition,
 } from './types.js';
 
-function rootUrl(url: string): string {
-  return url.trim().replace(/\/+$/, '').replace(/\/v1$/i, '');
-}
-
-function v1Url(url: string): string {
-  return `${rootUrl(url)}/v1`;
-}
-
-function primaryModel(models: CatalogModel[], requestedId?: string): CatalogModel {
-  // An explicit --model wins over every heuristic below. It is validated
-  // against the UNFILTERED catalog before we get here, so an id absent from
-  // `models` (the available-only roster) is a real, registered model that is
-  // merely out of quota right now — pin it anyway rather than silently writing
-  // a different model into the user's config.
-  if (requestedId) return models.find(model => model.id === requestedId) ?? { id: requestedId };
-  // `auto` — the router picking the best model per request — is the whole
-  // point of the gateway and the right default for a generated config. Never
-  // fall back to `fusion` (multi-model fan-out) by accident.
-  return models.find(model => model.id === 'auto')
-    ?? models.find(model => model.id !== 'fusion' && model.available !== false)
-    ?? models.find(model => model.id !== 'fusion')
-    ?? { id: 'auto', name: 'Auto', context_window: 128_000 };
-}
-
 function catalogModels(models: CatalogModel[]): CatalogModel[] {
   const available = models.filter(model => model.id !== 'auto' && model.available !== false);
   if (available.length) return available;
   const nonAuto = models.filter(model => model.id !== 'auto');
-  return nonAuto.length ? nonAuto : [primaryModel(models)];
+  return nonAuto.length ? nonAuto : [primarySetupModel(models)];
 }
 
-function contextWindow(model: CatalogModel): number {
-  return model.context_window ?? model.context_length ?? 128_000;
-}
-
+// Max output tokens for a model: the catalog's window capped at 8192. When
+// the catalog publishes no window, 8192 is still the cap — an output cap, not
+// an invented context window, so it is safe to fall back to here.
 function outputLimit(model: CatalogModel): number {
-  return Math.min(8192, contextWindow(model));
+  return Math.min(8192, contextWindowOf(model) ?? 8192);
 }
 
 function yamlString(value: string): string {
@@ -51,7 +28,11 @@ function yamlString(value: string): string {
 }
 
 function claude(ctx: GenerateContext): Generation {
-  const model = primaryModel(ctx.models, ctx.requestedModelId);
+  const model = primarySetupModel(ctx.models, ctx.requestedModelId);
+  // Only pin the compaction window when the catalog actually published one —
+  // the same rule as claudeLaunchEnv in index.ts. Absent, Claude Code applies
+  // its own default; a guessed window compacts too early or too late.
+  const contextWindow = contextWindowOf(model);
   const directory = ctx.profile === 'default'
     ? path.join(ctx.homeDir, '.claude')
     : path.join(ctx.homeDir, '.claude', 'profiles', ctx.profile);
@@ -62,13 +43,15 @@ function claude(ctx: GenerateContext): Generation {
       sensitive: true,
       value: {
         env: {
-          ANTHROPIC_BASE_URL: rootUrl(ctx.url),
+          ANTHROPIC_BASE_URL: gatewayRootUrl(ctx.url),
           ANTHROPIC_AUTH_TOKEN: ctx.apiKey,
           ANTHROPIC_MODEL: model.id,
           ANTHROPIC_DEFAULT_OPUS_MODEL: model.id,
           ANTHROPIC_DEFAULT_SONNET_MODEL: model.id,
           ANTHROPIC_DEFAULT_HAIKU_MODEL: model.id,
-          CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(contextWindow(model)),
+          ...(contextWindow !== undefined
+            ? { CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(contextWindow) }
+            : {}),
           CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1',
         },
       },
@@ -83,12 +66,15 @@ function claude(ctx: GenerateContext): Generation {
 }
 
 function codex(ctx: GenerateContext): Generation {
-  const model = primaryModel(ctx.models, ctx.requestedModelId);
-  const compact = Math.max(16_000, Math.floor(contextWindow(model) * 0.9));
+  const model = primarySetupModel(ctx.models, ctx.requestedModelId);
+  const contextWindow = contextWindowOf(model);
+  const compact = contextWindow !== undefined
+    ? Math.max(16_000, Math.floor(contextWindow * 0.9))
+    : undefined;
   const providerTable = [
     '[model_providers.freellmapi]',
     'name = "FreeLLMAPI"',
-    `base_url = ${JSON.stringify(v1Url(ctx.url))}`,
+    `base_url = ${JSON.stringify(gatewayV1Url(ctx.url))}`,
     'wire_api = "responses"',
     'env_key = "FREELLMAPI_API_KEY"',
     'requires_openai_auth = false',
@@ -101,8 +87,8 @@ function codex(ctx: GenerateContext): Generation {
       '# freellmapi:start',
       `model = ${JSON.stringify(model.id)}`,
       'model_provider = "freellmapi"',
-      `model_context_window = ${contextWindow(model)}`,
-      `model_auto_compact_token_limit = ${compact}`,
+      ...(contextWindow !== undefined ? [`model_context_window = ${contextWindow}`] : []),
+      ...(compact !== undefined ? [`model_auto_compact_token_limit = ${compact}`] : []),
       'tool_output_token_limit = 20000',
       '',
       ...providerTable,
@@ -131,13 +117,15 @@ function codex(ctx: GenerateContext): Generation {
       ...(ctx.profile === 'default'
         ? []
         : [`Activate this profile with: codex --profile ${ctx.profile}`]),
-      `Selected ${model.id} with a ${contextWindow(model)} token context window.`,
+      contextWindow !== undefined
+        ? `Selected ${model.id} with a ${contextWindow} token context window.`
+        : `Selected ${model.id} (context window not published by the catalog).`,
     ],
   };
 }
 
 function cline(ctx: GenerateContext): Generation {
-  const model = primaryModel(ctx.models, ctx.requestedModelId);
+  const model = primarySetupModel(ctx.models, ctx.requestedModelId);
   return {
     files: [{
       path: path.join(ctx.homeDir, '.cline', 'data', 'settings', 'providers.json'),
@@ -153,9 +141,11 @@ function cline(ctx: GenerateContext): Generation {
               protocol: 'openai-chat',
               client: 'openai-compatible',
               model: model.id,
-              baseUrl: v1Url(ctx.url),
+              baseUrl: gatewayV1Url(ctx.url),
               apiKey: ctx.apiKey,
-              contextWindow: contextWindow(model),
+              // Omitted when the catalog publishes no window: Cline falls
+              // back to its own default instead of trusting a made-up 128k.
+              ...(contextWindowOf(model) !== undefined ? { contextWindow: contextWindowOf(model) } : {}),
               capabilities: ['streaming', 'tools'],
             },
             // The field is required by Cline's persisted schema. Keeping it
@@ -171,7 +161,7 @@ function cline(ctx: GenerateContext): Generation {
 }
 
 function continueDev(ctx: GenerateContext): Generation {
-  const model = primaryModel(ctx.models, ctx.requestedModelId);
+  const model = primarySetupModel(ctx.models, ctx.requestedModelId);
   return {
     files: [{
       path: path.join(ctx.homeDir, '.continue', 'config.yaml'),
@@ -185,12 +175,13 @@ function continueDev(ctx: GenerateContext): Generation {
         '  - name: FreeLLMAPI',
         '    provider: openai',
         `    model: ${yamlString(model.id)}`,
-        `    apiBase: ${yamlString(v1Url(ctx.url))}`,
+        `    apiBase: ${yamlString(gatewayV1Url(ctx.url))}`,
         '    apiKey: ${{ secrets.FREELLMAPI_API_KEY }}',
         '    capabilities:',
         '      - tool_use',
-        '    defaultCompletionOptions:',
-        `      contextLength: ${contextWindow(model)}`,
+        ...(contextWindowOf(model) !== undefined
+          ? ['    defaultCompletionOptions:', `      contextLength: ${contextWindowOf(model)}`]
+          : []),
         '# freellmapi:end',
         '',
       ].join('\n'),
@@ -214,7 +205,7 @@ function continueDev(ctx: GenerateContext): Generation {
 }
 
 function aider(ctx: GenerateContext): Generation {
-  const model = primaryModel(ctx.models, ctx.requestedModelId);
+  const model = primarySetupModel(ctx.models, ctx.requestedModelId);
   return {
     files: [{
       path: path.join(ctx.homeDir, '.aider.conf.yml'),
@@ -222,7 +213,7 @@ function aider(ctx: GenerateContext): Generation {
       sensitive: true,
       content: [
         '# freellmapi:start',
-        `openai-api-base: ${yamlString(v1Url(ctx.url))}`,
+        `openai-api-base: ${yamlString(gatewayV1Url(ctx.url))}`,
         `openai-api-key: ${yamlString(ctx.apiKey)}`,
         `model: ${yamlString(`openai/${model.id}`)}`,
         '# freellmapi:end',
@@ -230,7 +221,7 @@ function aider(ctx: GenerateContext): Generation {
       ].join('\n'),
     }],
     notes: [
-      `Environment-only alternative: OPENAI_API_BASE=${v1Url(ctx.url)} OPENAI_API_KEY=… aider --model openai/${model.id}`,
+      `Environment-only alternative: OPENAI_API_BASE=${gatewayV1Url(ctx.url)} OPENAI_API_KEY=… aider --model openai/${model.id}`,
     ],
   };
 }
@@ -254,14 +245,17 @@ function aider(ctx: GenerateContext): Generation {
 // placeholder an earlier run wrote. The config dir follows XDG_CONFIG_HOME the
 // same way, since that is where OpenCode reads it from.
 function opencode(ctx: GenerateContext): Generation {
-  const model = primaryModel(ctx.models, ctx.requestedModelId);
+  const model = primarySetupModel(ctx.models, ctx.requestedModelId);
   const configHome = process.env.XDG_CONFIG_HOME?.trim() || path.join(ctx.homeDir, '.config');
   const dataHome = process.env.XDG_DATA_HOME?.trim() || path.join(ctx.homeDir, '.local', 'share');
   const roster = catalogModels(ctx.models);
   const modelEntries = Object.fromEntries(
     [model, ...roster.filter(entry => entry.id !== model.id)].map(entry => [entry.id, {
       name: entry.name ?? entry.id,
-      limit: { context: contextWindow(entry), output: outputLimit(entry) },
+      limit: {
+        ...(contextWindowOf(entry) !== undefined ? { context: contextWindowOf(entry) } : {}),
+        output: outputLimit(entry),
+      },
     }]),
   );
   return {
@@ -277,7 +271,7 @@ function opencode(ctx: GenerateContext): Generation {
               npm: '@ai-sdk/openai-compatible',
               name: 'FreeLLMAPI',
               options: {
-                baseURL: v1Url(ctx.url),
+                baseURL: gatewayV1Url(ctx.url),
                 apiKey: undefined,
               },
               models: modelEntries,
@@ -302,13 +296,13 @@ function opencode(ctx: GenerateContext): Generation {
 }
 
 function goose(ctx: GenerateContext): Generation {
-  const model = primaryModel(ctx.models, ctx.requestedModelId);
+  const model = primarySetupModel(ctx.models, ctx.requestedModelId);
   // GOOSE_MODEL names the default, so it belongs in the provider's list too;
   // `auto` is filtered out of the plain roster and goes back at the front.
   const roster = catalogModels(ctx.models);
   const models = [model, ...roster.filter(entry => entry.id !== model.id)].map(entry => ({
     name: entry.id,
-    context_limit: contextWindow(entry),
+    ...(contextWindowOf(entry) !== undefined ? { context_limit: contextWindowOf(entry) } : {}),
   }));
   return {
     files: [
@@ -327,7 +321,7 @@ function goose(ctx: GenerateContext): Generation {
           display_name: 'FreeLLMAPI',
           description: 'FreeLLMAPI OpenAI-compatible gateway',
           api_key_env: 'FREELLMAPI_API_KEY',
-          base_url: v1Url(ctx.url),
+          base_url: gatewayV1Url(ctx.url),
           models,
           supports_streaming: true,
           requires_auth: true,
@@ -352,7 +346,7 @@ function goose(ctx: GenerateContext): Generation {
 }
 
 function qwen(ctx: GenerateContext): Generation {
-  const model = primaryModel(ctx.models, ctx.requestedModelId);
+  const model = primarySetupModel(ctx.models, ctx.requestedModelId);
   const dir = path.join(ctx.homeDir, '.qwen');
   // Qwen Code looks the selected model up in the provider list and, finding
   // nothing, silently falls back to the FIRST listed model — with `auto`
@@ -363,9 +357,9 @@ function qwen(ctx: GenerateContext): Generation {
     id: entry.id,
     name: entry.name ?? entry.id,
     envKey: 'FREELLMAPI_API_KEY',
-    baseUrl: v1Url(ctx.url),
+    baseUrl: gatewayV1Url(ctx.url),
     generationConfig: {
-      contextWindowSize: contextWindow(entry),
+      ...(contextWindowOf(entry) !== undefined ? { contextWindowSize: contextWindowOf(entry) } : {}),
     },
   }));
   return {
@@ -392,7 +386,7 @@ function qwen(ctx: GenerateContext): Generation {
       },
     ],
     notes: [
-      `Native Gemini mode is also available at ${rootUrl(ctx.url)}/v1beta with GEMINI_API_KEY.`,
+      `Native Gemini mode is also available at ${gatewayRootUrl(ctx.url)}/v1beta with GEMINI_API_KEY.`,
     ],
   };
 }
@@ -407,12 +401,12 @@ function qwen(ctx: GenerateContext): Generation {
 // stores never meet: the extension reads VS Code settings, the CLI reads
 // ~/.vscode-mock/global-storage/global-state.json.
 function roo(ctx: GenerateContext): Generation {
-  const model = primaryModel(ctx.models, ctx.requestedModelId);
+  const model = primarySetupModel(ctx.models, ctx.requestedModelId);
   const importPath = path.join(ctx.homeDir, '.roo', 'freellmapi.json');
   const cliImportPath = path.join(ctx.homeDir, '.roo', 'freellmapi-cli.json');
   const cliProfile = {
     apiProvider: 'openrouter',
-    openRouterBaseUrl: v1Url(ctx.url),
+    openRouterBaseUrl: gatewayV1Url(ctx.url),
     openRouterApiKey: ctx.apiKey,
     openRouterModelId: model.id,
   };
@@ -428,12 +422,12 @@ function roo(ctx: GenerateContext): Generation {
             apiConfigs: {
               freellmapi: {
                 apiProvider: 'openai',
-                openAiBaseUrl: v1Url(ctx.url),
+                openAiBaseUrl: gatewayV1Url(ctx.url),
                 openAiApiKey: ctx.apiKey,
                 openAiModelId: model.id,
                 openAiStreamingEnabled: true,
                 openAiCustomModelInfo: {
-                  contextWindow: contextWindow(model),
+                  ...(contextWindowOf(model) !== undefined ? { contextWindow: contextWindowOf(model) } : {}),
                   maxTokens: outputLimit(model),
                   supportsPromptCache: false,
                 },
@@ -476,7 +470,7 @@ function roo(ctx: GenerateContext): Generation {
 }
 
 function kilo(ctx: GenerateContext): Generation {
-  const model = primaryModel(ctx.models, ctx.requestedModelId);
+  const model = primarySetupModel(ctx.models, ctx.requestedModelId);
   // Kilo refuses to start (`Model not found: openai-compatible/auto`) unless
   // the selected model is in the provider's map, so the default goes first.
   const roster = catalogModels(ctx.models);
@@ -486,7 +480,7 @@ function kilo(ctx: GenerateContext): Generation {
       name: entry.name ?? entry.id,
       tool_call: true,
       limit: {
-        context: contextWindow(entry),
+        ...(contextWindowOf(entry) !== undefined ? { context: contextWindowOf(entry) } : {}),
         output: outputLimit(entry),
       },
     },
@@ -502,7 +496,7 @@ function kilo(ctx: GenerateContext): Generation {
           'openai-compatible': {
             options: {
               apiKey: '{env:FREELLMAPI_API_KEY}',
-              baseURL: v1Url(ctx.url),
+              baseURL: gatewayV1Url(ctx.url),
             },
             models,
           },
@@ -523,7 +517,7 @@ function kilo(ctx: GenerateContext): Generation {
 // model, which therefore has to be in the provider's list; `auto` is filtered
 // out of the plain roster, so it goes back at the front.
 function crush(ctx: GenerateContext): Generation {
-  const model = primaryModel(ctx.models, ctx.requestedModelId);
+  const model = primarySetupModel(ctx.models, ctx.requestedModelId);
   const roster = catalogModels(ctx.models);
   const models = [model, ...roster.filter(entry => entry.id !== model.id)].map(entry => ({
     id: entry.id,
@@ -532,7 +526,7 @@ function crush(ctx: GenerateContext): Generation {
     cost_per_1m_out: 0,
     cost_per_1m_in_cached: 0,
     cost_per_1m_out_cached: 0,
-    context_window: contextWindow(entry),
+    ...(contextWindowOf(entry) !== undefined ? { context_window: contextWindowOf(entry) } : {}),
     default_max_tokens: outputLimit(entry),
     can_reason: false,
     supports_attachments: false,
@@ -551,7 +545,7 @@ function crush(ctx: GenerateContext): Generation {
           freellmapi: {
             name: 'FreeLLMAPI',
             type: 'openai-compat',
-            base_url: v1Url(ctx.url),
+            base_url: gatewayV1Url(ctx.url),
             api_key: '$FREELLMAPI_API_KEY',
             models,
           },
@@ -576,7 +570,7 @@ function crush(ctx: GenerateContext): Generation {
 // honours `max_completion_tokens`, the two things pi-ai sends to an endpoint
 // it cannot recognize.
 function dsh(ctx: GenerateContext): Generation {
-  const model = primaryModel(ctx.models, ctx.requestedModelId);
+  const model = primarySetupModel(ctx.models, ctx.requestedModelId);
   // DSH_HOME relocates the whole harness home; nothing else about the
   // layout changes, so honour it the way dsh itself does.
   const home = process.env.DSH_HOME?.trim() || path.join(ctx.homeDir, '.dsh');
@@ -591,7 +585,7 @@ function dsh(ctx: GenerateContext): Generation {
     .map(entry => ({
       id: entry.id,
       name: entry.name ?? entry.id,
-      contextWindow: contextWindow(entry),
+      ...(contextWindowOf(entry) !== undefined ? { contextWindow: contextWindowOf(entry) } : {}),
       maxTokens: outputLimit(entry),
     }));
   return {
@@ -606,7 +600,7 @@ function dsh(ctx: GenerateContext): Generation {
                 displayName: ctx.profile === 'default' ? 'FreeLLMAPI' : `FreeLLMAPI (${ctx.profile})`,
                 apiKeyEnv: 'FREELLMAPI_API_KEY',
                 api: 'openai-completions',
-                baseURL: v1Url(ctx.url),
+                baseURL: gatewayV1Url(ctx.url),
                 models: entries,
               },
             },
@@ -661,7 +655,7 @@ function dsh(ctx: GenerateContext): Generation {
 // config fields. The key travels through the config file's own `{env:VAR}`
 // substitution instead, which keeps it off disk.
 function mimo(ctx: GenerateContext): Generation {
-  const model = primaryModel(ctx.models, ctx.requestedModelId);
+  const model = primarySetupModel(ctx.models, ctx.requestedModelId);
   const configDir = process.env.MIMOCODE_HOME?.trim()
     ? path.join(process.env.MIMOCODE_HOME.trim(), 'config')
     : path.join(
@@ -675,7 +669,10 @@ function mimo(ctx: GenerateContext): Generation {
   const modelEntries = Object.fromEntries(
     [model, ...roster.filter(entry => entry.id !== model.id)].map(entry => [entry.id, {
       name: entry.name ?? entry.id,
-      limit: { context: contextWindow(entry), output: outputLimit(entry) },
+      limit: {
+        ...(contextWindowOf(entry) !== undefined ? { context: contextWindowOf(entry) } : {}),
+        output: outputLimit(entry),
+      },
     }]),
   );
   return {
@@ -689,7 +686,7 @@ function mimo(ctx: GenerateContext): Generation {
             npm: '@ai-sdk/openai-compatible',
             name: 'FreeLLMAPI',
             options: {
-              baseURL: v1Url(ctx.url),
+              baseURL: gatewayV1Url(ctx.url),
               apiKey: '{env:FREELLMAPI_API_KEY}',
             },
             models: modelEntries,
@@ -727,7 +724,7 @@ function openclawStateDir(homeDir: string): string {
 }
 
 function openclaw(ctx: GenerateContext): Generation {
-  const model = primaryModel(ctx.models, ctx.requestedModelId);
+  const model = primarySetupModel(ctx.models, ctx.requestedModelId);
   const stateDir = openclawStateDir(ctx.homeDir);
   const configPath = process.env.OPENCLAW_CONFIG_PATH?.trim()
     || path.join(stateDir, 'openclaw.json');
@@ -745,7 +742,7 @@ function openclaw(ctx: GenerateContext): Generation {
       reasoning: false,
       input: ['text'],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: contextWindow(entry),
+      ...(contextWindowOf(entry) !== undefined ? { contextWindow: contextWindowOf(entry) } : {}),
       maxTokens: outputLimit(entry),
     }));
   return {
@@ -760,7 +757,7 @@ function openclaw(ctx: GenerateContext): Generation {
           models: {
             providers: {
               [provider]: {
-                baseUrl: v1Url(ctx.url),
+                baseUrl: gatewayV1Url(ctx.url),
                 apiKey: '${FREELLMAPI_API_KEY}',
                 api: 'openai-completions',
                 // OpenClaw attaches its own `openclaw/<version>` identity only
@@ -807,7 +804,7 @@ function openclaw(ctx: GenerateContext): Generation {
 // dict instead — picked with `/model custom:<name>:<model>` — leaving the
 // default model alone.
 function hermes(ctx: GenerateContext): Generation {
-  const model = primaryModel(ctx.models, ctx.requestedModelId);
+  const model = primarySetupModel(ctx.models, ctx.requestedModelId);
   const home = process.env.HERMES_HOME?.trim() || path.join(ctx.homeDir, '.hermes');
   const provider = `freellmapi-${ctx.profile.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')}`;
   // Hermes only identifies itself to hosts it knows; a custom endpoint gets the
@@ -819,10 +816,10 @@ function hermes(ctx: GenerateContext): Generation {
       model: {
         provider: 'custom',
         default: model.id,
-        base_url: v1Url(ctx.url),
+        base_url: gatewayV1Url(ctx.url),
         api_key: '${FREELLMAPI_API_KEY}',
         api_mode: 'chat_completions',
-        context_length: contextWindow(model),
+        ...(contextWindowOf(model) !== undefined ? { context_length: contextWindowOf(model) } : {}),
         default_headers: headers,
         // The wizard strips these when it writes api_key; a leftover would
         // point the key lookup at a variable this route never sets.
@@ -834,11 +831,11 @@ function hermes(ctx: GenerateContext): Generation {
       providers: {
         [provider]: {
           name: `FreeLLMAPI (${ctx.profile})`,
-          api: v1Url(ctx.url),
+          api: gatewayV1Url(ctx.url),
           api_key: '${FREELLMAPI_API_KEY}',
           transport: 'chat_completions',
           default_model: model.id,
-          context_length: contextWindow(model),
+          ...(contextWindowOf(model) !== undefined ? { context_length: contextWindowOf(model) } : {}),
           extra_headers: headers,
         },
       },
@@ -877,7 +874,7 @@ function piAgentDir(homeDir: string): string {
 }
 
 function pi(ctx: GenerateContext): Generation {
-  const model = primaryModel(ctx.models, ctx.requestedModelId);
+  const model = primarySetupModel(ctx.models, ctx.requestedModelId);
   const dir = piAgentDir(ctx.homeDir);
   const provider = ctx.profile === 'default'
     ? 'freellmapi'
@@ -892,7 +889,7 @@ function pi(ctx: GenerateContext): Generation {
       reasoning: false,
       input: ['text'],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: contextWindow(entry),
+      ...(contextWindowOf(entry) !== undefined ? { contextWindow: contextWindowOf(entry) } : {}),
       maxTokens: outputLimit(entry),
     }));
   const files: Generation['files'] = [{
@@ -903,7 +900,7 @@ function pi(ctx: GenerateContext): Generation {
       providers: {
         [provider]: {
           name: ctx.profile === 'default' ? 'FreeLLMAPI' : `FreeLLMAPI (${ctx.profile})`,
-          baseUrl: v1Url(ctx.url),
+          baseUrl: gatewayV1Url(ctx.url),
           api: 'openai-completions',
           apiKey: ctx.apiKey,
           // Pi names itself only to a few hosts it knows; a custom endpoint gets
@@ -954,7 +951,7 @@ function reasonixHome(homeDir: string): string {
 }
 
 function reasonix(ctx: GenerateContext): Generation {
-  const model = primaryModel(ctx.models, ctx.requestedModelId);
+  const model = primarySetupModel(ctx.models, ctx.requestedModelId);
   const home = reasonixHome(ctx.homeDir);
   // A provider name is what every `provider/model` ref and saved session points
   // at, so a named profile becomes a second entry rather than replacing it.
@@ -974,11 +971,11 @@ function reasonix(ctx: GenerateContext): Generation {
           `name = ${JSON.stringify(provider)}`,
           `display_name = ${JSON.stringify(ctx.profile === 'default' ? 'FreeLLMAPI' : `FreeLLMAPI (${ctx.profile})`)}`,
           'kind = "openai"',
-          `base_url = ${JSON.stringify(v1Url(ctx.url))}`,
+          `base_url = ${JSON.stringify(gatewayV1Url(ctx.url))}`,
           `models = [${models.map(id => JSON.stringify(id)).join(', ')}]`,
           `default = ${JSON.stringify(model.id)}`,
           'api_key_env = "FREELLMAPI_API_KEY"',
-          `context_window = ${contextWindow(model)}`,
+          ...(contextWindowOf(model) !== undefined ? [`context_window = ${contextWindowOf(model)}`] : []),
           // Without a price Reasonix bills unknown models at a guessed rate;
           // the gateway's models are free.
           'price = { cache_hit = 0, input = 0, output = 0, currency = "$" }',
@@ -1021,7 +1018,7 @@ function zcodeProviderFile(homeDir: string): string {
 }
 
 function zcode(ctx: GenerateContext): Generation {
-  const model = primaryModel(ctx.models, ctx.requestedModelId);
+  const model = primarySetupModel(ctx.models, ctx.requestedModelId);
   // Like every other generator, a named profile is a second provider entry so
   // both routes coexist in ZCode's model picker.
   const provider = ctx.profile === 'default'
@@ -1051,7 +1048,7 @@ function zcode(ctx: GenerateContext): Generation {
               config: {
                 group: 'standard-personal',
                 access: { type: 'api-key', apiKey: ctx.apiKey },
-                api: { type: 'openai-chat-completions', baseUrl: v1Url(ctx.url) },
+                api: { type: 'openai-chat-completions', baseUrl: gatewayV1Url(ctx.url) },
                 personalModelIds: ids.map(entry => entry.id),
                 modelOrder: ids.map(entry => entry.id),
                 visibility: 'visible',
@@ -1064,7 +1061,7 @@ function zcode(ctx: GenerateContext): Generation {
               modelId: entry.id,
               config: {
                 enabled: true,
-                properties: { contextWindow: contextWindow(entry) },
+                properties: contextWindowOf(entry) !== undefined ? { contextWindow: contextWindowOf(entry) } : {},
                 optionSpecs: {
                   maxOutputTokens: { max: outputLimit(entry), map: '{"max_tokens": maxOutputTokens}' },
                 },
@@ -1102,7 +1099,7 @@ function cursor(_ctx: GenerateContext): Generation {
 }
 
 function atomcode(ctx: GenerateContext): Generation {
-  const model = primaryModel(ctx.models, ctx.requestedModelId);
+  const model = primarySetupModel(ctx.models, ctx.requestedModelId);
   const configDir = path.join(ctx.homeDir, '.atomcode');
   // default_model takes precedence over legacy default_provider settings.
   // Keep the selector above tables so mergeToml writes it at the root.
@@ -1116,13 +1113,13 @@ function atomcode(ctx: GenerateContext): Generation {
         '',
         '[provider_accounts.freellmapi]',
         'provider = "openai"',
-        `base_url = ${JSON.stringify(v1Url(ctx.url))}`,
+        `base_url = ${JSON.stringify(gatewayV1Url(ctx.url))}`,
         `api_key = ${JSON.stringify(ctx.apiKey)}`,
         '',
         '[models.freellmapi]',
         'account = "freellmapi"',
         `model = ${JSON.stringify(model.id)}`,
-        `context_window = ${contextWindow(model)}`,
+        ...(contextWindowOf(model) !== undefined ? [`context_window = ${contextWindowOf(model)}`] : []),
       ].join('\n'),
     }],
     notes: [
@@ -1135,14 +1132,14 @@ function atomcode(ctx: GenerateContext): Generation {
 }
 
 function generic(ctx: GenerateContext): Generation {
-  const model = primaryModel(ctx.models, ctx.requestedModelId);
+  const model = primarySetupModel(ctx.models, ctx.requestedModelId);
   return {
     files: [],
     notes: [
-      `OPENAI_BASE_URL=${v1Url(ctx.url)}`,
+      `OPENAI_BASE_URL=${gatewayV1Url(ctx.url)}`,
       `OPENAI_API_KEY=${ctx.apiKey || '<unified-key>'}`,
       `OPENAI_MODEL=${model.id}`,
-      `curl ${v1Url(ctx.url)}/chat/completions -H "Authorization: Bearer $OPENAI_API_KEY" -H "Content-Type: application/json" -d '{"model":"${model.id}","messages":[{"role":"user","content":"Hello"}]}'`,
+      `curl ${gatewayV1Url(ctx.url)}/chat/completions -H "Authorization: Bearer $OPENAI_API_KEY" -H "Content-Type: application/json" -d '{"model":"${model.id}","messages":[{"role":"user","content":"Hello"}]}'`,
     ],
   };
 }

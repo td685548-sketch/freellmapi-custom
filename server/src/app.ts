@@ -235,16 +235,24 @@ export function createApp(config?: Config) {
   // AsyncLocalStorage so logRequest() can read it from any depth.
   app.use(clientContextMiddleware);
 
+  // ONE shared proxy rate limiter for every public inference surface
+  // (Ollama /api/*, /v1beta, /v1/t/:token, /thruline/v1, /v1, /mcp): the
+  // limiter counts per API-key hash in a single process-wide store
+  // (middleware/rateLimit.ts), so one credential gets one budget across all
+  // surfaces instead of 120/min per mount. Creating a fresh limiter per
+  // mount used to hand the same key ~600-720/min in total.
+  const proxyRateLimiter = createProxyRateLimiter(cfg.proxyRateLimitRpm);
+
   // Ollama emulation owns only its exact fixed /api/* paths. Mount it before
   // the dashboard session gate because real Ollama clients do not use that
   // auth scheme. Its legacy /api/embeddings handler explicitly falls through
   // when it sees a valid dashboard session.
-  // The same per-IP limiter as /v1 runs first: key-required mode is a
+  // The shared limiter runs first: key-required mode is a
   // brute-forceable credential check without it. Dashboard traffic on the
   // shared /api/embeddings path shares the (generous, configurable) budget.
   app.use(
     ['/api/tags', '/api/version', '/api/show', '/api/chat', '/api/generate', '/api/embed', '/api/embeddings'],
-    createProxyRateLimiter(cfg.proxyRateLimitRpm),
+    proxyRateLimiter,
   );
   app.use(ollamaRouter);
 
@@ -265,7 +273,7 @@ export function createApp(config?: Config) {
   // Custom fork surface (admin/member gating, /api/invites, /api/user, invite
   // registration). Registered below the limiter so it shares the same throttle.
   app.use('/api', modelListCacheInvalidation);
-  app.use(['/v1beta', '/thruline/v1beta'], createProxyRateLimiter(cfg.proxyRateLimitRpm));
+  app.use(['/v1beta', '/thruline/v1beta'], proxyRateLimiter);
   registerCustomRoutes(app);
 
   // Dashboard auth (#35): /api/auth/{status,setup,login} bootstrap without a
@@ -337,17 +345,17 @@ export function createApp(config?: Config) {
   app.use('/v1', providersRouter);
 
   // Separately revocable URL tokens for clients that cannot set headers.
-  app.use('/v1/t/:token', createProxyRateLimiter(cfg.proxyRateLimitRpm));
+  app.use('/v1/t/:token', proxyRateLimiter);
   app.use('/v1/t/:token', urlTokenRouter);
 
   // X Gateway (9Router integration): admin-only OpenAI-compatible surface.
-  // Same per-IP rate limiter as /v1; auth and permission are in the x-gateway router.
-  app.use('/thruline/v1', createProxyRateLimiter(cfg.proxyRateLimitRpm));
+  // Same shared limiter as /v1; auth and permission are in the x-gateway router.
+  app.use('/thruline/v1', proxyRateLimiter);
 
-  // OpenAI-compatible proxy. Per-IP rate limiting (#35 item #6) runs first so
+  // OpenAI-compatible proxy. Rate limiting (#35 item #6) runs first so
   // it throttles unauthenticated brute-force / flood attempts before any
   // routing work. Tune via PROXY_RATE_LIMIT_RPM; 0 disables it.
-  app.use('/v1', createProxyRateLimiter(cfg.proxyRateLimitRpm));
+  app.use('/v1', proxyRateLimiter);
   // Anthropic-compatible Messages API (`POST /v1/messages`, `/count_tokens`) for
   // Claude Code and anything else speaking the Anthropic SDK. Mounted BEFORE the
   // OpenAI router so it can content-negotiate `GET /v1/models` (Anthropic shape
@@ -365,10 +373,10 @@ export function createApp(config?: Config) {
 
   // MCP server (Model Context Protocol over stateless Streamable HTTP):
   // gateway introspection tools for MCP-speaking agents. Unified-key auth,
-  // like /v1 — NOT behind the dashboard session gate. Same per-IP limiter as
-  // /v1 (its own bucket): both surfaces guard the same unified key, so an
-  // unauthenticated brute-force must not get a free throttle-less oracle here.
-  app.use('/mcp', createProxyRateLimiter(cfg.proxyRateLimitRpm));
+  // like /v1 — NOT behind the dashboard session gate. The shared limiter
+  // guards it too: both surfaces guard the same keys, so an unauthenticated
+  // brute-force must not get a free throttle-less oracle here.
+  app.use('/mcp', proxyRateLimiter);
   app.use('/mcp', mcpRouter);
 
   // Liveness / readiness probes for orchestrators (GET /livez, /readyz, #433).
