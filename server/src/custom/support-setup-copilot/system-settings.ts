@@ -912,7 +912,7 @@ function normalizeActionPayload(
   }
 }
 
-function buildSystemSettingAction(
+export function buildSystemSettingAction(
   settingId: SupportSystemSettingId,
   rawPayload: Record<string, unknown>,
   canApply: boolean,

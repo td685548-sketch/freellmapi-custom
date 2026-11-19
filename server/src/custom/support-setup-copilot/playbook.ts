@@ -45,9 +45,9 @@ import {
   buildIdentityReply,
   identitySuggestedQuickReplies,
 } from './identity.js';
+import { runCopilotAgentLoop } from './agent-loop.js';
 import {
   parseLlmCoachResponse,
-  runHumanLikeLlmCoach,
   type GatewayLoopbackContext,
   type LlmCoachOutput,
 } from './llm-coach.js';
@@ -1513,22 +1513,30 @@ export async function runSupportSetupCopilotTurn(params: {
       hasBaseProposal: false,
     });
     const canProposeSystemSettings = hasAnySystemSettingPermission(user);
-    const readOnlyLlm =
+    // Phase 2: the read-only path also runs through the bounded agent loop
+    // (admitted tools only — personal actions + permitted system settings),
+    // so a viewer can never be offered a tenant-step tool.
+    const readOnlyLoop =
       readOnlyDialogue.act === 'platform_guide' || canProposeSystemSettings
-        ? await runHumanLikeLlmCoach({
+        ? await runCopilotAgentLoop({
             user,
+            scope,
+            agentContext,
             messages,
             locale,
             targetMode,
+            tenantId: effectiveTenant?.id ?? null,
             currentPath,
             diagnostic,
             extracted: {},
             canCreateTenant: false,
             canEditSteps: canEditSet,
-            agentContext: agentContext ?? undefined,
             gatewayLoopback,
           })
         : null;
+    const readOnlyLlm = readOnlyLoop?.output
+      ? { output: readOnlyLoop.output, modelUsed: readOnlyLoop.modelUsed }
+      : null;
 
     if (readOnlyLlm?.output.systemActions?.length && !explicitBriefSubmitted) {
       const postReadOnlySys = evaluateSystemSettingsProposal({
@@ -1578,20 +1586,29 @@ export async function runSupportSetupCopilotTurn(params: {
     locale,
   );
 
-  // Attempt live human-like LLM coach (Thruline accounts first, then main FreeLLMAPI /v1/chat/completions router)
-  const llm = await runHumanLikeLlmCoach({
+  // Attempt live human-like LLM coach via the bounded Phase 2 agent loop
+  // (Thruline accounts first, then main FreeLLMAPI /v1/chat/completions
+  // router). The loop — not a single LLM call — drives tool use, and its
+  // output is already scope-filtered (targetSteps/systemActions the caller
+  // cannot apply are dropped before any proposal is built).
+  const loopResult = await runCopilotAgentLoop({
     user,
+    scope,
+    agentContext,
     messages,
     locale,
     targetMode,
+    tenantId: effectiveTenant?.id ?? null,
     currentPath,
     diagnostic,
     extracted,
     canCreateTenant: scope.canCreateTenant,
     canEditSteps: canEditSet,
-    agentContext: agentContext ?? undefined,
     gatewayLoopback,
   });
+  const llm = loopResult.output
+    ? { output: loopResult.output, modelUsed: loopResult.modelUsed }
+    : null;
 
   if (llm?.output.systemActions?.length && !explicitBriefSubmitted) {
     const postLlmSys = evaluateSystemSettingsProposal({
