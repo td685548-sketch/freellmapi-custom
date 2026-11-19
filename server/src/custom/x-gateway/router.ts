@@ -78,6 +78,7 @@ import {
   recordCandidateFailure,
   recordCandidateSuccess,
   resetRouteBackoff,
+  type RouteErrorClassification,
 } from './route-cooldown.js';
 import { runInGatewayScope } from './context.js';
 import { xGatewayProtocolsRouter } from './protocols.js';
@@ -110,6 +111,37 @@ export function parseModelThinkingSuffix(rawModel: string | undefined): {
   return match
     ? { cleanModel: match[1].trim(), thinkingEffort: match[2].toLowerCase() as ThinkingEffort }
     : { cleanModel: model };
+}
+
+/**
+ * True when the router (not the caller) picked the model: plain `auto` /
+ * `auto:*`, or a provider-scoped `<provider>/auto` / `<provider>/auto:*`
+ * (e.g. `kr/auto` from the playground). The input is the alias-resolved,
+ * lowercased model. An explicit model such as `kr/claude-sonnet-4.5` is not
+ * auto-picked.
+ */
+export function isAutoPickedModel(model: string | undefined): boolean {
+  const lower = (model ?? '').trim().toLowerCase();
+  if (lower === 'auto' || lower.startsWith('auto:')) return true;
+  const slashIdx = lower.indexOf('/');
+  if (slashIdx <= 0) return false;
+  const suffix = lower.slice(slashIdx + 1);
+  return suffix === 'auto' || suffix.startsWith('auto:');
+}
+
+/**
+ * Whether a failed candidate takes its whole provider out of the remaining
+ * attempts. A request-scoped 4xx (e.g. an invalid model id) only skips the
+ * provider when the caller explicitly requested that model: when the router
+ * auto-picked the model, the bad pick is the router's fault, so the loop
+ * keeps trying the next candidate and the failed route is only demoted in
+ * health sorting.
+ */
+export function shouldSkipProviderAfterFailure(
+  classification: RouteErrorClassification,
+  autoPickedModel: boolean,
+): boolean {
+  return classification.requestScoped && !autoPickedModel;
 }
 
 /** Authorize the underlying model, so adding an effort suffix cannot change a
@@ -1035,7 +1067,7 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
     }
     const effectiveModelForRouting = smartRoute?.overridden ? smartRoute.effectiveModel : requestedModel;
     const resolvedAliasLower = resolveXGatewayModelAlias(effectiveModelForRouting).toLowerCase();
-    const isAutoModel = resolvedAliasLower === 'auto' || resolvedAliasLower.startsWith('auto:');
+    const isAutoModel = isAutoPickedModel(resolvedAliasLower);
     const rawHeaderSession = req.headers['x-session-id'];
     const headerSession = typeof rawHeaderSession === 'string'
       ? rawHeaderSession.trim()
@@ -1481,7 +1513,7 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
           }
           if (!isSemaphoreError(err)) {
             const classification = recordCandidateFailure(account.id, modelId, err);
-            if (classification.requestScoped) {
+            if (shouldSkipProviderAfterFailure(classification, isAutoModel)) {
               skippedProviders.add(account.provider);
             } else {
               recordRouteOutcome(healthKey(candidate), { error: true });
@@ -1646,7 +1678,7 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
         }
         if (!isSemaphoreError(err)) {
           const classification = recordCandidateFailure(account.id, modelId, err);
-          if (classification.requestScoped) {
+          if (shouldSkipProviderAfterFailure(classification, isAutoModel)) {
             skippedProviders.add(account.provider);
           } else {
             recordRouteOutcome(healthKey(candidate), { error: true });

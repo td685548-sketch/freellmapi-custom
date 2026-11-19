@@ -48,7 +48,8 @@ import {
 import { pingAccount, stopAutoPingWorker } from '../../custom/provider-accounts/auto-ping.js';
 import { invalidateConfigCache } from '../../custom/x-gateway/config.js';
 import { mintXGatewayClientKey } from '../../custom/x-gateway/client-keys.js';
-import { resetRouteHealth, resetSessionPins, resolveCandidateRoutes } from '../../custom/x-gateway/router.js';
+import { resetRouteHealth, resetSessionPins, isAutoPickedModel, resolveCandidateRoutes, shouldSkipProviderAfterFailure } from '../../custom/x-gateway/router.js';
+import { classifyRouteError } from '../../custom/x-gateway/route-cooldown.js';
 
 const REAL_FETCH = globalThis.fetch.bind(globalThis);
 
@@ -702,6 +703,136 @@ describe('Spec 033 — Hierarchical Account Semaphore, Weighted Credentials & Pe
       const drainedJson = (await drainedRes.json()) as { error: { code: string } };
       expect(drainedJson.error.code).toBe('no_available_keys');
       expect(accountRow(streamAcc).enabled).toBe(1);
+    });
+  });
+
+  describe('Provider-scoped auto routing (kr/auto, oc/auto)', () => {
+    it('picks the proven 4.5 family first for kr/auto', () => {
+      const kiroId = createApiKeyAccount({
+        provider: 'kiro',
+        key: JSON.stringify({ accessToken: 'test-kiro-access-token', refreshToken: 'test-kiro-refresh-token' }),
+        label: 'Kiro Test',
+      });
+      const routes = resolveCandidateRoutes('kr/auto');
+      expect(routes.candidates.length).toBeGreaterThan(0);
+      expect(routes.candidates.every(c => c.account.id === kiroId)).toBe(true);
+      expect(routes.candidates.map(c => c.modelId).slice(0, 3)).toEqual([
+        'claude-sonnet-4.5',
+        'claude-opus-4.5',
+        'claude-haiku-4.5',
+      ]);
+    });
+
+    it('isAutoPickedModel matches auto and <provider>/auto only', () => {
+      for (const model of ['auto', 'auto:free', 'kr/auto', 'oc/auto', 'KR/AUTO', 'kr/auto:free', ' auto ']) {
+        expect(isAutoPickedModel(model)).toBe(true);
+      }
+      for (const model of [
+        'kr/claude-sonnet-4.5',
+        'oc/muse-spark-1.2-contributor-free',
+        'claude-sonnet-4.5',
+        'groq/llama-3.3-70b-versatile',
+        'combo:foo',
+        '',
+        undefined,
+      ]) {
+        expect(isAutoPickedModel(model)).toBe(false);
+      }
+    });
+
+    it('does not skip the provider on an auto-picked request-scoped 400, but does for an explicit model', () => {
+      const badModel400 = Object.assign(
+        new Error(
+          'Kiro inference failed (HTTP 400): {"message":"Invalid model ID. Please select a different model to continue.","reason":"INVALID_MODEL_ID"}',
+        ),
+        { status: 400 },
+      );
+      const classification = classifyRouteError(badModel400);
+      expect(classification.requestScoped).toBe(true);
+      expect(shouldSkipProviderAfterFailure(classification, true)).toBe(false);
+      expect(shouldSkipProviderAfterFailure(classification, false)).toBe(true);
+
+      const rateLimited = classifyRouteError(Object.assign(new Error('429 Too Many Requests'), { status: 429 }));
+      expect(rateLimited.requestScoped).toBe(false);
+      expect(shouldSkipProviderAfterFailure(rateLimited, true)).toBe(false);
+      expect(shouldSkipProviderAfterFailure(rateLimited, false)).toBe(false);
+    });
+
+    it('fails over to the next auto-picked model on a 400, but keeps the provider skip for an explicit 400', async () => {
+      createApiKeyAccount({
+        provider: 'groq',
+        key: 'gsk_auto_routing_test_123456',
+        label: 'Groq Auto',
+        baseUrl: 'https://93.184.216.34/v1',
+        models: [
+          { id: 'model-bad', name: 'Model Bad' },
+          { id: 'model-good', name: 'Model Good' },
+        ],
+        userId: adminUserId,
+      });
+
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+        const url = String(input);
+        if (url.startsWith(baseUrl)) return REAL_FETCH(input, init);
+        if (url.includes('93.184.216.34')) {
+          const body = JSON.parse(String(init?.body ?? '{}')) as { model?: string };
+          if (body.model === 'model-bad') {
+            return new Response(
+              JSON.stringify({
+                error: {
+                  message: 'Invalid model ID. Please select a different model to continue.',
+                  type: 'invalid_request_error',
+                  code: 'invalid_model',
+                },
+              }),
+              { status: 400, headers: { 'Content-Type': 'application/json' } },
+            );
+          }
+          return new Response(
+            JSON.stringify({
+              id: 'chatcmpl-auto-routing',
+              object: 'chat.completion',
+              created: Math.floor(Date.now() / 1000),
+              model: 'model-good',
+              choices: [
+                {
+                  index: 0,
+                  message: { role: 'assistant', content: 'served-by-model-good' },
+                  finish_reason: 'stop',
+                },
+              ],
+              usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        return REAL_FETCH(input, init);
+      });
+
+      const postChat = (model: string) =>
+        REAL_FETCH(`${baseUrl}/thruline/v1/chat/completions`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${xgwKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ model, messages: [{ role: 'user', content: 'ping' }] }),
+        });
+
+      // Provider-scoped auto: the 400 on the first auto-picked model must not
+      // skip the provider — the loop falls through to the next model.
+      const autoRes = await postChat('groq/auto');
+      expect(autoRes.status).toBe(200);
+      expect(autoRes.headers.get('x-routed-via')).toBe('groq/model-good');
+      const autoBody = (await autoRes.json()) as { choices: Array<{ message: { content: string } }> };
+      expect(autoBody.choices[0]?.message.content).toBe('served-by-model-good');
+
+      // Explicit model: the same 400 still skips the provider, so the request
+      // ends with the upstream error instead of silently serving another model.
+      const explicitRes = await postChat('groq/model-bad');
+      expect(explicitRes.status).toBe(502);
+      const explicitBody = (await explicitRes.json()) as { error: { message: string } };
+      expect(explicitBody.error.message).toContain('Invalid model ID');
     });
   });
 });
