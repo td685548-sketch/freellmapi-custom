@@ -247,6 +247,7 @@ describe('migration round trip', () => {
         '20261118_180000_custom_assistant_workspace.ts',
         '20261118_190000_custom_scenario_routing.ts',
         '20261118_200000_custom_quota_vouchers_topups.ts',
+        '20261118_210000_custom_unified_key_hash.ts',
         '20261119_000001_request_attempts_ttfb_ms.ts',
         '20261119_010000_custom_url_token_expiry.ts',
       ]);
@@ -296,7 +297,15 @@ describe('migration round trip', () => {
 
       await runMigrations(db, 'up');
       expect(getPendingMigrationNames(db)).toEqual([]);
-      expect(snapshotAppState(db)).toEqual(fullState);
+      // The unified key is a random secret: the hash migration's down deletes
+      // its rows and the next up mints a fresh key, so the two settings values
+      // cannot survive a round trip — only their presence and shape can. The
+      // normalized comparison below covers that; the shape is asserted after.
+      expect(normalizeUnifiedKeyRows(snapshotAppState(db))).toEqual(normalizeUnifiedKeyRows(fullState));
+      const reUpSettings = snapshotAppState(db).rows.settings as { key: string; value: string }[];
+      expect(reUpSettings.find(row => row.key === 'unified_api_key_hash')?.value).toMatch(/^[0-9a-f]{64}$/);
+      expect(reUpSettings.find(row => row.key === 'unified_api_key_prefix')?.value).toMatch(/^freellmapi-…[0-9a-f]{4}$/);
+      expect(reUpSettings.some(row => row.key === 'unified_api_key')).toBe(false);
     } finally {
       db.close();
     }
@@ -372,6 +381,27 @@ function snapshotAppState(db: Database.Database): DatabaseSnapshot {
   return {
     schema: snapshotSchema(db),
     rows,
+  };
+}
+
+/**
+ * Replace the unified key's hash/prefix settings values with a placeholder.
+ * Only the key migration's values are non-deterministic across a round trip
+ * (see the note at its use in the down-to-baseline test); every other row
+ * still has to match exactly.
+ */
+function normalizeUnifiedKeyRows(snapshot: DatabaseSnapshot): DatabaseSnapshot {
+  const settings = (snapshot.rows.settings ?? []) as { key: string; value: string }[];
+  return {
+    ...snapshot,
+    rows: {
+      ...snapshot.rows,
+      settings: settings.map(row =>
+        row.key === 'unified_api_key_hash' || row.key === 'unified_api_key_prefix'
+          ? { ...row, value: '<unified-key>' }
+          : row,
+      ),
+    },
   };
 }
 

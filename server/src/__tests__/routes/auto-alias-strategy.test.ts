@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
 import { resolveRoutingChain, setRoutingStrategy, refreshStatsCache } from '../../services/router.js';
 
@@ -82,7 +82,7 @@ async function chat(model: string): Promise<string> {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${getUnifiedApiKey()}`,
+      Authorization: `Bearer ${regenerateUnifiedKey()}`,
     },
     body: JSON.stringify({ model, messages: [{ role: 'user', content: 'hi' }] }),
   });

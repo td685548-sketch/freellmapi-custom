@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { getDb, getUnifiedApiKey, initDb, setSetting } from '../../db/index.js';
+import { getDb, regenerateUnifiedKey, initDb, setSetting } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
 import { mintDashboardToken } from '../helpers/auth.js';
 import { isLoopback } from '../../routes/ollama.js';
@@ -254,7 +254,7 @@ describe('Ollama emulation', () => {
     setSetting('ollama_emulation', 'key-required');
     expect((await request(app, 'GET', '/api/tags')).status).toBe(401);
     expect((await request(app, 'GET', '/api/tags', undefined, {
-      Authorization: `Bearer ${getUnifiedApiKey()}`,
+      Authorization: `Bearer ${regenerateUnifiedKey()}`,
     })).status).toBe(200);
   });
 

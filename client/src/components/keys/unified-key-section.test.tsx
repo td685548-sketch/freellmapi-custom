@@ -57,7 +57,7 @@ async function click(el: HTMLElement) {
 it('does not expose a cached old key to a rotate-only operator', async () => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   queryClient.setQueryData(['unified-key'], { apiKey: 'old-key-from-earlier-authorized-view' })
-  vi.mocked(apiFetch).mockResolvedValue({ apiKey: 'new-key-from-authorized-rotation' })
+  vi.mocked(apiFetch).mockResolvedValue({ apiKey: 'new-key-from-authorized-rotation', apiKeyPrefix: 'freellmapi-…ation', hasKey: true })
   act(() => root.render(<QueryClientProvider client={queryClient}><I18nProvider initialLocale="en"><UnifiedKeySection canView={false} canRotate /></I18nProvider></QueryClientProvider>))
   await flush()
   expect(container.textContent).not.toContain('old-key-from-earlier-authorized-view')
@@ -71,8 +71,11 @@ it('does not expose a cached old key to a rotate-only operator', async () => {
 
 it('does not regenerate the key on a single click', async () => {
   vi.mocked(apiFetch).mockImplementation(async path =>
-    path === '/api/settings/api-key' ? { apiKey: 'sk-fre…e-key' } : { ok: true })
+    path === '/api/settings/api-key' ? { apiKey: null, apiKeyPrefix: 'freellmapi-…e-key', hasKey: true } : { ok: true })
   await mount()
+
+  // The server stores only the key hash, so the dashboard shows the prefix.
+  expect(container.querySelector('code.select-all')!.textContent).toContain('freellmapi-…e-key')
 
   await click(findButton('Regenerate')!)
   // One click only ARMS the button (the dashboard's destructive idiom); the
@@ -85,9 +88,9 @@ it('regenerates on the confirming click and reveals the fresh key', async () => 
   const calls = { regenerate: 0 }
   vi.mocked(apiFetch).mockImplementation(async path => {
     if (path === '/api/settings/api-key') {
-      return { apiKey: calls.regenerate ? 'sk-fresh-key-after-regen' : 'sk-old-key-before-regen' }
+      return { apiKey: null, apiKeyPrefix: calls.regenerate ? 'freellmapi-…regen' : 'freellmapi-…regen', hasKey: true }
     }
-    if (path === '/api/settings/api-key/regenerate') { calls.regenerate++; return { apiKey: 'sk-fresh-key-after-regen' } }
+    if (path === '/api/settings/api-key/regenerate') { calls.regenerate++; return { apiKey: 'sk-fresh-key-after-regen', apiKeyPrefix: 'freellmapi-…regen', hasKey: true } }
     return { ok: true }
   })
   await mount()
@@ -104,8 +107,10 @@ it('regenerates on the confirming click and reveals the fresh key', async () => 
 
 it('keeps the key masked when the user disarms the confirmation', async () => {
   vi.mocked(apiFetch).mockImplementation(async path =>
-    path === '/api/settings/api-key' ? { apiKey: 'sk-secret-value-123' } : { ok: true })
+    path === '/api/settings/api-key' ? { apiKey: null, apiKeyPrefix: 'freellmapi-…-123', hasKey: true } : { ok: true })
   await mount()
+
+  expect(container.querySelector('code.select-all')!.textContent).toContain('freellmapi-…-123')
 
   await click(findButton('Regenerate')!)
   // Escape disarms the armed button without firing anything.
@@ -123,9 +128,9 @@ it('never shows the revoked key unmasked while the new one loads', async () => {
   let regenerated = false
   vi.mocked(apiFetch).mockImplementation(async path => {
     if (path === '/api/settings/api-key') {
-      return regenerated ? new Promise(() => {}) : { apiKey: 'sk-old-key-before-regen' }
+      return regenerated ? new Promise(() => {}) : { apiKey: null, apiKeyPrefix: 'freellmapi-…regen', hasKey: true }
     }
-    if (path === '/api/settings/api-key/regenerate') { regenerated = true; return { apiKey: 'sk-fresh-key-after-regen' } }
+    if (path === '/api/settings/api-key/regenerate') { regenerated = true; return { apiKey: 'sk-fresh-key-after-regen', apiKeyPrefix: 'freellmapi-…regen', hasKey: true } }
     return { ok: true }
   })
   await mount()

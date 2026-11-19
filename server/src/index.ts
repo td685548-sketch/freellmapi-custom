@@ -168,11 +168,13 @@ async function main() {
   const servers = [server];
   installGracefulShutdown({ servers: () => servers.filter(s => s.listening), closeDb: () => { stopSupportWorker(); stopPerformanceMetrics(); getDb().close?.(); } });
   server.on('error', (err: NodeJS.ErrnoException) => {
-    // The default '::' bind fails where IPv6 is disabled (kernel
-    // ipv6.disable=1 and the like) — retry IPv4-only rather than dying.
-    // Anything else (EADDRINUSE, an explicit HOST that can't bind) keeps the
-    // fail-fast posture documented in main().catch below.
-    if (!process.env.HOST && (err.code === 'EAFNOSUPPORT' || err.code === 'EADDRNOTAVAIL')) {
+    // An explicit '::' bind (HOST=::, or the Docker image's default) fails
+    // where IPv6 is disabled (kernel ipv6.disable=1 and the like) — retry
+    // IPv4-only rather than dying. Anything else (EADDRINUSE, an explicit
+    // HOST that can't bind) keeps the fail-fast posture documented in
+    // main().catch below. The loopback default (127.0.0.1) never takes this
+    // branch.
+    if (HOST === '::' && (err.code === 'EAFNOSUPPORT' || err.code === 'EADDRNOTAVAIL')) {
       console.warn('[server] IPv6 unavailable on this host — falling back to 0.0.0.0 (IPv4-only)');
       const fallback = app.listen(Number(PORT), '0.0.0.0', onReady('0.0.0.0'));
       tuneKeepAlive(fallback);

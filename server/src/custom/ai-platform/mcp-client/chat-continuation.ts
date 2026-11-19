@@ -7,7 +7,7 @@ import type {
   McpContinuationStatus,
   PublicMcpApprovalResponse,
 } from '@freellmapi/shared/ai-platform-mcp.js';
-import { getDb, getUnifiedApiKey, type Db } from '../../../db/index.js';
+import { getDb, getInternalLoopbackToken, type Db } from '../../../db/index.js';
 import { contentToString } from '../../../lib/content.js';
 import { decrypt, encrypt } from '../../../lib/crypto.js';
 import { maskText } from '../masking.js';
@@ -118,7 +118,7 @@ function buildContinuationLoopbackReq(
     }
   }
   if (!token) {
-    token = getUnifiedApiKey();
+    token = getInternalLoopbackToken();
   }
 
   const addr = getRecordedServerAddress(inboundReq);

@@ -2,7 +2,7 @@ import { beforeAll, afterAll, describe, it, expect } from 'vitest';
 import { once } from 'node:events';
 import type { Server } from 'node:http';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey, setSetting } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey, setSetting } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
 import { nextMonthResetAt } from '../../services/key-budget.js';
 
@@ -27,7 +27,7 @@ beforeAll(async () => {
       VALUES ('custom', ?, 'Budget media', ?, 1, 1, '', ?)`).run(`budget-${modality}`, modality, keyId);
   }
   setSetting('ollama_emulation', 'key-required');
-  token = getUnifiedApiKey();
+  token = regenerateUnifiedKey();
   server = createApp().listen(0, '127.0.0.1');
   await once(server, 'listening');
   baseUrl = `http://127.0.0.1:${(server.address() as { port: number }).port}`;

@@ -1,6 +1,6 @@
 import { it, expect, vi } from 'vitest';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
 import { resetLearnedOutputCaps } from '../../lib/output-cap.js';
 import { getProvider } from '../../providers/index.js';
@@ -34,7 +34,7 @@ it('/v1/messages learns an output ceiling from a max_tokens rejection and clamps
   if (!server.listening) await new Promise<void>(r => server.once('listening', r));
   const send = (text: string) => fetch('http://127.0.0.1:' + (server.address() as { port: number }).port + '/v1/messages', {
     method: 'POST',
-    headers: { 'x-api-key': getUnifiedApiKey(), 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+    headers: { 'x-api-key': regenerateUnifiedKey(), 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: 'claude-opus-4-5', max_tokens: 128000,
       messages: [{ role: 'user', content: text }],

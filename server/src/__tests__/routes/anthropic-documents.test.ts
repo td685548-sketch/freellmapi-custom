@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { mintDashboardToken } from '../helpers/auth.js';
 
 // `document` content blocks on POST /v1/messages.
@@ -30,7 +30,7 @@ async function request(app: Express, path: string, body: any, extraHeaders: Reco
 }
 
 function anthropicHeaders() {
-  return { 'x-api-key': getUnifiedApiKey(), 'anthropic-version': '2023-06-01' };
+  return { 'x-api-key': regenerateUnifiedKey(), 'anthropic-version': '2023-06-01' };
 }
 
 /** Mock Groq's upstream and capture the post-translation outbound body. */

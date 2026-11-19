@@ -24,6 +24,36 @@ import type { Request, Response, NextFunction } from 'express';
 
 const DEFAULT_ALLOWED_HOSTS = ['localhost', '127.0.0.1', '::1'];
 
+/** True when `host` binds every interface instead of loopback only. */
+export function isWideBindHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase();
+  return normalized === '' || normalized === '*' || normalized === '::' || normalized === '0.0.0.0';
+}
+
+/**
+ * Boot warning for a wide bind with the DNS-rebinding guard off. Called once
+ * from createApp: binding '::' / '0.0.0.0' with ALLOWED_HOSTS unset (or '*')
+ * leaves the dashboard reachable from the whole network with no Host-header
+ * check, so the operator should either narrow the bind (HOST=127.0.0.1) or
+ * turn the guard on (ALLOWED_HOSTS). Deliberately a warning, not a refusal:
+ * LAN, reverse-proxy and container installs bind wide on purpose.
+ */
+export function warnOnWideBind(
+  host: string,
+  allowed: string[],
+  logger: Pick<Console, 'warn'> = console,
+): void {
+  if (!isWideBindHost(host)) return;
+  const guardOff = allowed.length === 0 || allowed.includes('*');
+  if (!guardOff) return;
+  logger.warn(
+    '[server] WARNING: listening on all interfaces ' +
+      `(${host.trim() || '0.0.0.0'}) with the Host-header guard off (ALLOWED_HOSTS unset). ` +
+      'Anyone who can reach this port can load the dashboard. ' +
+      'Set HOST=127.0.0.1 to listen on loopback only, or set ALLOWED_HOSTS to the hostnames you serve.',
+  );
+}
+
 /** Lowercase hostname from a raw Host header value, or null if malformed.
  *  URL parsing is what makes `[::1]:3001` (bracketed IPv6), `host` and
  *  `host:port` all yield a comparable bare hostname. WHATWG URL keeps the

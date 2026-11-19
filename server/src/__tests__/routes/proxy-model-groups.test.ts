@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
 import { setUnifyEnabled, setUnifyOverrides } from '../../services/model-groups.js';
 import { setRoutingStrategy } from '../../services/router.js';
@@ -29,7 +29,7 @@ async function request(app: Express, method: string, path: string, body?: any, h
 }
 
 function authHeaders() {
-  return { Authorization: `Bearer ${getUnifiedApiKey()}` };
+  return { Authorization: `Bearer ${regenerateUnifiedKey()}` };
 }
 
 // Insert a catalog row + fallback_config entry, returning its model_db_id.

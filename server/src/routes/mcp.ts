@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { NextFunction, Request, Response } from 'express';
-import { getDb, getUnifiedApiKey, getSetting } from '../db/index.js';
-import { extractApiToken, timingSafeStringEqual } from './proxy.js';
+import { getDb, getInternalLoopbackToken, getSetting, validateUnifiedApiKey } from '../db/index.js';
+import { extractApiToken } from './proxy.js';
 import { runSearch, searchStatus } from '../services/search.js';
 import { buildModelListing } from '../services/model-listing.js';
 import { supportedParametersForPlatforms } from '../lib/sampling-params.js';
@@ -309,7 +309,7 @@ async function askFreeLlmApi(args: Record<string, unknown>, req: Request, res: R
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',
-        Authorization: `Bearer ${getUnifiedApiKey()}`,
+        Authorization: `Bearer ${getInternalLoopbackToken()}`,
       },
       body: JSON.stringify({
         model,
@@ -637,8 +637,7 @@ async function dispatchRpc(msg: JsonRpcRequest, id: number | string | null, req:
 
 function authenticate(req: Request, res: Response): boolean {
   const token = extractApiToken(req);
-  const unifiedKey = getUnifiedApiKey();
-  if (!token || !timingSafeStringEqual(token, unifiedKey)) {
+  if (!token || !validateUnifiedApiKey(token)) {
     // Echo the request id when the body carries one, so strict JSON-RPC
     // clients can correlate the auth error with their pending call.
     const body = req.body;

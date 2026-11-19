@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { getDb, getUnifiedApiKey, initDb, setSetting } from '../../db/index.js';
+import { getDb, regenerateUnifiedKey, initDb, setSetting } from '../../db/index.js';
 import { mintDashboardToken } from '../helpers/auth.js';
 import { clearCompressionStats } from '../../services/compression/stats.js';
 
@@ -120,7 +120,7 @@ describe('compression routes and chat integration', () => {
     const response = await request('POST', '/v1/chat/completions', {
       model: 'auto',
       messages: [{ role: 'user', content: 'hello   \n\n\n\nworld' }],
-    }, { Authorization: `Bearer ${getUnifiedApiKey()}` });
+    }, { Authorization: `Bearer ${regenerateUnifiedKey()}` });
     expect(response.status).toBe(200);
     expect(forwarded[0].messages[0].content).toBe('hello\n\nworld');
     expect(response.headers.get('x-freellm-compress')).toMatch(/^lossless; saved~=\d+$/);
@@ -130,7 +130,7 @@ describe('compression routes and chat integration', () => {
       max_tokens: 32,
       messages: [{ role: 'user', content: 'anthropic   \n\n\n\nmessage' }],
     }, {
-      'x-api-key': getUnifiedApiKey(),
+      'x-api-key': regenerateUnifiedKey(),
       'anthropic-version': '2023-06-01',
     });
     expect(anthropic.status).toBe(200);
@@ -141,7 +141,7 @@ describe('compression routes and chat integration', () => {
       model: 'auto',
       input: 'responses   \n\n\n\nmessage',
       max_output_tokens: 32,
-    }, { Authorization: `Bearer ${getUnifiedApiKey()}` });
+    }, { Authorization: `Bearer ${regenerateUnifiedKey()}` });
     expect(responses.status).toBe(200);
     expect(forwarded[2].messages[0].content).toBe('responses\n\nmessage');
     expect(responses.headers.get('x-freellm-compress')).toMatch(/^lossless; saved~=\d+$/);

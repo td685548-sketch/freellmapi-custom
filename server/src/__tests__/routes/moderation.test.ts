@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
 import { listModerationModels, resolveModel, runModerations } from '../../services/moderation.js';
 import { clearLastHealthyStampState } from '../../services/health.js';
@@ -156,7 +156,7 @@ describe('POST /v1/moderations route', () => {
   });
 
   it('validates the body shape', async () => {
-    const key = getUnifiedApiKey();
+    const key = regenerateUnifiedKey();
     const missing = await postModeration({}, key);
     expect(missing.status).toBe(400);
     const empty = await postModeration({ input: [] }, key);
@@ -175,7 +175,7 @@ describe('POST /v1/moderations route', () => {
     ]);
     const { status, body } = await postModeration(
       { input: 'a perfectly fine sentence' },
-      getUnifiedApiKey(),
+      regenerateUnifiedKey(),
     );
     expect(status).toBe(200);
     expect(calls).toEqual(['openai']);
@@ -196,7 +196,7 @@ describe('POST /v1/moderations route', () => {
     ]);
     const { status, body } = await postModeration(
       { input: 'flagged content' },
-      getUnifiedApiKey(),
+      regenerateUnifiedKey(),
     );
     expect(status).toBe(200);
     expect(body._provider).toBe('openrouter');
@@ -204,7 +204,7 @@ describe('POST /v1/moderations route', () => {
   });
 
   it('returns 503 when no moderation provider has an enabled key', async () => {
-    const { status, body } = await postModeration({ input: 'x' }, getUnifiedApiKey());
+    const { status, body } = await postModeration({ input: 'x' }, regenerateUnifiedKey());
     expect(status).toBe(503);
     expect(body.error.message).toContain('No moderation providers available');
   });
@@ -214,7 +214,7 @@ describe('POST /v1/moderations route', () => {
     const key = insertKey('openai');
     getDb().prepare("UPDATE api_keys SET status = 'unknown' WHERE id = ?").run(key);
     mockModeration([{ platform: 'openai', response: { results: [{ flagged: false }] } }]);
-    const { status } = await postModeration({ input: 'fine' }, getUnifiedApiKey());
+    const { status } = await postModeration({ input: 'fine' }, regenerateUnifiedKey());
     expect(status).toBe(200);
     expect(getDb().prepare('SELECT status, last_healthy_at FROM api_keys WHERE id = ?').get(key))
       .toMatchObject({ status: 'healthy', last_healthy_at: expect.any(String) });
@@ -233,7 +233,7 @@ describe('POST /v1/moderations route', () => {
     const addr = server.address() as { port: number };
     const res = await fetch(`http://127.0.0.1:${addr.port}/v1/moderations`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getUnifiedApiKey()}` },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${regenerateUnifiedKey()}` },
       body: JSON.stringify({ input: 'x' }),
     });
     server.close();

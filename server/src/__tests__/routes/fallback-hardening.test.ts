@@ -26,7 +26,7 @@ vi.mock('../../providers/index.js', async (importOriginal) => {
 });
 
 const { createApp } = await import('../../app.js');
-const { initDb, getDb, getUnifiedApiKey } = await import('../../db/index.js');
+const { initDb, getDb, regenerateUnifiedKey } = await import('../../db/index.js');
 const { encrypt } = await import('../../lib/crypto.js');
 const { setRoutingStrategy, getAllPenalties } = await import('../../services/router.js');
 const { msUntilNextUtcMidnight, resetEmptyCompletionStreaks, EMPTY_COMPLETION_STREAK_LIMIT } = await import('../../lib/fallback-loop.js');
@@ -80,7 +80,7 @@ describe('fallback hardening (items 3, 4, 5, 6)', () => {
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     initDb(':memory:');
     app = createApp();
-    key = getUnifiedApiKey();
+    key = regenerateUnifiedKey();
 
     const db = getDb();
     setRoutingStrategy('priority');

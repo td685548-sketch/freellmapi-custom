@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import type { Platform } from '@freellmapi/shared/types.js';
-import { getDb, getUnifiedApiKey, isKeyStoreDecryptable } from '../db/index.js';
+import { getDb, isKeyStoreDecryptable, validateUnifiedApiKey } from '../db/index.js';
 import type { Db } from '../db/types.js';
 import { isEncryptionKeyInitialized } from '../lib/crypto.js';
-import { extractApiToken, timingSafeStringEqual } from './proxy.js';
+import { extractApiToken } from './proxy.js';
 import { getProvider } from '../providers/index.js';
 import { getSoonestCooldownExpiry } from '../services/ratelimit.js';
 import { getQuotaStateForKeys } from '../services/provider-quota.js';
@@ -215,8 +215,7 @@ interface PlatformKeyRow {
 // so status polling doesn't draw down a caller's request budget.
 providersRouter.get('/providers', (req: Request, res: Response) => {
   const token = extractApiToken(req);
-  const unifiedKey = getUnifiedApiKey();
-  if (!token || !timingSafeStringEqual(token, unifiedKey)) {
+  if (!token || !validateUnifiedApiKey(token)) {
     res.status(401).json({ error: { message: 'Invalid API key', type: 'authentication_error' } });
     return;
   }
@@ -324,8 +323,7 @@ providersRouter.get('/providers', (req: Request, res: Response) => {
 // "the window resets soon, hold off" scheduling.
 providersRouter.get('/quota-forecast', (req: Request, res: Response) => {
   const token = extractApiToken(req);
-  const unifiedKey = getUnifiedApiKey();
-  if (!token || !timingSafeStringEqual(token, unifiedKey)) {
+  if (!token || !validateUnifiedApiKey(token)) {
     res.status(401).json({ error: { message: 'Invalid API key', type: 'authentication_error' } });
     return;
   }

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { mintDashboardToken } from '../helpers/auth.js';
 import {
   RING_CAPACITY,
@@ -68,7 +68,7 @@ describe('server log viewer', () => {
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     initDb(':memory:');
     app = createApp();
-    unifiedKey = getUnifiedApiKey();
+    unifiedKey = regenerateUnifiedKey();
     dashToken = mintDashboardToken('logs@example.com');
   });
 

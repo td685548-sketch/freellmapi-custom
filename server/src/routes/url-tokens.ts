@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { Router } from 'express';
 import type { NextFunction, Request, Response } from 'express';
-import { getUnifiedApiKey } from '../db/index.js';
+import { getInternalLoopbackToken } from '../db/index.js';
 import { ollamaRouter } from './ollama.js';
 import { proxyRouter } from './proxy.js';
 import { responsesRouter } from './responses.js';
@@ -30,7 +30,7 @@ urlTokenRouter.use((req: Request, res: Response, next: NextFunction) => {
   // Downstream protocol routers retain their normal authentication checks.
   // Supply the unified key internally only after the separately revocable URL
   // token was verified; it never appears in the public URL.
-  req.headers.authorization = `Bearer ${getUnifiedApiKey()}`;
+  req.headers.authorization = `Bearer ${getInternalLoopbackToken()}`;
   (req as Request & { urlTokenAuthenticated?: boolean }).urlTokenAuthenticated = true;
   (req as Request & { urlTokenScope?: string }).urlTokenScope = crypto.createHash('sha256').update(token).digest('hex').slice(0, 16);
   next();

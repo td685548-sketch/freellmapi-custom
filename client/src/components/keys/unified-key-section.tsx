@@ -14,20 +14,20 @@ export function UnifiedKeySection({ canView = true, canRotate = true }: { canVie
   const [rotatedKey, setRotatedKey] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
-  const { data, isError } = useQuery<{ apiKey: string }>({
+  const { data, isError } = useQuery<{ apiKey?: string | null; apiKeyPrefix?: string | null; hasKey?: boolean }>({
     queryKey: ['unified-key'],
     queryFn: () => apiFetch('/api/settings/api-key'),
     enabled: canView,
   })
 
   const regenerate = useMutation({
-    mutationFn: () => apiFetch<{ apiKey: string }>('/api/settings/api-key/regenerate', { method: 'POST' }),
+    mutationFn: () => apiFetch<{ apiKey: string; apiKeyPrefix?: string | null; hasKey?: boolean }>('/api/settings/api-key/regenerate', { method: 'POST' }),
     onSuccess: (res) => {
       setRotatedKey(res.apiKey)
       // Write the fresh key into the cache BEFORE unmasking: invalidating
       // alone would leave the old, now-revoked key in the cache until the
       // refetch lands, and it would flash unmasked in the meantime.
-      queryClient.setQueryData<{ apiKey: string }>(['unified-key'], { apiKey: res.apiKey })
+      queryClient.setQueryData<{ apiKey: string | null; apiKeyPrefix: string | null; hasKey: boolean }>(['unified-key'], { apiKey: null, apiKeyPrefix: res.apiKeyPrefix ?? null, hasKey: true })
       // Reveal the fresh key right away: the whole point of regenerating is
       // to move apps to the new value, and a masked box hides exactly the
       // string they need to copy next. Showing it doubles as the success
@@ -36,8 +36,12 @@ export function UnifiedKeySection({ canView = true, canRotate = true }: { canVie
     },
   })
 
-  const apiKey = canView ? data?.apiKey ?? '' : rotatedKey ?? ''
-  const masked = apiKey ? apiKey.slice(0, 13) + '•'.repeat(32) : '…'
+  // The server stores only the key's SHA-256 hash, so a full key is never
+  // fetched: the only viewable/copyable value is a key this session just
+  // rotated into existence. Otherwise the dashboard shows the non-secret
+  // prefix, and Show / Copy stay disabled until a fresh key exists.
+  const apiKey = rotatedKey ?? ''
+  const masked = data?.apiKeyPrefix ?? '…'
   const baseUrl = import.meta.env.DEV
     ? `http://${window.location.hostname}:${__SERVER_PORT__}/v1`
     : `${window.location.origin}/v1`
@@ -82,7 +86,7 @@ export function UnifiedKeySection({ canView = true, canRotate = true }: { canVie
       ) : (
         <div className="flex items-center gap-2">
           <code className="flex-1 font-mono text-xs bg-muted px-3 py-2 rounded-lg select-all truncate tabular-nums">
-            {showKey ? apiKey : masked}
+            {showKey && apiKey ? apiKey : masked}
           </code>
           <Button variant="outline" size="sm" disabled={!apiKey} onClick={() => setShowKey(!showKey)}>
             {showKey ? t('keys.hideKey') : t('keys.showKey')}

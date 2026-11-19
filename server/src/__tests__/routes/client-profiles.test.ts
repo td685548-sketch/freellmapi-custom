@@ -10,7 +10,7 @@ vi.mock('../../services/router.js', async (importOriginal) => {
 
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, regenerateUnifiedKey } from '../../db/index.js';
 import { mintDashboardToken } from '../helpers/auth.js';
 
 let dashToken = '';
@@ -65,7 +65,7 @@ describe('client profiles (#411)', () => {
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     initDb(':memory:');
     app = createApp();
-    unifiedKey = getUnifiedApiKey();
+    unifiedKey = regenerateUnifiedKey();
     dashToken = mintDashboardToken('client-profiles@example.com');
   });
 

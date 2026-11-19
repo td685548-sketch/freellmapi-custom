@@ -24,7 +24,7 @@ import {
   type PublishedAgentSnapshot,
   type PublishedFlowDefinition,
 } from '@freellmapi/shared/ai-platform-orchestrator.js';
-import { getDb, getUnifiedApiKey } from '../../../db/index.js';
+import { getDb, getInternalLoopbackToken } from '../../../db/index.js';
 import { decrypt } from '../../../lib/crypto.js';
 import { extractInferenceToken } from '../../../middleware/user-rate-limit.js';
 import { compactLoopMessagesForBudget } from '../../context-budget/loop-guard.js';
@@ -305,7 +305,7 @@ function buildSyntheticLoopbackReq(
 ): Request {
   let token = '';
   if (profileId === 0) {
-    token = getUnifiedApiKey();
+    token = getInternalLoopbackToken();
   } else {
     try {
       const row = getDb()

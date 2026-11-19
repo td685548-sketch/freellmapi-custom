@@ -105,7 +105,7 @@ export function CommandPalette() {
     queryFn: () => apiFetch('/api/fallback'),
     enabled: open,
   })
-  const { data: keyData } = useQuery<{ apiKey: string }>({
+  const { data: keyData } = useQuery<{ apiKey?: string | null }>({
     queryKey: ['unified-key'],
     queryFn: () => apiFetch('/api/settings/api-key'),
     enabled: open && canRevealGateway,

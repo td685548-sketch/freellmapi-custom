@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { getDb, getUnifiedApiKey, initDb } from '../../db/index.js';
+import { getDb, regenerateUnifiedKey, initDb } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
 import { mintDashboardToken } from '../helpers/auth.js';
 
@@ -113,7 +113,7 @@ describe('revocable URL-token aliases', () => {
   });
 
   it('never accepts the unified API key as a URL credential', async () => {
-    const response = await request(app, 'GET', `/v1/t/${getUnifiedApiKey()}/models`);
+    const response = await request(app, 'GET', `/v1/t/${regenerateUnifiedKey()}/models`);
     expect(response.status).toBe(401);
   });
 
@@ -191,7 +191,7 @@ describe('revocable URL-token aliases', () => {
 
     // The genuine unified key keeps its read.
     const viaUnified = await request(app, 'GET', '/v1/usage', undefined, {
-      Authorization: `Bearer ${getUnifiedApiKey()}`,
+      Authorization: `Bearer ${regenerateUnifiedKey()}`,
     });
     expect(viaUnified.status).toBe(200);
     expect(typeof viaUnified.body.requests).toBe('number');

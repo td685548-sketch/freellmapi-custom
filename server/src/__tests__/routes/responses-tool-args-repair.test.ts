@@ -16,7 +16,7 @@ vi.mock('../../providers/index.js', async (importOriginal) => {
 });
 
 const { createApp } = await import('../../app.js');
-const { initDb, getDb, getUnifiedApiKey } = await import('../../db/index.js');
+const { initDb, getDb, regenerateUnifiedKey } = await import('../../db/index.js');
 const { encrypt } = await import('../../lib/crypto.js');
 const { setRoutingStrategy } = await import('../../services/router.js');
 
@@ -65,7 +65,7 @@ describe('Tool-argument repair on /v1/responses (double-encoded nested JSON)', (
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     initDb(':memory:');
     app = createApp();
-    key = getUnifiedApiKey();
+    key = regenerateUnifiedKey();
 
     const db = getDb();
     setRoutingStrategy('priority');

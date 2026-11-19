@@ -78,10 +78,16 @@ export interface Config {
 export function loadConfig(): Config {
   return {
     port: process.env.PORT ?? 3001,
-    // Dual-stack ('::') by default so the dashboard is reachable over both IPv4
-    // and IPv6 (e.g. IPv6-enabled Docker networks — #180). Hosts with IPv6
-    // disabled fall back to IPv4-only below; HOST overrides the default outright.
-    host: process.env.HOST ?? '::',
+    // Loopback-only by default: the dashboard and the /v1 proxy listen on
+    // 127.0.0.1 unless the operator asks for more. The old default ('::',
+    // dual-stack, all interfaces) exposed a single-user server with no
+    // ALLOWED_HOSTS guard to the whole network out of the box. Set HOST=::
+    // (dual-stack) or HOST=0.0.0.0 (IPv4-only) for LAN / reverse-proxy /
+    // container installs, and set ALLOWED_HOSTS alongside it — createApp
+    // warns at boot when a wide bind runs with the host guard off. The
+    // Docker image sets HOST=:: itself (Docker forwards to the container IP,
+    // not its loopback), and PaaS docs set HOST=0.0.0.0.
+    host: process.env.HOST ?? '127.0.0.1',
     dbPath: process.env.FREEAPI_DB_PATH?.trim() || null,
     dashboardOrigins: (process.env.DASHBOARD_ORIGINS ?? '')
       .split(',')

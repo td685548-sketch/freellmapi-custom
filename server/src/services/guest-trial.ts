@@ -1,5 +1,5 @@
 import type { Request } from 'express';
-import { getDb, getSetting, getUnifiedApiKey, setSetting } from '../db/index.js';
+import { getDb, getInternalLoopbackToken, getSetting, setSetting } from '../db/index.js';
 import {
   GUEST_TRIAL_DEFAULTS, GUEST_TRIAL_LIMITS as L, type GuestTrialInfo, type GuestTrialSettings,
 } from '@freellmapi/shared/guest-access.js';
@@ -123,7 +123,7 @@ export async function askTrial(req: Request, turns: TrialTurn[], model: string, 
   try {
     const res = await fetch(`http://${host}:${port}/v1/chat/completions`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${getUnifiedApiKey()}`, 'user-agent': 'freellm-guest-trial', host: `127.0.0.1:${port}` },
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${getInternalLoopbackToken()}`, 'user-agent': 'freellm-guest-trial', host: `127.0.0.1:${port}` },
       body: JSON.stringify({ model, max_tokens: s.maxTokens, messages: turns }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });

@@ -4,7 +4,7 @@ import type {
   AssistantThreadSummary,
   KeyRoutingMode,
 } from '@freellmapi/shared/customer-ai.js';
-import { getDb, getUnifiedApiKey } from '../../db/index.js';
+import { getDb, getInternalLoopbackToken } from '../../db/index.js';
 import { setRequestKeyRoutingPreset } from '../../lib/client-context.js';
 import { resolveAuth } from '../../lib/system-prompt.js';
 import { extractInferenceToken } from '../../middleware/user-rate-limit.js';
@@ -208,7 +208,7 @@ export async function chatWithAssistant(
 
   const headers: Record<string, string> = {
     'content-type': 'application/json',
-    authorization: `Bearer ${getUnifiedApiKey()}`,
+    authorization: `Bearer ${getInternalLoopbackToken()}`,
     'user-agent': 'freellm-customer-ai-hub',
     host: `127.0.0.1:${port}`,
   };
@@ -432,7 +432,7 @@ export async function streamChatWithAssistant(
   const headers: Record<string, string> = {
     'content-type': 'application/json',
     accept: 'text/event-stream',
-    authorization: `Bearer ${getUnifiedApiKey()}`,
+    authorization: `Bearer ${getInternalLoopbackToken()}`,
     'user-agent': 'freellm-customer-ai-hub',
     host: `127.0.0.1:${port}`,
   };

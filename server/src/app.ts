@@ -37,7 +37,7 @@ import { urlTokenRouter } from './routes/url-tokens.js';
 import { updateRouter } from './routes/update.js';
 import { moderationRouter } from './routes/moderation.js';
 import { requireAuth } from './middleware/requireAuth.js';
-import { createHostGuard } from './middleware/allowed-hosts.js';
+import { createHostGuard, warnOnWideBind } from './middleware/allowed-hosts.js';
 import { createProxyRateLimiter, createAdminRateLimiter } from './middleware/rateLimit.js';
 import { registerCustomRoutes } from './custom/register.js';
 import { supportOutputBodyLimit } from './custom/x-gateway/support-output-body-limit.js';
@@ -124,6 +124,11 @@ export function createApp(config?: Config) {
   // above everything below — its whole value is answering before any state or
   // credential is touched.
   app.use(createHostGuard(cfg.allowedHosts));
+  // A wide bind with the host guard off is the one boot-time misconfiguration
+  // worth shouting about: it is silent until someone else on the network
+  // finds the dashboard. Warning only — LAN / proxy / container installs
+  // bind wide deliberately.
+  warnOnWideBind(cfg.host, cfg.allowedHosts);
   app.use(installPerformanceMetrics());
   // Pre-rename Thruline addresses (/x/...) keep working.
   app.use(legacyGatewayPath);

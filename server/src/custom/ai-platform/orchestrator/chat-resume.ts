@@ -11,7 +11,7 @@ import type {
   ChatApprovalContinuationView,
   ChatContinuationStatus,
 } from '@freellmapi/shared/ai-platform-tracing-oauth.js';
-import { getDb, getUnifiedApiKey } from '../../../db/index.js';
+import { getDb, getInternalLoopbackToken } from '../../../db/index.js';
 import { decrypt, encrypt } from '../../../lib/crypto.js';
 import { isPillarEnabled } from '../flags.js';
 import { maskText } from '../masking.js';
@@ -185,7 +185,7 @@ async function buildSyntheticResumeRequest(
   }
   if (!token) {
     try {
-      token = getUnifiedApiKey();
+      token = getInternalLoopbackToken();
     } catch {
       token = '';
     }

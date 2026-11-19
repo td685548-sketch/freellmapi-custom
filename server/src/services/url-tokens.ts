@@ -1,6 +1,5 @@
 import crypto from 'crypto';
-import { getDb, getUnifiedApiKey } from '../db/index.js';
-import { timingSafeStringEqual } from '../routes/proxy.js';
+import { getDb, validateUnifiedApiKey } from '../db/index.js';
 
 function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
@@ -90,7 +89,7 @@ export function revokeUrlToken(id: number): boolean {
 }
 
 export function validateUrlToken(token: string): boolean {
-  if (!token || timingSafeStringEqual(token, getUnifiedApiKey())) {
+  if (!token || validateUnifiedApiKey(token)) {
     if (token) {
       console.warn('[URL tokens] Rejected a raw unified API key in a tokenized URL');
     }

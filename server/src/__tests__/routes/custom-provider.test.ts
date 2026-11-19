@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import http from 'node:http';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { decrypt } from '../../lib/crypto.js';
 import { routeRequest } from '../../services/router.js';
 import { resolveProvider, getProvider } from '../../providers/index.js';
@@ -230,7 +230,7 @@ describe('Custom Provider Endpoints', () => {
     const addr = server.address() as any;
     const res = await fetch(`http://127.0.0.1:${addr.port}/v1/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getUnifiedApiKey()}` },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${regenerateUnifiedKey()}` },
       body: JSON.stringify({ model: 'ndjson-model', messages: [{ role: 'user', content: 'hi' }] }),
     });
     const body = await res.json().catch(() => null);

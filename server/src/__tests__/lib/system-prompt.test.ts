@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import type { ChatMessage } from '@freellmapi/shared/types.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
 import {
   resolveAuth,
@@ -31,7 +31,7 @@ describe('resolveAuth (#411)', () => {
   });
 
   it('resolves the unified key to the default behavior (no enforced prompt)', () => {
-    const auth = resolveAuth(getUnifiedApiKey());
+    const auth = resolveAuth(regenerateUnifiedKey());
     expect(auth).toEqual({ kind: 'unified', systemPrompt: null });
   });
 

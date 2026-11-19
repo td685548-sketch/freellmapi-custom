@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
 import { clearAllCooldowns } from '../../services/ratelimit.js';
 import { resetDecisionRoutingCache } from '../../services/routing-decision.js';
@@ -36,7 +36,7 @@ async function request(method: string, path: string, body?: any, headers: Record
   return { status: res.status, body: json, headers: res.headers };
 }
 
-const auth = () => ({ Authorization: `Bearer ${getUnifiedApiKey()}` });
+const auth = () => ({ Authorization: `Bearer ${regenerateUnifiedKey()}` });
 
 function addKey(platform: string, raw: string): void {
   const secret = encrypt(raw);

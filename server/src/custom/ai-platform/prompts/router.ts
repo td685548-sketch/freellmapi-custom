@@ -9,7 +9,7 @@ import {
   type PromptVariable,
 } from '@freellmapi/shared/ai-platform-prompts.js';
 import type { Permission } from '@freellmapi/shared/permissions.js';
-import { getDb, getUnifiedApiKey } from '../../../db/index.js';
+import { getDb, getInternalLoopbackToken } from '../../../db/index.js';
 import type { SessionUser } from '../../../services/auth.js';
 import { isPillarEnabled } from '../flags.js';
 import { GatewayCallError, callGateway } from '../loopback.js';
@@ -427,7 +427,7 @@ async function callPromptModel(
   // so test/eval runs never touch client_profiles quotas or request/token usage tables.
   const syntheticReq = {
     headers: {
-      authorization: `Bearer ${getUnifiedApiKey()}`,
+      authorization: `Bearer ${getInternalLoopbackToken()}`,
     },
     originalUrl: '/v1/chat/completions',
     url: '/v1/chat/completions',

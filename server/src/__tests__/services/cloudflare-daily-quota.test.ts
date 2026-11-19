@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
 import { benchCloudflareAccount, cloudflareAccountId, isCloudflareNeuronsExhausted } from '../../services/cloudflare-daily-quota.js';
 import { clearCooldownsForKey, getActiveCooldownsForKeys, isOnCooldown, clearAllCooldowns } from '../../services/ratelimit.js';
@@ -100,7 +100,7 @@ describe('Cloudflare account bench through /v1/chat/completions', () => {
     const addr = server.address() as { port: number };
     const res = await fetch(`http://127.0.0.1:${addr.port}/v1/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getUnifiedApiKey()}` },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${regenerateUnifiedKey()}` },
       body: JSON.stringify(body),
     });
     const json = await res.json().catch(() => null);

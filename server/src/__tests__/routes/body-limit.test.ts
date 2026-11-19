@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { loadConfig } from '../../lib/config.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 
 async function post(app: Express, path: string, body: unknown, key: string) {
   const server = app.listen(0, '127.0.0.1');
@@ -33,7 +33,7 @@ describe('Inference body limits (vision payloads)', () => {
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     initDb(':memory:');
     app = createApp();
-    key = getUnifiedApiKey();
+    key = regenerateUnifiedKey();
   });
 
   it('accepts an >10mb vision payload on /v1/chat/completions (no parser 413)', async () => {
@@ -75,7 +75,7 @@ describe('Over-limit bodies (configurable ceiling)', () => {
     initDb(':memory:');
     // Tiny ceiling so the rejection path is testable without a 50MB body.
     app = createApp({ ...loadConfig(), requestBodyLimitBytes: 1024 });
-    key = getUnifiedApiKey();
+    key = regenerateUnifiedKey();
   });
 
   it('returns a normalized OpenAI-style 413 and logs it for the dashboard', async () => {

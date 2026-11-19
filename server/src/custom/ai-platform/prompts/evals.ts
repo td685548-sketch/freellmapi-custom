@@ -21,7 +21,7 @@ import {
   type PromptVariable,
 } from '@freellmapi/shared/ai-platform-prompts.js';
 import { GUARD_ALLOWED_PATTERN_FLAGS } from '@freellmapi/shared/ai-platform-output-guard.js';
-import { getDb, getUnifiedApiKey, type Db } from '../../../db/index.js';
+import { getDb, getInternalLoopbackToken, type Db } from '../../../db/index.js';
 import { isPillarEnabled } from '../flags.js';
 import { GatewayCallError, callGateway } from '../loopback.js';
 import {
@@ -930,7 +930,7 @@ export async function runPromptEvaluation(
 
   const syntheticReq = {
     headers: {
-      authorization: `Bearer ${getUnifiedApiKey()}`,
+      authorization: `Bearer ${getInternalLoopbackToken()}`,
     },
     originalUrl: '/v1/chat/completions',
     url: '/v1/chat/completions',

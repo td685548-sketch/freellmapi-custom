@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { Server } from 'node:http';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { mintDashboardToken } from '../helpers/auth.js';
 
 let server: Server;
@@ -17,7 +17,7 @@ beforeEach(async () => {
 });
 afterEach(()=>{server.close();vi.restoreAllMocks();});
 it('requires dashboard authentication, not the unified inference key', async () => {
-  for(const credential of [null,getUnifiedApiKey()]) {
+  for(const credential of [null,regenerateUnifiedKey()]) {
     const response=await httpFetch(origin+'/api/fallback/quota-forecast',{headers:credential?{Authorization:'Bearer '+credential}:{}});
     expect(response.status).toBe(401);
   }

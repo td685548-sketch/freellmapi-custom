@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { clearCooldownsForKey } from '../../services/ratelimit.js';
 import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
 
@@ -61,7 +61,7 @@ async function postTranscription(app: Express, fields: Record<string, string>) {
   for (const [k, v] of Object.entries(fields)) form.append(k, v);
   const res = await realFetch(`http://127.0.0.1:${port}/v1/audio/transcriptions`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${getUnifiedApiKey()}` },
+    headers: { Authorization: `Bearer ${regenerateUnifiedKey()}` },
     body: form,
   });
   const raw = await res.text();
