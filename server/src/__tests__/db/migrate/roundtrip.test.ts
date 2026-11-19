@@ -249,6 +249,7 @@ describe('migration round trip', () => {
         '20261118_200000_custom_quota_vouchers_topups.ts',
         '20261118_210000_custom_unified_key_hash.ts',
         '20261119_000001_request_attempts_ttfb_ms.ts',
+        '20261119_010000_custom_url_token_expiry.ts',
       ]);
     } finally {
       db.close();

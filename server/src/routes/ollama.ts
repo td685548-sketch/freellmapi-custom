@@ -7,6 +7,7 @@ import type {
 } from '@freellmapi/shared/types.js';
 import { isLoopbackRequest } from '../lib/loopback.js';
 import { getSetting, validateUnifiedApiKey } from '../db/index.js';
+import { isUrlTokenAuthenticated } from '../lib/system-prompt.js';
 import { buildModelListing } from '../services/model-listing.js';
 import { extractApiToken } from './proxy.js';
 import { runInboundChat, type InboundChatResult, type InboundChatWire } from '../lib/inbound-chat.js';
@@ -26,7 +27,10 @@ export function getOllamaEmulationMode(): OllamaEmulationMode {
 export const isLoopback = (req: Request): boolean => isLoopbackRequest(req);
 
 function authorize(req: Request, res: Response): boolean {
-  if ((req as Request & { urlTokenAuthenticated?: boolean }).urlTokenAuthenticated) {
+  // URL tokens are chat-scoped: they may use this inference surface, never
+  // the install-wide /v1/usage ledger (that gate lives in routes/proxy.ts
+  // and checks the same flag via isUrlTokenAuthenticated()).
+  if (isUrlTokenAuthenticated(req)) {
     return true;
   }
   const mode = getOllamaEmulationMode();

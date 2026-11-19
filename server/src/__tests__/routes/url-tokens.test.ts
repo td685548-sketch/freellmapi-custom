@@ -117,6 +117,66 @@ describe('revocable URL-token aliases', () => {
     expect(response.status).toBe(401);
   });
 
+  it('mints chat-scoped tokens with a 90-day default expiry', async () => {
+    const minted = await request(app, 'POST', '/api/settings/url-tokens', { label: 'expiry-default' }, {
+      Authorization: `Bearer ${dashboardToken}`,
+    });
+    expect(minted.status).toBe(201);
+    expect(minted.body.scope).toBe('chat');
+    expect(typeof minted.body.expiresAt).toBe('string');
+    const days = (new Date(minted.body.expiresAt).getTime() - Date.now()) / 86_400_000;
+    expect(days).toBeGreaterThan(89);
+    expect(days).toBeLessThan(91);
+
+    const listed = await request(app, 'GET', '/api/settings/url-tokens', undefined, {
+      Authorization: `Bearer ${dashboardToken}`,
+    });
+    expect(listed.status).toBe(200);
+    expect(listed.body.tokens[0]).toMatchObject({ scope: 'chat', expiresAt: minted.body.expiresAt });
+  });
+
+  it('honours a per-token expiresInDays and rejects out-of-range values', async () => {
+    const minted = await request(app, 'POST', '/api/settings/url-tokens', { label: 'short', expiresInDays: 30 }, {
+      Authorization: `Bearer ${dashboardToken}`,
+    });
+    expect(minted.status).toBe(201);
+    const days = (new Date(minted.body.expiresAt).getTime() - Date.now()) / 86_400_000;
+    expect(days).toBeGreaterThan(29);
+    expect(days).toBeLessThan(31);
+
+    for (const bad of [0, -1, 3651, 'soon']) {
+      const rejected = await request(app, 'POST', '/api/settings/url-tokens', { label: 'bad', expiresInDays: bad }, {
+        Authorization: `Bearer ${dashboardToken}`,
+      });
+      expect(rejected.status).toBe(400);
+    }
+  });
+
+  it('rejects an expired token without any manual revoke', async () => {
+    const minted = await request(app, 'POST', '/api/settings/url-tokens', { label: 'will-expire' }, {
+      Authorization: `Bearer ${dashboardToken}`,
+    });
+    expect(minted.status).toBe(201);
+    expect((await request(app, 'GET', `/v1/t/${minted.body.token}/models`)).status).toBe(200);
+
+    getDb().prepare("UPDATE url_tokens SET expires_at = datetime('now', '-1 day') WHERE id = ?")
+      .run(minted.body.id);
+    const expired = await request(app, 'GET', `/v1/t/${minted.body.token}/models`);
+    expect(expired.status).toBe(401);
+    expect(expired.body.error?.message).toMatch(/expired/i);
+  });
+
+  it('grandfathers pre-expiry tokens (expires_at NULL) until revoked', async () => {
+    const minted = await request(app, 'POST', '/api/settings/url-tokens', { label: 'legacy' }, {
+      Authorization: `Bearer ${dashboardToken}`,
+    });
+    expect(minted.status).toBe(201);
+    getDb().prepare('UPDATE url_tokens SET expires_at = NULL WHERE id = ?').run(minted.body.id);
+    // No expiry recorded: the token keeps working, as it did before the
+    // migration — revoking it is the operator's explicit act.
+    expect((await request(app, 'GET', `/v1/t/${minted.body.token}/models`)).status).toBe(200);
+  });
+
   it('does not let a URL token read the unified-only /v1/usage ledger', async () => {
     const minted = await request(app, 'POST', '/api/settings/url-tokens', { label: 'widget' }, {
       Authorization: `Bearer ${dashboardToken}`,

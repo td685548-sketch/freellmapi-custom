@@ -197,8 +197,9 @@ describe('X-Routed-Via with a header-hostile model id (#619)', () => {
     const { status, headers } = await request(
       app,
       'POST',
-      `/v1beta/models/gemini-2.5-flash:generateContent?key=${regenerateUnifiedKey()}`,
+      '/v1beta/models/gemini-2.5-flash:generateContent',
       { contents: [{ role: 'user', parts: [{ text: 'hi' }] }] },
+      { 'x-goog-api-key': regenerateUnifiedKey() },
     );
     expect(status).toBe(200);
     expectRoutedVia(headers);

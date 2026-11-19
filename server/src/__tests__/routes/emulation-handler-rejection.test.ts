@@ -78,8 +78,9 @@ describe('emulation surfaces forward handler rejections to the error handler', (
   it('answers 500 on the Gemini generateContent surface', async () => {
     const response = await request(
       app,
-      `/v1beta/models/gemini-2.5-flash:generateContent?key=${regenerateUnifiedKey()}`,
+      '/v1beta/models/gemini-2.5-flash:generateContent',
       { contents: [{ role: 'user', parts: [{ text: 'hello' }] }] },
+      { 'x-goog-api-key': regenerateUnifiedKey() },
     );
     expect(response.status).toBe(500);
     expect(response.body?.error).toBeTruthy();
