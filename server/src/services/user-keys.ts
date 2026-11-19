@@ -32,6 +32,16 @@ function sha256(val: string): string {
 }
 
 /**
+ * SHA-256 hash of a user API key — the same value stored as `key_hash`.
+ * Rate limiting buckets by this hash (middleware/rateLimit.ts) so the raw key
+ * never lands in a map key, a log line, or a header, and a key keeps one
+ * budget no matter which IP it arrives from.
+ */
+export function hashUserApiKey(token: string): string {
+  return sha256(token);
+}
+
+/**
  * Mint a new user API key. Returns the plaintext key once (only the SHA-256 hash is persisted for auth).
  */
 export function mintUserApiKey(
@@ -235,6 +245,13 @@ function touchLastUsed(keyHash: string, keyId: number): void {
 const requestMemo = new AsyncLocalStorage<Map<string, ValidatedUserKey | null>>();
 
 export function withUserKeyMemo<T>(run: () => T): T {
+  // Reuse an enclosing memo when one already exists for this request: the
+  // proxy rate limiter (middleware/rateLimit.ts) opens a memo so the key
+  // validation it performs is reused by the user gate and resolveAuth
+  // downstream, instead of each of them repeating the lookup. A memo still
+  // lives only as long as its request, so a revocation is honoured by the
+  // very next request either way.
+  if (requestMemo.getStore()) return run();
   return requestMemo.run(new Map(), run);
 }
 
