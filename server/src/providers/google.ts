@@ -607,7 +607,7 @@ export class GoogleProvider extends BaseProvider {
   constructor(opts: GoogleProviderOptions = {}) {
     super();
     // PROVIDER_TIMEOUT_GOOGLE wins over the registration default (#547).
-    this.timeoutMs = providerTimeoutMs('google', opts.timeoutMs ?? 15000);
+    this.timeoutMs = providerTimeoutMs('google', opts.timeoutMs);
   }
 
   async chatCompletion(
@@ -739,9 +739,9 @@ export class GoogleProvider extends BaseProvider {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify(body),
-      // Default 'headers' bounds: the deadline dies at response headers, and
+      // Explicit 'headers' bounds: the deadline dies at response headers, and
       // the client signal + stall watchdog own the stream from there.
-    }, options?.timeoutMs ?? this.timeoutMs, { signal: options?.signal });
+    }, options?.timeoutMs ?? this.timeoutMs, { signal: options?.signal, timeoutBounds: 'headers' });
 
     recordQuotaObservationsFromResponse(res, {
       platform: this.platform,

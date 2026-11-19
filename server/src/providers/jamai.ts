@@ -67,7 +67,7 @@ export class JamaiProvider extends BaseProvider {
     const res = await this.fetchWithTimeout(`${JAMAI_BASE_URL}/chat/completions`, {
       method: 'POST', headers: jamaiHeaders(credential), redirect: 'error',
       body: JSON.stringify(this.body(messages, modelId, options, stream)),
-    }, options?.timeoutMs ?? providerTimeoutMs(this.platform, 60_000),
+    }, options?.timeoutMs ?? providerTimeoutMs(this.platform),
     { signal: options?.signal, timeoutBounds: stream ? 'headers' : 'request' });
     this.record(res, 'chat/completions', quotaContext, modelId);
     // JamAI errors can echo request_headers, including credentials. Never
@@ -97,7 +97,7 @@ export class JamaiProvider extends BaseProvider {
     options?: CompletionOptions, quotaContext?: QuotaObservationContext): AsyncGenerator<ChatCompletionChunk> {
     const res = await this.request(credential, messages, modelId, options, true, quotaContext);
     let finished = false;
-    for await (const chunk of this.readSseStream(res, { firstByteTimeoutMs: options?.timeoutMs ?? providerTimeoutMs(this.platform, 60_000) })) {
+    for await (const chunk of this.readSseStream(res, { firstByteTimeoutMs: options?.timeoutMs ?? providerTimeoutMs(this.platform) })) {
       checkModel(modelId, chunk.model);
       if (!Array.isArray(chunk.choices)) throw upstreamError('returned an invalid stream chunk');
       for (const choice of chunk.choices) {

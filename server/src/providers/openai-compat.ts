@@ -171,7 +171,7 @@ export class OpenAICompatProvider extends BaseProvider {
     this.extraHeaders = opts.extraHeaders ?? {};
     this.validateUrl = opts.validateUrl;
     // PROVIDER_TIMEOUT_<PLATFORM> wins over the registration default (#547).
-    this.timeoutMs = providerTimeoutMs(opts.platform, opts.timeoutMs ?? 60_000);
+    this.timeoutMs = providerTimeoutMs(opts.platform, opts.timeoutMs);
     this.keyless = opts.keyless ?? false;
     this.forceSingleToolCall = opts.forceSingleToolCall ?? false;
     this.forwardsPartial = opts.platform === 'custom' && isMoonshotEndpoint(opts.baseUrl);
@@ -524,9 +524,9 @@ export class OpenAICompatProvider extends BaseProvider {
         stream: true,
         stream_options: options?.stream_options,
       }),
-      // Default 'headers' bounds: the deadline dies at response headers, and
+      // Explicit 'headers' bounds: the deadline dies at response headers, and
       // the client signal + stall watchdog own the stream from there.
-    }, options?.timeoutMs ?? this.timeoutMs, { signal: options?.signal });
+    }, options?.timeoutMs ?? this.timeoutMs, { signal: options?.signal, timeoutBounds: 'headers' });
 
     recordQuotaObservationsFromResponse(res, {
       platform: this.platform,

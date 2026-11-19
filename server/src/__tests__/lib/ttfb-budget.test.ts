@@ -74,10 +74,15 @@ describe('endpoint TTFB budgets (#1262)', () => {
     expect(getEndpointTimeBudgetMs(45_000, 'google', '', NOW)).toBe(45_000);
   });
 
-  it('caps the learned allowance at three times the base so it cannot ratchet', () => {
+  it('caps the learned allowance at three times the base and at 90s absolute, so it cannot ratchet', () => {
     addRequest(500_000);
-    expect(getEndpointTimeBudgetMs(45_000, 'google', '', NOW)).toBe(135_000);
+    expect(getEndpointTimeBudgetMs(45_000, 'google', '', NOW)).toBe(90_000);
     expect(getEndpointTimeBudgetMs(6_000, 'google', '', NOW)).toBe(18_000);
+  });
+
+  it('never trims an explicitly larger base budget with the absolute cap', () => {
+    addRequest(500_000);
+    expect(getEndpointTimeBudgetMs(120_000, 'google', '', NOW)).toBe(120_000);
   });
 
   it('keeps a small base budget for a fast endpoint despite the absolute buffer', () => {
@@ -113,7 +118,7 @@ describe('endpoint TTFB budgets (#1262)', () => {
     expect(getEndpointTtfbStats('custom', 'https://a.example/v1', NOW)?.sampleCount).toBe(2);
     expect(getEndpointTimeBudgetMs(45_000, 'custom', 'https://b.example/v1', NOW)).toBe(45_000);
     expect(getEndpointTimeBudgetMs(45_000, 'custom', 'https://new.example/v1', NOW)).toBe(45_000);
-    expect(getEndpointTimeBudgetMs(45_000, 'custom', '', NOW)).toBe(100_000);
+    expect(getEndpointTimeBudgetMs(45_000, 'custom', '', NOW)).toBe(90_000);
   });
 
   it('ignores failed, canceled, expired, future, invalid and missing observations', () => {

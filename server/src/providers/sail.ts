@@ -22,7 +22,6 @@ import {
 import { providerTimeoutMs } from '../lib/provider-timeout.js';
 
 const BASE_URL = 'https://api.sailresearch.com/v1';
-const DEFAULT_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const POLL_REQUEST_TIMEOUT_MS = 30_000;
 
@@ -91,7 +90,7 @@ export class SailProvider extends BaseProvider {
 
   constructor(options: SailProviderOptions = {}) {
     super();
-    this.timeoutMs = providerTimeoutMs('sail', options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    this.timeoutMs = providerTimeoutMs('sail', options.timeoutMs);
     this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   }
 

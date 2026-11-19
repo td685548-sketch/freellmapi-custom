@@ -706,7 +706,7 @@ export class WebCookieProvider extends BaseProvider {
         body: JSON.stringify(body),
       },
       connectTimeoutMs,
-      { signal: options?.signal },
+      { signal: options?.signal, timeoutBounds: 'headers' },
     );
 
     if (!res.ok) {
@@ -1430,7 +1430,7 @@ export class AnthropicWireProvider extends BaseProvider {
         ),
       },
       options?.timeoutMs ?? this.timeoutMs,
-      { signal: options?.signal },
+      { signal: options?.signal, timeoutBounds: 'headers' },
     );
 
     if (!res.ok) {

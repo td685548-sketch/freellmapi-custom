@@ -1196,3 +1196,43 @@ describe('retryable quota errors with token counts', () => {
     expect(state.skipPlatforms.has('fake')).toBe(false);
   });
 });
+
+describe('runFallbackLoop: per-attempt TTFB', () => {
+  it('records ttfbMs from the first disarmHedge call and null when the attempt dies first', async () => {
+    const { registerAttemptTraceObserver } = await import('../../lib/attempt-trace.js');
+    const seen: Array<import('../../lib/attempt-trace.js').AttemptTraceRecord[]> = [];
+    const unregister = registerAttemptTraceObserver((records) => { seen.push([...records]); });
+    try {
+      // Attempt 0: streaming dispatch proves alive, then succeeds.
+      // Attempt 1 (after a retryable failure): dies before any first byte.
+      let calls = 0;
+      await runFallbackLoop(hooksSkeleton({
+        maxRetries: 2,
+        route: () => fakeRoute(),
+        dispatch: async (_route, _attempt, ctx) => {
+          calls += 1;
+          if (calls === 1) {
+            ctx.disarmHedge();
+            return 'done';
+          }
+          throw Object.assign(new Error('boom'), { status: 500 });
+        },
+      }));
+      // The successful first attempt ends the loop, so run a second loop for
+      // the never-alive case.
+      await runFallbackLoop(hooksSkeleton({
+        maxRetries: 1,
+        route: () => fakeRoute(),
+        dispatch: async () => { throw Object.assign(new Error('boom'), { status: 500 }); },
+      }));
+    } finally {
+      unregister();
+    }
+    expect(seen.length).toBe(2);
+    expect(seen[0]).toHaveLength(1);
+    expect(typeof seen[0][0].ttfbMs).toBe('number');
+    expect(seen[0][0].ttfbMs).toBeGreaterThanOrEqual(0);
+    expect(seen[1]).toHaveLength(1);
+    expect(seen[1][0].ttfbMs).toBeNull();
+  });
+});

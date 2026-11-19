@@ -108,9 +108,9 @@ export class CohereProvider extends BaseProvider {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
-      // Default 'headers' bounds: the deadline dies at response headers, and
+      // Explicit 'headers' bounds: the deadline dies at response headers, and
       // the client signal + stall watchdog own the stream from there.
-    }, undefined, { signal: options?.signal });
+    }, undefined, { signal: options?.signal, timeoutBounds: 'headers' });
     recordQuotaObservationsFromResponse(res, {
       platform: this.platform,
       keyId: quotaContext?.keyId,
