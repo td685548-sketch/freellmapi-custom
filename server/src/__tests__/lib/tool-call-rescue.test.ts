@@ -88,6 +88,68 @@ describe('inline tool-call dialect rescue', () => {
     });
   });
 
+  describe('Anthropic <function_calls><invoke> dialect', () => {
+    it('parses <parameter> children, JSON-parsing values that parse', () => {
+      const text = '<function_calls><invoke name="Bash"><parameter name="command">ls -la</parameter><parameter name="timeout">30</parameter></invoke></function_calls>';
+      const r = rescueInlineToolCalls(text, TOOLS);
+      expect(r.detected).toBe(true);
+      expect(r.calls).toHaveLength(1);
+      expect(r.calls![0].name).toBe('Bash');
+      expect(JSON.parse(r.calls![0].arguments)).toEqual({ command: 'ls -la', timeout: 30 });
+      expect(r.cleanText).toBe('');
+    });
+
+    it('parses object/array parameter values as JSON, not strings', () => {
+      const text = '<invoke name="Write"><parameter name="file_path">/tmp/n.txt</parameter><parameter name="tags">["a", "b"]</parameter></invoke>';
+      const r = rescueInlineToolCalls(text, TOOLS);
+      expect(JSON.parse(r.calls![0].arguments)).toEqual({ file_path: '/tmp/n.txt', tags: ['a', 'b'] });
+    });
+
+    it('parses a bare <invoke> with a JSON-object body', () => {
+      const text = '<invoke name="Read">{"file_path": "/tmp/a"}</invoke>';
+      const r = rescueInlineToolCalls(text, TOOLS);
+      expect(r.calls).toHaveLength(1);
+      expect(r.calls![0].name).toBe('Read');
+      expect(JSON.parse(r.calls![0].arguments)).toEqual({ file_path: '/tmp/a' });
+    });
+
+    it('parses multiple invokes and keeps surrounding prose', () => {
+      const text = 'On it.\n<function_calls><invoke name="Read"><parameter name="file_path">/a</parameter></invoke><invoke name="Grep"><parameter name="pattern">TODO</parameter></invoke></function_calls>';
+      const r = rescueInlineToolCalls(text, TOOLS);
+      expect(r.calls).toHaveLength(2);
+      expect(r.calls![1].name).toBe('Grep');
+      expect(r.cleanText).toBe('On it.');
+    });
+
+    it('accepts single-quoted names and decodes XML entities in values', () => {
+      const text = `<invoke name='Bash'><parameter name="command">echo a &amp;&amp; echo b</parameter></invoke>`;
+      const r = rescueInlineToolCalls(text, TOOLS);
+      expect(JSON.parse(r.calls![0].arguments)).toEqual({ command: 'echo a && echo b' });
+    });
+
+    it('treats a no-parameter invoke as a no-arg call', () => {
+      const r = rescueInlineToolCalls('<invoke name="list_dir"></invoke>', TOOLS);
+      expect(r.calls).toEqual([{ name: 'list_dir', arguments: '{}' }]);
+    });
+
+    it('rejects an invoke naming a tool the request never declared', () => {
+      const r = rescueInlineToolCalls('<invoke name="DropTables"><parameter name="x">1</parameter></invoke>', TOOLS);
+      expect(r.detected).toBe(true);
+      expect(r.calls).toBeNull();
+    });
+
+    it('treats a truncated unclosed invoke as unparseable (dead turn)', () => {
+      const r = rescueInlineToolCalls('<function_calls><invoke name="Read"><parameter name="file_path">/a', TOOLS);
+      expect(r.detected).toBe(true);
+      expect(r.calls).toBeNull();
+    });
+
+    it('does not synthesize a call when no tools were declared', () => {
+      const out = rescueInlineToolCalls('<invoke name="Bash"><parameter name="command">ls</parameter></invoke>', new Set<string>());
+      expect(out.calls).toBeNull();
+    });
+  });
+
   describe('bare / fenced JSON dialect (schema-gated)', () => {
     it('rescues a bare JSON object naming a known tool', () => {
       const r = rescueInlineToolCalls('{"name": "list_dir", "arguments": {"path": "/tmp"}}', TOOLS);
@@ -118,6 +180,8 @@ describe('inline tool-call dialect rescue', () => {
       expect(startsWithDialectMarker('  <|tool_call_begin|>')).toBe(true);
       expect(startsWithDialectMarker('\n<tool_call>{}')).toBe(true);
       expect(startsWithDialectMarker('<function=Bash{')).toBe(true);
+      expect(startsWithDialectMarker('<function_calls><invoke name="Bash">')).toBe(true);
+      expect(startsWithDialectMarker('<invoke name="Bash">')).toBe(true);
       expect(startsWithDialectMarker('Hello!')).toBe(false);
       expect(startsWithDialectMarker('<html>')).toBe(false);
     });
@@ -127,6 +191,8 @@ describe('inline tool-call dialect rescue', () => {
       expect(couldBecomeDialectMarker('<|to')).toBe(true);
       expect(couldBecomeDialectMarker('<fun')).toBe(true);
       expect(couldBecomeDialectMarker('<tool_ca')).toBe(true);
+      expect(couldBecomeDialectMarker('<inv')).toBe(true);
+      expect(couldBecomeDialectMarker('<function_c')).toBe(true);
       expect(couldBecomeDialectMarker('<div')).toBe(false);
       expect(couldBecomeDialectMarker('Hi')).toBe(false);
       // Full marker present is no longer a *prefix* — startsWith takes over.
@@ -135,6 +201,7 @@ describe('inline tool-call dialect rescue', () => {
 
     it('containsDialectMarker finds markers mid-text', () => {
       expect(containsDialectMarker('prose then <function=Read{"a":1}</function>')).toBe(true);
+      expect(containsDialectMarker('prose then <invoke name="Read">{"a":1}</invoke>')).toBe(true);
       expect(containsDialectMarker('plain text')).toBe(false);
     });
   });

@@ -132,11 +132,38 @@ export function validateToolArguments(
 
   if (validate(parsed)) return { ok: true };
 
+  // A bare "/path message" names the field but not the rule or the value, so
+  // an operator reading the trail cannot tell a wrong type from a missing
+  // key without replaying the call. The keyword disambiguates the rule and
+  // the (truncated) received value shows what the model actually sent.
   const detail = (validate.errors ?? [])
     .slice(0, 3)
-    .map(e => `${e.instancePath || '/'} ${e.message ?? 'is invalid'}`)
+    .map(e => {
+      const path = e.instancePath || '/';
+      const keyword = e.keyword ? ` [${e.keyword}]` : '';
+      const got = valueAt(parsed, e.instancePath);
+      const shown = got === undefined ? '' : ` (got ${truncateValue(got)})`;
+      return `${path}${keyword} ${e.message ?? 'is invalid'}${shown}`;
+    })
     .join('; ');
   return { ok: false, reason: `${toolName}: ${detail || 'does not match its schema'}` };
+}
+
+/** Resolve a JSON-pointer path (e.g. "/a/0/b") against the parsed arguments. */
+function valueAt(root: unknown, instancePath: string | undefined): unknown {
+  if (!instancePath) return root;
+  let cur: unknown = root;
+  for (const raw of instancePath.split('/').slice(1)) {
+    if (cur === null || typeof cur !== 'object') return undefined;
+    const key = raw.replace(/~1/g, '/').replace(/~0/g, '~');
+    cur = (cur as Record<string, unknown>)[key];
+  }
+  return cur;
+}
+
+function truncateValue(value: unknown): string {
+  const s = JSON.stringify(value) ?? String(value);
+  return s.length > 80 ? `${s.slice(0, 80)}…` : s;
 }
 
 /**
