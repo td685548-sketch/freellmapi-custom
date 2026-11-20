@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { ChevronLeft } from 'lucide-react'
 import { useI18n } from '@/i18n'
 import { apiFetch } from '@/lib/api'
+import { UNIFIED_KEY_GC_TIME_MS, UNIFIED_KEY_QUERY_KEY } from '@/lib/unified-key-query'
 import { CopyButton } from '@/components/copy-button'
 import { PageHeader } from '@/components/page-header'
 import { ModelsTabs } from '@/components/models-tabs'
@@ -40,7 +41,8 @@ export default function EmbeddingDetailPage() {
     queryFn: () => apiFetch('/api/embeddings'),
   })
   const { data: keyData } = useQuery<{ apiKey: string }>({
-    queryKey: ['unified-key'],
+    queryKey: UNIFIED_KEY_QUERY_KEY,
+    gcTime: UNIFIED_KEY_GC_TIME_MS,
     queryFn: () => apiFetch('/api/settings/api-key'),
   })
 

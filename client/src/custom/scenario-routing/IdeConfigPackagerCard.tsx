@@ -11,6 +11,7 @@ import {
   Wifi,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import { UNIFIED_KEY_GC_TIME_MS, UNIFIED_KEY_QUERY_KEY } from '@/lib/unified-key-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -90,7 +91,8 @@ export function IdeConfigPackagerCard({
   const activeKeys = (keysData?.keys ?? []).filter((k) => !k.revoked);
 
   const { data: unifiedKeyData } = useQuery<{ apiKey: string }>({
-    queryKey: ['api-key'],
+    queryKey: UNIFIED_KEY_QUERY_KEY,
+    gcTime: UNIFIED_KEY_GC_TIME_MS,
     queryFn: () => apiFetch<{ apiKey: string }>('/api/settings/api-key'),
     enabled: isSignedIn && canRevealGateway,
   });

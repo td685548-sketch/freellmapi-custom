@@ -37,13 +37,12 @@ import {
   type SupportLiveTestTurnDiagnostic,
   type SupportLiveTestViewMode,
 } from '@freellmapi/shared/support-service-desk-live-test.js'
-import { apiFetch } from '@/lib/api'
+import { apiFetch, getToken } from '@/lib/api'
 import { useI18n } from '@/i18n'
 import { useSupportServiceDeskLiveTestStrings } from '../support-service-desk-live-test-strings'
 import SupportWidgetPreview from './SupportWidgetPreview'
 
 const API_BASE = (import.meta.env.BASE_URL ?? '/').replace(/\/$/, '')
-const TOKEN_STORAGE_KEY = 'freellmapi_dashboard_token'
 
 export interface LiveTestTenantInfo {
   id: number
@@ -89,9 +88,12 @@ function getWidgetGlobal(): FreeLLMAPISupportGlobal | undefined {
   return (window as unknown as { FreeLLMAPISupport?: FreeLLMAPISupportGlobal }).FreeLLMAPISupport
 }
 
+// The dashboard token lives in sessionStorage now (see client/src/lib/api.ts);
+// read it through getToken() so this widget never resurrects a token from
+// localStorage.
 function readDashboardToken(): string | null {
   try {
-    return window.localStorage.getItem(TOKEN_STORAGE_KEY)
+    return getToken()
   } catch {
     return null
   }

@@ -110,7 +110,7 @@ function readToken(): string | null {
     return libApi.getToken();
   }
   try {
-    return localStorage.getItem(TOKEN_KEY);
+    return sessionStorage.getItem(TOKEN_KEY);
   } catch {
     return null;
   }

@@ -2,7 +2,7 @@
 //
 // The desktop shell signs the dashboard in as a hidden machine account whose
 // password is random and never shown (desktop/src/server-host.ts). If that
-// session is ever rejected — expired after a month of uptime, cleared by a
+// session is ever rejected — expired after 24h, cleared by a
 // 401 — the gate must ask the shell for a fresh one, never show a login form
 // nobody can fill in. This mounts the real AuthGate against a stubbed
 // /api/auth/status and checks exactly that.
@@ -59,7 +59,7 @@ beforeEach(() => {
   root = createRoot(container)
   accepted = new Set()
   statusCalls = []
-  localStorage.setItem(TOKEN_KEY, 'stale-token')
+  sessionStorage.setItem(TOKEN_KEY, 'stale-token')
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (!url.endsWith('/api/auth/status')) return json({ error: { message: `unexpected ${url}` } }, 404)
@@ -73,7 +73,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount())
   container.remove()
-  localStorage.clear()
+  sessionStorage.clear()
   vi.unstubAllGlobals()
   const w = window as DesktopWindow
   delete w.__FREEAPI_DESKTOP__
@@ -96,7 +96,7 @@ describe('AuthGate inside the desktop shell', () => {
     await flush()
 
     expect(bridge).toHaveBeenCalledTimes(1)
-    expect(localStorage.getItem(TOKEN_KEY)).toBe(FRESH)
+    expect(sessionStorage.getItem(TOKEN_KEY)).toBe(FRESH)
     expect(statusCalls.at(-1)).toBe(`Bearer ${FRESH}`)
     expect(container.querySelector('[data-testid="app"]')?.textContent).toBe('dashboard')
     expect(passwordField()).toBeNull()

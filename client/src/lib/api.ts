@@ -3,27 +3,39 @@ import { getSessionRevision, notifySessionChanged } from '@/custom/session-state
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '');
 const TOKEN_KEY = 'freellmapi_dashboard_token';
 
-// Dashboard session token (#35). Stored in localStorage; sent as a Bearer on
-// every /api request and cleared on a 401.
+// Dashboard session token (#35). Stored in sessionStorage, not localStorage:
+// a token in localStorage survives the browser (and the machine) indefinitely
+// and is readable by any script running on the dashboard origin, so a single
+// XSS — or a shared / unattended machine — keeps the session forever. A
+// sessionStorage token dies when the tab closes, and each tab holds its own
+// session, so a stolen token's window is one tab's lifetime. The full httpOnly
+// cookie migration is still open work (it needs server-side Set-Cookie and
+// CSRF handling); this is the mitigation that fits the current Bearer flow.
+//
+// A token left in localStorage by an older build is purged on every read:
+// without the purge the old persistent token would linger next to the new
+// session-scoped one. sessionStorage fires no cross-tab 'storage' events, so
+// there is no cross-tab listener any more — in-tab changes go through
+// notifySessionChanged() in setToken/clearToken, and a new tab simply signs
+// in again (the desktop shell re-seeds it via preload; the browser tab uses
+// POST /api/auth/desktop-session or the login form).
+function purgeLegacyToken(): void {
+  try { localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
+}
+
 export function getToken(): string | null {
-  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
+  purgeLegacyToken();
+  try { return sessionStorage.getItem(TOKEN_KEY); } catch { return null; }
 }
 export function setToken(token: string): void {
   const previous = getToken();
-  try { localStorage.setItem(TOKEN_KEY, token); } catch { /* ignore */ }
+  try { sessionStorage.setItem(TOKEN_KEY, token); } catch { /* ignore */ }
   if (previous !== getToken()) notifySessionChanged();
 }
 export function clearToken(): void {
   const previous = getToken();
-  try { localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
+  try { sessionStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
   if (previous !== getToken()) notifySessionChanged();
-}
-
-// Changes made in another tab must also end this tab's cached identity.
-if (typeof window !== 'undefined') {
-  window.addEventListener('storage', event => {
-    if (event.key === TOKEN_KEY || event.key === null) notifySessionChanged();
-  });
 }
 
 export const UNAUTHORIZED_EVENT = 'freellmapi:unauthorized';

@@ -9,6 +9,15 @@ import { parseStoredPermissions } from '@freellmapi/shared/permissions.js';
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
+// Desktop sessions are minted on demand by the shell (IPC / POST
+// /api/auth/desktop-session) whenever the dashboard needs one, so they do not
+// need the browser's 30-day lifetime: 24h bounds how long a token minted for
+// the hidden machine account stays usable if it leaks, and the next launch
+// (or AuthGate repair) mints a fresh one automatically.
+export const DESKTOP_SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+export const DESKTOP_USER_EMAIL = 'desktop@localhost';
+
 import type { Permission } from '@freellmapi/shared/user-access.js';
 
 export type UserRole = 'admin' | 'member';
@@ -99,20 +108,23 @@ export function verifyCredentials(email: string, password: string): SessionUser 
 /** Desktop app only: a session for the install's account, creating the hidden
  *  machine account (`desktop@localhost`, random password nobody knows) on first
  *  run. The desktop window gets this over IPC; a browser tab on the same
- *  machine gets it from POST /api/auth/desktop-session (routes/auth.ts). */
+ *  machine gets it from POST /api/auth/desktop-session (routes/auth.ts).
+ *
+ *  The account is always looked up by its own email. The old code created the
+ *  account only on an empty database and then signed in as the lowest-id user,
+ *  so a database that already had a real user — the primary admin, typically —
+ *  made the desktop shell silently authenticate as that account. */
 export function desktopSessionToken(): string {
-  if (userCount() === 0) {
-    createUser('desktop@localhost', crypto.randomBytes(24).toString('hex'));
-  }
-  const first = getDb().prepare('SELECT id FROM users ORDER BY id ASC LIMIT 1').get() as { id: number };
-  return createSession(first.id);
+  const existing = getDb().prepare('SELECT id FROM users WHERE email = ?').get(DESKTOP_USER_EMAIL) as { id: number } | undefined;
+  const desktopId = existing?.id ?? createUser(DESKTOP_USER_EMAIL, crypto.randomBytes(24).toString('hex')).userId;
+  return createSession(desktopId, DESKTOP_SESSION_TTL_MS);
 }
 
 /** Mint a session and return the raw token (only the hash is persisted). */
-export function createSession(userId: number): string {
+export function createSession(userId: number, ttlMs: number = SESSION_TTL_MS): string {
   const token = crypto.randomBytes(32).toString('hex');
   getDb().prepare('INSERT INTO sessions (token_hash, user_id, expires_at_ms) VALUES (?, ?, ?)')
-    .run(sha256(token), userId, Date.now() + SESSION_TTL_MS);
+    .run(sha256(token), userId, Date.now() + ttlMs);
   return token;
 }
 

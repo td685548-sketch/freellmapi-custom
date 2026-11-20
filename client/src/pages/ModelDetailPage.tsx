@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router-dom'
 import { ChevronLeft, Merge, Save, Split, Trash2 } from 'lucide-react'
 import { useI18n } from '@/i18n'
 import { apiFetch } from '@/lib/api'
+import { UNIFIED_KEY_GC_TIME_MS, UNIFIED_KEY_QUERY_KEY } from '@/lib/unified-key-query'
 import { addAlias, aliasesFor, removeAlias } from '@/lib/alias-merge'
 import { Button } from '@/components/ui/button'
 import { ConfirmButton } from '@/components/confirm-button'
@@ -72,7 +73,8 @@ export default function ModelDetailPage() {
     queryFn: () => apiFetch('/api/fallback/routing'),
   })
   const { data: keyData } = useQuery<{ apiKey: string }>({
-    queryKey: ['unified-key'],
+    queryKey: UNIFIED_KEY_QUERY_KEY,
+    gcTime: UNIFIED_KEY_GC_TIME_MS,
     queryFn: () => apiFetch('/api/settings/api-key'),
   })
   const { data: unify } = useQuery<{ enabled: boolean; overrides: UnifyOverrides }>({

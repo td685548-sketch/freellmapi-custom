@@ -26,18 +26,23 @@ function jsonResponse(status: number, body: unknown): Response {
   })
 }
 
-describe('apiFetch 401 handling', () => {
-  let events: string[]
+function stubStorages() {
+  vi.stubGlobal('localStorage', makeStorage())
+  vi.stubGlobal('sessionStorage', makeStorage())
+  vi.stubGlobal('window', { addEventListener: () => {}, dispatchEvent: (e: Event) => { events.push(e.type); return true } })
+  // Node's CustomEvent (>=19) works; make sure it exists either way.
+  if (typeof globalThis.CustomEvent === 'undefined') {
+    vi.stubGlobal('CustomEvent', class extends Event {})
+  }
+}
 
+let events: string[]
+
+describe('apiFetch 401 handling', () => {
   beforeEach(() => {
     events = []
-    vi.stubGlobal('localStorage', makeStorage())
-    vi.stubGlobal('window', { addEventListener: () => {}, dispatchEvent: (e: Event) => { events.push(e.type); return true } })
-    // Node's CustomEvent (>=19) works; make sure it exists either way.
-    if (typeof globalThis.CustomEvent === 'undefined') {
-      vi.stubGlobal('CustomEvent', class extends Event {})
-    }
-    localStorage.setItem(TOKEN_KEY, 'session-token')
+    stubStorages()
+    sessionStorage.setItem(TOKEN_KEY, 'session-token')
   })
 
   afterEach(() => {
@@ -52,7 +57,7 @@ describe('apiFetch 401 handling', () => {
     const { apiFetch } = await import('./api')
 
     await expect(apiFetch('/api/keys')).rejects.toMatchObject({ status: 401, code: 'authentication_error' })
-    expect(localStorage.getItem(TOKEN_KEY)).toBeNull()
+    expect(sessionStorage.getItem(TOKEN_KEY)).toBeNull()
     expect(events).toContain('freellmapi:unauthorized')
   })
 
@@ -64,7 +69,7 @@ describe('apiFetch 401 handling', () => {
 
     await expect(apiFetch('/api/keys/custom/discover-models', { method: 'POST', body: '{}' }))
       .rejects.toMatchObject({ status: 401, code: 'upstream_error' })
-    expect(localStorage.getItem(TOKEN_KEY)).toBe('session-token')
+    expect(sessionStorage.getItem(TOKEN_KEY)).toBe('session-token')
     expect(events).toHaveLength(0)
   })
 
@@ -73,15 +78,15 @@ describe('apiFetch 401 handling', () => {
     const { apiFetch } = await import('./api')
 
     await expect(apiFetch('/api/whatever')).rejects.toMatchObject({ status: 401 })
-    expect(localStorage.getItem(TOKEN_KEY)).toBe('session-token')
+    expect(sessionStorage.getItem(TOKEN_KEY)).toBe('session-token')
     expect(events).toHaveLength(0)
   })
 })
 
 describe('apiFetch error messages', () => {
   beforeEach(() => {
-    vi.stubGlobal('localStorage', makeStorage())
-    vi.stubGlobal('window', { addEventListener: () => {}, dispatchEvent: () => true })
+    events = []
+    stubStorages()
   })
 
   afterEach(() => {
@@ -110,5 +115,42 @@ describe('apiFetch error messages', () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(500, {})))
     const { apiFetch } = await import('./api')
     await expect(apiFetch('/api/keys')).rejects.toMatchObject({ status: 500, message: 'HTTP 500' })
+  })
+})
+
+// Session mitigations: the dashboard token lives in sessionStorage (dies with
+// the tab) instead of localStorage (persists indefinitely). A token left in
+// localStorage by an older build must never be read back — it is purged.
+describe('dashboard token storage', () => {
+  beforeEach(() => {
+    events = []
+    stubStorages()
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('stores the token in sessionStorage, never in localStorage', async () => {
+    const { setToken } = await import('./api')
+    setToken('session-token')
+    expect(sessionStorage.getItem(TOKEN_KEY)).toBe('session-token')
+    expect(localStorage.getItem(TOKEN_KEY)).toBeNull()
+  })
+
+  it('ignores and purges a legacy token left in localStorage', async () => {
+    localStorage.setItem(TOKEN_KEY, 'legacy-persistent-token')
+    const { getToken } = await import('./api')
+    expect(getToken()).toBeNull()
+    expect(localStorage.getItem(TOKEN_KEY)).toBeNull()
+  })
+
+  it('clearToken removes the token from sessionStorage', async () => {
+    const { setToken, clearToken, getToken } = await import('./api')
+    setToken('session-token')
+    clearToken()
+    expect(getToken()).toBeNull()
+    expect(sessionStorage.getItem(TOKEN_KEY)).toBeNull()
   })
 })

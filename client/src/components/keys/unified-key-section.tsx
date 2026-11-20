@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '@/lib/api'
+import { UNIFIED_KEY_GC_TIME_MS, UNIFIED_KEY_QUERY_KEY } from '@/lib/unified-key-query'
 import { copyText } from '@/lib/clipboard'
 import { toast } from '@/lib/toast'
 import { Button } from '@/components/ui/button'
@@ -15,8 +16,9 @@ export function UnifiedKeySection({ canView = true, canRotate = true }: { canVie
   const [copied, setCopied] = useState(false)
 
   const { data, isError } = useQuery<{ apiKey?: string | null; apiKeyPrefix?: string | null; hasKey?: boolean }>({
-    queryKey: ['unified-key'],
+    queryKey: UNIFIED_KEY_QUERY_KEY,
     queryFn: () => apiFetch('/api/settings/api-key'),
+    gcTime: UNIFIED_KEY_GC_TIME_MS,
     enabled: canView,
   })
 
@@ -27,7 +29,7 @@ export function UnifiedKeySection({ canView = true, canRotate = true }: { canVie
       // Write the fresh key into the cache BEFORE unmasking: invalidating
       // alone would leave the old, now-revoked key in the cache until the
       // refetch lands, and it would flash unmasked in the meantime.
-      queryClient.setQueryData<{ apiKey: string | null; apiKeyPrefix: string | null; hasKey: boolean }>(['unified-key'], { apiKey: null, apiKeyPrefix: res.apiKeyPrefix ?? null, hasKey: true })
+      queryClient.setQueryData<{ apiKey: string | null; apiKeyPrefix: string | null; hasKey: boolean }>(UNIFIED_KEY_QUERY_KEY, { apiKey: null, apiKeyPrefix: res.apiKeyPrefix ?? null, hasKey: true })
       // Reveal the fresh key right away: the whole point of regenerating is
       // to move apps to the new value, and a masked box hides exactly the
       // string they need to copy next. Showing it doubles as the success

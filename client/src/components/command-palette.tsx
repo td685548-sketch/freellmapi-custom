@@ -21,6 +21,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
+import { UNIFIED_KEY_GC_TIME_MS, UNIFIED_KEY_QUERY_KEY } from '@/lib/unified-key-query'
 import { copyText } from '@/lib/clipboard'
 import { toast } from '@/lib/toast'
 import { apiBaseUrl } from '@/components/api-usage'
@@ -106,7 +107,8 @@ export function CommandPalette() {
     enabled: open,
   })
   const { data: keyData } = useQuery<{ apiKey?: string | null }>({
-    queryKey: ['unified-key'],
+    queryKey: UNIFIED_KEY_QUERY_KEY,
+    gcTime: UNIFIED_KEY_GC_TIME_MS,
     queryFn: () => apiFetch('/api/settings/api-key'),
     enabled: open && canRevealGateway,
   })

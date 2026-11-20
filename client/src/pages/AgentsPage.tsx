@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { CheckCircle2, ExternalLink, Globe } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
+import { UNIFIED_KEY_GC_TIME_MS, UNIFIED_KEY_QUERY_KEY } from '@/lib/unified-key-query'
 import { useI18n } from '@/i18n'
 import { PageHeader } from '@/components/page-header'
 import { CopyButton } from '@/components/copy-button'
@@ -73,8 +74,9 @@ export default function AgentsPage() {
   const { hasPermission } = useUserSession()
   const canRevealGateway = hasPermission('reveal_gateway_key')
   const { data: keyData } = useQuery<KeyResponse>({
-    queryKey: ['api-key'],
+    queryKey: UNIFIED_KEY_QUERY_KEY,
     queryFn: () => apiFetch('/api/settings/api-key'),
+    gcTime: UNIFIED_KEY_GC_TIME_MS,
     enabled: canRevealGateway,
   })
   const { data: byClient = [] } = useQuery<ClientAnalytics[]>({
