@@ -293,6 +293,25 @@ function buildConversationPrompt(messages: ChatMessage[]): string {
     .join('\n\n');
 }
 
+/**
+ * An empty DeepSeek stream is not an expired session: the token was accepted
+ * (the completion call itself succeeded), so say what DeepSeek reported. Only
+ * when it reported nothing do we fall back to the token advice.
+ */
+export function describeEmptyCompletion(status: string, hint: string): string {
+  const suffix = hint ? ` DeepSeek said: "${hint}".` : '';
+  if (status === 'CONTENT_FILTER') {
+    return `DeepSeek Web filtered this prompt and returned no answer — try rewording the system instruction or the question.${suffix}`;
+  }
+  if (status && status !== 'FINISHED') {
+    return `DeepSeek Web ended the turn without an answer (status ${status}).${suffix}`;
+  }
+  if (hint) {
+    return `DeepSeek Web returned no answer.${suffix}`;
+  }
+  return 'DeepSeek Web returned an empty completion (check that userToken is valid and not expired).';
+}
+
 function isThinkingModel(modelId: string): boolean {
   const m = modelId.toLowerCase();
   return m.includes('think') || m.includes('r1') || m.includes('reason');
@@ -906,6 +925,11 @@ export async function* streamDeepSeekWebChat(
       let buffer = '';
       let currentPath: '' | 'thinking' | 'content' = '';
       const searchResults: SearchResultEntry[] = [];
+      // Why an empty stream was empty: DeepSeek reports a refusal in-band
+      // (`response/status` = CONTENT_FILTER, or a hint) rather than as an
+      // error code, so keep the last one to explain a turn that yields nothing.
+      let streamStatus = '';
+      let streamHint = '';
 
       const emitText = (raw: string): DeepSeekWebDelta | null => {
         const text = formatStreamContent(raw, opts.modelId);
@@ -951,6 +975,18 @@ export async function* streamDeepSeekWebChat(
         const p = data.p;
         const o = data.o;
         const v = data.v;
+
+        if (p === 'response/status') {
+          // A status word (WIP / FINISHED / CONTENT_FILTER ...), never answer text.
+          if (typeof v === 'string') streamStatus = v.toUpperCase();
+          return out;
+        }
+        if (v && typeof v === 'object' && !Array.isArray(v) && typeof v.response?.status === 'string') {
+          streamStatus = v.response.status.toUpperCase();
+        }
+        if (String(data.type ?? '').toLowerCase() === 'hint' && typeof data.content === 'string' && data.content.trim()) {
+          streamHint = data.content.trim().slice(0, 200);
+        }
 
         if (v && typeof v === 'object' && !Array.isArray(v) && v.response) {
           if (v.response.thinking_enabled === true) currentPath = 'thinking';
@@ -1053,10 +1089,7 @@ export async function* streamDeepSeekWebChat(
       }
 
       if (!emittedAny) {
-        throw new DeepSeekWebChatError(
-          'DeepSeek Web returned an empty completion (check that userToken is valid and not expired).',
-          502,
-        );
+        throw new DeepSeekWebChatError(describeEmptyCompletion(streamStatus, streamHint), 502);
       }
       return;
     } catch (err) {
