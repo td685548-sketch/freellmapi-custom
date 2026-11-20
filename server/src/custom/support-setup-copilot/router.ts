@@ -44,6 +44,7 @@ import {
   normalizePlatformPath,
 } from './platform-guide.js';
 import { detectConversationLocale, runSupportSetupCopilotTurn } from './playbook.js';
+import { canUseSystemTarget, handleSystemTargetChatTurn } from './system-target.js';
 import {
   getSetupProposalForUser,
   listPendingProposalsForUser,
@@ -149,7 +150,7 @@ const requirementsHintSchema = z
 const chatBodySchema = z
   .object({
     tenantId: z.number().int().positive().nullable().optional(),
-    targetMode: z.enum(['create_tenant', 'update_tenant']).optional(),
+    targetMode: z.enum(['create_tenant', 'update_tenant', 'system']).optional(),
     locale: z.enum(['vi', 'en']).optional(),
     currentPath: z.string().trim().max(240).optional(),
     messages: z.array(chatMessageSchema).min(1).max(30),
@@ -357,6 +358,7 @@ supportSetupCopilotRouter.get('/status', (req: Request, res: Response) => {
     visible: true,
     memberCopilotVisible: true,
     canCreateTenant: scope.canCreateTenant,
+    canUseSystemTarget: canUseSystemTarget(user),
     availableModels: listCopilotModelOptions(),
     tenants: scope.tenants.map((entry) => {
       const canSeeKey =
@@ -584,6 +586,28 @@ supportSetupCopilotRouter.post('/chat', async (req: Request, res: Response, next
     });
     if (grantResponse) {
       res.json(grantResponse);
+      return;
+    }
+
+    // 2d. System Target (platform-wide, full-power admins only): system
+    // settings + platform guidance, never a tenant. Placed after the
+    // identity / grant handlers above and before any tenant gate.
+    if (targetMode === 'system') {
+      if (!canUseSystemTarget(user)) {
+        throw new SupportSetupCopilotError(
+          403,
+          'forbidden',
+          'The System target is only available to administrators with full access.',
+        );
+      }
+      res.json(
+        handleSystemTargetChatTurn({
+          user,
+          messages,
+          locale: effectiveLocale,
+          currentPath,
+        }),
+      );
       return;
     }
 

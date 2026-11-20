@@ -180,7 +180,7 @@ export function SupportSetupCopilot() {
   const [roadmapOpen, setRoadmapOpen] = useState(false);
   const [briefOpen, setBriefOpen] = useState(false);
   const [whoamiOpen, setWhoamiOpen] = useState(false);
-  const [targetSelection, setTargetSelection] = useState<'auto' | 'new' | number>('auto');
+  const [targetSelection, setTargetSelection] = useState<'auto' | 'new' | 'system' | number>('auto');
   const [input, setInput] = useState('');
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [brief, setBrief] = useState<BriefDraft>(() => defaultBrief(uiLocale));
@@ -195,8 +195,9 @@ export function SupportSetupCopilot() {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesRef = useRef<HTMLDivElement | null>(null);
 
+  // 'system' needs no tenant diagnostic, so it reads the status like 'new' does.
   const statusQueryArg =
-    targetSelection === 'new'
+    targetSelection === 'new' || targetSelection === 'system'
       ? null
       : typeof targetSelection === 'number'
         ? targetSelection
@@ -227,6 +228,8 @@ export function SupportSetupCopilot() {
   const tenants = statusData?.tenants ?? [];
   const activeTenantDiag = statusData?.activeTenant ?? null;
   const canCreateTenant = Boolean(statusData?.canCreateTenant);
+  const canUseSystemTarget = Boolean(statusData?.canUseSystemTarget);
+  const isSystemTarget = canUseSystemTarget && targetSelection === 'system';
   const canEditAnyStep =
     canCreateTenant || Boolean(activeTenantDiag?.steps.some((st) => st.canEdit));
 
@@ -253,7 +256,9 @@ export function SupportSetupCopilot() {
     }) =>
       postSupportSetupChat({
         ...(isTenantSetupVisible
-          ? { tenantId: resolvedTenantId, targetMode: resolvedTargetMode }
+          ? isSystemTarget
+            ? { tenantId: null, targetMode: 'system' as const }
+            : { tenantId: resolvedTenantId, targetMode: resolvedTargetMode }
           : {}),
         locale: payload.effectiveLocale ?? uiLocale,
         currentPath: location.pathname,
@@ -1286,7 +1291,9 @@ export function SupportSetupCopilot() {
                       id="ssc-tenant-select"
                       className="ssc-select"
                       value={
-                        targetSelection === 'new'
+                        isSystemTarget
+                          ? 'system'
+                          : targetSelection === 'new'
                           ? 'new'
                           : resolvedTenantId !== null
                             ? String(resolvedTenantId)
@@ -1294,7 +1301,9 @@ export function SupportSetupCopilot() {
                       }
                       onChange={(e) => {
                         const val = e.target.value;
-                        setTargetSelection(val === 'new' ? 'new' : Number(val));
+                        setTargetSelection(
+                          val === 'new' ? 'new' : val === 'system' ? 'system' : Number(val),
+                        );
                       }}
                     >
                       {tenants.map((t) => (
@@ -1303,6 +1312,7 @@ export function SupportSetupCopilot() {
                         </option>
                       ))}
                       {canCreateTenant && <option value="new">{s.newTenantOption}</option>}
+                      {canUseSystemTarget && <option value="system">{s.systemTargetOption}</option>}
                     </select>
                   </div>
 
@@ -1327,7 +1337,7 @@ export function SupportSetupCopilot() {
                     <span>{s.whoamiPillLabel}</span>
                   </button>
 
-                  {canEditAnyStep ? (
+                  {canEditAnyStep && !isSystemTarget ? (
                     <button
                       type="button"
                       className={`ssc-pill-toggle ${briefOpen ? 'ssc-pill-toggle--active' : ''}`}
@@ -1346,7 +1356,13 @@ export function SupportSetupCopilot() {
                   )}
                 </div>
 
-                {activeTenantDiag && (
+                {isSystemTarget && (
+                  <p className="ssc-system-hint" data-testid="copilot-system-target-hint">
+                    {s.systemTargetHint}
+                  </p>
+                )}
+
+                {activeTenantDiag && !isSystemTarget && (
                   <div className="ssc-progress-row">
                     <span className="ssc-progress-label">
                       {formatSetupString(s.roadmapProgress, {
@@ -1543,7 +1559,7 @@ export function SupportSetupCopilot() {
             </div>
           )}
 
-          {briefOpen && isTenantSetupVisible && canEditAnyStep && (
+          {briefOpen && isTenantSetupVisible && canEditAnyStep && !isSystemTarget && (
             <div className="ssc-brief" data-testid="support-setup-brief">
               <div style={{ fontSize: 11.5, fontWeight: 600 }}>{s.briefHeading}</div>
               <div className="ssc-brief-grid">
@@ -1671,12 +1687,57 @@ export function SupportSetupCopilot() {
               <div className="ssc-welcome">
                 <span className="ssc-welcome-badge">
                   <Sparkles size={11} />
-                  <span>{isTenantSetupVisible ? s.welcomeBadge : s.memberWelcomeBadge}</span>
+                  <span>
+                    {isSystemTarget
+                      ? s.systemWelcomeBadge
+                      : isTenantSetupVisible
+                        ? s.welcomeBadge
+                        : s.memberWelcomeBadge}
+                  </span>
                 </span>
-                <h3>{isTenantSetupVisible ? s.welcomeTitle : s.memberWelcomeTitle}</h3>
-                <p>{isTenantSetupVisible ? s.welcomeDescription : s.memberWelcomeDescription}</p>
+                <h3>
+                  {isSystemTarget
+                    ? s.systemWelcomeTitle
+                    : isTenantSetupVisible
+                      ? s.welcomeTitle
+                      : s.memberWelcomeTitle}
+                </h3>
+                <p>
+                  {isSystemTarget
+                    ? s.systemWelcomeDescription
+                    : isTenantSetupVisible
+                      ? s.welcomeDescription
+                      : s.memberWelcomeDescription}
+                </p>
                 <div className="ssc-starters">
-                  {isTenantSetupVisible ? (
+                  {isSystemTarget ? (
+                    <>
+                      {(
+                        [
+                          ['copilot-starter-system-settings', s.systemStarterSettings, s.systemStarterSettingsDesc, s.systemStarterSettingsPrompt, Wand2],
+                          ['copilot-starter-system-overview', s.systemStarterOverview, s.systemStarterOverviewDesc, s.systemStarterOverviewPrompt, Sparkles],
+                          ['copilot-starter-whoami', s.starterWhoAmI, s.starterWhoAmIDesc, s.starterWhoAmIPrompt, ShieldCheck],
+                        ] as const
+                      ).map(([testId, title, desc, prompt, Icon]) => (
+                        <button
+                          key={testId}
+                          type="button"
+                          className="ssc-starter-btn"
+                          data-testid={testId}
+                          onClick={() => sendMessage(prompt)}
+                        >
+                          <span className="ssc-starter-icon" aria-hidden="true">
+                            <Icon size={15} />
+                          </span>
+                          <span className="ssc-starter-copy">
+                            <span className="ssc-starter-title">{title}</span>
+                            <span className="ssc-starter-desc">{desc}</span>
+                          </span>
+                          <ChevronRight size={14} className="ssc-starter-arrow" aria-hidden="true" />
+                        </button>
+                      ))}
+                    </>
+                  ) : isTenantSetupVisible ? (
                     <>
                       {canEditAnyStep && (
                         <button

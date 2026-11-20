@@ -1230,7 +1230,7 @@ export function buildSanitizedSetupProposal(params: {
 
 const STIFF_NUMBERED_FORM_RE = /(?:^|\n)\s*1[.)]\s+.+\n\s*2[.)]\s+/m;
 
-function resolveSystemSettingsTurnResponse(params: {
+export function resolveSystemSettingsTurnResponse(params: {
   evalResult: EvaluateSystemSettingsProposalResult;
   userId: number;
   locale: 'vi' | 'en';
