@@ -41,12 +41,16 @@ describe('validateToolArguments', () => {
     if (!verdict.ok) expect(verdict.reason.startsWith('get_weather:')).toBe(true);
   });
 
-  it('names the violated rule and the value the model sent', () => {
+  it('names the violated rule but never echoes the value the model sent', () => {
     const verdict = validateToolArguments('get_weather', '{"city":"Berlin","days":"three"}', WEATHER_SCHEMA);
     expect(verdict.ok).toBe(false);
     if (!verdict.ok) {
       expect(verdict.reason).toContain('[type]');
-      expect(verdict.reason).toContain('got "three"');
+      // The reason reaches the client inside the failover trail, so the
+      // model's arguments must not leak through it — see
+      // tool-validate-surfaces.test.ts.
+      expect(verdict.reason).not.toContain('three');
+      expect(verdict.reason).not.toContain('(got');
     }
   });
 
@@ -59,12 +63,13 @@ describe('validateToolArguments', () => {
     }
   });
 
-  it('truncates a long offending value instead of pasting the whole argument', () => {
+  it('never echoes a long offending value', () => {
     const long = 'x'.repeat(200);
     const verdict = validateToolArguments('get_weather', JSON.stringify({ city: 'Berlin', days: long }), WEATHER_SCHEMA);
     expect(verdict.ok).toBe(false);
     if (!verdict.ok) {
       expect(verdict.reason).not.toContain(long);
+      expect(verdict.reason).not.toContain('xxx');
       expect(verdict.reason.length).toBeLessThan(400);
     }
   });

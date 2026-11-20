@@ -132,38 +132,22 @@ export function validateToolArguments(
 
   if (validate(parsed)) return { ok: true };
 
-  // A bare "/path message" names the field but not the rule or the value, so
-  // an operator reading the trail cannot tell a wrong type from a missing
-  // key without replaying the call. The keyword disambiguates the rule and
-  // the (truncated) received value shows what the model actually sent.
+  // A bare "/path message" names the field but not the rule, so an operator
+  // reading the trail cannot tell a wrong type from a missing key without
+  // replaying the call. The keyword disambiguates the rule. The received
+  // value is deliberately NOT echoed here: this reason travels in the
+  // failover attempt trail, which the 502 response returns to the client —
+  // echoing it would hand the caller the model's (possibly sensitive) bad
+  // arguments, an invariant pinned by tool-validate-surfaces.test.ts.
   const detail = (validate.errors ?? [])
     .slice(0, 3)
     .map(e => {
       const path = e.instancePath || '/';
       const keyword = e.keyword ? ` [${e.keyword}]` : '';
-      const got = valueAt(parsed, e.instancePath);
-      const shown = got === undefined ? '' : ` (got ${truncateValue(got)})`;
-      return `${path}${keyword} ${e.message ?? 'is invalid'}${shown}`;
+      return `${path}${keyword} ${e.message ?? 'is invalid'}`;
     })
     .join('; ');
   return { ok: false, reason: `${toolName}: ${detail || 'does not match its schema'}` };
-}
-
-/** Resolve a JSON-pointer path (e.g. "/a/0/b") against the parsed arguments. */
-function valueAt(root: unknown, instancePath: string | undefined): unknown {
-  if (!instancePath) return root;
-  let cur: unknown = root;
-  for (const raw of instancePath.split('/').slice(1)) {
-    if (cur === null || typeof cur !== 'object') return undefined;
-    const key = raw.replace(/~1/g, '/').replace(/~0/g, '~');
-    cur = (cur as Record<string, unknown>)[key];
-  }
-  return cur;
-}
-
-function truncateValue(value: unknown): string {
-  const s = JSON.stringify(value) ?? String(value);
-  return s.length > 80 ? `${s.slice(0, 80)}…` : s;
 }
 
 /**
