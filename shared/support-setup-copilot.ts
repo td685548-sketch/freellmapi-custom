@@ -512,6 +512,8 @@ export interface SupportSetupStatusResponse {
   visible: boolean;
   memberCopilotVisible?: boolean;
   canCreateTenant: boolean;
+  /** Full-power (wildcard) admins only: the platform-wide "System" Target is offered. */
+  canUseSystemTarget?: boolean;
   availableModels: Array<{ id: string; label: string }>;
   tenants: SupportSetupStatusTenantItem[];
   activeTenant: SupportSetupTenantDiagnostic | null;
@@ -526,7 +528,8 @@ export interface SupportSetupChatMessage {
 
 export interface SupportSetupChatRequest {
   tenantId?: number | null;
-  targetMode?: 'create_tenant' | 'update_tenant';
+  /** 'system' = platform-wide Target (system settings, permissions); full-power admins only. */
+  targetMode?: 'create_tenant' | 'update_tenant' | 'system';
   locale?: 'vi' | 'en';
   currentPath?: string;
   messages: SupportSetupChatMessage[];

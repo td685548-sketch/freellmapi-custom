@@ -1431,4 +1431,85 @@ it('renders surgical proposal badge and defaults only targeted steps to checked'
     await flush();
     expect(chatBodies.at(-1)?.messages?.at(-1)?.content).toBe('Tôi có quyền gì?');
   });
+
+  it('offers a System target only to full-admin, sends targetMode "system" with no tenant, and hides tenant-only UI', async () => {
+    const chatBodies: Array<{ tenantId?: number | null; targetMode?: string; messages?: Array<{ content: string }> }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith('/api/user/session')) {
+          return json({ userId: 1, email: 'admin@example.com', role: 'admin', isPrimary: true, permissions: ['*'] });
+        }
+        if (url.includes('/api/support-setup-copilot/status')) {
+          return json({ ...sampleStatus(true), canUseSystemTarget: true });
+        }
+        if (url.endsWith('/api/support-setup-copilot/chat')) {
+          chatBodies.push(JSON.parse(String(init?.body ?? '{}')));
+          const resp: SupportSetupChatResponse = {
+            ok: true,
+            reply: 'System-wide overview',
+            intent: 'guide',
+            missingQuestions: [],
+            suggestedQuickReplies: [],
+            proposal: null,
+            modelUsed: null,
+            usedFallback: true,
+          };
+          return json(resp);
+        }
+        return json({});
+      }),
+    );
+
+    mount('/thruline/support-guardrails', 'en');
+    await flush();
+    act(() => (container.querySelector('[data-testid="support-setup-copilot-launcher"]') as HTMLButtonElement).click());
+    await flush();
+
+    const select = container.querySelector('#ssc-tenant-select') as HTMLSelectElement;
+    const optionValues = Array.from(select.options).map((o) => o.value);
+    expect(optionValues).toContain('system');
+    // Tenant Target keeps the 7-step progress and Quick Brief.
+    expect(container.querySelector('[data-testid="support-setup-roadmap-toggle"]')).not.toBeNull();
+
+    act(() => {
+      select.value = 'system';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-testid="copilot-system-target-hint"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="support-setup-roadmap-toggle"]')).toBeNull();
+    expect(container.textContent).toContain('Manage the whole platform from here');
+
+    const starter = container.querySelector('[data-testid="copilot-starter-system-settings"]') as HTMLButtonElement;
+    act(() => starter.click());
+    await flush();
+    expect(chatBodies.at(-1)?.targetMode).toBe('system');
+    expect(chatBodies.at(-1)?.tenantId).toBeNull();
+    expect(chatBodies.at(-1)?.messages?.at(-1)?.content).toBe('What system settings can you help toggle?');
+  });
+
+  it('does not offer the System target when the server does not grant it', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.endsWith('/api/user/session')) {
+          return json({ userId: 2, email: 'ops@example.com', role: 'member', permissions: ['edit_cache'] });
+        }
+        if (url.includes('/api/support-setup-copilot/status')) {
+          return json(sampleStatus(true));
+        }
+        return json({});
+      }),
+    );
+
+    mount('/thruline/support-guardrails', 'en');
+    await flush();
+    act(() => (container.querySelector('[data-testid="support-setup-copilot-launcher"]') as HTMLButtonElement).click());
+    await flush();
+
+    const select = container.querySelector('#ssc-tenant-select') as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.value)).not.toContain('system');
+  });
 });
