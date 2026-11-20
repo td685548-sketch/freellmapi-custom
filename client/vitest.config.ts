@@ -57,7 +57,15 @@ export default defineConfig({
       // functions 13.6%, lines 22.7%. Thresholds sit 1pt below the floored
       // baseline — they exist to catch regressions, not to force coverage
       // up in this PR.
-      thresholds: { statements: 20, branches: 16, functions: 12, lines: 21 },
+      //
+      // Thresholds are evaluated ONLY on a full-suite run (same rule as the
+      // server suite: a `--shard` slice cannot meet a global threshold, and
+      // PR #169 showed that combination failing a green suite). The client
+      // suite is never sharded in CI today, but the guard is cheap insurance
+      // against a future sharded run collecting coverage.
+      ...(isShardedRun()
+        ? {}
+        : { thresholds: { statements: 20, branches: 16, functions: 12, lines: 21 } }),
     },
     // jsdom 27 delegates Storage to Node's experimental webstorage, which is
     // undefined without --experimental-webstorage; the setup file installs a
@@ -65,3 +73,10 @@ export default defineConfig({
     setupFiles: ['./vitest.setup-storage.ts'],
   },
 })
+
+// True when this invocation runs a `--shard=N/M` slice (space or `=`
+// form). Only a sharded CI job passes it; the coverage job and local
+// `test:coverage` runs never do.
+function isShardedRun(): boolean {
+  return process.argv.some((a) => a === '--shard' || a.startsWith('--shard='))
+}

@@ -42,7 +42,24 @@ export default defineConfig({
       // statements 42.21%, branches 33.71%, functions 49.06%, lines
       // 43.17%. Thresholds sit 1pt below the floored baseline — they exist
       // to catch regressions, not to force coverage up in this PR.
-      thresholds: { statements: 41, branches: 32, functions: 48, lines: 42 },
+      //
+      // Thresholds are evaluated ONLY on a full-suite run. The old CI
+      // workflow still collects coverage per shard (COVERAGE=1 on Node 22
+      // shards), and a quarter-suite slice cannot meet a global threshold:
+      // that combination failed all four shards on PR #169 even though
+      // every test passed. A `--shard` run therefore skips the thresholds
+      // (coverage is still collected and reported); the dedicated coverage
+      // job runs the whole suite without --shard, so it still enforces them.
+      ...(isShardedRun()
+        ? {}
+        : { thresholds: { statements: 41, branches: 32, functions: 48, lines: 42 } }),
     },
   },
 });
+
+// True when this invocation runs a `--shard=N/M` slice (space or `=`
+// form). Only the sharded CI job passes it; the coverage job and local
+// `test:coverage` runs never do.
+function isShardedRun(): boolean {
+  return process.argv.some((a) => a === '--shard' || a.startsWith('--shard='));
+}
