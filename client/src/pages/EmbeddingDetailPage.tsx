@@ -7,7 +7,8 @@ import { UNIFIED_KEY_GC_TIME_MS, UNIFIED_KEY_QUERY_KEY } from '@/lib/unified-key
 import { CopyButton } from '@/components/copy-button'
 import { PageHeader } from '@/components/page-header'
 import { ModelsTabs } from '@/components/models-tabs'
-import { apiBaseUrl, ApiUsageBlock } from '@/components/api-usage'
+import { ApiUsageBlock } from '@/components/api-usage'
+import { apiBaseUrl } from '@/components/api-base-url'
 
 interface ProviderEntry {
   id: number

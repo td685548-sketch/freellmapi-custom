@@ -166,7 +166,7 @@ export function UpdateReminder() {
 
     void check()
     return () => { cancelled = true }
-  }, [version, refresh])
+  }, [version, refresh, canCheckUpdates])
 
   // Dismissal is per version and has to survive a reload, or the pill is back
   // on the next page load for a release the operator already dealt with.

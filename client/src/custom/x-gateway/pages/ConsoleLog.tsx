@@ -13,7 +13,7 @@ import {
   fmtDollars,
   resolveClientModelPricing,
   type ProviderPricingMap,
-} from './AccountUsage'
+} from './account-usage-pricing'
 
 const MAX_TERMINAL_LINES = 1000
 const CONSOLE_LOGS_URL = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api/translator/console-logs`

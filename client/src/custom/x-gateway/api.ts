@@ -8,6 +8,8 @@ import type {
   ProviderAccountAuthResult,
   ProviderAccountPollResponse,
   ProviderAccountTestResponse,
+  ProviderRoutingStrategy,
+  ProviderThinkingMode,
 } from '../../../../shared/x-accounts'
 
 const base = '/api/thruline-accounts'
@@ -35,6 +37,12 @@ export interface ProviderModelsConfigResponse {
   disabledModels: string[]
   customModels: Array<{ id: string; name: string }>
   modelAliases: Record<string, string>
+  // Routing config the server returns alongside the model lists
+  // (see GET /providers/:id/models in provider-accounts/router.ts).
+  strategy?: ProviderRoutingStrategy
+  stickyLimit?: number
+  thinkingMode?: ProviderThinkingMode
+  customHeaders?: Record<string, string>
 }
 
 export interface CustomProviderNode {

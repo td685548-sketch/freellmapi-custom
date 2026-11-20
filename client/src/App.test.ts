@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { extractCookieCredential } from './custom/x-gateway/ConnectAccountDialog'
+import { extractCookieCredential } from './custom/x-gateway/cookie-credential'
 
 // The Playground only scrolls inside its transcript pane if every ancestor
 // between <body> and that pane carries a definite height. One unconditional

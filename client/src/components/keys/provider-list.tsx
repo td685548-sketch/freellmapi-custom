@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '@/lib/api'
-import { Button, buttonVariants } from '@/components/ui/button'
+import { Button } from '@/components/ui/button'
+import { buttonVariants } from '@/components/ui/button-variants'
 import { ConfirmButton } from '@/components/confirm-button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
@@ -32,7 +33,7 @@ import {
   customModelDeletePath,
   statusDot,
   statusLabelKey,
-} from './shared'
+} from './shared-data'
 import { balanceByKey } from './quota-balance'
 import { ApinexCheckinNotice } from './apinex-checkin-notice'
 import type { HealthData } from './shared'

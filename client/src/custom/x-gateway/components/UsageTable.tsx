@@ -109,14 +109,18 @@ export default function UsageTable<T extends UsageValueSummary>({
     return new Set()
   })
 
-  useEffect(() => {
+  // A different table re-reads its own stored expansion (render adjustment;
+  // the initial key was already read by the useState initializer above).
+  const [prevStorageKey, setPrevStorageKey] = useState(storageKey)
+  if (storageKey !== prevStorageKey) {
+    setPrevStorageKey(storageKey)
     try {
       const saved = localStorage.getItem(storageKey)
       setExpanded(saved ? new Set(JSON.parse(saved) as string[]) : new Set())
     } catch {
       setExpanded(new Set())
     }
-  }, [storageKey])
+  }
 
   useEffect(() => {
     try {

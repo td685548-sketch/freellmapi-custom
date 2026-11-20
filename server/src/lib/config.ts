@@ -1,4 +1,5 @@
 const DEFAULT_RPM = 120;
+const DEFAULT_PORT = 3001;
 
 // JSON body ceiling for the LLM wire surfaces (/v1, /v1beta, /mcp, Ollama
 // /api/*). Vision requests inline base64 images (~33% inflation over the raw
@@ -19,11 +20,52 @@ const DEFAULT_RPM = 120;
 // own smaller fixed ceiling.
 const DEFAULT_REQUEST_BODY_LIMIT_MB = 25;
 
+// Invalid numeric env vars that already produced a fallback warning in this
+// process. loadConfig() runs once at boot, but tests and re-reads call it
+// repeatedly — warn once per var so a bad value does not spam the log.
+const warnedInvalidEnvVars = new Set<string>();
+
+function warnOnce(envVar: string, message: string): void {
+  if (warnedInvalidEnvVars.has(envVar)) return;
+  warnedInvalidEnvVars.add(envVar);
+  console.warn(message);
+}
+
+/** Test-only reset for the warn-once set above. */
+export function resetConfigParseWarningsForTests(): void {
+  warnedInvalidEnvVars.clear();
+}
+
+// Validate PORT. Previously `process.env.PORT ?? 3001` was passed through
+// verbatim, so PORT=abc became Number("abc") = NaN and listen() threw a
+// generic error, PORT= (empty) became 0 and bound a random port, and
+// PORT=99999 threw ERR_SOCKET_BAD_PORT — all far from the cause. Fail fast
+// here with a message that names the bad value and the valid range.
+// Unset/blank → default 3001.
+export function parsePort(raw: string | undefined = process.env.PORT): number {
+  if (raw === undefined || raw.trim() === '') return DEFAULT_PORT;
+  const trimmed = raw.trim();
+  const n = /^\d+$/.test(trimmed) ? Number(trimmed) : NaN;
+  if (!Number.isInteger(n) || n < 1 || n > 65535) {
+    throw new Error(
+      `Invalid PORT=${JSON.stringify(raw)}: must be an integer between 1 and 65535. ` +
+        `Set PORT to e.g. PORT=3001, or unset it to use the default ${DEFAULT_PORT}.`,
+    );
+  }
+  return n;
+}
+
 function parseRateLimitRpm(): number {
   const raw = process.env.PROXY_RATE_LIMIT_RPM;
   if (raw === undefined || raw.trim() === '') return DEFAULT_RPM;
   const n = Number(raw);
-  if (!Number.isFinite(n) || n < 0) return DEFAULT_RPM;
+  if (!Number.isFinite(n) || n < 0) {
+    warnOnce(
+      'PROXY_RATE_LIMIT_RPM',
+      `[config] Invalid PROXY_RATE_LIMIT_RPM=${JSON.stringify(raw)}: must be a non-negative number — falling back to the default ${DEFAULT_RPM} RPM.`,
+    );
+    return DEFAULT_RPM;
+  }
   return Math.floor(n);
 }
 
@@ -31,12 +73,18 @@ function parseRequestBodyLimitBytes(): number {
   const raw = process.env.REQUEST_BODY_LIMIT_MB;
   if (raw === undefined || raw.trim() === '') return DEFAULT_REQUEST_BODY_LIMIT_MB * 1024 * 1024;
   const n = Number(raw);
-  if (!Number.isFinite(n) || n < 1) return DEFAULT_REQUEST_BODY_LIMIT_MB * 1024 * 1024;
+  if (!Number.isFinite(n) || n < 1) {
+    warnOnce(
+      'REQUEST_BODY_LIMIT_MB',
+      `[config] Invalid REQUEST_BODY_LIMIT_MB=${JSON.stringify(raw)}: must be a number >= 1 — falling back to the default ${DEFAULT_REQUEST_BODY_LIMIT_MB} MB.`,
+    );
+    return DEFAULT_REQUEST_BODY_LIMIT_MB * 1024 * 1024;
+  }
   return Math.floor(n) * 1024 * 1024;
 }
 
 export interface Config {
-  port: number | string;
+  port: number;
   host: string;
   dbPath: string | null;
   dashboardOrigins: string[];
@@ -77,7 +125,7 @@ export interface Config {
 
 export function loadConfig(): Config {
   return {
-    port: process.env.PORT ?? 3001,
+    port: parsePort(),
     // Loopback-only by default: the dashboard and the /v1 proxy listen on
     // 127.0.0.1 unless the operator asks for more. The old default ('::',
     // dual-stack, all interfaces) exposed a single-user server with no

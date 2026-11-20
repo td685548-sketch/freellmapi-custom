@@ -659,7 +659,7 @@ const baseComponents: Components = {
   button: CustomButton as unknown as Components['button'],
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 const customComponents: Components = {
   ...baseComponents,
   // Custom UI components used by LLMs (e.g. 9Router / Claude / GPT custom tags)

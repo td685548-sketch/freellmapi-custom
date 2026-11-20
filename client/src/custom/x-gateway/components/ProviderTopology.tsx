@@ -45,6 +45,35 @@ export interface ActiveRequestInfo {
 const FE_ACTIVE_TIMEOUT_MS = 60_000
 const FE_ACTIVE_TICK_MS = 1_000
 
+// The transform that fits the whole layout in the viewport, or null when
+// the container has no size yet. Module-level so both the Fit button's
+// callback and the auto-fit adjustment below share one computation.
+function fitTransformFor(
+  width: number,
+  height: number,
+  bounds: { minX: number; maxX: number; minY: number; maxY: number },
+): { x: number; y: number; scale: number } | null {
+  if (width <= 0 || height <= 0) return null
+  const { minX, maxX, minY, maxY } = bounds
+  const bw = Math.max(1, maxX - minX)
+  const bh = Math.max(1, maxY - minY)
+  const pad = 48
+  const scaleX = (width - pad * 2) / bw
+  const scaleY = (height - pad * 2) / bh
+  const scale = Math.max(0.25, Math.min(1.25, Math.min(scaleX, scaleY)))
+  const cx = (minX + maxX) / 2
+  const cy = (minY + maxY) / 2
+  return {
+    x: width / 2 - cx * scale,
+    y: height / 2 - cy * scale,
+    scale,
+  }
+}
+
+function nowMs(): number {
+  return Date.now()
+}
+
 const STATUS_COLOR: Record<TopologyStatus, string> = {
   healthy: '#10b981',
   degraded: '#f59e0b',
@@ -227,57 +256,60 @@ export default function ProviderTopology({
   const lastSet = useMemo(() => new Set(lastProvider ? [lastProvider.toLowerCase()] : []), [lastProvider])
   const errorSet = useMemo(() => new Set(errorProvider ? [errorProvider.toLowerCase()] : []), [errorProvider])
 
-  // Track firstSeen per active provider; drop if running longer than FE_ACTIVE_TIMEOUT_MS
-  const firstSeenRef = useRef<Record<string, number>>({})
-  const [tick, setTick] = useState(0)
+  // Track firstSeen per active provider; drop if running longer than FE_ACTIVE_TIMEOUT_MS.
+  // `firstSeen` is state (read by the memo below), so it is maintained with a
+  // render adjustment instead of a ref + effect; `now` ticks once a second
+  // while anything is active so entries expire on time.
+  const [firstSeen, setFirstSeen] = useState<Record<string, number>>({})
+  const [now, setNow] = useState(Date.now)
 
-  useEffect(() => {
-    const seen = firstSeenRef.current
-    const now = Date.now()
+  {
+    let next: Record<string, number> | null = null
     for (const p of rawActiveSet) {
-      if (!seen[p]) seen[p] = now
+      if (firstSeen[p] === undefined) {
+        next = { ...(next ?? firstSeen), [p]: nowMs() }
+      }
     }
-    for (const p of Object.keys(seen)) {
-      if (!rawActiveSet.has(p)) delete seen[p]
+    for (const p of Object.keys(next ?? firstSeen)) {
+      if (!rawActiveSet.has(p)) {
+        const copy = { ...(next ?? firstSeen) }
+        delete copy[p]
+        next = copy
+      }
     }
-  }, [rawActiveSet])
+    if (next) setFirstSeen(next)
+  }
 
   useEffect(() => {
     if (rawActiveSet.size === 0) return
-    const id = setInterval(() => setTick(t => t + 1), FE_ACTIVE_TICK_MS)
+    const id = setInterval(() => setNow(Date.now()), FE_ACTIVE_TICK_MS)
     return () => clearInterval(id)
   }, [rawActiveSet])
 
   const activeSet = useMemo(() => {
-    const now = Date.now()
     const filtered = new Set<string>()
     for (const p of rawActiveSet) {
-      const ts = firstSeenRef.current[p]
+      const ts = firstSeen[p]
       if (!ts || now - ts < FE_ACTIVE_TIMEOUT_MS) filtered.add(p)
     }
     return filtered
-  }, [rawActiveSet, tick])
+  }, [rawActiveSet, firstSeen, now])
 
   const layout = useMemo(() => buildRadialLayout(nodes), [nodes])
 
   const fitView = useCallback(() => {
-    const { width, height } = size
-    if (width <= 0 || height <= 0) return
-    const { minX, maxX, minY, maxY } = layout.bounds
-    const bw = Math.max(1, maxX - minX)
-    const bh = Math.max(1, maxY - minY)
-    const pad = 48
-    const scaleX = (width - pad * 2) / bw
-    const scaleY = (height - pad * 2) / bh
-    const scale = Math.max(0.25, Math.min(1.25, Math.min(scaleX, scaleY)))
-    const cx = (minX + maxX) / 2
-    const cy = (minY + maxY) / 2
-    setTransform({
-      x: width / 2 - cx * scale,
-      y: height / 2 - cy * scale,
-      scale,
-    })
+    const next = fitTransformFor(size.width, size.height, layout.bounds)
+    if (next) setTransform(next)
   }, [layout.bounds, size])
+
+  // Refit when nodes arrive/leave or the viewport changes (render adjustment,
+  // not an effect); panning and zooming leave the transform alone.
+  const [prevFitKey, setPrevFitKey] = useState({ length: nodes.length, bounds: layout.bounds, size })
+  if (nodes.length !== prevFitKey.length || layout.bounds !== prevFitKey.bounds || size !== prevFitKey.size) {
+    setPrevFitKey({ length: nodes.length, bounds: layout.bounds, size })
+    const next = fitTransformFor(size.width, size.height, layout.bounds)
+    if (next) setTransform(next)
+  }
 
   useEffect(() => {
     const el = containerRef.current
@@ -293,10 +325,6 @@ export default function ProviderTopology({
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
-
-  useEffect(() => {
-    fitView()
-  }, [fitView, nodes.length])
 
   const handleZoom = (delta: number) => {
     setTransform(prev => {

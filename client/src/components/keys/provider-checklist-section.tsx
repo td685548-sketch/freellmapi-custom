@@ -4,7 +4,7 @@ import { apiFetch } from '@/lib/api'
 import { ChevronDown, ExternalLink, KeyRound, Plus, Unlock } from 'lucide-react'
 import { Tooltip } from '@/components/tooltip'
 import { useI18n } from '@/i18n'
-import { PLATFORMS } from './shared'
+import { PLATFORMS } from './shared-data'
 
 // Shape of GET /api/keys/providers (#543). Declared inline: the backend owns
 // the contract (server/src/routes/keys.ts) and this is the only consumer.

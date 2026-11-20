@@ -1,6 +1,6 @@
 import { Link, useInRouterContext } from 'react-router-dom'
 import { ChartLine } from 'lucide-react'
-import { buttonVariants } from '@/components/ui/button'
+import { buttonVariants } from '@/components/ui/button-variants'
 import { useCustomT } from './i18n/use-custom-t'
 
 // "Usage" button on a Users row, opening that account's analytics. Renders nothing

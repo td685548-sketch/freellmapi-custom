@@ -64,6 +64,9 @@ export default function TranslatorInspector() {
   const saveCaseMutation = useSaveTranslatorCase();
   const deleteCaseMutation = useDeleteTranslatorCase();
   const inspectMutation = useInspectTranslation();
+  // `mutate` is a stable callback; depending on the whole mutation object
+  // would re-run this effect on every inspect result.
+  const inspect = inspectMutation.mutate;
   const dispatchMutation = useDispatchTranslation();
   const [caseName, setCaseName] = useState('');
   const [selectedCaseId, setSelectedCaseId] = useState('');
@@ -89,14 +92,14 @@ export default function TranslatorInspector() {
   useEffect(() => {
     if (!parseValidation.valid || !parseValidation.parsed) return;
     const timer = setTimeout(() => {
-      inspectMutation.mutate({
+      inspect({
         sourceProtocol,
         targetProtocol,
         payload: parseValidation.parsed as Record<string, unknown>,
       });
     }, 250);
     return () => clearTimeout(timer);
-  }, [sourceProtocol, targetProtocol, parseValidation.valid, parseValidation.parsed]);
+  }, [sourceProtocol, targetProtocol, parseValidation.valid, parseValidation.parsed, inspect]);
 
   const handleSwap = () => {
     const prevSource = sourceProtocol;

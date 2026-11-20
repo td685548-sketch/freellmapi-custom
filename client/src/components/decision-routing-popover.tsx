@@ -6,7 +6,7 @@ import { useI18n } from '@/i18n'
 import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
-import { PLATFORMS } from '@/components/keys/shared'
+import { PLATFORMS } from '@/components/keys/shared-data'
 import type { DecisionModel } from '@/lib/decision'
 import type { DecisionRoutingStatus } from '@/lib/routing'
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Check, Layers, Search } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
@@ -90,15 +90,18 @@ export default function FusionPage() {
   )
 
   // Hydrate local state from the server once it loads.
-  useEffect(() => {
-    if (!data) return
-    setMode(data.config.mode)
-    setModels(data.config.models)
-    setJudge(data.config.judge ?? JUDGE_AUTO)
-    setK(data.config.k)
-    setStrategy(data.config.strategy)
-    setExposePanel(data.config.expose_panel)
-  }, [data])
+  const [prevFusionData, setPrevFusionData] = useState(data)
+  if (data !== prevFusionData) {
+    setPrevFusionData(data)
+    if (data) {
+      setMode(data.config.mode)
+      setModels(data.config.models)
+      setJudge(data.config.judge ?? JUDGE_AUTO)
+      setK(data.config.k)
+      setStrategy(data.config.strategy)
+      setExposePanel(data.config.expose_panel)
+    }
+  }
 
   const maxK = data?.maxK ?? 8
 

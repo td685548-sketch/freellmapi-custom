@@ -41,106 +41,21 @@ import UsageTable, {
   UsageViewModeToggle,
 } from '../components/UsageTable'
 
+import {
+  calculateBlendedTokensCostDollars,
+  calculateTokenCostDollars,
+  fmtDollars,
+  resolveClientModelPricing,
+  type ModelPricingRate,
+  type ProviderPricingMap,
+} from './account-usage-pricing'
+
 type TimeRange = '24h' | '7d' | '30d' | 'all'
-
-export interface ModelPricingRate {
-  input: number
-  output: number
-  cached?: number
-  reasoning?: number
-  cache_creation?: number
-}
-
-export type ProviderPricingMap = Record<string, Record<string, ModelPricingRate>>
 
 interface PricingResponse {
   pricing: ProviderPricingMap
   defaults: ProviderPricingMap
   overrides: ProviderPricingMap
-}
-
-const FALLBACK_RATE: ModelPricingRate = {
-  input: 1.0,
-  output: 3.0,
-  cached: 0.5,
-  reasoning: 3.0,
-}
-
-export function resolveClientModelPricing(
-  provider: string | undefined,
-  model: string | undefined,
-  pricingMap: ProviderPricingMap | undefined,
-): ModelPricingRate {
-  const normProvider = (provider ?? '').trim().toLowerCase()
-  const rawModel = (model ?? '').trim()
-
-  if (rawModel.toLowerCase().includes(':free') || rawModel.toLowerCase().startsWith('cline-free/')) {
-    return { input: 0, output: 0, cached: 0, reasoning: 0 }
-  }
-
-  if (pricingMap) {
-    if (normProvider && rawModel && pricingMap[normProvider]?.[rawModel]) {
-      return pricingMap[normProvider][rawModel]
-    }
-    const slashIdx = rawModel.indexOf('/')
-    const stripped = slashIdx >= 0 ? rawModel.slice(slashIdx + 1) : rawModel
-    const prefix = slashIdx > 0 ? rawModel.slice(0, slashIdx).toLowerCase() : ''
-
-    if (normProvider && stripped && pricingMap[normProvider]?.[stripped]) {
-      return pricingMap[normProvider][stripped]
-    }
-    if (prefix && stripped && pricingMap[prefix]?.[stripped]) {
-      return pricingMap[prefix][stripped]
-    }
-    for (const models of Object.values(pricingMap)) {
-      if (rawModel && models[rawModel]) return models[rawModel]
-      if (stripped && models[stripped]) return models[stripped]
-    }
-    if (normProvider && pricingMap[normProvider]) {
-      const entries = Object.values(pricingMap[normProvider])
-      if (entries.length > 0) {
-        const avgIn = entries.reduce((s, e) => s + e.input, 0) / entries.length
-        const avgOut = entries.reduce((s, e) => s + e.output, 0) / entries.length
-        return { input: avgIn, output: avgOut }
-      }
-    }
-  }
-
-  return FALLBACK_RATE
-}
-
-export function calculateTokenCostDollars(
-  provider: string | undefined,
-  model: string | undefined,
-  inputTokens: number,
-  outputTokens: number,
-  pricingMap: ProviderPricingMap | undefined,
-): number {
-  const rate = resolveClientModelPricing(provider, model, pricingMap)
-  const inTok = Math.max(0, Number(inputTokens) || 0)
-  const outTok = Math.max(0, Number(outputTokens) || 0)
-  return (inTok * rate.input + outTok * rate.output) / 1_000_000
-}
-
-export function calculateBlendedTokensCostDollars(
-  provider: string | undefined,
-  model: string | undefined,
-  totalTokens: number,
-  pricingMap: ProviderPricingMap | undefined,
-): number {
-  const tok = Math.max(0, Number(totalTokens) || 0)
-  if (tok === 0) return 0
-  // Standard 70% input / 30% output blend when only total token count is stored
-  const inputTokens = tok * 0.7
-  const outputTokens = tok * 0.3
-  return calculateTokenCostDollars(provider, model, inputTokens, outputTokens, pricingMap)
-}
-
-export const fmtDollars = (dollars: number) => {
-  if (!dollars || dollars <= 0) return '$0.00'
-  if (dollars < 0.0001) return `$${dollars.toFixed(6)}`
-  if (dollars < 0.01) return `$${dollars.toFixed(4)}`
-  return `$${dollars.toFixed(2)}`
 }
 
 const fmtTokens = (n: number) => {
@@ -380,15 +295,15 @@ export default function AccountUsage() {
     setNewModel('')
   }
 
-  const rawProviders = query.data?.providers ?? []
   const accounts = useMemo(() => {
+    const rawProviders = query.data?.providers ?? []
     return rawProviders.flatMap(provider =>
       provider.accounts.map(account => ({
         ...account,
         providerName: provider.name,
       }))
     )
-  }, [rawProviders])
+  }, [query.data?.providers])
 
   // Filter accounts by provider search
   const filteredAccounts = useMemo(() => {
@@ -415,8 +330,8 @@ export default function AccountUsage() {
   const estimatedCost = fmtDollars(totalCostDollars)
 
   // Chart data calculation
-  const hourlyBuckets = hourlyQuery.data?.buckets ?? []
   const chartData = useMemo(() => {
+    const hourlyBuckets = hourlyQuery.data?.buckets ?? []
     if (hourlyBuckets.length > 0) {
       return hourlyBuckets.map(b => ({
         time: b.hour.slice(11, 16) || b.hour,
@@ -432,7 +347,7 @@ export default function AccountUsage() {
       { time: '18:00', requests: 0, tokens: 0 },
       { time: '23:59', requests: 0, tokens: 0 },
     ]
-  }, [hourlyBuckets])
+  }, [hourlyQuery.data?.buckets])
 
   // Top Models ranking from logs with exact input/output token pricing
   const topModels = useMemo(() => {
@@ -1629,11 +1544,15 @@ function RequestDetailsPanel({ presetFilters }: { presetFilters?: Partial<Detail
   }))
   const [selected, setSelected] = useState<RequestDetailRow | null>(null)
 
-  useEffect(() => {
-    if (!presetFilters) return
-    setFilters({ ...EMPTY_DETAIL_FILTERS, ...presetFilters })
-    setPage(1)
-  }, [presetFilters])
+  // A new preset replaces the filters and resets to page 1.
+  const [prevPresetFilters, setPrevPresetFilters] = useState(presetFilters)
+  if (presetFilters !== prevPresetFilters) {
+    setPrevPresetFilters(presetFilters)
+    if (presetFilters) {
+      setFilters({ ...EMPTY_DETAIL_FILTERS, ...presetFilters })
+      setPage(1)
+    }
+  }
 
   const detailsQuery = useQuery({
     queryKey: ['x-request-details', page, filters, revision],

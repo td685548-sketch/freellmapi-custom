@@ -11,7 +11,7 @@ import { toast } from '@/lib/toast'
 
 import type { InviteCode } from '../../../shared/user-access'
 import { useCustomT } from './i18n/use-custom-t'
-import { askConfirm } from '@/custom/x-gateway/shell/confirm'
+import { askConfirm } from '@/custom/x-gateway/shell/confirm-store'
 import { useAdministrativeAccess } from './use-administrative-access'
 import { AdminVouchersPanel } from './quota-vouchers/AdminVouchersPanel'
 import { AdminTopUpRequestsPanel } from './quota-vouchers/AdminTopUpRequestsPanel'

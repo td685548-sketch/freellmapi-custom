@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip } from '@/components/tooltip'
-import { askConfirm } from '@/custom/x-gateway/shell/confirm'
+import { askConfirm } from '@/custom/x-gateway/shell/confirm-store'
 
 // Named fallback chains (#960/#895). The backend /api/profiles CRUD is
 // complete and every chain is listed as an `auto:<name>` model in /v1/models;

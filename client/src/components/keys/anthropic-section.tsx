@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -40,7 +40,12 @@ export function AnthropicSection() {
   })
 
   const [draft, setDraft] = useState<AnthropicMap | null>(null)
-  useEffect(() => { if (mapData?.map) setDraft(mapData.map) }, [mapData])
+  // Re-sync when the server map changes (render adjustment, not an effect).
+  const [prevMap, setPrevMap] = useState(mapData?.map)
+  if (mapData?.map !== prevMap) {
+    setPrevMap(mapData?.map)
+    if (mapData?.map) setDraft(mapData.map)
+  }
 
   const save = useMutation({
     mutationFn: (map: AnthropicMap) => apiFetch('/api/settings/anthropic-map', { method: 'PUT', body: JSON.stringify(map) }),
