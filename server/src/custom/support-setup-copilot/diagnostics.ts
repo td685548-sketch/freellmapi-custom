@@ -508,10 +508,10 @@ export function buildTenantSetupDiagnostic(
       canEdit: canEditSteps.has('runtime_policy'),
       summaryEn: originsRestricted
         ? `Restricted to ${origins.length} origin(s); maxCompletionTokens=${runtimePolicy.maxCompletionTokens}.`
-        : `Origins unrestricted (*); maxCompletionTokens=${runtimePolicy.maxCompletionTokens}.`,
+        : `Origins unrestricted (*); maxCompletionTokens=${runtimePolicy.maxCompletionTokens}. To finish this step, tell the Copilot your live website domain (e.g. "restrict CORS to https://yourshop.com") so only your site can embed the widget.`,
       summaryVi: originsRestricted
         ? `Giới hạn ${origins.length} domain CORS hợp lệ; maxCompletionTokens=${runtimePolicy.maxCompletionTokens}.`
-        : `CORS đang mở rộng (*); maxCompletionTokens=${runtimePolicy.maxCompletionTokens}.`,
+        : `CORS đang mở rộng (*); maxCompletionTokens=${runtimePolicy.maxCompletionTokens}. Để hoàn tất bước này, hãy nhắn cho Copilot tên miền website thật (ví dụ "giới hạn CORS cho https://shopcuaban.com") để chỉ web của bạn mới nhúng được widget.`,
       thrulinePath: '/thruline/support-integration',
       tenantPortalTab: 'tenant_integration',
     });

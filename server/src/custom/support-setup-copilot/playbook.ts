@@ -805,6 +805,7 @@ export function buildSanitizedSetupProposal(params: {
   const competitorKeywords = normalizeStringList(requirements.competitorKeywords, 20, 80);
   const requireContactIntake = Boolean(requirements.requireContactIntake);
 
+  const originsOpen = allowedOrigins.includes('*');
   const firstOriginHost =
     allowedOrigins.find((o) => o !== '*')
       ? allowedOrigins.find((o) => o !== '*')!.replace(/^https?:\/\//i, '')
@@ -1154,14 +1155,22 @@ export function buildSanitizedSetupProposal(params: {
       enabledByDefault: canEditAfterCreate('runtime_policy'),
       titleEn: 'Integration CORS Origins & Runtime Limits',
       titleVi: 'Tên miền CORS & Giới hạn Runtime',
-      summaryEn: `Allowed origins: ${allowedOrigins.join(', ')} · maxCompletionTokens: ${runtimePayload.maxCompletionTokens}`,
-      summaryVi: `CORS cho phép: ${allowedOrigins.join(', ')} · maxCompletionTokens: ${runtimePayload.maxCompletionTokens}`,
+      summaryEn: originsOpen
+        ? `Origins left open (*) for testing · maxCompletionTokens: ${runtimePayload.maxCompletionTokens} · step stays partial until you share your live domain`
+        : `Allowed origins: ${allowedOrigins.join(', ')} · maxCompletionTokens: ${runtimePayload.maxCompletionTokens}`,
+      summaryVi: originsOpen
+        ? `CORS đang để mở (*) để thử nghiệm · maxCompletionTokens: ${runtimePayload.maxCompletionTokens} · bước này còn "một phần" cho đến khi bạn cho mình tên miền thật`
+        : `CORS cho phép: ${allowedOrigins.join(', ')} · maxCompletionTokens: ${runtimePayload.maxCompletionTokens}`,
       highlightsEn: [
-        `Bind CORS origins to ${allowedOrigins.join(', ')}`,
+        originsOpen
+          ? 'Keep CORS open (*) for now — send me your website domain to lock it down'
+          : `Bind CORS origins to ${allowedOrigins.join(', ')}`,
         'Set bounded runtime limits (640 completion tokens, 3 model/tool turns)',
       ],
       highlightsVi: [
-        `Cấu hình CORS cho ${allowedOrigins.join(', ')}`,
+        originsOpen
+          ? 'Tạm giữ CORS mở (*) — gửi mình tên miền website để khóa lại'
+          : `Cấu hình CORS cho ${allowedOrigins.join(', ')}`,
         'Đặt giới hạn an toàn runtime (640 token trả lời, tối đa 3 lượt gọi model/tool)',
       ],
       payload: runtimePayload as unknown as Record<string, unknown>,
