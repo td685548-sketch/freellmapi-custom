@@ -1,6 +1,6 @@
 // Built to build/preload.cjs (CommonJS — the reliable preload format).
 // Runs in the renderer before any page script: fetches the dashboard session
-// token via origin-verified synchronous IPC and seeds localStorage so AuthGate's
+// token via origin-verified synchronous IPC and seeds sessionStorage so AuthGate's
 // first /api/auth/status call is authenticated without exposing tokens in argv.
 import { contextBridge, ipcRenderer } from 'electron';
 
@@ -8,9 +8,11 @@ const TOKEN_KEY = 'freellmapi_dashboard_token';
 const initialToken = ipcRenderer.sendSync('freeapi:session-token-sync') as unknown;
 if (typeof initialToken === 'string' && initialToken.length > 0) {
   try {
-    window.localStorage.setItem(TOKEN_KEY, initialToken);
+    // sessionStorage, matching client/src/lib/api.ts: the token dies with the
+    // window instead of persisting on disk in localStorage.
+    window.sessionStorage.setItem(TOKEN_KEY, initialToken);
   } catch {
-    // localStorage unavailable — the dashboard will show its login screen.
+    // sessionStorage unavailable — the dashboard will show its login screen.
   }
 }
 
@@ -21,7 +23,7 @@ contextBridge.exposeInMainWorld('__FREEAPI_PLATFORM__', process.platform);
 
 // The dashboard window signs in as the hidden machine account, whose password
 // is random and never shown, so it must never land on the login form. When the
-// seeded session is gone (expired after 30 days of uptime, or cleared by a 401)
+// seeded session is gone (expired after 24h, or cleared by a 401)
 // AuthGate asks the main process for a fresh one instead. Exposed as a bare
 // function rather than a broader bridge: the renderer loads http://127.0.0.1,
 // and every extra capability handed to that world is one an XSS could use —

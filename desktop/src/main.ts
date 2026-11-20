@@ -4,6 +4,7 @@ import { app, dialog, ipcMain, clipboard, nativeTheme, net, screen, shell, type 
 import { startServer, ensureSessionToken, regenerateUnifiedKey, isAutoUpdateCheckEnabled, backupBeforeUpdate, outboundProxyUrl, setCatalogFallbackFetch } from './server.mjs';
 import { loadConfig, saveConfig } from './config.js';
 import { installFileLogger } from './logger.js';
+import { scheduleClipboardClear } from './clipboard-clear.js';
 import { buildTray, refreshTrayLocale } from './tray.js';
 import { trayIsInMenuBar } from './tray-visibility.js';
 import { shouldOpenDashboardOnLaunch } from './tray-platform.js';
@@ -31,6 +32,9 @@ if (!app.requestSingleInstanceLock()) {
 
   let resolvedPort = DEFAULT_PORT;
   let sessionToken = '';
+  // Cancels the pending clipboard clear for the unified key, if any — a
+  // second copy restarts the timer instead of clearing the fresh copy early.
+  let cancelApiKeyClipboardClear: (() => void) | undefined;
   // The dashboard owns the theme (its Settings dialog); the popover and the
   // window vibrancy follow. The persisted choice may be 'system', in which
   // case themeSource is handed back to the OS so the dashboard's
@@ -197,7 +201,12 @@ if (!app.requestSingleInstanceLock()) {
   // "Regenerate Key" so the click is explicit about that.
   ipcMain.handle('freeapi:regenerate-api-key', (event) => {
     assertTrustedDesktopSender(event);
-    clipboard.writeText(regenerateUnifiedKey());
+    const key = regenerateUnifiedKey();
+    clipboard.writeText(key);
+    // The key must not linger in the system clipboard: clear it after a
+    // delay, unless the operator has since copied something else.
+    cancelApiKeyClipboardClear?.();
+    cancelApiKeyClipboardClear = scheduleClipboardClear(clipboard, key);
   });
   ipcMain.handle('freeapi:get-login-item', (event) => {
     assertTrustedDesktopSender(event);

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo, useCallback, type ReactNode } fro
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronRight, CircleAlert, FileText, Globe, X } from 'lucide-react'
 import { apiFetch, getToken } from '@/lib/api'
+import { UNIFIED_KEY_GC_TIME_MS, UNIFIED_KEY_QUERY_KEY } from '@/lib/unified-key-query'
 import { buildModelOptions } from '@/lib/model-groups'
 import type { Chain } from '@/components/chain-manager'
 import { Markdown } from '@/components/markdown'
@@ -317,7 +318,8 @@ export default function PlaygroundPage() {
 
   const { hasPermission } = useUserSession()
   const { data: keyData } = useQuery<{ apiKey: string }>({
-    queryKey: ['unified-key'],
+    queryKey: UNIFIED_KEY_QUERY_KEY,
+    gcTime: UNIFIED_KEY_GC_TIME_MS,
     queryFn: () => apiFetch('/api/settings/api-key'),
     enabled: hasPermission('reveal_gateway_key'),
   })

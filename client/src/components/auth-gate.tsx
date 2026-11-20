@@ -29,7 +29,7 @@ const PASSWORD_MIN = 8
 // Inside the desktop shell the dashboard runs as a hidden machine account with
 // a random password nobody knows (desktop/src/server-host.ts). There are no
 // credentials to type, so the gate never shows a login form there: when the
-// seeded session is gone (expired after a month of uptime, or cleared by a
+// seeded session is gone (expired after 24h, or cleared by a
 // 401) it asks the shell for a fresh one through the preload bridge.
 type DesktopWindow = Window & {
   __FREEAPI_DESKTOP__?: boolean

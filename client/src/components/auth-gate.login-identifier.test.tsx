@@ -80,6 +80,7 @@ afterEach(() => {
   act(() => root.unmount())
   container.remove()
   localStorage.clear()
+  sessionStorage.clear()
   vi.unstubAllGlobals()
 })
 
