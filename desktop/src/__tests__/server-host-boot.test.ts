@@ -15,6 +15,13 @@ import { EventEmitter } from 'node:events';
 
 const calls: string[] = [];
 
+// Queued outcomes for the mocked app.listen(): each listen() consumes one.
+// 'listening' is the default; an Error is emitted as the server's 'error'
+// event instead. Tests that exercise the port scan push their own outcomes
+// here (and reset them in beforeEach alongside `calls`).
+const listenOutcomes: Array<'listening' | NodeJS.ErrnoException> = [];
+const listenPorts: number[] = [];
+
 vi.mock('../../../server/src/env.js', () => ({}));
 
 vi.mock('../../../server/src/db/index.js', () => ({
@@ -22,7 +29,7 @@ vi.mock('../../../server/src/db/index.js', () => ({
     calls.push('initDb');
   }),
   getDb: vi.fn(),
-  getUnifiedApiKey: vi.fn(),
+  regenerateUnifiedKey: vi.fn(),
 }));
 
 vi.mock('../../../server/src/lib/proxy.js', () => ({
@@ -101,10 +108,15 @@ vi.mock('../../../server/src/app.js', () => ({
   createApp: vi.fn(() => {
     calls.push('createApp');
     return {
-      listen: (_port: number, _host: string) => {
+      listen: (port: number, _host: string) => {
         calls.push('listen');
+        listenPorts.push(port);
         const server = new EventEmitter();
-        setImmediate(() => server.emit('listening'));
+        const outcome = listenOutcomes.shift() ?? 'listening';
+        setImmediate(() => {
+          if (outcome === 'listening') server.emit('listening');
+          else server.emit('error', outcome);
+        });
         return server;
       },
     };
@@ -149,18 +161,20 @@ vi.mock('../../../server/src/custom/provider-accounts/gemini-web-keepalive.js', 
   rotateGeminiWebAccountsOnce: vi.fn(async () => 0),
 }));
 
-async function boot(): Promise<void> {
+async function boot(opts: { host?: string; preferredPort?: number } = {}): Promise<{ port: number }> {
   const { startServer } = await import('../server-host.js');
-  await startServer({
+  return startServer({
     dbPath: ':memory:',
     clientDist: '/tmp/client-dist',
-    host: '127.0.0.1',
-    preferredPort: 45999,
+    host: opts.host ?? '127.0.0.1',
+    preferredPort: opts.preferredPort ?? 45999,
   });
 }
 
 beforeEach(() => {
   calls.length = 0;
+  listenOutcomes.length = 0;
+  listenPorts.length = 0;
 });
 
 describe('desktop server boot sequence (#949)', () => {
@@ -240,5 +254,39 @@ describe('desktop server boot sequence (#949)', () => {
         `server/src/index.ts calls ${step}() but the desktop embedder never does — add it to startServer() in server-host.ts`,
       ).toContain(step);
     }
+  });
+});
+
+// tryListen() used to resolve(null) for every listen error, so EACCES (no
+// permission to bind) and an unresolvable host were indistinguishable from a
+// busy port: the scan burned 50 ports and then reported "No free port found"
+// as if every port were busy. Only EADDRINUSE scans on; anything else must
+// fail fast with the OS error attached.
+describe('desktop server listen scan (tryListen)', () => {
+  const listenError = (code: string, message: string) =>
+    Object.assign(new Error(message), { code }) as NodeJS.ErrnoException;
+
+  it('scans past a busy port and boots on the next one', async () => {
+    listenOutcomes.push(listenError('EADDRINUSE', 'address already in use'), 'listening');
+    const handle = await boot();
+    expect(handle.port).toBe(46000);
+    expect(listenPorts).toEqual([45999, 46000]);
+  });
+
+  it('fails fast with a clear error when binding is not permitted (EACCES)', async () => {
+    listenOutcomes.push(listenError('EACCES', 'permission denied'));
+    await expect(boot()).rejects.toThrow(
+      'Cannot start the local server on 127.0.0.1:45999: permission denied (EACCES)',
+    );
+    // No scan: the same failure would repeat on every port in the range.
+    expect(listenPorts).toEqual([45999]);
+  });
+
+  it('fails fast with a clear error for an unusable host (EADDRNOTAVAIL)', async () => {
+    listenOutcomes.push(listenError('EADDRNOTAVAIL', "cannot assign requested address"));
+    await expect(boot({ host: '203.0.113.99' })).rejects.toThrow(
+      'Cannot start the local server on 203.0.113.99:45999: cannot assign requested address (EADDRNOTAVAIL)',
+    );
+    expect(listenPorts).toEqual([45999]);
   });
 });

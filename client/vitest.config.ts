@@ -38,6 +38,27 @@ export default defineConfig({
   esbuild: { jsx: 'automatic' },
   test: {
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    // Same 10s bound as the server suite; no `retry` — retrying would hide
+    // real flakes instead of fixing them.
+    testTimeout: 10_000,
+    hookTimeout: 10_000,
+    coverage: {
+      enabled: process.env.COVERAGE === '1',
+      provider: 'v8',
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: ['src/**/*.test.{ts,tsx}'],
+      reporter: ['text', 'text-summary', 'json'],
+      // Same as the server suite: a failing run must still produce the
+      // report, or the CI coverage artifact goes missing exactly when the
+      // numbers would explain the failure.
+      reportOnFailure: true,
+      // Baseline measured 2026-11-19 on the full client suite (72 files,
+      // 526 tests, all passing): statements 21.31%, branches 17.05%,
+      // functions 13.6%, lines 22.7%. Thresholds sit 1pt below the floored
+      // baseline — they exist to catch regressions, not to force coverage
+      // up in this PR.
+      thresholds: { statements: 20, branches: 16, functions: 12, lines: 21 },
+    },
     // jsdom 27 delegates Storage to Node's experimental webstorage, which is
     // undefined without --experimental-webstorage; the setup file installs a
     // memory Storage only where the native one is missing. See the file.

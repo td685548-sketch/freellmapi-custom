@@ -11,7 +11,7 @@ import '../../server/src/lib/init-log-redaction.js';
 import tls from 'node:tls';
 import type { Server } from 'node:http';
 import { createApp } from '../../server/src/app.js';
-import { initDb, getDb, getUnifiedApiKey } from '../../server/src/db/index.js';
+import { initDb, getDb, regenerateUnifiedKey } from '../../server/src/db/index.js';
 import { restoreProxySettings, flushProxyCache, getProxyMode, getProxyUrl, isProxyActive } from '../../server/src/lib/proxy.js';
 import { startHealthChecker, checkAllKeys } from '../../server/src/services/health.js';
 import { startCatalogSync } from '../../server/src/services/catalog-sync.js';
@@ -31,7 +31,7 @@ import { NodeScheduler } from '../../server/src/lib/scheduler.js';
 import { startWorkerLifecycle } from '../../server/src/custom/x-gateway/support-runtime-router.js';
 import { rotateGeminiWebAccountsOnce, startGeminiWebKeepAlive } from '../../server/src/custom/provider-accounts/gemini-web-keepalive.js';
 
-export { getDb, getUnifiedApiKey, isAutoUpdateCheckEnabled };
+export { getDb, regenerateUnifiedKey, isAutoUpdateCheckEnabled };
 
 // Desktop updater → a full dump before an update installs, listed on the
 // Backups page as "Pre-update". Returns the file it wrote.
@@ -197,19 +197,32 @@ async function listenWithScan(
   attempts = 50,
 ): Promise<{ server: Server; port: number }> {
   for (let port = start; port < start + attempts; port++) {
-    const server = await tryListen(app, host, port);
-    if (server) return { server, port };
+    const result = await tryListen(app, host, port);
+    if (result.status === 'listening') return { server: result.server, port };
+    // A busy port is the only failure worth scanning past: the next port may
+    // be free. Anything else (no permission to bind, an unresolvable host)
+    // will fail on every port in the range, so surface it immediately with
+    // the OS error instead of burning 50 attempts and then reporting the
+    // misleading "No free port found" as if every port were busy.
+    if (result.status === 'fatal') {
+      throw new Error(`Cannot start the local server on ${host}:${port}: ${result.message} (${result.code})`);
+    }
   }
   throw new Error(`No free port found in ${start}–${start + attempts - 1}`);
 }
 
-function tryListen(app: ReturnType<typeof createApp>, host: string, port: number): Promise<Server | null> {
+type TryListenResult =
+  | { status: 'listening'; server: Server }
+  | { status: 'busy' }
+  | { status: 'fatal'; code: string; message: string };
+
+function tryListen(app: ReturnType<typeof createApp>, host: string, port: number): Promise<TryListenResult> {
   return new Promise((resolve) => {
     const server = app.listen(port, host);
-    server.once('listening', () => resolve(server));
+    server.once('listening', () => resolve({ status: 'listening', server }));
     server.once('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE') resolve(null);
-      else resolve(null);
+      if (err.code === 'EADDRINUSE') resolve({ status: 'busy' });
+      else resolve({ status: 'fatal', code: err.code ?? 'UNKNOWN', message: err.message });
     });
   });
 }
