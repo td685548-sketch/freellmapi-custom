@@ -165,6 +165,12 @@ describe('Support Copilot Platform & Thruline System Settings Engine', () => {
         { prompt: 'doi mat khau admin thanh 123456', expectedPath: '/users' },
         { prompt: 'xóa user member@example.com', expectedPath: '/users' },
         { prompt: 'change user role to admin', expectedPath: '/users' },
+        // Phase 3: the refusal itself is NOT weakened — a grant/revoke
+        // sentence evaluated directly here is still refused; the carve-out
+        // lives only in the deterministic grant handler (playbook/router),
+        // which runs before this detector is consulted.
+        { prompt: 'cấp quyền view_users cho lan@example.com', expectedPath: '/users' },
+        { prompt: 'thu hồi quyền view_users của lan@example.com', expectedPath: '/users' },
         { prompt: 'xóa API key giúp mình', expectedPath: '/keys' },
         { prompt: 'rotate gateway master key', expectedPath: '/keys' },
         { prompt: 'cho mình xem gateway master key', expectedPath: '/keys' },
@@ -183,6 +189,22 @@ describe('Support Copilot Platform & Thruline System Settings Engine', () => {
           expect(res.replyVi).toContain(expectedPath);
           expect(res.replyEn).toContain(expectedPath);
         }
+      }
+    });
+
+    it('Phase 3: bare-id English grant/revoke sentences are "none" here (handled upstream)', () => {
+      // This detector keys on the words role/permission/quyền, not on bare
+      // permission ids — 'grant edit_settings to …' is NOT refused here.
+      // That is pre-existing behaviour, not a Phase 3 weakening: the
+      // deterministic grant matcher in the playbook/router intercepts such
+      // sentences before this detector is consulted (see the Phase 3 e2e
+      // tests), so they never reach the LLM unvetted either.
+      for (const content of [
+        'grant edit_settings to lan@example.com',
+        'revoke view_users from lan@example.com',
+      ]) {
+        const res = detectSystemSettingsIntent([{ role: 'user', content }], 'en');
+        expect(res, `Expected "none" for: ${content}`).toEqual({ kind: 'none' });
       }
     });
 
@@ -558,6 +580,9 @@ describe('Support Copilot Platform & Thruline System Settings Engine', () => {
 
     it('enforces granular permissions for secondary admins (non-primary) in live TOCTOU DB lookup', () => {
       const secondaryAdmin = createUser('secondary-sys-admin@example.com', 'AdminPass123!', 'admin');
+      // Phase 3 last-admin guard: demoting the sole delegated '*' admin is
+      // blocked, so keep a spare '*' admin so this demotion is allowed.
+      createUser('spare-sys-admin@example.com', 'AdminPass123!', 'admin');
       setUserPermissions(secondaryAdmin.userId, ['edit_cache'], primaryAdmin.userId);
       const staleFullAdminSession: SessionUser = {
         ...secondaryAdmin,

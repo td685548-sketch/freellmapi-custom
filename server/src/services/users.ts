@@ -1,4 +1,4 @@
-import { getDb } from '../db/index.js';
+import { getDb, type Db } from '../db/index.js';
 import type { UserRole } from './auth.js';
 import type { AdminUser as AdminUserRow, Permission } from '@freellmapi/shared/user-access.js';
 import { parseStoredPermissions, permissionGranted } from '@freellmapi/shared/permissions.js';
@@ -6,7 +6,7 @@ import { parseStoredPermissions, permissionGranted } from '@freellmapi/shared/pe
 // Admin-side account management. Deliberately its own service file so upstream's
 // services/auth.ts stays the self-scoped authentication path it has always been.
 
-interface PermissionRow {
+export interface PermissionRow {
   role: string;
   is_primary: number;
   permissions: string | null;
@@ -66,7 +66,8 @@ export function listUsers(actorUserId: number): AdminUserRow[] {
  * validation, so a demotion bites on the target's next request without having
  * to touch their sessions.
  *
- * Throws `{ code }`: 'self_role_change' | 'user_not_found' | 'primary_admin_protected'.
+ * Throws `{ code }`: 'self_role_change' | 'user_not_found' | 'primary_admin_protected' |
+ * 'insufficient_privileges' | 'last_admin_protected'.
  */
 function deny(code: string, message: string): never {
   throw Object.assign(new Error(message), { code });
@@ -74,8 +75,42 @@ function deny(code: string, message: string): never {
 function subject(row: PermissionRow) {
   return { role: row.role, isPrimary: Boolean(row.is_primary), permissions: grantedPermissions(row) };
 }
-function noBroaderThan(actor: PermissionRow, permissions: Permission[]): boolean {
+export function noBroaderThan(actor: PermissionRow, permissions: Permission[]): boolean {
   return permissions.every(p => permissionGranted(subject(actor), p));
+}
+
+/**
+ * Last-admin guard (Phase 3, shared by the admin UI and the Copilot).
+ *
+ * The primary admin always holds '*' and can never be a target, so counting
+ * it would make this check dead code. The guard therefore counts DELEGATED
+ * (non-primary) '*' holders: at least one must remain, so the system never
+ * depends solely on the primary account's credentials. Legacy admins (role
+ * 'admin' with no stored list) count as '*' holders via grantedPermissions.
+ */
+export function hasOtherWildcardAdmin(db: Db, excludeUserId: number): boolean {
+  const rows = db
+    .prepare('SELECT role, is_primary, permissions FROM users WHERE id != ?')
+    .all(excludeUserId) as PermissionRow[];
+  return rows.some(
+    (row) => !row.is_primary && permissionGranted(subject(row), '*'),
+  );
+}
+
+function assertNotLastWildcardAdmin(
+  db: Db,
+  target: PermissionRow,
+  targetUserId: number,
+  nextPermissions: Permission[],
+): void {
+  const heldWildcard = permissionGranted(subject(target), '*');
+  const keepsWildcard = nextPermissions.includes('*');
+  if (heldWildcard && !keepsWildcard && !hasOtherWildcardAdmin(db, targetUserId)) {
+    deny(
+      'last_admin_protected',
+      'Cannot remove the last delegated full administrator. Assign full access to another admin first.',
+    );
+  }
 }
 
 export function setUserRole(userId: number, role: UserRole, actorUserId: number): void {
@@ -92,7 +127,8 @@ export function setUserRole(userId: number, role: UserRole, actorUserId: number)
     if (!full && !noBroaderThan(actor, held)) deny('insufficient_privileges', 'Cannot alter an account with broader authority');
     // A role label never becomes a route around the grant hierarchy. Only a
     // full-access actor can mint wildcard authority on promotion.
-    const next = role === 'member' ? [] : full ? ['*'] : held;
+    const next: Permission[] = role === 'member' ? [] : full ? ['*'] : held;
+    assertNotLastWildcardAdmin(db, target, userId, next);
     db.prepare('UPDATE users SET role = ?, permissions = ? WHERE id = ?').run(role, JSON.stringify(next), userId);
   })();
 }
@@ -110,7 +146,7 @@ export function setUserRole(userId: number, role: UserRole, actorUserId: number)
  *    collect the whole admin surface one victim at a time.
  *
  * Throws `{ code }`: 'self_permission_change' | 'user_not_found' |
- * 'primary_admin_protected' | 'insufficient_privileges'.
+ * 'primary_admin_protected' | 'insufficient_privileges' | 'last_admin_protected'.
  */
 export function setUserPermissions(userId: number, permissions: Permission[], actorUserId: number): void {
   if (userId === actorUserId) deny('self_permission_change', 'You cannot change your own permissions');
@@ -125,6 +161,7 @@ export function setUserPermissions(userId: number, permissions: Permission[], ac
       if (!noBroaderThan(actor, grantedPermissions(target))) deny('insufficient_privileges', 'Cannot alter an account with broader authority');
       if (!noBroaderThan(actor, permissions)) deny('insufficient_privileges', 'Cannot grant permissions you do not hold');
     }
+    assertNotLastWildcardAdmin(db, target, userId, permissions);
     db.prepare('UPDATE users SET permissions = ? WHERE id = ?').run(JSON.stringify(permissions), userId);
   })();
 }
@@ -175,6 +212,19 @@ export function revokeApiKeysForUser(userId: number, actorUserId?: number): numb
   }
   return db.prepare('UPDATE user_api_keys SET revoked = 1 WHERE user_id = ? AND revoked = 0')
     .run(userId).changes;
+}
+
+/** Live permission row for one user id (shared by the Copilot grant pre-check). */
+export function readPermissionRow(userId: number): PermissionRow | undefined {
+  return getDb()
+    .prepare('SELECT role, is_primary, permissions FROM users WHERE id = ?')
+    .get(userId) as PermissionRow | undefined;
+}
+
+/** Current global permission list for a user id, or null when the account does not exist. */
+export function getUserPermissions(userId: number): Permission[] | null {
+  const row = readPermissionRow(userId);
+  return row ? grantedPermissions(row) : null;
 }
 
 /** Lets a revoke route answer 404 instead of a misleading `{ revoked: 0 }`. */

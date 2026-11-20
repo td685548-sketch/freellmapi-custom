@@ -823,6 +823,109 @@ it('renders surgical proposal badge and defaults only targeted steps to checked'
     expect(appliedCard?.textContent).toContain('Đã bật Response Cache thành công.');
   });
 
+  it('renders permission-grant proposal with target/scope/diff and approves with no step selection', async () => {
+    let appliedPayload: { approved: boolean; selectedSteps?: unknown; selectedSystemActions?: unknown } | null = null;
+
+    // Phase 3: Consent Card for a staged permission grant/revoke — the user
+    // must see exactly what they approve (target, scope, permissions added/
+    // removed, current → after diff) before Approve runs anything.
+    const grantProposal: SupportSetupProposal = {
+      id: 'prop-grant-1',
+      userId: 1,
+      tenantId: null,
+      tenantName: 'System',
+      tenantSlug: 'system',
+      targetMode: 'permission_grant',
+      status: 'pending_consent',
+      summary: 'Cấp quyền cho người dùng',
+      createdAt: '2026-11-20T10:00:00Z',
+      expiresAt: '2026-11-20T11:00:00Z',
+      steps: [],
+      permissionGrants: [
+        {
+          scope: 'global',
+          tenantId: null,
+          targetUserId: 7,
+          targetEmail: 'lan@example.com',
+          action: 'grant',
+          permissions: ['view_users', 'edit_cache'],
+          previousPermissions: [],
+          newPermissions: ['view_users', 'edit_cache'],
+        },
+        {
+          scope: 'tenant',
+          tenantId: 3,
+          tenantSlug: 'acme',
+          tenantName: 'Acme Corp',
+          targetUserId: 9,
+          targetEmail: 'nam@example.com',
+          action: 'revoke',
+          permissions: ['view_tenant_ai'],
+          previousPermissions: ['view_tenant_ai', 'view_tenant_members'],
+          newPermissions: ['view_tenant_members'],
+        },
+      ],
+      requirements: {},
+    };
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith('/api/user/session')) {
+          return json({ userId: 1, email: 'admin@example.com', role: 'admin', isPrimary: true, permissions: ['*'] });
+        }
+        if (url.includes('/api/support-setup-copilot/status')) {
+          const st = sampleStatus(true);
+          st.pendingProposals = [grantProposal];
+          return json(st);
+        }
+        if (url.endsWith('/api/support-setup-copilot/proposals/prop-grant-1/apply')) {
+          appliedPayload = JSON.parse(String(init?.body ?? '{}')) as { approved: boolean };
+          const applyRes: SupportSetupApplyResponse = {
+            ok: true,
+            proposalId: 'prop-grant-1',
+            proposal: { ...grantProposal, status: 'applied' },
+            tenant: null,
+            stepResults: [],
+            systemResults: [],
+            diagnostic: null,
+          };
+          return json(applyRes);
+        }
+        return json({});
+      }),
+    );
+
+    mount('/settings', 'vi');
+    await flush();
+
+    const launcher = container.querySelector('[data-testid="support-setup-copilot-launcher"]') as HTMLButtonElement;
+    act(() => launcher.click());
+    await flush();
+
+    const grantsContainer = container.querySelector('[data-testid="support-setup-permission-grants"]');
+    expect(grantsContainer).not.toBeNull();
+    // Global grant row: target + added permissions + empty → granted diff.
+    expect(grantsContainer?.textContent).toContain('lan@example.com');
+    expect(grantsContainer?.textContent).toContain('view_users');
+    expect(grantsContainer?.textContent).toContain('edit_cache');
+    expect(grantsContainer?.textContent).toContain('Cấp');
+    // Tenant revoke row: target + removed permission + remaining diff.
+    expect(grantsContainer?.textContent).toContain('nam@example.com');
+    expect(grantsContainer?.textContent).toContain('view_tenant_ai');
+    expect(grantsContainer?.textContent).toContain('Thu hồi');
+    expect(grantsContainer?.textContent).toContain('view_tenant_members');
+    expect(grantsContainer?.textContent).toContain('Hiện tại');
+    expect(grantsContainer?.textContent).toContain('Sau khi duyệt');
+
+    // Approve sends only { approved: true } — no steps, no system actions.
+    const approveBtn = container.querySelector('[data-testid="support-setup-approve-btn"]') as HTMLButtonElement;
+    act(() => approveBtn.click());
+    await flush();
+
+    expect(appliedPayload).toEqual({ approved: true });
+  });
+
   it('renders model badge when modelUsed is returned and not fallback', async () => {
     vi.stubGlobal(
       'fetch',

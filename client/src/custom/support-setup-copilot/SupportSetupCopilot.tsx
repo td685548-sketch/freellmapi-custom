@@ -940,33 +940,52 @@ export function SupportSetupCopilot() {
   const renderProposalCard = (rawProposal: SupportSetupProposal) => {
     const proposal = proposalOverrides[rawProposal.id] ?? rawProposal;
     const isSystemSettings = proposal.targetMode === 'system_settings';
+    const isPermissionGrant = proposal.targetMode === 'permission_grant';
+    const permissionGrants = proposal.permissionGrants ?? [];
     const isPending = proposal.status === 'pending_consent';
 
     const selectedSteps = new Set(getSelectedSteps(proposal));
     const selectedSystemActions = new Set(getSelectedSystemActions(proposal));
 
-    const hasEditableItem = isSystemSettings
-      ? (proposal.systemActions ?? []).some((a) => a.canApply)
-      : proposal.steps.some((st) => st.canApply);
+    const hasEditableItem = isPermissionGrant
+      ? permissionGrants.length > 0
+      : isSystemSettings
+        ? (proposal.systemActions ?? []).some((a) => a.canApply)
+        : proposal.steps.some((st) => st.canApply);
 
-    const hasSelected = isSystemSettings ? selectedSystemActions.size > 0 : selectedSteps.size > 0;
+    const hasSelected = isPermissionGrant
+      ? permissionGrants.length > 0
+      : isSystemSettings
+        ? selectedSystemActions.size > 0
+        : selectedSteps.size > 0;
 
-    const targetText = isSystemSettings
-      ? s.systemSettingsTarget
-      : formatSetupString(
-          proposal.targetMode === 'create_tenant' ? s.consentTargetCreate : s.consentTargetUpdate,
-          { name: proposal.tenantName, slug: proposal.tenantSlug },
-        );
+    const targetText = isPermissionGrant
+      ? permissionGrants.length === 1
+        ? permissionGrants[0]!.scope === 'global'
+          ? formatSetupString(s.permissionGrantTargetGlobal, { email: permissionGrants[0]!.targetEmail })
+          : formatSetupString(s.permissionGrantTargetTenant, {
+              email: permissionGrants[0]!.targetEmail,
+              name: permissionGrants[0]!.tenantName ?? permissionGrants[0]!.tenantSlug ?? '',
+            })
+        : proposal.summary
+      : isSystemSettings
+        ? s.systemSettingsTarget
+        : formatSetupString(
+            proposal.targetMode === 'create_tenant' ? s.consentTargetCreate : s.consentTargetUpdate,
+            { name: proposal.tenantName, slug: proposal.tenantSlug },
+          );
 
-    const countText = isSystemSettings
-      ? formatSetupString(s.systemSettingsApplyCount, {
-          selected: selectedSystemActions.size,
-          total: (proposal.systemActions ?? []).length,
-        })
-      : formatSetupString(s.selectedStepsCount, {
-          selected: selectedSteps.size,
-          total: proposal.steps.length,
-        });
+    const countText = isPermissionGrant
+      ? formatSetupString(s.permissionGrantCount, { total: permissionGrants.length })
+      : isSystemSettings
+        ? formatSetupString(s.systemSettingsApplyCount, {
+            selected: selectedSystemActions.size,
+            total: (proposal.systemActions ?? []).length,
+          })
+        : formatSetupString(s.selectedStepsCount, {
+            selected: selectedSteps.size,
+            total: proposal.steps.length,
+          });
 
     const statusBadge =
       proposal.status === 'applied'
@@ -1004,7 +1023,50 @@ export function SupportSetupCopilot() {
           <div className="ssc-proposal-target">{targetText}</div>
         </div>
 
-        {isSystemSettings ? (
+        {isPermissionGrant ? (
+          <div className="ssc-proposal-steps" data-testid="support-setup-permission-grants">
+            {permissionGrants.map((grant) => {
+              const actionLabel =
+                grant.action === 'grant' ? s.permissionGrantAction : s.permissionGrantRevoke;
+              const permsLabel =
+                grant.permissions.length > 0
+                  ? grant.permissions.join(', ')
+                  : grant.rolePreset
+                    ? `${s.permissionGrantRolePreset}: ${grant.rolePreset}`
+                    : s.permissionGrantRemoveMember;
+              const curVal =
+                grant.previousPermissions.length > 0
+                  ? grant.previousPermissions.join(', ')
+                  : '—';
+              const nextVal =
+                grant.newPermissions.length > 0 ? grant.newPermissions.join(', ') : '—';
+              return (
+                <div
+                  className="ssc-proposal-step ssc-proposal-system-action"
+                  key={`${grant.targetUserId}_${grant.scope}_${grant.tenantId ?? 'global'}`}
+                >
+                  <div style={{ flex: 1 }}>
+                    <div className="ssc-proposal-step-title">
+                      <span>
+                        {actionLabel} · {permsLabel}
+                      </span>
+                    </div>
+                    <div className="ssc-proposal-step-summary">{grant.targetEmail}</div>
+                    <div className="ssc-action-diff-preview">
+                      <span className="ssc-action-diff-old">
+                        {s.permissionGrantCurrent}: {curVal}
+                      </span>
+                      <span className="ssc-action-diff-arrow">➔</span>
+                      <span className="ssc-action-diff-new">
+                        {s.permissionGrantAfter}: {nextVal}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : isSystemSettings ? (
           <div className="ssc-proposal-steps" data-testid="support-setup-system-actions">
             {(proposal.systemActions ?? []).map((action) => {
               const checked = selectedSystemActions.has(action.settingId);
@@ -1085,7 +1147,9 @@ export function SupportSetupCopilot() {
                 declineMutation.isPending
               }
               onClick={() => {
-                if (isSystemSettings) {
+                if (isPermissionGrant) {
+                  applyMutation.mutate({ proposalId: proposal.id });
+                } else if (isSystemSettings) {
                   applyMutation.mutate({
                     proposalId: proposal.id,
                     selectedSystemActions: [...selectedSystemActions],

@@ -1,9 +1,10 @@
 /**
  * Permission-aware tool registry for the Setup Copilot agent harness (Phase 2).
  *
- * Registers the THREE EXISTING tool sets — the 7 tenant setup steps
- * (executor.ts), the 9 system settings (system-settings.ts), and the 3
- * personal actions (user-actions.ts) — WITHOUT rewriting their handlers.
+ * Registers the tool sets — the 7 tenant setup steps (executor.ts), the 9
+ * system settings (system-settings.ts), the 3 personal actions
+ * (user-actions.ts), and (Phase 3) the 4 permission grant/revoke tools
+ * (permission-grants.ts) — WITHOUT rewriting their handlers.
  *
  * Two separate layers, deliberately kept apart:
  *  1. Prompt assembly (`filterAdmittedTools`): only tools the caller is
@@ -34,12 +35,14 @@ import {
   type SupportSystemSettingId,
 } from '@freellmapi/shared/support-setup-copilot.js';
 import type { Permission } from '@freellmapi/shared/user-access.js';
-import { parseStoredPermissions } from '@freellmapi/shared/permissions.js';
+import { SYSTEM_PERMISSIONS } from '@freellmapi/shared/permissions.js';
 import {
+  TENANT_PERMISSIONS,
+  TENANT_ROLE_PRESETS,
   tenantPermissionGranted,
   type TenantPermission,
+  type TenantRolePresetId,
 } from '@freellmapi/shared/tenant-rbac.js';
-import { getDb } from '../../db/index.js';
 import { hasPermission } from '../../middleware/requirePermission.js';
 import type { SessionUser } from '../../services/auth.js';
 import { listUserApiKeys } from '../../services/user-keys.js';
@@ -48,8 +51,14 @@ import {
   isPlatformTenantOperator,
   resolveEffectiveTenantAccess,
 } from '../tenant-portal/store.js';
+import { listSupportTenants } from '../x-gateway/support-store.js';
 import { appendSupportAuditLog } from '../x-gateway/support-enterprise-router.js';
 import type { CopilotAgentContext } from './identity.js';
+import {
+  authorizePermissionGrant,
+  resolveLiveSessionUser,
+  type ParsedPermissionGrantIntent,
+} from './permission-grants.js';
 import { SURGICAL_STEP_REQUIRED_PERMISSION } from './surgical-steps.js';
 import {
   buildSystemSettingAction,
@@ -62,7 +71,11 @@ import {
   buildSwitchKeyRoutingModeProposal,
 } from './user-actions.js';
 
-export type CopilotToolKind = 'tenant_step' | 'system_setting' | 'personal_action';
+export type CopilotToolKind =
+  | 'tenant_step'
+  | 'system_setting'
+  | 'personal_action'
+  | 'permission_grant';
 export type CopilotToolSideEffect = 'none' | 'proposal' | 'mutation';
 
 /**
@@ -276,10 +289,74 @@ function buildRegistry(): readonly CopilotToolDefinition[] {
     },
   );
 
+  // Phase 3: permission grant/revoke for OTHER users. Each tool only stages
+  // a grant descriptor (authorizePermissionGrant, live DB re-read); the
+  // Consent Card + apply branch do the actual write.
+  const globalPermissionSchema = z.object({
+    targetEmail: z.string().email().max(254),
+    permissions: z.array(z.string().min(1).max(64)).min(1).max(100),
+  });
+  const tenantPermissionSchema = z.object({
+    targetEmail: z.string().email().max(254),
+    tenantId: z.number().int().positive().optional(),
+    tenantSlug: z.string().min(1).max(64).optional(),
+    permissions: z.array(z.string().min(1).max(64)).max(100).optional(),
+    rolePreset: z.enum(['tenant_owner', 'ai_configurator', 'support_operator', 'viewer']).optional(),
+  });
+  tools.push(
+    {
+      id: 'permission.grant_global',
+      kind: 'permission_grant',
+      labelEn: 'Grant global permissions (proposal)',
+      labelVi: 'Cấp quyền toàn cục (đề xuất)',
+      description:
+        'Stage a proposal to ADD global permissions to another user (Consent Card only — never applies directly). Requires edit_user_permissions; can only grant permissions the caller holds.',
+      requiredPermission: 'edit_user_permissions',
+      inputSchema: globalPermissionSchema,
+      sideEffect: 'proposal',
+    },
+    {
+      id: 'permission.revoke_global',
+      kind: 'permission_grant',
+      labelEn: 'Revoke global permissions (proposal)',
+      labelVi: 'Thu hồi quyền toàn cục (đề xuất)',
+      description:
+        'Stage a proposal to REMOVE global permissions from another user (Consent Card only — never applies directly). Requires edit_user_permissions; cannot remove the last delegated full admin.',
+      requiredPermission: 'edit_user_permissions',
+      inputSchema: globalPermissionSchema,
+      sideEffect: 'proposal',
+    },
+    {
+      id: 'permission.grant_tenant',
+      kind: 'permission_grant',
+      labelEn: 'Grant tenant permissions (proposal)',
+      labelVi: 'Cấp quyền tenant (đề xuất)',
+      description:
+        'Stage a proposal to ADD tenant permissions (or assign a role preset, which replaces) to another user on a tenant (Consent Card only). Requires manage_tenant_members on that tenant; can only grant permissions the caller holds there.',
+      requiredPermission: 'manage_tenant_members',
+      inputSchema: tenantPermissionSchema.refine(
+        (v) => (v.permissions?.length ?? 0) > 0 || v.rolePreset !== undefined,
+        { message: 'Provide permissions or a rolePreset.' },
+      ),
+      sideEffect: 'proposal',
+    },
+    {
+      id: 'permission.revoke_tenant',
+      kind: 'permission_grant',
+      labelEn: 'Revoke tenant permissions (proposal)',
+      labelVi: 'Thu hồi quyền tenant (đề xuất)',
+      description:
+        'Stage a proposal to REMOVE tenant permissions from another user (Consent Card only). Omit permissions to remove the member from the tenant entirely. Requires manage_tenant_members on that tenant; cannot remove the last member manager.',
+      requiredPermission: 'manage_tenant_members',
+      inputSchema: tenantPermissionSchema,
+      sideEffect: 'proposal',
+    },
+  );
+
   return tools;
 }
 
-/** The full registry: 7 tenant steps + 9 system settings + 3 personal actions. */
+/** The full registry: 7 tenant steps + 9 system settings + 3 personal actions + 4 permission tools. */
 export const COPILOT_TOOL_REGISTRY: readonly CopilotToolDefinition[] = buildRegistry();
 
 export function findCopilotTool(toolId: string): CopilotToolDefinition | undefined {
@@ -325,6 +402,25 @@ export function filterAdmittedTools(params: {
       return (
         tool.requiredPermission !== null &&
         hasPermission(user, tool.requiredPermission as Permission)
+      );
+    }
+    if (tool.kind === 'permission_grant') {
+      // Global tools: the exact leaf global permission (session snapshot —
+      // the gate re-checks live). Tenant tools: manage_tenant_members on the
+      // scoped tenant, or on any tenant the caller manages (the LLM must
+      // then name the tenant via tenantSlug); operators always qualify.
+      if (tool.id === 'permission.grant_global' || tool.id === 'permission.revoke_global') {
+        return hasPermission(user, 'edit_user_permissions');
+      }
+      if (isPlatformTenantOperator(user)) return true;
+      if (
+        tenantEntry !== undefined &&
+        tenantPermissionGranted(tenantEntry.permissions, 'manage_tenant_members')
+      ) {
+        return true;
+      }
+      return agentContext.tenants.some((t) =>
+        tenantPermissionGranted(t.permissions, 'manage_tenant_members'),
       );
     }
     return false;
@@ -373,40 +469,14 @@ export function buildAdmittedToolsPromptSection(
   ].join('\n');
 }
 
-/**
- * Live session user re-read from the DB (same shape as
- * `resolveLiveUserFromDb` in system-settings.ts, kept local so the gate
- * never trusts a stale session snapshot for global permissions).
- */
-function resolveLiveSessionUser(userId: number): SessionUser | null {
-  if (!Number.isInteger(userId) || userId <= 0) return null;
-  try {
-    const db = getDb();
-    const row = db
-      .prepare('SELECT id, email, role, is_primary, permissions FROM users WHERE id = ?')
-      .get(userId) as
-      | {
-          id: number;
-          email: string;
-          role: string;
-          is_primary?: number;
-          permissions?: string | null;
-        }
-      | undefined;
-    if (!row) return null;
-    return {
-      userId: row.id,
-      email: row.email,
-      role: row.role === 'admin' ? 'admin' : 'member',
-      isPrimary: Boolean(row.is_primary),
-      permissions: parseStoredPermissions(
-        row.permissions ?? null,
-        row.role,
-        Boolean(row.is_primary),
-      ),
-    };
-  } catch {
-    return null;
+/** Denial raised by a tool handler after the gate passed (target checks). */
+export class CopilotToolDenialError extends Error {
+  constructor(
+    public readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'CopilotToolDenialError';
   }
 }
 
@@ -415,11 +485,46 @@ function livePermissionDenial(params: {
   tool: CopilotToolDefinition;
   user: SessionUser;
   tenantId?: number | null;
+  input?: Record<string, unknown>;
 }): string | null {
-  const { tool, user, tenantId } = params;
+  const { tool, user, tenantId, input } = params;
   if (tool.kind === 'personal_action') {
     // Own-account only: the account must still exist in the DB.
     return resolveLiveSessionUser(user.userId) ? null : 'account_not_found';
+  }
+  if (tool.kind === 'permission_grant') {
+    if (tool.id === 'permission.grant_global' || tool.id === 'permission.revoke_global') {
+      // Global grants: exact leaf global permission, live from the DB row.
+      const liveUser = resolveLiveSessionUser(user.userId);
+      if (!liveUser) return 'account_not_found';
+      return hasPermission(liveUser, 'edit_user_permissions')
+        ? null
+        : 'missing_permission:edit_user_permissions';
+    }
+    // Tenant grants: manage_tenant_members on the tenant named by the tool
+    // input (id, then slug), else the loop's scoped tenant.
+    let resolvedTenantId: number | null = null;
+    const inputTenantId = input?.tenantId;
+    if (typeof inputTenantId === 'number' && Number.isInteger(inputTenantId) && inputTenantId > 0) {
+      resolvedTenantId = inputTenantId;
+    } else if (typeof input?.tenantSlug === 'string' && input.tenantSlug.trim()) {
+      const found = listSupportTenants().find(
+        (t) => t.slug.toLowerCase() === String(input.tenantSlug).trim().toLowerCase(),
+      );
+      if (!found) return 'tenant_not_found';
+      resolvedTenantId = found.id;
+    } else if (tenantId != null) {
+      resolvedTenantId = tenantId;
+    }
+    if (resolvedTenantId == null) return 'tenant_required';
+    try {
+      const access = resolveEffectiveTenantAccess(user, resolvedTenantId);
+      return tenantPermissionGranted(access.permissions, 'manage_tenant_members')
+        ? null
+        : 'missing_permission:manage_tenant_members';
+    } catch {
+      return 'missing_permission:manage_tenant_members';
+    }
   }
   if (tool.kind === 'tenant_step') {
     const required = tool.requiredPermission as TenantPermission;
@@ -515,6 +620,42 @@ function runToolHandler(params: {
     });
     return { actionType: 'open_onboarding_guide', proposal };
   }
+  if (tool.kind === 'permission_grant') {
+    // Phase 3: stage a grant descriptor only — the gate already verified
+    // the caller's own permission; authorizePermissionGrant re-validates
+    // the target, subset, self/primary and last-admin guards live. Never writes.
+    const isTenant = tool.id === 'permission.grant_tenant' || tool.id === 'permission.revoke_tenant';
+    const isGrant = tool.id === 'permission.grant_global' || tool.id === 'permission.grant_tenant';
+    const permissions = Array.isArray(input.permissions)
+      ? (input.permissions as unknown[]).filter((p): p is string => typeof p === 'string')
+      : [];
+    const knownIds = new Set<string>(
+      isTenant ? [...TENANT_PERMISSIONS, '*'] : [...SYSTEM_PERMISSIONS, '*'],
+    );
+    for (const p of permissions) {
+      if (!knownIds.has(p)) throw new Error(`Unknown permission '${p}'.`);
+    }
+    let rolePreset: TenantRolePresetId | undefined;
+    if (isTenant && typeof input.rolePreset === 'string') {
+      if (!(input.rolePreset in TENANT_ROLE_PRESETS)) {
+        throw new Error(`Unknown tenant role preset '${input.rolePreset}'.`);
+      }
+      rolePreset = input.rolePreset as TenantRolePresetId;
+    }
+    const intent: ParsedPermissionGrantIntent = {
+      action: isGrant ? 'grant' : 'revoke',
+      scope: isTenant ? 'tenant' : 'global',
+      targetEmail: String(input.targetEmail),
+      permissions,
+      rolePreset,
+      tenantSlug: typeof input.tenantSlug === 'string' ? input.tenantSlug : null,
+      tenantId: typeof input.tenantId === 'number' ? input.tenantId : null,
+      removeMember: isTenant && !isGrant && permissions.length === 0 && rolePreset === undefined,
+    };
+    const auth = authorizePermissionGrant({ user, intent, tenantId: tenantId ?? null });
+    if (!auth.ok) throw new CopilotToolDenialError(auth.code, auth.messageEn);
+    return { grant: auth.grant };
+  }
   throw new Error(`No handler registered for tool '${tool.id}'.`);
 }
 
@@ -579,7 +720,7 @@ export async function executeCopilotTool(params: {
     };
   }
 
-  const denial = livePermissionDenial({ tool, user, tenantId });
+  const denial = livePermissionDenial({ tool, user, tenantId, input: parsed.data });
   if (denial) {
     appendSupportAuditLog({
       tenantId: auditTenantId,
@@ -611,12 +752,25 @@ export async function executeCopilotTool(params: {
         setTimeout(() => reject(new Error(`Tool '${toolId}' timed out.`)), timeoutMs);
       }),
     ]);
+    const grantDetails =
+      tool.kind === 'permission_grant' &&
+      result !== null &&
+      typeof result === 'object' &&
+      'grant' in result &&
+      (result as { grant: unknown }).grant !== null &&
+      typeof (result as { grant: unknown }).grant === 'object'
+        ? {
+            targetEmail: ((result as { grant: { targetEmail?: unknown } }).grant.targetEmail as string | undefined) ?? undefined,
+            scope: ((result as { grant: { scope?: unknown } }).grant.scope as string | undefined) ?? undefined,
+            action: ((result as { grant: { action?: unknown } }).grant.action as string | undefined) ?? undefined,
+          }
+        : {};
     appendSupportAuditLog({
       tenantId: auditTenantId,
       action: 'support.setup_copilot.tool_executed',
       userId: String(user.userId),
       role: user.role,
-      details: { toolId, requiredPermission: tool.requiredPermission },
+      details: { toolId, requiredPermission: tool.requiredPermission, ...grantDetails },
     });
     return {
       toolId,
@@ -627,6 +781,30 @@ export async function executeCopilotTool(params: {
       detailVi: `Công cụ '${toolId}' đã chuẩn bị xong đề xuất. Chưa có thay đổi nào được áp dụng.`,
     };
   } catch (err) {
+    // Target-level refusals (unknown target, self, primary, subset,
+    // last-admin) are denials, not handler errors — same audit trail as
+    // the pre-execute gate, handler never ran a write.
+    if (err instanceof CopilotToolDenialError) {
+      appendSupportAuditLog({
+        tenantId: auditTenantId,
+        action: 'support.setup_copilot.tool_denied',
+        userId: String(user.userId),
+        role: user.role,
+        details: {
+          toolId,
+          requiredPermission: tool.requiredPermission,
+          reason: err.code,
+        },
+      });
+      return {
+        toolId,
+        status: 'denied',
+        reason: err.code,
+        requiredPermission: tool.requiredPermission,
+        detailEn: err.message,
+        detailVi: err.message,
+      };
+    }
     const message = err instanceof Error ? err.message : 'Tool execution failed.';
     appendSupportAuditLog({
       tenantId: auditTenantId,

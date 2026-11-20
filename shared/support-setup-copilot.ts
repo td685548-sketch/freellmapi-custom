@@ -14,6 +14,39 @@ import type {
   SupportTicketPriority,
 } from './support-service-desk.js';
 import type { Permission } from './user-access.js';
+import type { TenantRolePresetId } from './tenant-rbac.js';
+
+/** A single staged permission change (Phase 3). One entry per target user. */
+export type CopilotPermissionGrantScope = 'global' | 'tenant';
+export type CopilotPermissionGrantAction = 'grant' | 'revoke';
+
+export interface CopilotPermissionGrant {
+  /** 'global' = gateway-wide permissions; 'tenant' = membership on one tenant. */
+  scope: CopilotPermissionGrantScope;
+  /** Tenant id for scope 'tenant'; null for global grants. */
+  tenantId: number | null;
+  tenantSlug?: string | null;
+  tenantName?: string | null;
+  targetUserId: number;
+  targetEmail: string;
+  action: CopilotPermissionGrantAction;
+  /**
+   * Global: the permissions being added (grant) or removed (revoke).
+   * Tenant grant: the permissions being added (union) or the preset's
+   * permissions when rolePreset is set (replace). Tenant revoke: the
+   * permissions being removed; when the result is empty the member is
+   * removed from the tenant entirely.
+   */
+  permissions: string[];
+  /** Tenant preset being assigned (replace semantics); absent = additive permissions. */
+  rolePreset?: TenantRolePresetId;
+  /** Tenant revoke with no permissions listed = remove the member entirely. */
+  removeMember?: boolean;
+  /** Target's grants at stage time (re-read live again at apply time). */
+  previousPermissions: string[];
+  /** Target's expected grants after the change (recomputed live at apply time). */
+  newPermissions: string[];
+}
 
 export const SYSTEM_SETTING_IDS = [
   'thruline_gateway_enabled',
@@ -220,7 +253,7 @@ export interface SupportSetupPlannedStep<K extends SupportSetupStepId = SupportS
 export interface SupportSetupProposal {
   id: string;
   userId: number;
-  targetMode: 'create_tenant' | 'update_tenant' | 'system_settings';
+  targetMode: 'create_tenant' | 'update_tenant' | 'system_settings' | 'permission_grant';
   tenantId: number | null;
   tenantName: string;
   tenantSlug: string;
@@ -231,6 +264,8 @@ export interface SupportSetupProposal {
   isSurgical?: boolean;
   targetedSteps?: SupportSetupStepId[];
   systemActions?: SupportSystemSettingAction[];
+  /** Phase 3: staged permission grants — applied only via the Consent Card. */
+  permissionGrants?: CopilotPermissionGrant[];
   createdAt: string;
   expiresAt: string;
   appliedAt?: string | null;

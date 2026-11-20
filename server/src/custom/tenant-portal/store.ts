@@ -244,6 +244,70 @@ function findUserByEmail(db: Db, email: string): UserLookupRow | undefined {
     .get(normalizeEmail(email)) as UserLookupRow | undefined;
 }
 
+/** Email → account lookup shared by the Copilot grant path (no duplicate query). */
+export function getUserByEmail(email: string): {
+  id: number;
+  email: string;
+  role: string;
+  isPrimary: boolean;
+} | undefined {
+  const db = ensureTenantRbacTables();
+  const row = findUserByEmail(db, email);
+  return row
+    ? { id: row.id, email: row.email, role: row.role, isPrimary: Boolean(row.is_primary) }
+    : undefined;
+}
+
+/**
+ * Last-delegator guard (Phase 3, shared by the admin UI and the Copilot):
+ * at least one membership row on the tenant must keep
+ * `manage_tenant_members`, so tenant delegation can never silently collapse.
+ * Platform operators can still manage the tenant, but they are not counted
+ * here — this guard protects the delegated manager set, mirroring the
+ * global last-admin rule in services/users.ts.
+ */
+export function hasOtherTenantMemberManager(
+  tenantId: number,
+  excludeUserId: number,
+): boolean {
+  const db = ensureTenantRbacTables();
+  const rows = db
+    .prepare(
+      'SELECT permissions_json FROM custom_tenant_memberships WHERE tenant_id = ? AND user_id != ?',
+    )
+    .all(tenantId, excludeUserId) as Array<{ permissions_json: string }>;
+  return rows.some((r) =>
+    tenantPermissionGranted(
+      parseStoredTenantPermissions(r.permissions_json),
+      'manage_tenant_members',
+    ),
+  );
+}
+
+function assertNotLastTenantMemberManager(
+  tenantId: number,
+  targetUserId: number,
+  nextPermissions: TenantPermission[],
+): void {
+  const db = ensureTenantRbacTables();
+  const existingRow = db
+    .prepare(
+      'SELECT permissions_json FROM custom_tenant_memberships WHERE tenant_id = ? AND user_id = ?',
+    )
+    .get(tenantId, targetUserId) as { permissions_json: string } | undefined;
+  if (!existingRow) return;
+  const existingPerms = parseStoredTenantPermissions(existingRow.permissions_json);
+  if (!tenantPermissionGranted(existingPerms, 'manage_tenant_members')) return;
+  if (tenantPermissionGranted(nextPermissions, 'manage_tenant_members')) return;
+  if (!hasOtherTenantMemberManager(tenantId, targetUserId)) {
+    throw new TenantRbacError(
+      409,
+      'last_admin_protected',
+      'Cannot remove the last member manager of this tenant. Assign manage_tenant_members to another member first.',
+    );
+  }
+}
+
 function resolveMembershipPayload(input: {
   rolePreset?: TenantRolePresetId;
   permissions?: readonly string[];
@@ -543,6 +607,8 @@ export function upsertTenantMembershipByPlatformAdmin(params: {
     }
   }
 
+  assertNotLastTenantMemberManager(params.tenantId, target.id, permissions);
+
   writeMembershipRow(db, {
     tenantId: params.tenantId,
     userId: target.id,
@@ -625,6 +691,8 @@ export function upsertTenantMemberByTenantAdmin(params: {
       }
     }
   }
+
+  assertNotLastTenantMemberManager(params.tenantId, target.id, permissions);
 
   writeMembershipRow(db, {
     tenantId: params.tenantId,
@@ -711,6 +779,8 @@ export function removeTenantMember(params: {
       );
     }
   }
+
+  assertNotLastTenantMemberManager(params.tenantId, params.targetUserId, []);
 
   return (
     db
