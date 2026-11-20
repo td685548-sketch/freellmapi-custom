@@ -95,6 +95,8 @@ To keep the `main` branch stable, ensure clean CI validation, and preserve full 
 ### Rule 1: One Dedicated Branch/Worktree per Feature or Fix (Protect Root `main`)
 **Never commit or push features or fixes directly to `main`. Every new feature, bug fix, or independent maintenance task gets its own dedicated branch from the latest `origin/main` inside an isolated Git worktree.** This applies to 9Router integration too; there is no shared integration-branch exception.
 
+**Mandatory Pre-Edit Sync (`origin/main`):** Before starting any code edits, agents **MUST** run `git fetch origin` and ensure the branch they are editing contains the latest `origin/main` (either create the worktree branch directly off `origin/main` or merge/rebase `origin/main` into an existing task branch if continuing prior work), because `main` on the official GitHub repo (`origin/main`) is always the latest live running code.
+
 Because the primary root checkout (`D:\FreeLLMAPI`) serves as the **Live Local Production Server**, **NEVER switch the root checkout away from `main`**. Always create an isolated worktree for feature or fix branches:
 
 ```powershell
