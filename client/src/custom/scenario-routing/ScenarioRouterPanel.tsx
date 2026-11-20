@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Activity,
@@ -143,19 +143,23 @@ export function ScenarioRouterPanel({
     selectedKeyId !== null &&
     Boolean(configData?.keyPolicies.some((p) => p.keyId === selectedKeyId));
 
-  useEffect(() => {
-    if (!activePolicy) return;
-    setEnabled(activePolicy.enabled);
-    setThreshold(activePolicy.longContextThreshold);
-    setRules({
-      background: { ...activePolicy.rules.background },
-      think: { ...activePolicy.rules.think },
-      longContext: { ...activePolicy.rules.longContext },
-      vision: { ...activePolicy.rules.vision },
-      webSearch: { ...activePolicy.rules.webSearch },
-      default: { ...activePolicy.rules.default },
-    });
-  }, [activePolicy, selectedKeyId]);
+  // Re-sync the draft form when the active policy (or key) changes.
+  const [prevPolicy, setPrevPolicy] = useState<{ policy: typeof activePolicy; keyId: typeof selectedKeyId }>({ policy: activePolicy, keyId: selectedKeyId })
+  if (activePolicy !== prevPolicy.policy || selectedKeyId !== prevPolicy.keyId) {
+    setPrevPolicy({ policy: activePolicy, keyId: selectedKeyId })
+    if (activePolicy) {
+      setEnabled(activePolicy.enabled)
+      setThreshold(activePolicy.longContextThreshold)
+      setRules({
+        background: { ...activePolicy.rules.background },
+        think: { ...activePolicy.rules.think },
+        longContext: { ...activePolicy.rules.longContext },
+        vision: { ...activePolicy.rules.vision },
+        webSearch: { ...activePolicy.rules.webSearch },
+        default: { ...activePolicy.rules.default },
+      })
+    }
+  }
 
   const saveMutation = useMutation({
     mutationFn: () =>

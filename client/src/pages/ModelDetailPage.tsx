@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 import { ChevronLeft, Merge, Save, Split, Trash2 } from 'lucide-react'
@@ -213,7 +213,9 @@ export default function ModelDetailPage() {
   // the full overrides list (see lib/alias-merge) — the visible rows are only
   // this group's slice, so editing by row position would hit other groups.
   const merges = useMemo(() => unify?.overrides.merges ?? [], [unify])
-  const groupAliases = useMemo(() => aliasesFor(merges, label), [merges, label])
+  // No manual useMemo here: the compiler preserves memoization itself, and
+  // this is only rendered, never a hook dep.
+  const groupAliases = aliasesFor(merges, label)
   const submitAlias = () => {
     if (!aliasInput.trim()) return
     mergeMutation.mutate(addAlias(merges, label, aliasInput))
@@ -413,7 +415,13 @@ function ProviderSettingsRow({
     tpmLimit, tpdLimit, supportsVision, supportsTools, enabled])
 
   const [form, setForm] = useState(() => modelSettingsForm(source))
-  useEffect(() => setForm(modelSettingsForm(source)), [modelDbId, source])
+  // Re-sync when the model's own values change (render adjustment, not an
+  // effect); `source` is memoized, so editing the form doesn't reset it.
+  const [prevFormSource, setPrevFormSource] = useState({ source, modelDbId })
+  if (source !== prevFormSource.source || modelDbId !== prevFormSource.modelDbId) {
+    setPrevFormSource({ source, modelDbId })
+    setForm(modelSettingsForm(source))
+  }
   const setField = <K extends keyof typeof form>(key: K, value: typeof form[K]) =>
     setForm(current => ({ ...current, [key]: value }))
 

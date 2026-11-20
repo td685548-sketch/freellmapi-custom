@@ -62,6 +62,14 @@ interface PxpipeResponse {
   }
 }
 
+// Shape of the saver self-test responses, rendered as OK/latency or an error.
+interface SaverTestResult {
+  ok: boolean
+  latencyMs?: number
+  durationMs?: number
+  error?: string
+}
+
 interface PxpipeTimelineEntry {
   date: string
   tokensSavedEst: number
@@ -184,8 +192,8 @@ export default function TokenSavers() {
 
   const [headroomUrlDraft, setHeadroomUrlDraft] = useState<string | null>(null)
   const [headroomTimeoutDraft, setHeadroomTimeoutDraft] = useState<number | null>(null)
-  const [testResult, setTestResult] = useState<any>(null)
-  const [pxpipeSelfTestResult, setPxpipeSelfTestResult] = useState<any>(null)
+  const [testResult, setTestResult] = useState<SaverTestResult | null>(null)
+  const [pxpipeSelfTestResult, setPxpipeSelfTestResult] = useState<SaverTestResult | null>(null)
 
   const mutation = useMutation({
     meta: { silenceToast: true },
@@ -237,22 +245,22 @@ export default function TokenSavers() {
   const headroomTestMutation = useMutation({
     meta: { silenceToast: true },
     mutationFn: (params: { url?: string; timeoutMs?: number }) =>
-      apiFetch<any>('/api/savers/headroom/test', { method: 'POST', body: JSON.stringify(params) }),
+      apiFetch<SaverTestResult>('/api/savers/headroom/test', { method: 'POST', body: JSON.stringify(params) }),
     onSuccess: (res) => {
       setTestResult(res)
     },
-    onError: (err: any) => {
+    onError: (err) => {
       setTestResult({ ok: false, error: err?.message || 'Test failed' })
     },
   })
 
   const pxpipeTestMutation = useMutation({
     meta: { silenceToast: true },
-    mutationFn: () => apiFetch<any>('/api/savers/pxpipe/test', { method: 'POST' }),
+    mutationFn: () => apiFetch<SaverTestResult>('/api/savers/pxpipe/test', { method: 'POST' }),
     onSuccess: (res) => {
       setPxpipeSelfTestResult(res)
     },
-    onError: (err: any) => {
+    onError: (err) => {
       setPxpipeSelfTestResult({ ok: false, error: err?.message || 'Self-test failed' })
     },
   })

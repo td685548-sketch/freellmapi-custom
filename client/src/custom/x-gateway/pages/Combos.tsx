@@ -8,7 +8,7 @@ import { useSessionRevision } from '../../session-state'
 import { useAccounts } from '../api'
 import { mgmtApi, type ComboEntry, type ComboKind, type ComboPayload, type ComboStrategy, type XCombo } from '../management-api'
 import { useMgmtStrings } from '../management-strings'
-import { askConfirm } from '../shell/confirm'
+import { askConfirm } from '../shell/confirm-store'
 
 /** Router policy fields live on the server combo but not yet in the shared
  *  management API types (owned by another track), so the console carries them
@@ -119,7 +119,7 @@ export default function Combos() {
   const session = useUserSession()
   const canEdit = session.hasPermission('edit_x_combos')
   const accounts = useAccounts()
-  const providers = accounts.data?.providers ?? []
+  const providers = useMemo(() => accounts.data?.providers ?? [], [accounts.data?.providers])
   const query = useQuery({ queryKey: ['x-combos', revision], queryFn: ({ signal }) => mgmtApi.combos(signal), retry: false })
   const [draft, setDraft] = useState<Draft | null>(null)
   const [search, setSearch] = useState('')

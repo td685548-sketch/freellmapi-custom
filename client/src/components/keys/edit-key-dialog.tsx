@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label'
 import { X } from 'lucide-react'
 import type { ApiKey } from '../../../../shared/types'
 import { useI18n } from '@/i18n'
-import { PLATFORMS } from './shared'
+import { PLATFORMS } from './shared-data'
 import { GroupLabelField } from './group-label-field'
 import { capUsage } from './cap-usage'
 

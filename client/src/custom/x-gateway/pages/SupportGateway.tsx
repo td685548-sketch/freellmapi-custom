@@ -30,7 +30,7 @@ import { apiFetch } from '@/lib/api'
 import { useUserSession } from '../../use-session'
 import { useSessionRevision } from '../../session-state'
 import { useSupportStrings } from '../support-strings'
-import { askConfirm } from '../shell/confirm'
+import { askConfirm } from '../shell/confirm-store'
 
 // ---------------------------------------------------------------------------
 // TypeScript Interfaces

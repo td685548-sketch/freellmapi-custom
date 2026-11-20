@@ -15,7 +15,7 @@ import { StarterQuotaDefaultSection } from './StarterQuotaDefaultSection'
 
 import type { AdminUser, RegistrationRequest } from '../../../shared/user-access'
 import { useCustomT } from './i18n/use-custom-t'
-import { askPrompt } from '@/custom/x-gateway/shell/confirm'
+import { askPrompt } from '@/custom/x-gateway/shell/confirm-store'
 export type { AdminUser, RegistrationRequest } from '../../../shared/user-access'
 
 export interface UserPageCapabilities { viewUsers: boolean; viewRequests: boolean; roles: boolean; permissions: boolean; quotas: boolean; sessions: boolean; keys: boolean; approve: boolean; reject: boolean }

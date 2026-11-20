@@ -48,15 +48,10 @@ const PROVIDER_ICON_FILES: Record<string, string> = {
 const NO_ICON_PROVIDERS = new Set(['custom', 'runcrate'])
 const failedIconIds = new Set<string>()
 
-export function getProviderIconFile(providerId: string): string | null {
+function getProviderIconFile(providerId: string): string | null {
   const id = providerId.trim().toLowerCase()
   if (!id || NO_ICON_PROVIDERS.has(id) || failedIconIds.has(id)) return null
   return PROVIDER_ICON_FILES[id] ?? `${id}.png`
-}
-
-export function getProviderIconSrc(providerId: string): string | null {
-  const file = getProviderIconFile(providerId)
-  return file ? `/providers/${file}` : null
 }
 
 export function ProviderMark({ id, name }: { id: string; name?: string }) {
@@ -477,20 +472,29 @@ export function EditCompatibleModal({ isOpen, node, onClose, onUpdated }: EditCo
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Reset the form when a different node is edited (render adjustment).
+  const [prevEditNode, setPrevEditNode] = useState(node)
+  if (node !== prevEditNode) {
+    setPrevEditNode(node)
+    if (node) {
+      setName(node.name || '')
+      setPrefix(node.alias || node.id.replace(/^custom-/, '') || '')
+      const t = (node.customNodeType as 'openai-compatible' | 'anthropic-compatible' | 'custom-embedding') || 'openai-compatible'
+      setNodeType(t)
+      setApiType((node.customNodeApiType as 'chat' | 'responses') || 'chat')
+      setBaseUrl(node.baseUrl || '')
+      setCheckKey('')
+      setCheckModelId('')
+      setValidationResult(null)
+      setError(null)
+      setModelInput('')
+    }
+  }
+
+  // The stored node (models, base URL, prefix) can differ from the list row,
+  // so refresh the form from the server when the edited node changes.
   useEffect(() => {
     if (!node) return
-    setName(node.name || '')
-    setPrefix(node.alias || node.id.replace(/^custom-/, '') || '')
-    const t = (node.customNodeType as 'openai-compatible' | 'anthropic-compatible' | 'custom-embedding') || 'openai-compatible'
-    setNodeType(t)
-    setApiType((node.customNodeApiType as 'chat' | 'responses') || 'chat')
-    setBaseUrl(node.baseUrl || '')
-    setCheckKey('')
-    setCheckModelId('')
-    setValidationResult(null)
-    setError(null)
-    setModelInput('')
-
     accountsApi.getCustomNodes().then(res => {
       const match = res?.nodes?.find(n => n.id === node.id)
       if (match) {

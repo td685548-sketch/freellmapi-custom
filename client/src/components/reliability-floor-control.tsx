@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useI18n } from '@/i18n'
 import { apiFetch } from '@/lib/api'
@@ -20,7 +20,11 @@ export function ReliabilityFloorControl() {
 
   const [text, setText] = useState(floor == null ? '' : String(floor))
   // Re-sync when the server value changes under us (poll, or another tab).
-  useEffect(() => { setText(floor == null ? '' : String(floor)) }, [floor])
+  const [prevFloor, setPrevFloor] = useState(floor)
+  if (floor !== prevFloor) {
+    setPrevFloor(floor)
+    setText(floor == null ? '' : String(floor))
+  }
 
   const mutation = useMutation({
     mutationFn: (value: number | null) =>

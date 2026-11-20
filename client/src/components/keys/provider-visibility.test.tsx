@@ -7,7 +7,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '@/i18n'
 import { AddKeyForm } from './add-key-form'
 import { AddModelDialog } from './add-model-dialog'
-import { LISTED_PLATFORMS, PLATFORMS } from './shared'
+import { LISTED_PLATFORMS, PLATFORMS } from './shared-data'
 
 vi.mock('@/lib/api', () => ({ apiFetch: vi.fn(async () => []) }))
 vi.mock('@/components/model-combobox', () => ({

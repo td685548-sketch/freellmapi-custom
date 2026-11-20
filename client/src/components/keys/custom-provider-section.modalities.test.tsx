@@ -9,7 +9,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '@/i18n'
 import { apiFetch } from '@/lib/api'
 import en from '@/i18n/locales/en.json'
-import { CUSTOM_MODEL_KIND_LABEL } from './shared'
+import { CUSTOM_MODEL_KIND_LABEL } from './shared-data'
 import { CustomProviderSection } from './custom-provider-section'
 
 vi.mock('@/lib/api', () => ({ apiFetch: vi.fn() }))

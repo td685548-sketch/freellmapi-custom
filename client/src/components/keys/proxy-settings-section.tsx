@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -8,7 +8,7 @@ import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Globe } from 'lucide-react'
 import { useI18n } from '@/i18n'
-import { PLATFORMS, CUSTOM_GROUP } from './shared'
+import { PLATFORMS, CUSTOM_GROUP } from './shared-data'
 import type { ApiKey } from '../../../../shared/types'
 import type { ProxyMode } from '../../../../shared/types'
 
@@ -52,13 +52,17 @@ export function ProxySettingsSection({ canEdit = true }: { canEdit?: boolean } =
   })
 
   // Sync from server when the query refetches; keep the user's typed value
-  // in between (controlled input).
-  useEffect(() => {
+  // in between (controlled input) — so this tracks the *values*, not the
+  // query object identity: a refetch returning the same values must not
+  // wipe an in-progress edit.
+  const [prevProxy, setPrevProxy] = useState({ url: data?.proxyUrl, mode: data?.proxyMode })
+  if (data?.proxyUrl !== prevProxy.url || data?.proxyMode !== prevProxy.mode) {
+    setPrevProxy({ url: data?.proxyUrl, mode: data?.proxyMode })
     if (data) {
       setProxyUrl(data.proxyUrl)
       setProxyMode(data.proxyMode)
     }
-  }, [data?.proxyUrl, data?.proxyMode])
+  }
 
   const saveProxy = useMutation({
     meta: { silenceToast: true },

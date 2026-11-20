@@ -8,7 +8,7 @@ const POLL_MS = 30_000
 /** Count of registration requests waiting for approval; 0 when the viewer cannot see them.
  *  Shares the ['registration-requests'] cache with the Users page, so approving or
  *  rejecting there updates the badge immediately. */
-export function usePendingRequestCount(): number {
+function usePendingRequestCount(): number {
   const { can } = useAdministrativeAccess()
   const enabled = can('view_requests')
   const { data } = useQuery<{ requests: RegistrationRequest[] }>({

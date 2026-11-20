@@ -24,7 +24,7 @@ interface ClearBody { accountId?: number; provider?: string; model?: string }
 const ENDPOINT = '/api/thruline-accounts/availability';
 const REFRESH_MS = 15_000;
 
-export function formatCountdown(ms: number): string {
+function formatCountdown(ms: number): string {
   const total = Math.max(0, Math.ceil(ms / 1000));
   const h = Math.floor(total / 3600);
   const m = Math.floor((total % 3600) / 60);
@@ -63,9 +63,9 @@ export default function ModelAvailabilityBadge() {
   });
 
   // Tick once a second while the panel is open so countdowns stay live.
+  // The immediate tick on open happens in the button's onClick below.
   useEffect(() => {
     if (!open) return undefined;
-    setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [open]);
@@ -105,7 +105,7 @@ export default function ModelAvailabilityBadge() {
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
-        onClick={() => setOpen(v => !v)}
+        onClick={() => { setNow(Date.now()); setOpen(v => !v) }}
         className={tone}
       >
         <span aria-hidden className={`x-availability-dot ${healthy ? 'ok' : query.isError ? '' : 'warn'}`} />

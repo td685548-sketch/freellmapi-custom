@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ShieldAlert } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
@@ -42,7 +42,12 @@ export function ContentFilterCard({ profileId, canEdit }: { profileId: number; c
   const { data } = useQuery<{ settings: ContentFilterSettings }>({ queryKey: ['content-filter', profileId], queryFn: () => apiFetch(base) })
   const events = useQuery<{ events: ContentFilterEvent[] }>({ queryKey: ['content-filter-events', profileId], queryFn: () => apiFetch(`${base}/events`), enabled: canEdit })
   const [draft, setDraft] = useState<Draft | null>(null)
-  useEffect(() => { if (data?.settings) setDraft(toDraft(data.settings)) }, [data?.settings])
+  // Re-sync when the server settings change (render adjustment, not an effect).
+  const [prevSettings, setPrevSettings] = useState(data?.settings)
+  if (data?.settings !== prevSettings) {
+    setPrevSettings(data?.settings)
+    if (data?.settings) setDraft(toDraft(data.settings))
+  }
 
   const save = useMutation({
     mutationFn: (body: ContentFilterSettings) => apiFetch(base, { method: 'PUT', body: JSON.stringify(body) }),

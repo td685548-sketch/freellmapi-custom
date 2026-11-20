@@ -25,7 +25,7 @@ import { apiFetch } from '@/lib/api'
 import { useUserSession } from '../../use-session'
 import { useSessionRevision } from '../../session-state'
 import { useXStrings } from '../strings'
-import { askConfirm } from '../shell/confirm'
+import { askConfirm } from '../shell/confirm-store'
 
 type GatewayStatus = {
   enabled: boolean

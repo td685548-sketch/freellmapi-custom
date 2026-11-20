@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, useEffectEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
@@ -51,7 +51,7 @@ import { useUserSession } from '../../use-session';
 import { useSessionRevision } from '../../session-state';
 import '../playground.css';
 import { ThrulineLogo } from '../ThrulineLogo';
-import { askConfirm } from '../shell/confirm'
+import { askConfirm } from '../shell/confirm-store'
 
 /** Extract `<think>...</think>` blocks (including unclosed streaming tags) and merge with `reasoning_content`. */
 function splitThinkContent(content: string, reasoning?: string): { thinking: string; answer: string } {
@@ -239,6 +239,17 @@ export default function Playground() {
   // Settings open state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
+  // Streaming state (declared before the callbacks that use it).
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamError, setStreamError] = useState<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [copiedTurnId, setCopiedTurnId] = useState<string | null>(null);
+  const [isNearBottom, setIsNearBottom] = useState(true);
+  const isNearBottomRef = useRef(true);
+
   // Clear current conversation messages
   const handleClearCurrentChat = useCallback(async () => {
     if (activeChat.messages.length === 0) return;
@@ -274,17 +285,6 @@ export default function Playground() {
   const [maxTokens, setMaxTokens] = useState<number>(2048);
   const [reasoningEffort, setReasoningEffort] = useState<'' | 'low' | 'medium' | 'high'>('');
 
-  // Streaming state
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [streamError, setStreamError] = useState<string | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [copiedTurnId, setCopiedTurnId] = useState<string | null>(null);
-  const [isNearBottom, setIsNearBottom] = useState(true);
-  const isNearBottomRef = useRef(true);
-
   // Auto-scroll inside chat container
   const scrollToBottom = useCallback((force = false) => {
     const el = messagesContainerRef.current;
@@ -310,13 +310,23 @@ export default function Playground() {
     scrollToBottom(false);
   }, [activeChat.messages, isStreaming, scrollToBottom]);
 
-  useEffect(() => {
+  // When the active chat changes, the view starts at the bottom.
+  const [prevChatId, setPrevChatId] = useState(activeChat.id);
+  if (activeChat.id !== prevChatId) {
+    setPrevChatId(activeChat.id);
     setIsNearBottom(true);
+  }
+  useEffect(() => {
     isNearBottomRef.current = true;
     scrollToBottom(true);
   }, [activeChat.id, scrollToBottom]);
 
   const persistedImageIdsRef = useRef(new Set<string>());
+
+  // Read the chats alive when the effect runs, without subscribing to them:
+  // hydration is a mount / user-change job, not something to redo on every
+  // message. (An effect event is exempt from exhaustive-deps.)
+  const getChats = useEffectEvent(() => chats);
 
   // Hydrate persisted image URLs from IndexedDB on mount and prune expired/orphaned images.
   useEffect(() => {
@@ -325,7 +335,7 @@ export default function Playground() {
     const activeIds = new Set<string>();
     const missingIds: string[] = [];
 
-    for (const chat of chats) {
+    for (const chat of getChats()) {
       for (const msg of chat.messages) {
         if (!msg.images) continue;
         for (const img of msg.images) {
@@ -366,7 +376,7 @@ export default function Playground() {
   }, [userId]);
 
   const chatSaverRef = useRef<DebouncedChatSaver | null>(null);
-  if (!chatSaverRef.current) {
+  if (chatSaverRef.current == null) {
     chatSaverRef.current = createDebouncedChatSaver();
   }
 

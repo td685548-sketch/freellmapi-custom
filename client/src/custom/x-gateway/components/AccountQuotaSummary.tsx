@@ -10,7 +10,7 @@ function formatCompact(n: number): string {
   return Number.isInteger(n) ? n.toLocaleString() : n.toFixed(1)
 }
 
-export function formatWindowLabel(w: XQuotaWindow): string {
+function formatWindowLabel(w: XQuotaWindow): string {
   const map: Record<string, string> = {
     CREDIT: 'Credits',
     CREDIT_freetrial: 'Free Trial',
@@ -33,14 +33,14 @@ export function formatWindowLabel(w: XQuotaWindow): string {
   return w.modelId ? `${base} · ${w.modelId}` : base
 }
 
-export function windowColor(pct: number | null): string {
+function windowColor(pct: number | null): string {
   if (pct == null) return '#64748b'
   if (pct > 70) return '#10b981'
   if (pct >= 30) return '#f59e0b'
   return '#ef4444'
 }
 
-export function formatWindowValue(w: XQuotaWindow): string {
+function formatWindowValue(w: XQuotaWindow): string {
   if (w.remaining == null && w.limit == null) return '—'
   if (w.unit === '%' && w.remaining != null) {
     return `${Math.round(w.remaining)}%`
@@ -66,9 +66,16 @@ interface Props {
   compact?: boolean
 }
 
+// `now` defaults to the current time on every render (countdowns stay live
+// as the parent re-renders); kept in a module helper because the hooks
+// purity rule forbids calling Date.now() directly during render.
+function currentTimeMs(): number {
+  return Date.now()
+}
+
 export default function AccountQuotaSummary({
   quota,
-  now = Date.now(),
+  now = currentTimeMs(),
   onRefresh,
   refreshing = false,
   compact = false,

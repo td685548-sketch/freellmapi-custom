@@ -13,7 +13,7 @@ import { FieldError } from '@/components/ui/field-error'
 import { useI18n } from '@/i18n'
 import { toast } from '@/lib/toast'
 import type { ApiKey } from '@freellmapi/shared/types'
-import { LISTED_PLATFORMS, CUSTOM_GROUP } from '@/components/keys/shared'
+import { LISTED_PLATFORMS, CUSTOM_GROUP } from '@/components/keys/shared-data'
 
 export interface AddModelDialogProps {
   open: boolean

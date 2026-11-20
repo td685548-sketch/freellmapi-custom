@@ -13,7 +13,8 @@ import { toast } from '@/lib/toast'
 import type { FallbackEntry } from '@/lib/routing'
 import { scopeCandidates, shouldOfferModelPicker, type ScopeCandidate } from '@/lib/model-scope-selection'
 import { invalidateSearchQueries, SEARCH_PROVIDERS } from '@/lib/search'
-import { GetKeyLink, LISTED_PLATFORMS, PLATFORMS } from './shared'
+import { GetKeyLink } from './shared'
+import { LISTED_PLATFORMS, PLATFORMS } from './shared-data'
 
 /** A key that just landed, plus the models the picker should offer for it.
  *  Only produced when the picker is actually worth showing (#657) — otherwise
