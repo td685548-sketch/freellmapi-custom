@@ -32,13 +32,28 @@ import {
   type PlaygroundRequest,
 } from '../playground-api';
 import {
+  DEFAULT_CHAT_SAMPLING_SETTINGS,
+  SETTINGS_OPEN_KEY,
   newChat,
   loadChats,
   saveChats,
+  loadActiveChatId,
+  saveActiveChatId,
+  resolveActiveChatId,
+  loadDefaultSettings,
+  saveDefaultSettings,
+  getChatSettings,
+  sanitizeChatSettings,
+  sanitizeReasoningEffort,
+  sanitizeSystemPrompt,
+  sanitizeTemperature,
+  sanitizeMaxTokens,
   createDebouncedChatSaver,
   buildWindowedPlaygroundMessages,
   type DebouncedChatSaver,
   type ChatSession,
+  type ChatSettings,
+  type ChatSamplingSettings,
   type ChatTurn,
   type ChatImage,
 } from '../playground-state';
@@ -153,6 +168,21 @@ async function optimizeImageFile(file: File): Promise<{ id: string; name: string
   });
 }
 
+function createInitialStateForUser(userId: number): {
+  chats: ChatSession[];
+  activeChatId: string;
+} {
+  if (!userId) {
+    const fresh = newChat();
+    return { chats: [fresh], activeChatId: fresh.id };
+  }
+  const defaults = loadDefaultSettings(userId);
+  const loaded = loadChats(userId);
+  const chats = loaded.length > 0 ? loaded : [newChat(defaults)];
+  const activeChatId = resolveActiveChatId(chats, loadActiveChatId(userId));
+  return { chats, activeChatId };
+}
+
 export default function Playground() {
   const s = usePlaygroundStrings();
   const session = useUserSession();
@@ -170,17 +200,54 @@ export default function Playground() {
     staleTime: 60_000,
   });
 
-  // Chat sessions state
-  const [chats, setChats] = useState<ChatSession[]>(() => {
-    const loaded = loadChats(userId);
-    return loaded.length > 0 ? loaded : [newChat()];
+  // Chat sessions state (tracks resolved userId so session loading/switching never clobbers edits)
+  const [loadedUserId, setLoadedUserId] = useState<number>(userId);
+  const [hasPreSessionEdits, setHasPreSessionEdits] = useState(false);
+  const [chats, setChats] = useState<ChatSession[]>(() => createInitialStateForUser(userId).chats);
+  const [activeChatId, setActiveChatId] = useState<string>(() => {
+    const preferred = userId ? loadActiveChatId(userId) : '';
+    return resolveActiveChatId(chats, preferred);
   });
-  const [activeChatId, setActiveChatId] = useState<string>(() => chats[0]?.id ?? '');
 
-  // Active chat
+  if (userId !== loadedUserId) {
+    const previousUserId = loadedUserId;
+    setLoadedUserId(userId);
+    setHasPreSessionEdits(false);
+    if (userId > 0) {
+      const defaults = loadDefaultSettings(userId);
+      const loaded = loadChats(userId);
+      if (previousUserId === 0 && hasPreSessionEdits) {
+        const merged = loaded.length > 0 ? [...chats, ...loaded].slice(0, 20) : chats;
+        setChats(merged);
+        setActiveChatId((prevId) => resolveActiveChatId(merged, prevId));
+      } else {
+        const nextChats = loaded.length > 0 ? loaded : [newChat(defaults)];
+        const preferred = loadActiveChatId(userId);
+        setChats(nextChats);
+        setActiveChatId(resolveActiveChatId(nextChats, preferred));
+      }
+    } else {
+      const fresh = newChat();
+      setChats([fresh]);
+      setActiveChatId(fresh.id);
+    }
+  }
+
+  const defaultSampling = useMemo(
+    () => (userId ? loadDefaultSettings(userId) : DEFAULT_CHAT_SAMPLING_SETTINGS),
+    [userId],
+  );
+
+  // Active chat & derived settings (single source of truth)
   const activeChat = useMemo(() => {
-    return chats.find((c) => c.id === activeChatId) || chats[0] || newChat();
-  }, [chats, activeChatId]);
+    return chats.find((c) => c.id === activeChatId) || chats[0] || newChat(defaultSampling);
+  }, [chats, activeChatId, defaultSampling]);
+
+  const activeSettings = useMemo(
+    () => getChatSettings(activeChat, defaultSampling),
+    [activeChat, defaultSampling],
+  );
+  const { systemPrompt, temperature, maxTokens, reasoningEffort } = activeSettings;
 
   // Input & attachments state
   const [inputText, setInputText] = useState('');
@@ -236,8 +303,26 @@ export default function Playground() {
     setIsInputExpanded((prev) => !prev);
   }, []);
 
-  // Settings open state
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  // Settings open state (persisted across tab switches & reloads)
+  const [isSettingsOpen, setIsSettingsOpen] = useState(() => {
+    try {
+      return localStorage.getItem(SETTINGS_OPEN_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const updateSettingsOpen = useCallback((nextOrUpdater: boolean | ((prev: boolean) => boolean)) => {
+    setIsSettingsOpen((prev) => {
+      const next = typeof nextOrUpdater === 'function' ? nextOrUpdater(prev) : nextOrUpdater;
+      try {
+        localStorage.setItem(SETTINGS_OPEN_KEY, String(next));
+      } catch {
+        // ignore storage error
+      }
+      return next;
+    });
+  }, []);
 
   // Streaming state (declared before the callbacks that use it).
   const [isStreaming, setIsStreaming] = useState(false);
@@ -279,11 +364,56 @@ export default function Playground() {
     adjustTextareaHeight();
   }, [inputText, isInputExpanded, adjustTextareaHeight]);
 
-  // Settings
-  const [systemPrompt, setSystemPrompt] = useState('');
-  const [temperature, setTemperature] = useState<number>(0.7);
-  const [maxTokens, setMaxTokens] = useState<number>(2048);
-  const [reasoningEffort, setReasoningEffort] = useState<'' | 'low' | 'medium' | 'high'>('');
+  const markPreSessionEdit = () => {
+    if (!userId) setHasPreSessionEdits(true);
+  };
+
+  const updateActiveChatSettings = (patch: Partial<ChatSettings>) => {
+    markPreSessionEdit();
+    const targetId = activeChat.id;
+    const nextSampling: Partial<ChatSamplingSettings> = {};
+    if (patch.temperature !== undefined) {
+      nextSampling.temperature = sanitizeTemperature(patch.temperature, temperature);
+    }
+    if (patch.maxTokens !== undefined) {
+      nextSampling.maxTokens = sanitizeMaxTokens(patch.maxTokens, maxTokens);
+    }
+    if (patch.reasoningEffort !== undefined) {
+      nextSampling.reasoningEffort = sanitizeReasoningEffort(patch.reasoningEffort, reasoningEffort);
+    }
+
+    if (Object.keys(nextSampling).length > 0 && userId) {
+      saveDefaultSettings(userId, {
+        temperature,
+        maxTokens,
+        reasoningEffort,
+        ...nextSampling,
+      });
+    }
+
+    setChats((prev) => {
+      const exists = prev.some((c) => c.id === targetId);
+      const base = exists ? prev : [activeChat, ...prev];
+      return base.map((c) => {
+        if (c.id !== targetId) return c;
+        const current = getChatSettings(c, defaultSampling);
+        const merged: ChatSettings = {
+          systemPrompt:
+            patch.systemPrompt !== undefined
+              ? sanitizeSystemPrompt(patch.systemPrompt, current.systemPrompt)
+              : current.systemPrompt,
+          temperature: nextSampling.temperature ?? current.temperature,
+          maxTokens: nextSampling.maxTokens ?? current.maxTokens,
+          reasoningEffort: nextSampling.reasoningEffort ?? current.reasoningEffort,
+        };
+        return {
+          ...c,
+          ...merged,
+          updatedAt: Date.now(),
+        };
+      });
+    });
+  };
 
   // Auto-scroll inside chat container
   const scrollToBottom = useCallback((force = false) => {
@@ -394,10 +524,16 @@ export default function Playground() {
     };
   }, []);
 
+  // Persist activeChatId immediately for the resolved user.
+  useEffect(() => {
+    if (!userId || loadedUserId !== userId || !activeChat.id) return;
+    saveActiveChatId(userId, activeChat.id);
+  }, [activeChat.id, userId, loadedUserId]);
+
   // Persist chats to localStorage (debounced while streaming, flushed immediately once settled)
   // and save new image payloads to IndexedDB (7-day TTL).
   useEffect(() => {
-    if (!userId) return;
+    if (!userId || loadedUserId !== userId) return;
     if (isStreaming) {
       chatSaverRef.current?.schedule(userId, chats);
     } else {
@@ -420,7 +556,7 @@ export default function Playground() {
     if (newImages.length > 0) {
       void savePlaygroundImages(userId, newImages);
     }
-  }, [chats, userId, isStreaming]);
+  }, [chats, userId, loadedUserId, isStreaming]);
 
   // Model selection grouped by provider / combos
   const groupedModels = useMemo(() => {
@@ -447,7 +583,9 @@ export default function Playground() {
 
   const handleNewChat = () => {
     if (isStreaming) handleStopStream();
-    const created = newChat();
+    markPreSessionEdit();
+    const defaults = userId ? loadDefaultSettings(userId) : defaultSampling;
+    const created = newChat(defaults);
     setChats((prev) => [created, ...prev.slice(0, 19)]);
     setActiveChatId(created.id);
     setInputText('');
@@ -463,27 +601,31 @@ export default function Playground() {
   const handleDeleteChat = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!await askConfirm(s.deleteConfirm)) return;
-    if (isStreaming && activeChatId === id) handleStopStream();
+    if (isStreaming && activeChat.id === id) handleStopStream();
+    markPreSessionEdit();
 
     const remaining = chats.filter((c) => c.id !== id);
-    if (activeChatId === id) {
+    if (activeChat.id === id) {
       setStreamError(null);
     }
     if (remaining.length === 0) {
-      const fresh = newChat();
+      const defaults = userId ? loadDefaultSettings(userId) : defaultSampling;
+      const fresh = newChat(defaults);
       setChats([fresh]);
       setActiveChatId(fresh.id);
     } else {
       setChats(remaining);
-      if (activeChatId === id) {
+      if (activeChat.id === id) {
         setActiveChatId(remaining[0]!.id);
       }
     }
   };
 
   const handleModelChange = (modelId: string) => {
+    markPreSessionEdit();
+    const targetId = activeChat.id;
     setChats((prev) =>
-      prev.map((c) => (c.id === activeChatId ? { ...c, model: modelId, updatedAt: Date.now() } : c))
+      prev.map((c) => (c.id === targetId ? { ...c, model: modelId, updatedAt: Date.now() } : c))
     );
   };
 
@@ -601,18 +743,20 @@ export default function Playground() {
     model: string,
     turnsToSend: ChatTurn[],
     assistantTurnId: string,
+    settingsSnapshot: ChatSettings,
   ) => {
     setIsStreaming(true);
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    const requestMessages = buildWindowedPlaygroundMessages(turnsToSend, systemPrompt);
+    const normalizedSettings = sanitizeChatSettings(settingsSnapshot);
+    const requestMessages = buildWindowedPlaygroundMessages(turnsToSend, normalizedSettings.systemPrompt);
     const payload: PlaygroundRequest = {
       model: model || 'auto',
       messages: requestMessages,
-      temperature,
-      max_tokens: maxTokens,
-      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+      temperature: normalizedSettings.temperature,
+      max_tokens: normalizedSettings.maxTokens,
+      ...(normalizedSettings.reasoningEffort ? { reasoning_effort: normalizedSettings.reasoningEffort } : {}),
     };
 
     let accumulatedContent = '';
@@ -760,6 +904,8 @@ export default function Playground() {
     const newTitle = activeChat.title || text.slice(0, 30) || 'New conversation';
     const chatId = activeChat.id;
     const model = activeChat.model || 'auto';
+    const settingsSnapshot = getChatSettings(activeChat, defaultSampling);
+    markPreSessionEdit();
 
     setChats((prev) =>
       prev.map((c) =>
@@ -778,7 +924,7 @@ export default function Playground() {
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     setAttachments([]);
 
-    await executeStream(chatId, model, turnsToSend, assistantTurnId);
+    await executeStream(chatId, model, turnsToSend, assistantTurnId, settingsSnapshot);
   };
 
   const handleRetry = async () => {
@@ -809,6 +955,8 @@ export default function Playground() {
 
     const chatId = activeChat.id;
     const model = activeChat.model || 'auto';
+    const settingsSnapshot = getChatSettings(activeChat, defaultSampling);
+    markPreSessionEdit();
     setChats((prev) =>
       prev.map((c) =>
         c.id === chatId
@@ -817,7 +965,7 @@ export default function Playground() {
       )
     );
 
-    await executeStream(chatId, model, baseMessages, assistantTurnId);
+    await executeStream(chatId, model, baseMessages, assistantTurnId, settingsSnapshot);
   };
 
   const handleCopyText = (text: string, turnId: string) => {
@@ -977,10 +1125,11 @@ export default function Playground() {
 
               <button
                 type="button"
-                onClick={() => setIsSettingsOpen((prev) => !prev)}
+                onClick={() => updateSettingsOpen((prev) => !prev)}
                 className={`x-icon-button ${isSettingsOpen ? 'text-primary bg-primary/10' : ''}`}
                 title={s.settings}
                 aria-label={s.settings}
+                aria-expanded={isSettingsOpen}
               >
                 <Sliders size={14} />
               </button>
@@ -1013,7 +1162,7 @@ export default function Playground() {
           {/* Collapsible Chat Settings */}
           <details
             open={isSettingsOpen}
-            onToggle={(e) => setIsSettingsOpen(e.currentTarget.open)}
+            onToggle={(e) => updateSettingsOpen(e.currentTarget.open)}
             className="x-chat-settings px-4 py-2.5 bg-muted/20 border-b border-border text-xs flex-shrink-0 transition-all"
           >
             <summary className="cursor-pointer font-medium text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 py-0.5">
@@ -1026,7 +1175,7 @@ export default function Playground() {
                 <input
                   type="text"
                   value={systemPrompt}
-                  onChange={(e) => setSystemPrompt(e.target.value)}
+                  onChange={(e) => updateActiveChatSettings({ systemPrompt: e.target.value })}
                   placeholder="You are a helpful coding assistant..."
                   className="w-full text-xs"
                 />
@@ -1042,7 +1191,12 @@ export default function Playground() {
                   max="2"
                   step="0.1"
                   value={temperature}
-                  onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                  onChange={(e) => {
+                    const parsed = Number.parseFloat(e.target.value);
+                    if (Number.isFinite(parsed)) {
+                      updateActiveChatSettings({ temperature: parsed });
+                    }
+                  }}
                   className="w-full"
                 />
               </label>
@@ -1054,7 +1208,12 @@ export default function Playground() {
                   min="1"
                   max="32768"
                   value={maxTokens}
-                  onChange={(e) => setMaxTokens(parseInt(e.target.value, 10) || 2048)}
+                  onChange={(e) => {
+                    const parsed = Number.parseInt(e.target.value, 10);
+                    if (Number.isFinite(parsed)) {
+                      updateActiveChatSettings({ maxTokens: parsed });
+                    }
+                  }}
                   className="w-full text-xs"
                 />
               </label>
@@ -1063,7 +1222,11 @@ export default function Playground() {
                 <span className="block mb-1 text-muted-foreground">Reasoning</span>
                 <select
                   value={reasoningEffort}
-                  onChange={(e) => setReasoningEffort(e.target.value as '' | 'low' | 'medium' | 'high')}
+                  onChange={(e) =>
+                    updateActiveChatSettings({
+                      reasoningEffort: sanitizeReasoningEffort(e.target.value),
+                    })
+                  }
                   className="w-full text-xs"
                 >
                   <option value="">Default (model)</option>

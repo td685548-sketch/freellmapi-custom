@@ -1,20 +1,135 @@
 import type { PlaygroundContent, PlaygroundRequest } from '../../../../shared/x-playground';
 
+export type ReasoningEffort = '' | 'low' | 'medium' | 'high';
+
+export interface ChatSamplingSettings {
+  temperature: number;
+  maxTokens: number;
+  reasoningEffort: ReasoningEffort;
+}
+
+export interface ChatSettings extends ChatSamplingSettings {
+  systemPrompt: string;
+}
+
+export const DEFAULT_TEMPERATURE = 0.7;
+export const DEFAULT_MAX_TOKENS = 2048;
+export const DEFAULT_REASONING_EFFORT: ReasoningEffort = '';
+export const MIN_TEMPERATURE = 0;
+export const MAX_TEMPERATURE = 2;
+export const MIN_MAX_TOKENS = 1;
+export const MAX_MAX_TOKENS = 32_768;
+
+export const DEFAULT_CHAT_SAMPLING_SETTINGS: ChatSamplingSettings = {
+  temperature: DEFAULT_TEMPERATURE,
+  maxTokens: DEFAULT_MAX_TOKENS,
+  reasoningEffort: DEFAULT_REASONING_EFFORT,
+};
+
+export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
+  systemPrompt: '',
+  ...DEFAULT_CHAT_SAMPLING_SETTINGS,
+};
+
 export interface ChatImage { id: string; name: string; url: string }
 export interface ChatTurn {
   id: string; role: 'user' | 'assistant'; content: string; reasoning?: string; images?: ChatImage[]; meta?: string;
 }
 export interface ChatSession {
-  id: string; title: string; model: string; messages: ChatTurn[]; updatedAt: number;
+  id: string;
+  title: string;
+  model: string;
+  messages: ChatTurn[];
+  updatedAt: number;
+  systemPrompt?: string;
+  temperature?: number;
+  maxTokens?: number;
+  reasoningEffort?: ReasoningEffort;
 }
 export const historyKey = (userId: number) => `x-playground.history.${userId}`;
+export const activeChatKey = (userId: number) => `x-playground.active-chat.${userId}`;
+export const settingsKey = (userId: number) => `x-playground.settings.${userId}`;
+export const SETTINGS_OPEN_KEY = 'x_playground_settings_open';
 export const CHAT_SAVE_DEBOUNCE_MS = 600;
 export const PLAYGROUND_MAX_HISTORY_TURNS = 20;
 export const PLAYGROUND_MAX_HISTORY_CHARS = 40_000;
 export const PLAYGROUND_PINNED_OPENING_CHARS = 4_000;
 export const PLAYGROUND_RECENT_IMAGE_TURNS = 2;
-export function newChat(): ChatSession {
-  return { id: crypto.randomUUID(), title: '', model: 'auto', messages: [], updatedAt: Date.now() };
+
+export function sanitizeTemperature(value: unknown, fallback = DEFAULT_TEMPERATURE): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return Math.min(MAX_TEMPERATURE, Math.max(MIN_TEMPERATURE, value));
+}
+
+export function sanitizeMaxTokens(value: unknown, fallback = DEFAULT_MAX_TOKENS): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return Math.min(MAX_MAX_TOKENS, Math.max(MIN_MAX_TOKENS, Math.round(value)));
+}
+
+export function sanitizeReasoningEffort(
+  value: unknown,
+  fallback: ReasoningEffort = DEFAULT_REASONING_EFFORT,
+): ReasoningEffort {
+  if (value === '' || value === 'low' || value === 'medium' || value === 'high') {
+    return value;
+  }
+  return fallback;
+}
+
+export function sanitizeSystemPrompt(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
+export function sanitizeChatSamplingSettings(
+  raw: unknown,
+  fallback: ChatSamplingSettings = DEFAULT_CHAT_SAMPLING_SETTINGS,
+): ChatSamplingSettings {
+  if (!raw || typeof raw !== 'object') {
+    return { ...fallback };
+  }
+  const obj = raw as Record<string, unknown>;
+  return {
+    temperature: sanitizeTemperature(obj.temperature, fallback.temperature),
+    maxTokens: sanitizeMaxTokens(obj.maxTokens, fallback.maxTokens),
+    reasoningEffort: sanitizeReasoningEffort(obj.reasoningEffort, fallback.reasoningEffort),
+  };
+}
+
+export function sanitizeChatSettings(
+  raw: unknown,
+  defaults: Partial<ChatSamplingSettings> = DEFAULT_CHAT_SAMPLING_SETTINGS,
+): ChatSettings {
+  const samplingDefaults = sanitizeChatSamplingSettings(defaults);
+  if (!raw || typeof raw !== 'object') {
+    return { systemPrompt: '', ...samplingDefaults };
+  }
+  const obj = raw as Record<string, unknown>;
+  return {
+    systemPrompt: sanitizeSystemPrompt(obj.systemPrompt, ''),
+    ...sanitizeChatSamplingSettings(obj, samplingDefaults),
+  };
+}
+
+export function getChatSettings(
+  chat?: Partial<ChatSession> | null,
+  defaults?: Partial<ChatSamplingSettings>,
+): ChatSettings {
+  return sanitizeChatSettings(chat, defaults);
+}
+
+export function newChat(defaults?: Partial<ChatSamplingSettings>): ChatSession {
+  const sampling = sanitizeChatSamplingSettings(defaults);
+  return {
+    id: crypto.randomUUID(),
+    title: '',
+    model: 'auto',
+    messages: [],
+    updatedAt: Date.now(),
+    systemPrompt: '',
+    temperature: sampling.temperature,
+    maxTokens: sampling.maxTokens,
+    reasoningEffort: sampling.reasoningEffort,
+  };
 }
 function sanitizeImageMeta(images: unknown): ChatImage[] | undefined {
   if (!Array.isArray(images) || images.length === 0) return undefined;
@@ -39,6 +154,7 @@ export function loadChats(userId: number): ChatSession[] {
         && typeof m.id === 'string' && ['user', 'assistant'].includes(m.role) && typeof m.content === 'string')))
       .slice(0, 20).map(c => ({
         ...c,
+        ...sanitizeChatSettings(c),
         messages: c.messages.map(({ id, role, content, reasoning, meta, images }) => ({
           id,
           role,
@@ -53,7 +169,9 @@ export function loadChats(userId: number): ChatSession[] {
 export function saveChats(userId: number, chats: ChatSession[]): boolean {
   try {
     // Store only lightweight image metadata (id, name) in localStorage; actual image data lives in IndexedDB.
-    const safe = chats.slice(0, 20).map(c => ({ ...c,
+    const safe = chats.slice(0, 20).map(c => ({
+      ...c,
+      ...sanitizeChatSettings(c),
       messages: c.messages.slice(-100).map(({ id, role, content, meta, images }) => ({
         id,
         role,
@@ -67,6 +185,56 @@ export function saveChats(userId: number, chats: ChatSession[]): boolean {
     localStorage.setItem(historyKey(userId), text);
     return true;
   } catch { return false; }
+}
+
+export function loadActiveChatId(userId: number): string {
+  if (!userId) return '';
+  try {
+    return localStorage.getItem(activeChatKey(userId)) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+export function saveActiveChatId(userId: number, chatId: string): boolean {
+  if (!userId || !chatId) return false;
+  try {
+    localStorage.setItem(activeChatKey(userId), chatId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function resolveActiveChatId(chats: ChatSession[], preferredId: string): string {
+  if (preferredId && chats.some((c) => c.id === preferredId)) {
+    return preferredId;
+  }
+  return chats[0]?.id ?? '';
+}
+
+export function loadDefaultSettings(userId: number): ChatSamplingSettings {
+  if (!userId) return { ...DEFAULT_CHAT_SAMPLING_SETTINGS };
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(settingsKey(userId)) ?? 'null');
+    return sanitizeChatSamplingSettings(raw);
+  } catch {
+    return { ...DEFAULT_CHAT_SAMPLING_SETTINGS };
+  }
+}
+
+export function saveDefaultSettings(
+  userId: number,
+  settings: Partial<ChatSamplingSettings>,
+): boolean {
+  if (!userId) return false;
+  try {
+    const normalized = sanitizeChatSamplingSettings(settings);
+    localStorage.setItem(settingsKey(userId), JSON.stringify(normalized));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export interface DebouncedChatSaver {
