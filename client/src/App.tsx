@@ -2,7 +2,7 @@ import { Suspense, useEffect, useState, type ReactNode } from 'react'
 import { PageSwitch } from './custom/page-switch/PageSwitch'
 import { BrowserRouter, Routes, Route, Navigate, NavLink, Link, useLocation, useNavigate } from 'react-router-dom'
 import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { Activity, ChevronDown, KeyRound, LogOut, Menu, MoreHorizontal, RefreshCw, Search, Settings, Sparkles } from 'lucide-react'
+import { Activity, ChevronDown, Info, KeyRound, LogOut, Menu, MoreHorizontal, RefreshCw, Search, Settings, Sparkles } from 'lucide-react'
 import { buttonVariants } from '@/components/ui/button-variants'
 import {
   DropdownMenu,
@@ -37,7 +37,7 @@ import { NotificationBell } from '@/custom/NotificationBell'
 import NotFoundPage from '@/pages/NotFoundPage'
 // Every routed page is downloaded on first use; see custom/route-splitting.
 import {
-  AgentsPage, AiPlatformApp, AnalyticsAccessPage, AuditLogPage, AudioPage, CustomerAiHubPage, DecisionPage, EmbeddingDetailPage,
+  AboutPage, AgentsPage, AiPlatformApp, AnalyticsAccessPage, AuditLogPage, AudioPage, CustomerAiHubPage, DecisionPage, EmbeddingDetailPage,
   EmbeddingsPage, FallbackPage, FusionPage, ImagePage, InvitesAccessPage, KeysPage, LogsAccessPage,
   MediaDetailPage, ModelDetailPage, PlaygroundPage, PremiumPage, ProfileUsagePage, SearchPage,
   StatusPage, TenantPortalApp, UsageRankingPage, UserAnalyticsPage, UsersAccessPage, VideoPage, XGatewayApp, preloadRoute,
@@ -208,6 +208,7 @@ function AccountMenuItems({
   upgradeLabel,
   settingsLabel,
   statusLabel,
+  aboutLabel,
   updatesLabel,
   signOutLabel,
   changeEmailLabel,
@@ -215,6 +216,7 @@ function AccountMenuItems({
   onUpgrade,
   onOpenSettings,
   onOpenStatus,
+  onOpenAbout,
   onOpenUpdates,
   onChangeEmail,
   onChangePassword,
@@ -225,6 +227,7 @@ function AccountMenuItems({
   upgradeLabel: string
   settingsLabel: string
   statusLabel?: string
+  aboutLabel?: string
   updatesLabel: string
   signOutLabel: string
   changeEmailLabel: string
@@ -232,6 +235,7 @@ function AccountMenuItems({
   onUpgrade: () => void
   onOpenSettings: () => void
   onOpenStatus?: () => void
+  onOpenAbout?: () => void
   onOpenUpdates: () => void
   onChangeEmail: () => void
   onChangePassword: () => void
@@ -252,6 +256,12 @@ function AccountMenuItems({
         <DropdownMenuItem onClick={onOpenStatus}>
           <Activity />
           {statusLabel}
+        </DropdownMenuItem>
+      )}
+      {onOpenAbout && aboutLabel && (
+        <DropdownMenuItem onClick={onOpenAbout}>
+          <Info />
+          {aboutLabel}
         </DropdownMenuItem>
       )}
       {canManageSettings && canManageUpdates && (
@@ -410,6 +420,7 @@ export function Navbar() {
                   upgradeLabel={t('nav.upgrade')}
                   settingsLabel={t('nav.settings')}
                   statusLabel={tc('System Status')}
+                  aboutLabel={tc('About')}
                   updatesLabel={t('settings.checkForUpdates')}
                   signOutLabel={t('nav.signOut')}
                   changeEmailLabel={t('auth.changeEmail')}
@@ -417,6 +428,7 @@ export function Navbar() {
                   onUpgrade={() => navigate('/premium')}
                   onOpenSettings={() => setSettingsOpen(true)}
                   onOpenStatus={() => navigate('/status')}
+                  onOpenAbout={() => navigate('/about')}
                   onOpenUpdates={() => setUpdatesOpen(true)}
                   onChangeEmail={() => setCredentialsMode('email')}
                   onChangePassword={() => setCredentialsMode('password')}
@@ -472,6 +484,7 @@ export function Navbar() {
                   upgradeLabel={t('nav.upgrade')}
                   settingsLabel={t('nav.settings')}
                   statusLabel={tc('System Status')}
+                  aboutLabel={tc('About')}
                   updatesLabel={t('settings.checkForUpdates')}
                   signOutLabel={t('nav.signOut')}
                   changeEmailLabel={t('auth.changeEmail')}
@@ -479,6 +492,7 @@ export function Navbar() {
                   onUpgrade={() => navigate('/premium')}
                   onOpenSettings={() => setSettingsOpen(true)}
                   onOpenStatus={() => navigate('/status')}
+                  onOpenAbout={() => navigate('/about')}
                   onOpenUpdates={() => setUpdatesOpen(true)}
                   onChangeEmail={() => setCredentialsMode('email')}
                   onChangePassword={() => setCredentialsMode('password')}
@@ -605,6 +619,7 @@ function App() {
                         <Route path="/analytics" element={<AnalyticsAccessPage />} />
                         <Route path="/logs" element={<LogsAccessPage />} />
                         <Route path="/status" element={<StatusPage />} />
+                        <Route path="/about" element={<AboutPage />} />
                         <Route path="/premium" element={<PremiumPage />} />
                         <Route path="/test" element={<Navigate to="/playground" replace />} />
                         <Route path="/health" element={<Navigate to="/keys" replace />} />

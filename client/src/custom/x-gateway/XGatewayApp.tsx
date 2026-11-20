@@ -35,6 +35,7 @@ const Combos = lazyPage(() => import('./pages/Combos'))
 const ConsoleLog = lazyPage(() => import('./pages/ConsoleLog'))
 const ProxyPool = lazyPage(() => import('./pages/ProxyPool'))
 const Settings = lazyPage(() => import('./pages/Settings'))
+const About = lazyPage(() => import('./pages/About'))
 const MediaProviders = lazyPage(() => import('./pages/MediaProviders'))
 const CLITools = lazyPage(() => import('./pages/CLIOperations'))
 const TranslatorInspector = lazyPage(() => import('./pages/TranslatorInspector'))
@@ -139,6 +140,7 @@ function XGatewayShell() {
         <Route path="usage" element={protectedPage(<AccountUsage />)} />
         <Route path="quota" element={<Quota />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="about" element={<About />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes></Suspense></ErrorBoundary></main>
     </div><QuickJump groups={groups} open={jumpOpen} onClose={() => setJumpOpen(false)} /><ConfirmHost /><Toaster />

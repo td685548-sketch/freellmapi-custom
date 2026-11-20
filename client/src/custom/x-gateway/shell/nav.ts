@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { ArrowLeftRight, BarChart3, BookOpen, Film, Gauge, Headphones, Headset, Home, KeyRound, Layers, LifeBuoy, MessageSquare, Network, Scissors, ScrollText, Server, Settings, ShieldCheck, Sparkles, Terminal } from 'lucide-react'
+import { ArrowLeftRight, BarChart3, BookOpen, Film, Gauge, Headphones, Headset, Home, Info, KeyRound, Layers, LifeBuoy, MessageSquare, Network, Scissors, ScrollText, Server, Settings, ShieldCheck, Sparkles, Terminal } from 'lucide-react'
 import { useUserSession } from '../../use-session'
 import { useXStrings } from '../strings'
 import { useMgmtStrings } from '../management-strings'
@@ -77,6 +77,7 @@ export function useNavGroups(): NavGroup[] {
     ] },
     { id: 'preferences', label: set.settingsNav, items: [
       { to: '/thruline/settings', label: set.settingsNav, icon: Settings },
+      { to: '/thruline/about', label: sh.about, icon: Info },
     ] },
   ]
   return groups.filter(group => group.items.length > 0)
