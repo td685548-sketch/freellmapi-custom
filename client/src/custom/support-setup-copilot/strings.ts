@@ -144,6 +144,15 @@ export interface SupportSetupCopilotStrings {
   systemSettingsSuccessTitle: string;
   systemSettingsSuccessReply: string;
   systemSettingsApplyCount: string;
+  permissionGrantTargetGlobal: string;
+  permissionGrantTargetTenant: string;
+  permissionGrantCount: string;
+  permissionGrantAction: string;
+  permissionGrantRevoke: string;
+  permissionGrantRolePreset: string;
+  permissionGrantRemoveMember: string;
+  permissionGrantCurrent: string;
+  permissionGrantAfter: string;
   openSettings: string;
   stepTitles: Record<SupportSetupStepId, string>;
   toneOptions: { friendly: string; professional: string; empathetic: string; technical: string };
@@ -292,6 +301,15 @@ const en: SupportSetupCopilotStrings = {
   openIntegration: 'Integration Studio',
   surgicalBadge: 'Targeted update · Other steps untouched',
   systemSettingsTarget: 'System Settings (Platform & Thruline)',
+  permissionGrantTargetGlobal: 'Permission change: {email} (global)',
+  permissionGrantTargetTenant: 'Permission change: {email} (tenant {name})',
+  permissionGrantCount: '{total} grant(s) to review',
+  permissionGrantAction: 'Grant',
+  permissionGrantRevoke: 'Revoke',
+  permissionGrantRolePreset: 'Role preset',
+  permissionGrantRemoveMember: 'Remove from tenant',
+  permissionGrantCurrent: 'Current',
+  permissionGrantAfter: 'After approval',
   systemSettingsSuccessTitle: 'System settings applied successfully',
   systemSettingsSuccessReply: 'System settings have been successfully applied!',
   systemSettingsApplyCount: '{selected}/{total} settings selected',
@@ -460,6 +478,15 @@ const vi: SupportSetupCopilotStrings = {
   openIntegration: 'Integration Studio',
   surgicalBadge: 'Chỉnh sửa chọn lọc · Giữ nguyên các mục khác',
   systemSettingsTarget: 'Cấu hình hệ thống (Platform & Thruline)',
+  permissionGrantTargetGlobal: 'Thay đổi quyền: {email} (toàn cục)',
+  permissionGrantTargetTenant: 'Thay đổi quyền: {email} (tenant {name})',
+  permissionGrantCount: '{total} thay đổi chờ duyệt',
+  permissionGrantAction: 'Cấp',
+  permissionGrantRevoke: 'Thu hồi',
+  permissionGrantRolePreset: 'Vai trò',
+  permissionGrantRemoveMember: 'Gỡ khỏi tenant',
+  permissionGrantCurrent: 'Hiện tại',
+  permissionGrantAfter: 'Sau khi duyệt',
   systemSettingsSuccessTitle: 'Đã áp dụng cấu hình hệ thống thành công',
   systemSettingsSuccessReply: 'Đã áp dụng các cấu hình hệ thống thành công!',
   systemSettingsApplyCount: 'Đã chọn {selected}/{total} mục cấu hình',

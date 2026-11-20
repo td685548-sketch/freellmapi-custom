@@ -450,4 +450,38 @@ describe('AI Support Setup Copilot — Human-Like Dialogue & Open-Domain Underst
       ).toBe(false);
     });
   });
+
+  describe('Phase 3: permission_grant_revoke act', () => {
+    it('classifies grant/revoke sentences as permission_grant_revoke', () => {
+      const grantSentences = [
+        'cấp quyền view_users cho lan@example.com',
+        'Cấp quyền view_users, edit_settings cho lan@example.com',
+        'thu hồi quyền view_users của lan@example.com',
+        'grant view_users to lan@example.com',
+        'revoke view_users from lan@example.com',
+        'cấp quyền view_tenant_ai cho lan@example.com trên tenant acme',
+        'cho lan@example.com làm ai_configurator trên tenant acme',
+        'gỡ lan@example.com khỏi tenant acme',
+      ];
+      for (const text of grantSentences) {
+        expect(
+          classifyHumanConversationalAct(text),
+          `Expected permission_grant_revoke for: ${text}`,
+        ).toBe('permission_grant_revoke');
+      }
+    });
+
+    it('still classifies identity questions and key rotations as before', () => {
+      expect(classifyHumanConversationalAct('tôi có quyền gì?')).toBe(
+        'identity_or_permissions',
+      );
+      expect(classifyHumanConversationalAct('what are my permissions')).toBe(
+        'identity_or_permissions',
+      );
+      // No email + no grant target: not a grant/revoke act.
+      expect(classifyHumanConversationalAct('xoay API key giúp mình')).not.toBe(
+        'permission_grant_revoke',
+      );
+    });
+  });
 });

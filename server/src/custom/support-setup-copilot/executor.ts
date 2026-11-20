@@ -1,6 +1,7 @@
 import type { SupportRuntimePolicy } from '@freellmapi/shared/support-runtime.js';
 import {
   SUPPORT_SETUP_STEP_IDS,
+  type CopilotPermissionGrant,
   type SupportSetupApplyResponse,
   type SupportSetupGuardrailsPayload,
   type SupportSetupKnowledgeMaskingPayload,
@@ -13,11 +14,15 @@ import {
   type SupportSetupWidgetPayload,
   type SupportSystemSettingId,
 } from '@freellmapi/shared/support-setup-copilot.js';
+import type { Permission } from '@freellmapi/shared/user-access.js';
 import type { SessionUser } from '../../services/auth.js';
+import { setUserPermissions } from '../../services/users.js';
 import {
   assertTenantPermission,
   isPlatformTenantOperator,
   listSafeTenantModelOptions,
+  removeTenantMember,
+  upsertTenantMemberByTenantAdmin,
 } from '../tenant-portal/store.js';
 import { appendSupportAuditLog } from '../x-gateway/support-enterprise-router.js';
 import {
@@ -56,7 +61,21 @@ import {
   markSetupProposalApplied,
   SupportSetupCopilotError,
 } from './store.js';
+import {
+  authorizePermissionGrant,
+  grantDenialStatus,
+} from './permission-grants.js';
 import { applySystemSettingsActions } from './system-settings.js';
+
+/** Map a coded store error (users.ts / tenant-portal/store.ts) to a copilot error. */
+function mapGrantStoreError(err: unknown): SupportSetupCopilotError {
+  const code =
+    err !== null && typeof err === 'object' && 'code' in err
+      ? String((err as { code: unknown }).code)
+      : 'internal_error';
+  const message = err instanceof Error ? err.message : 'Permission change failed.';
+  return new SupportSetupCopilotError(grantDenialStatus(code), code, message);
+}
 
 async function syncEvidencePackBestEffort(
   tenant: SupportTenant,
@@ -159,6 +178,144 @@ export async function applySupportSetupProposal(params: {
       'proposal_not_pending',
       `Setup proposal is in '${proposal.status}' state and cannot be applied.`,
     );
+  }
+
+  // Phase 3: permission grants. This branch runs BEFORE the scope.hasAccess
+  // gate: a delegated edit_user_permissions admin may hold no tenant access
+  // at all, and the grant authorization below is the enforcement — not the
+  // copilot scope.
+  if (proposal.targetMode === 'permission_grant') {
+    const grants = proposal.permissionGrants ?? [];
+    if (grants.length === 0) {
+      throw new SupportSetupCopilotError(
+        400,
+        'invalid_proposal',
+        'Permission grant proposal has no grants.',
+      );
+    }
+
+    // Re-authorize EVERY grant live before applying ANY of them, so a stale
+    // stage can never apply after the caller lost the permission, the
+    // target gained broader authority, or the last admin changed.
+    const freshGrants: CopilotPermissionGrant[] = [];
+    for (const staged of grants) {
+      const auth = authorizePermissionGrant({
+        user,
+        intent: {
+          action: staged.action,
+          scope: staged.scope,
+          targetEmail: staged.targetEmail,
+          permissions: staged.permissions,
+          rolePreset: staged.rolePreset,
+          tenantId: staged.tenantId,
+          tenantSlug: staged.tenantSlug ?? null,
+          removeMember: staged.removeMember ?? false,
+        },
+        tenantId: staged.tenantId,
+      });
+      if (!auth.ok) {
+        throw new SupportSetupCopilotError(
+          grantDenialStatus(auth.code),
+          auth.code,
+          auth.messageEn,
+        );
+      }
+      freshGrants.push(auth.grant);
+    }
+
+    const appliedGrants: Array<{
+      targetEmail: string;
+      scope: string;
+      action: string;
+      previousPermissions: string[];
+      newPermissions: string[];
+    }> = [];
+    for (const grant of freshGrants) {
+      try {
+        if (grant.scope === 'global') {
+          setUserPermissions(
+            grant.targetUserId,
+            grant.newPermissions as Permission[],
+            user.userId,
+          );
+        } else if (grant.action === 'revoke' && grant.newPermissions.length === 0) {
+          removeTenantMember({
+            tenantId: grant.tenantId!,
+            targetUserId: grant.targetUserId,
+            actor: user,
+          });
+        } else if (grant.action === 'grant' && grant.rolePreset) {
+          upsertTenantMemberByTenantAdmin({
+            tenantId: grant.tenantId!,
+            userId: grant.targetUserId,
+            rolePreset: grant.rolePreset,
+            actor: user,
+          });
+        } else {
+          upsertTenantMemberByTenantAdmin({
+            tenantId: grant.tenantId!,
+            userId: grant.targetUserId,
+            permissions: grant.newPermissions,
+            actor: user,
+          });
+        }
+      } catch (err) {
+        throw mapGrantStoreError(err);
+      }
+
+      appendSupportAuditLog({
+        tenantId: grant.scope === 'tenant' ? String(grant.tenantId) : 'system',
+        action: `support.setup_copilot.permission_${grant.action}_apply`,
+        userId: String(user.userId),
+        role: user.role,
+        details: {
+          proposalId,
+          targetUserId: grant.targetUserId,
+          targetEmail: grant.targetEmail,
+          scope: grant.scope,
+          tenantId: grant.tenantId,
+          action: grant.action,
+          ...(grant.action === 'grant'
+            ? { permissionsGranted: grant.permissions }
+            : { permissionsRemoved: grant.permissions }),
+          previousPermissions: grant.previousPermissions,
+          newPermissions: grant.newPermissions,
+          rolePreset: grant.rolePreset,
+          via: 'copilot',
+        },
+      });
+      appliedGrants.push({
+        targetEmail: grant.targetEmail,
+        scope: grant.scope,
+        action: grant.action,
+        previousPermissions: grant.previousPermissions,
+        newPermissions: grant.newPermissions,
+      });
+    }
+
+    const savedProposal = markSetupProposalApplied(
+      proposal.id,
+      user.userId,
+      proposal.tenantId,
+      { ...proposal, permissionGrants: freshGrants },
+      { appliedGrants },
+    );
+    return {
+      ok: true,
+      proposalId: savedProposal.id,
+      proposal: savedProposal,
+      tenant:
+        proposal.tenantId != null
+          ? {
+              id: proposal.tenantId,
+              name: proposal.tenantName,
+              slug: proposal.tenantSlug,
+              publicKey: '',
+            }
+          : null,
+      stepResults: [],
+      diagnostic: null,
+    };
   }
 
   const scope = resolveCopilotUserScope(user);

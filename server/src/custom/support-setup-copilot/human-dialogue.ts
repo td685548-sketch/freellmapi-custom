@@ -10,6 +10,7 @@ import {
   buildPlatformExpertReply,
   matchPlatformKnowledgeQuestion,
 } from './platform-guide.js';
+import { matchPermissionGrantIntent } from './permission-grants.js';
 
 export type HumanConversationalAct =
   | 'frustration_pushback'
@@ -23,6 +24,7 @@ export type HumanConversationalAct =
   | 'step_question'
   | 'roadmap_guide'
   | 'identity_or_permissions'
+  | 'permission_grant_revoke'
   | 'business_context';
 
 export interface OpenDomainTopicInsight {
@@ -1354,6 +1356,11 @@ export function classifyHumanConversationalAct(
   // Identity / permissions questions are answered deterministically from the
   // server identity record — classify them before any guide/step matcher.
   if (isIdentityOrPermissionsQuestion(trimmed)) return 'identity_or_permissions';
+
+  // Phase 3: grant/revoke requests are handled deterministically before any
+  // dialogue branch — classify them so the read-only loop path can offer
+  // the grant tools instead of swallowing the turn as a guide.
+  if (matchPermissionGrantIntent(trimmed)) return 'permission_grant_revoke';
 
   if (matchPlatformKnowledgeQuestion(trimmed, currentPath)) {
     return 'platform_guide';

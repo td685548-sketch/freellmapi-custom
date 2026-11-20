@@ -45,6 +45,7 @@ import {
 } from './platform-guide.js';
 import { detectConversationLocale, runSupportSetupCopilotTurn } from './playbook.js';
 import {
+  getSetupProposalForUser,
   listPendingProposalsForUser,
   markSetupProposalDeclined,
   SupportSetupCopilotError,
@@ -59,6 +60,11 @@ import {
   executeCopilotUserAction,
   matchUserActionIntent,
 } from './user-actions.js';
+import {
+  authorizePermissionGrant,
+  handlePermissionGrantChatTurn,
+} from './permission-grants.js';
+import type { CopilotPermissionGrant } from '@freellmapi/shared/support-setup-copilot.js';
 
 export const supportSetupCopilotRouter = Router();
 
@@ -185,6 +191,41 @@ function reprojectPendingProposalsForScope(
 ): SupportSetupProposal[] {
   const projected: SupportSetupProposal[] = [];
   for (const proposal of proposals) {
+    // Phase 3: permission grants are re-authorized live on every status
+    // read — a proposal whose caller lost the permission, or whose target
+    // changed, disappears instead of showing a stale Approve button.
+    if (proposal.targetMode === 'permission_grant') {
+      const grants = proposal.permissionGrants ?? [];
+      if (grants.length === 0) continue;
+      const fresh: CopilotPermissionGrant[] = [];
+      let authorized = true;
+      for (const staged of grants) {
+        const auth = authorizePermissionGrant({
+          user,
+          intent: {
+            action: staged.action,
+            scope: staged.scope,
+            targetEmail: staged.targetEmail,
+            permissions: staged.permissions,
+            rolePreset: staged.rolePreset,
+            tenantId: staged.tenantId,
+            tenantSlug: staged.tenantSlug ?? null,
+            removeMember: staged.removeMember ?? false,
+          },
+          tenantId: staged.tenantId,
+        });
+        if (!auth.ok) {
+          authorized = false;
+          break;
+        }
+        fresh.push(auth.grant);
+      }
+      if (authorized) {
+        projected.push({ ...proposal, permissionGrants: fresh });
+      }
+      continue;
+    }
+
     if (proposal.targetMode === 'system_settings') {
       const nextActions = reprojectSystemActionsForUser(proposal.systemActions ?? [], user);
       if (nextActions.some((a) => a.canApply)) {
@@ -266,6 +307,14 @@ supportSetupCopilotRouter.get('/status', (req: Request, res: Response) => {
   const onboarding = buildOnboardingChecklist(user.userId);
 
   if (!scope.hasAccess) {
+    // Phase 3: a delegated permissions admin holds no tenant access, but
+    // their own pending grant proposals must stay visible (and approvable)
+    // across reloads — the Consent Card lives in the chat turn otherwise.
+    const grantProposals = reprojectPendingProposalsForScope(
+      listPendingProposalsForUser(user.userId),
+      scope,
+      user,
+    ).filter((p) => p.targetMode === 'permission_grant');
     const hidden: SupportSetupStatusResponse = {
       ok: true,
       visible: false,
@@ -274,7 +323,7 @@ supportSetupCopilotRouter.get('/status', (req: Request, res: Response) => {
       availableModels: [],
       tenants: [],
       activeTenant: null,
-      pendingProposals: [],
+      pendingProposals: grantProposals,
       onboarding,
     };
     res.json(hidden);
@@ -523,6 +572,21 @@ supportSetupCopilotRouter.post('/chat', async (req: Request, res: Response, next
       }
     }
 
+    // 2c. Phase 3: deterministic grant/revoke — before the hasAccess gate,
+    // so a delegated edit_user_permissions admin with no tenant access can
+    // still grant/revoke via chat.
+    const grantResponse = handlePermissionGrantChatTurn({
+      user,
+      scope,
+      messages,
+      tenantId: scopedEntry?.tenant.id ?? null,
+      locale: effectiveLocale,
+    });
+    if (grantResponse) {
+      res.json(grantResponse);
+      return;
+    }
+
     // 3. Regular members without Support Tenant permissions:
     // Allow platform/member guidance on personal AI Hub/Agents/Keys screens; enforce 403 on tenant setup attempts.
     if (!scope.hasAccess) {
@@ -596,14 +660,26 @@ supportSetupCopilotRouter.post('/chat', async (req: Request, res: Response, next
   }
 });
 
+// Phase 3: a permission_grant proposal is owned by its creator and
+// enforced by the apply branch — it must stay applicable/declinable even
+// when the creator holds no tenant access (scope.hasAccess === false).
+function isPermissionGrantProposalForUser(proposalId: string, userId: number): boolean {
+  try {
+    return getSetupProposalForUser(proposalId, userId).targetMode === 'permission_grant';
+  } catch {
+    return false;
+  }
+}
+
 // POST /api/support-setup-copilot/proposals/:proposalId/apply
 supportSetupCopilotRouter.post(
   '/proposals/:proposalId/apply',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const user = (req as Request & { user?: SessionUser }).user!;
+      const proposalId = paramStr(req.params.proposalId).trim();
       const scope = resolveCopilotUserScope(user);
-      if (!scope.hasAccess) {
+      if (!scope.hasAccess && !isPermissionGrantProposalForUser(proposalId, user.userId)) {
         throw new SupportSetupCopilotError(
           403,
           'forbidden',
@@ -630,7 +706,7 @@ supportSetupCopilotRouter.post(
 
       const result = await applySupportSetupProposal({
         user,
-        proposalId: paramStr(req.params.proposalId).trim(),
+        proposalId,
         approved: parsed.data.approved,
         selectedSteps: parsed.data.selectedSteps,
         selectedSystemActions: parsed.data.selectedSystemActions,
@@ -651,7 +727,8 @@ supportSetupCopilotRouter.post(
     try {
       const user = (req as Request & { user?: SessionUser }).user!;
       const scope = resolveCopilotUserScope(user);
-      if (!scope.hasAccess) {
+      const proposalId = paramStr(req.params.proposalId).trim();
+      if (!scope.hasAccess && !isPermissionGrantProposalForUser(proposalId, user.userId)) {
         throw new SupportSetupCopilotError(
           403,
           'forbidden',
@@ -659,7 +736,7 @@ supportSetupCopilotRouter.post(
         );
       }
       const proposal = markSetupProposalDeclined(
-        paramStr(req.params.proposalId).trim(),
+        proposalId,
         user.userId,
       );
       res.json({ ok: true, proposal });

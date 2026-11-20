@@ -101,6 +101,22 @@ function userKeyCount(userId: number): number {
   return Number(row?.c ?? 0);
 }
 
+function readUserPermissions(userId: number): string[] {
+  const db = getDb();
+  const row = db
+    .prepare('SELECT permissions FROM users WHERE id = ?')
+    .get(userId) as { permissions: string | null } | undefined;
+  if (!row?.permissions) return [];
+  try {
+    const parsed: unknown = JSON.parse(row.permissions);
+    return Array.isArray(parsed)
+      ? parsed.filter((p): p is string => typeof p === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 function identityFor(user: SessionUser) {
   return buildCallerIdentity(user, resolveCopilotUserScope(user))!;
 }
@@ -163,11 +179,20 @@ describe('Setup Copilot — Agent Harness Loop (Phase 2)', () => {
   });
 
   describe('COPILOT_TOOL_REGISTRY', () => {
-    it('registers 7 tenant steps + 9 system settings + 3 personal actions', () => {
-      expect(COPILOT_TOOL_REGISTRY).toHaveLength(19);
+    it('registers 7 tenant steps + 9 system settings + 3 personal actions + 4 permission tools', () => {
+      expect(COPILOT_TOOL_REGISTRY).toHaveLength(23);
       expect(COPILOT_TOOL_REGISTRY.filter((t) => t.kind === 'tenant_step')).toHaveLength(7);
       expect(COPILOT_TOOL_REGISTRY.filter((t) => t.kind === 'system_setting')).toHaveLength(9);
       expect(COPILOT_TOOL_REGISTRY.filter((t) => t.kind === 'personal_action')).toHaveLength(3);
+      expect(COPILOT_TOOL_REGISTRY.filter((t) => t.kind === 'permission_grant')).toHaveLength(4);
+      expect(
+        COPILOT_TOOL_REGISTRY.filter((t) => t.kind === 'permission_grant').map((t) => t.id),
+      ).toEqual([
+        'permission.grant_global',
+        'permission.revoke_global',
+        'permission.grant_tenant',
+        'permission.revoke_tenant',
+      ]);
       const ids = COPILOT_TOOL_REGISTRY.map((t) => t.id);
       expect(new Set(ids).size).toBe(ids.length);
     });
@@ -193,12 +218,14 @@ describe('Setup Copilot — Agent Harness Loop (Phase 2)', () => {
         ]),
       );
       expect(stepIds).not.toContain('runtime_policy');
-      // No global permissions → no system-setting tools, but personal tools stay.
+      // No global permissions → no system-setting tools, no permission
+      // tools, but personal tools stay.
       expect(admitted.filter((t) => t.kind === 'system_setting')).toHaveLength(0);
+      expect(admitted.filter((t) => t.kind === 'permission_grant')).toHaveLength(0);
       expect(admitted.filter((t) => t.kind === 'personal_action')).toHaveLength(3);
     });
 
-    it('viewer is admitted to personal tools only — no tenant step, no system setting', () => {
+    it('viewer is admitted to personal tools only — no tenant step, no system setting, no permission tool', () => {
       const admitted = filterAdmittedTools({
         agentContext: identityFor(viewer),
         user: viewer,
@@ -206,16 +233,17 @@ describe('Setup Copilot — Agent Harness Loop (Phase 2)', () => {
       });
       expect(admitted.filter((t) => t.kind === 'tenant_step')).toHaveLength(0);
       expect(admitted.filter((t) => t.kind === 'system_setting')).toHaveLength(0);
+      expect(admitted.filter((t) => t.kind === 'permission_grant')).toHaveLength(0);
       expect(admitted.filter((t) => t.kind === 'personal_action')).toHaveLength(3);
     });
 
-    it('platform operator is admitted to all 19 tools', () => {
+    it('platform operator is admitted to all 23 tools', () => {
       const admitted = filterAdmittedTools({
         agentContext: identityFor(primaryAdmin),
         user: primaryAdmin,
         tenantId: existingTenantId,
       });
-      expect(admitted).toHaveLength(19);
+      expect(admitted).toHaveLength(23);
     });
   });
 
@@ -305,6 +333,86 @@ describe('Setup Copilot — Agent Harness Loop (Phase 2)', () => {
       expect(proposal.actionType).toBe('create_personal_key');
       expect(proposal.params.name).toBe('Loop Key');
       expect(userKeyCount(configurator.userId)).toBe(before);
+    });
+
+    it('permitted permission.grant_global → executed as a STAGED grant only (target unchanged)', async () => {
+      const before = readUserPermissions(viewer.userId);
+      const result = await executeCopilotTool({
+        user: primaryAdmin,
+        toolId: 'permission.grant_global',
+        input: { targetEmail: 'loop-viewer@example.com', permissions: ['view_users'] },
+        tenantId: existingTenantId,
+      });
+      expect(result.status).toBe('executed');
+      const grant = (result.result as Record<string, any>).grant;
+      expect(grant.scope).toBe('global');
+      expect(grant.action).toBe('grant');
+      expect(grant.targetEmail).toBe('loop-viewer@example.com');
+      expect(grant.permissions).toEqual(['view_users']);
+      expect(grant.newPermissions).toEqual(['view_users']);
+      expect(readUserPermissions(viewer.userId)).toEqual(before);
+      expect(proposalCount()).toBe(0);
+      const executed = listSupportAuditLogs(String(existingTenantId)).filter(
+        (e) =>
+          e.action === 'support.setup_copilot.tool_executed' &&
+          (e.details as Record<string, unknown>)?.toolId === 'permission.grant_global',
+      );
+      expect(executed.length).toBeGreaterThanOrEqual(1);
+      expect((executed[0]!.details as Record<string, unknown>).targetEmail).toBe(
+        'loop-viewer@example.com',
+      );
+    });
+
+    it('permission tool without edit_user_permissions → denied + audit, no DB change', async () => {
+      const before = readUserPermissions(viewer.userId);
+      const result = await executeCopilotTool({
+        user: viewer,
+        toolId: 'permission.grant_global',
+        input: { targetEmail: 'loop-configurator@example.com', permissions: ['view_users'] },
+        tenantId: existingTenantId,
+      });
+      expect(result.status).toBe('denied');
+      expect(result.reason).toBe('missing_permission:edit_user_permissions');
+      expect(readUserPermissions(viewer.userId)).toEqual(before);
+      const denied = listSupportAuditLogs(String(existingTenantId)).filter(
+        (e) =>
+          e.action === 'support.setup_copilot.tool_denied' &&
+          (e.details as Record<string, unknown>)?.toolId === 'permission.grant_global',
+      );
+      expect(denied.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('permission tool with unknown target → denied (account_not_found), nothing staged', async () => {
+      const result = await executeCopilotTool({
+        user: primaryAdmin,
+        toolId: 'permission.grant_global',
+        input: { targetEmail: 'ghost@example.com', permissions: ['view_users'] },
+        tenantId: existingTenantId,
+      });
+      expect(result.status).toBe('denied');
+      expect(result.reason).toBe('account_not_found');
+    });
+
+    it('permission tool with unknown permission id → rejected (handler error)', async () => {
+      const result = await executeCopilotTool({
+        user: primaryAdmin,
+        toolId: 'permission.grant_global',
+        input: { targetEmail: 'loop-viewer@example.com', permissions: ['not_a_permission'] },
+        tenantId: existingTenantId,
+      });
+      expect(result.status).toBe('rejected');
+      expect(result.reason).toBe('handler_error');
+    });
+
+    it('permission tool granting to self → denied (self_permission_change)', async () => {
+      const result = await executeCopilotTool({
+        user: primaryAdmin,
+        toolId: 'permission.grant_global',
+        input: { targetEmail: 'loop-admin@example.com', permissions: ['view_users'] },
+        tenantId: existingTenantId,
+      });
+      expect(result.status).toBe('denied');
+      expect(result.reason).toBe('self_permission_change');
     });
   });
 

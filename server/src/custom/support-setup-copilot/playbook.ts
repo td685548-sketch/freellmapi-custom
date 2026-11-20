@@ -45,12 +45,18 @@ import {
   buildIdentityReply,
   identitySuggestedQuickReplies,
 } from './identity.js';
-import { runCopilotAgentLoop } from './agent-loop.js';
+import { runCopilotAgentLoop, type CopilotLoopResult } from './agent-loop.js';
 import {
   parseLlmCoachResponse,
   type GatewayLoopbackContext,
   type LlmCoachOutput,
 } from './llm-coach.js';
+import {
+  buildPermissionGrantProposal,
+  collectStagedPermissionGrants,
+  describePermissionGrant,
+  handlePermissionGrantChatTurn,
+} from './permission-grants.js';
 import { matchPlatformKnowledgeQuestion } from './platform-guide.js';
 import { createSetupProposal, getSetupProposalForUser } from './store.js';
 import {
@@ -1286,6 +1292,40 @@ function resolveSystemSettingsTurnResponse(params: {
   };
 }
 
+/**
+ * Phase 3: turn gate-authorized, tool-staged permission grants (server
+ * records from the agent loop — never raw LLM text) into a pending_consent
+ * proposal. Returns null when the loop staged no grant tool call.
+ */
+function resolvePermissionGrantLoopResponse(params: {
+  loopResult: CopilotLoopResult;
+  userId: number;
+  locale: 'vi' | 'en';
+}): SupportSetupChatResponse | null {
+  const { loopResult, userId, locale } = params;
+  const grants = collectStagedPermissionGrants(loopResult.toolCalls);
+  if (grants.length === 0) return null;
+  const savedProposal = buildPermissionGrantProposal({ userId, grants, locale });
+  const lines = grants.map((g) => describePermissionGrant(g, locale)).join('\n');
+  return {
+    ok: true,
+    replyLocale: locale,
+    reply:
+      locale === 'vi'
+        ? `Mình đã chuẩn bị sẵn đề xuất thay đổi quyền theo đúng yêu cầu của bạn:\n${lines}\n\nMình **chưa thay đổi gì cả** — bạn kiểm tra lại rồi bấm **Xác nhận áp dụng** khi đã sẵn sàng nhé!`
+        : `I've prepared the permission change proposal based on your request:\n${lines}\n\nNothing has been changed yet — please review it and click **Approve & Apply** whenever you're ready!`,
+    intent: 'propose_setup',
+    missingQuestions: [],
+    suggestedQuickReplies:
+      locale === 'en'
+        ? ['What are my permissions?', 'Guide me on configuring AI Support']
+        : ['Tôi có quyền gì?', 'Hướng dẫn mình cấu hình AI Support'],
+    proposal: savedProposal,
+    modelUsed: loopResult.modelUsed,
+    usedFallback: false,
+  };
+}
+
 export async function runSupportSetupCopilotTurn(params: {
   user: SessionUser;
   scope: CopilotUserScope;
@@ -1375,6 +1415,20 @@ export async function runSupportSetupCopilotTurn(params: {
         requirementsHint.industry?.trim() ||
         requirementsHint.faqSummaryOrPolicies?.trim()),
   );
+
+  // Phase 3: deterministic grant/revoke. Runs BEFORE the system-settings
+  // pre-eval so an authorized grant is never refused by the sensitive
+  // mutation guard, and before the read-only / create-tenant gates so a
+  // delegated edit_user_permissions admin (no tenant access) can still use
+  // it. Unauthorized requests get a denial reply, never a staged proposal.
+  const grantResponse = handlePermissionGrantChatTurn({
+    user,
+    scope,
+    messages,
+    tenantId,
+    locale,
+  });
+  if (grantResponse) return grantResponse;
 
   // System Settings first (BEFORE create_tenant / canEditSet.size === 0 gates so delegated
   // edit_cache / edit_settings / manage_compression admins and sensitive-action guardrails
@@ -1517,7 +1571,9 @@ export async function runSupportSetupCopilotTurn(params: {
     // (admitted tools only — personal actions + permitted system settings),
     // so a viewer can never be offered a tenant-step tool.
     const readOnlyLoop =
-      readOnlyDialogue.act === 'platform_guide' || canProposeSystemSettings
+      readOnlyDialogue.act === 'platform_guide' ||
+      readOnlyDialogue.act === 'permission_grant_revoke' ||
+      canProposeSystemSettings
         ? await runCopilotAgentLoop({
             user,
             scope,
@@ -1556,6 +1612,15 @@ export async function runSupportSetupCopilotTurn(params: {
       if (sysResp) {
         return sysResp;
       }
+    }
+
+    if (readOnlyLoop) {
+      const grantResp = resolvePermissionGrantLoopResponse({
+        loopResult: readOnlyLoop,
+        userId: user.userId,
+        locale,
+      });
+      if (grantResp) return grantResp;
     }
 
     const useReadOnlyLlm = Boolean(
@@ -1628,6 +1693,15 @@ export async function runSupportSetupCopilotTurn(params: {
       return sysResp;
     }
   }
+
+  // Phase 3: LLM-staged permission grants from the loop's tool records
+  // (gate-authorized, server-grounded — never raw LLM text).
+  const loopGrantResponse = resolvePermissionGrantLoopResponse({
+    loopResult,
+    userId: user.userId,
+    locale,
+  });
+  if (loopGrantResponse) return loopGrantResponse;
 
   const mergedRequirements =
     !latestPlatformMatch && llm?.output.extractedRequirements
