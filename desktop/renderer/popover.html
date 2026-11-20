@@ -212,7 +212,7 @@
     <div class="actions">
       <button class="primary" id="open">Open Dashboard</button>
       <button class="ghost" id="copyurl">Copy URL</button>
-      <button class="ghost" id="copykey">Copy Key</button>
+      <button class="ghost" id="regenkey">Regenerate Key</button>
     </div>
 
     <div class="foot">
@@ -270,7 +270,7 @@
     setText('lastmodel-label', S.lastModel);
     setText('open', S.openDashboard);
     setText('copyurl', S.copyUrl);
-    setText('copykey', S.copyKey);
+    setText('regenkey', S.regenerateKey);
     setText('login-label', S.startAtLogin);
     setText('quit', S.quit);
     setText('ax-ago', S.hoursAgo);
@@ -294,7 +294,10 @@
 
   $('open').addEventListener('click', () => window.freeapi.openDashboard());
   $('copyurl').addEventListener('click', (e) => { window.freeapi.copyBaseUrl(); flash(e.target, S.copied || 'Copied ✓'); });
-  $('copykey').addEventListener('click', (e) => { window.freeapi.copyApiKey(); flash(e.target, S.copied || 'Copied ✓'); });
+  // Regenerates the unified key and copies the fresh one: the current key is
+  // hash-only and cannot be recovered (#155), so there is no "copy" without
+  // regenerating. The button is labelled accordingly.
+  $('regenkey').addEventListener('click', (e) => { window.freeapi.regenerateApiKey(); flash(e.target, S.copied || 'Copied ✓'); });
   $('quit').addEventListener('click', () => window.freeapi.quit());
   $('login').addEventListener('click', () => {
     loginOn = !loginOn;

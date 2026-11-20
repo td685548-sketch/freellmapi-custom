@@ -24,6 +24,17 @@
 // mid-reasoning), which is also useful: an idle upstream no longer looks
 // different from an idle connection at the client either way, but the extra
 // bytes stop the client from killing a stream that is merely slow.
+//
+// A ping is only sent once the hop has PROVEN ITSELF ALIVE — `isAlive`
+// (first upstream token of any kind: text or reasoning) — so a hop that dies
+// before its first token never commits the response and keeps invisible
+// failover. A hop that hangs before producing anything is indistinguishable
+// from a dead hop, and pinging it would trade the failover away for a
+// watchdog reset on a stream that was never going to answer. The cost is
+// explicit: a model that thinks entirely server-side, emitting no chunk at
+// all until its first text token, gets no watchdog protection during that
+// silence. `isAlive` defaults to "always alive" (the pre-gate behaviour),
+// so existing callers opt into the gate by passing it.
 const MIN_KEEPALIVE_MS = 1000;
 
 /**
@@ -47,6 +58,10 @@ export function streamKeepaliveMs(env: NodeJS.ProcessEnv = process.env): number 
  *   returned stop function is a no-op.
  * - `isDone` is polled at every tick: once the attempt has finished (response
  *   ended, failed over, or errored), the timer stops itself.
+ * - `isAlive` (optional) is polled at every tick: while the hop has not yet
+ *   produced a token the tick is SKIPPED, not fatal — the timer keeps running
+ *   and pings start the moment the hop proves itself alive. Omitted means
+ *   "always alive" (the pre-gate behaviour).
  * - `keepalive` runs on each tick and must write a content-free frame. It is
  *   expected to commit the response first if it has not been committed yet.
  *   Throwing (dead socket) stops the timer without surfacing anything —
@@ -58,10 +73,12 @@ export function startStreamKeepalive(
   intervalMs: number,
   isDone: () => boolean,
   keepalive: () => void,
+  isAlive: () => boolean = () => true,
 ): () => void {
   if (intervalMs <= 0) return () => {};
   const timer = setInterval(() => {
     if (isDone()) { stop(); return; }
+    if (!isAlive()) return; // hop silent so far: never commit a possibly-dead hop
     try {
       keepalive();
     } catch {

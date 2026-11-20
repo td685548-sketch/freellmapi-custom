@@ -6,7 +6,8 @@
   "main": "./types.ts",
   "types": "./types.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
     "typescript": "~6.0.2"

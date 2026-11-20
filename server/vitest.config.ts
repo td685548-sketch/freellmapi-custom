@@ -4,6 +4,12 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    // A single slow test (cold SQLite, a big fixture) must not hang the whole
+    // shard: 10s per test / hook bounds the damage instead of vitest's 5s
+    // default failing genuinely slow-but-healthy tests on loaded runners.
+    // No `retry` here on purpose — retrying would hide real flakes.
+    testTimeout: 10_000,
+    hookTimeout: 10_000,
     // The Cloudflare neuron meter asks Cloudflare's analytics API for the
     // account's own count in the background; that call would land in every
     // test's fetch mock. Its own tests switch it back on.
@@ -26,7 +32,34 @@ export default defineConfig({
       provider: 'v8',
       include: ['src/**/*.ts'],
       exclude: ['src/__tests__/**', 'src/db/migrate/**', 'src/scripts/**', 'src/index.ts'],
-      reporter: ['text', 'text-summary'],
+      reporter: ['text', 'text-summary', 'json'],
+      // A failing test run must still produce the report (and the artifact
+      // upload in CI): without this, vitest silently drops coverage on any
+      // failure and the coverage job goes blind exactly when it matters.
+      reportOnFailure: true,
+      // Baseline measured 2026-11-19 on the full suite minus the 8
+      // known-failing files the CI coverage job excludes (see ci.yml):
+      // statements 42.21%, branches 33.71%, functions 49.06%, lines
+      // 43.17%. Thresholds sit 1pt below the floored baseline — they exist
+      // to catch regressions, not to force coverage up in this PR.
+      //
+      // Thresholds are evaluated ONLY on a full-suite run. The old CI
+      // workflow still collects coverage per shard (COVERAGE=1 on Node 22
+      // shards), and a quarter-suite slice cannot meet a global threshold:
+      // that combination failed all four shards on PR #169 even though
+      // every test passed. A `--shard` run therefore skips the thresholds
+      // (coverage is still collected and reported); the dedicated coverage
+      // job runs the whole suite without --shard, so it still enforces them.
+      ...(isShardedRun()
+        ? {}
+        : { thresholds: { statements: 41, branches: 32, functions: 48, lines: 42 } }),
     },
   },
 });
+
+// True when this invocation runs a `--shard=N/M` slice (space or `=`
+// form). Only the sharded CI job passes it; the coverage job and local
+// `test:coverage` runs never do.
+function isShardedRun(): boolean {
+  return process.argv.some((a) => a === '--shard' || a.startsWith('--shard='));
+}

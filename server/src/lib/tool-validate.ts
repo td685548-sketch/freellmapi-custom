@@ -132,9 +132,20 @@ export function validateToolArguments(
 
   if (validate(parsed)) return { ok: true };
 
+  // A bare "/path message" names the field but not the rule, so an operator
+  // reading the trail cannot tell a wrong type from a missing key without
+  // replaying the call. The keyword disambiguates the rule. The received
+  // value is deliberately NOT echoed here: this reason travels in the
+  // failover attempt trail, which the 502 response returns to the client —
+  // echoing it would hand the caller the model's (possibly sensitive) bad
+  // arguments, an invariant pinned by tool-validate-surfaces.test.ts.
   const detail = (validate.errors ?? [])
     .slice(0, 3)
-    .map(e => `${e.instancePath || '/'} ${e.message ?? 'is invalid'}`)
+    .map(e => {
+      const path = e.instancePath || '/';
+      const keyword = e.keyword ? ` [${e.keyword}]` : '';
+      return `${path}${keyword} ${e.message ?? 'is invalid'}`;
+    })
     .join('; ');
   return { ok: false, reason: `${toolName}: ${detail || 'does not match its schema'}` };
 }

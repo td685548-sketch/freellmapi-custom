@@ -38,9 +38,45 @@ export default defineConfig({
   esbuild: { jsx: 'automatic' },
   test: {
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    // Same 10s bound as the server suite; no `retry` — retrying would hide
+    // real flakes instead of fixing them.
+    testTimeout: 10_000,
+    hookTimeout: 10_000,
+    coverage: {
+      enabled: process.env.COVERAGE === '1',
+      provider: 'v8',
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: ['src/**/*.test.{ts,tsx}'],
+      reporter: ['text', 'text-summary', 'json'],
+      // Same as the server suite: a failing run must still produce the
+      // report, or the CI coverage artifact goes missing exactly when the
+      // numbers would explain the failure.
+      reportOnFailure: true,
+      // Baseline measured 2026-11-19 on the full client suite (72 files,
+      // 526 tests, all passing): statements 21.31%, branches 17.05%,
+      // functions 13.6%, lines 22.7%. Thresholds sit 1pt below the floored
+      // baseline — they exist to catch regressions, not to force coverage
+      // up in this PR.
+      //
+      // Thresholds are evaluated ONLY on a full-suite run (same rule as the
+      // server suite: a `--shard` slice cannot meet a global threshold, and
+      // PR #169 showed that combination failing a green suite). The client
+      // suite is never sharded in CI today, but the guard is cheap insurance
+      // against a future sharded run collecting coverage.
+      ...(isShardedRun()
+        ? {}
+        : { thresholds: { statements: 20, branches: 16, functions: 12, lines: 21 } }),
+    },
     // jsdom 27 delegates Storage to Node's experimental webstorage, which is
     // undefined without --experimental-webstorage; the setup file installs a
     // memory Storage only where the native one is missing. See the file.
     setupFiles: ['./vitest.setup-storage.ts'],
   },
 })
+
+// True when this invocation runs a `--shard=N/M` slice (space or `=`
+// form). Only a sharded CI job passes it; the coverage job and local
+// `test:coverage` runs never do.
+function isShardedRun(): boolean {
+  return process.argv.some((a) => a === '--shard' || a.startsWith('--shard='))
+}
