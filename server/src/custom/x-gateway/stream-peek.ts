@@ -10,11 +10,17 @@ import type { ChatCompletionChunk } from '@freellmapi/shared/types.js';
  */
 
 export const DEFAULT_AUTO_STREAM_PEEK_TIMEOUT_MS = 7_000;
+export const DEFAULT_WEB_COOKIE_STREAM_PEEK_TIMEOUT_MS = 25_000;
 
 let autoStreamPeekTimeoutOverrideMs: number | null = null;
 
-export function getAutoStreamPeekTimeoutMs(): number {
-  return autoStreamPeekTimeoutOverrideMs ?? DEFAULT_AUTO_STREAM_PEEK_TIMEOUT_MS;
+export function getAutoStreamPeekTimeoutMs(options?: { webCookie?: boolean }): number {
+  if (autoStreamPeekTimeoutOverrideMs !== null) {
+    return autoStreamPeekTimeoutOverrideMs;
+  }
+  return options?.webCookie
+    ? DEFAULT_WEB_COOKIE_STREAM_PEEK_TIMEOUT_MS
+    : DEFAULT_AUTO_STREAM_PEEK_TIMEOUT_MS;
 }
 
 export function setAutoStreamPeekTimeoutMs(ms: number | null): void {
@@ -52,7 +58,7 @@ export function chunkHasClientContent(chunk: ChatCompletionChunk): boolean {
   return false;
 }
 
-function chunkHasReasoningContent(chunk: ChatCompletionChunk): boolean {
+export function chunkHasReasoningContent(chunk: ChatCompletionChunk): boolean {
   if (!Array.isArray(chunk?.choices)) return false;
   return chunk.choices.some(choice =>
     typeof choice?.delta?.reasoning_content === 'string' && choice.delta.reasoning_content.length > 0,
@@ -114,7 +120,7 @@ export async function peekStreamForContent(
   const iterator = stream[Symbol.asyncIterator]();
   const headChunks: ChatCompletionChunk[] = [];
   const timeoutMs = options?.timeoutMs && options.timeoutMs > 0 ? options.timeoutMs : 0;
-  const deadlineMs = timeoutMs > 0 ? Date.now() + timeoutMs : null;
+  let deadlineMs = timeoutMs > 0 ? Date.now() + timeoutMs : null;
   let sawReasoning = false;
 
   try {
@@ -134,7 +140,14 @@ export async function peekStreamForContent(
       }
       const chunk = step.value;
       headChunks.push(chunk);
-      if (chunkHasReasoningContent(chunk)) sawReasoning = true;
+      if (chunkHasReasoningContent(chunk)) {
+        sawReasoning = true;
+        // Active thinking/reasoning progress extends the first-content peek window
+        // so reasoning models do not falsely time out before emitting answer content.
+        if (timeoutMs > 0) {
+          deadlineMs = Date.now() + timeoutMs;
+        }
+      }
       if (chunkHasClientContent(chunk)) {
         return { headChunks, iterator, hasMore: true };
       }

@@ -203,6 +203,57 @@ export function extractDeepSeekUserToken(credential: string): string {
   return parsed.mode === 'token' ? parsed.userToken : '';
 }
 
+function rawCredentialHasSessionId(credential: string): boolean {
+  let raw = credential.trim().replace(/^(?:cookie|authorization):\s*/i, '').trim();
+  if (/^bearer\s+/i.test(raw)) {
+    raw = raw.replace(/^bearer\s+/i, '').trim();
+  }
+  if (!raw) return false;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.some(
+        (c: any) =>
+          Boolean(c)
+          && typeof c === 'object'
+          && c.name === 'ds_session_id'
+          && typeof c.value === 'string'
+          && c.value.trim().length > 0,
+      );
+    }
+    if (parsed && typeof parsed === 'object') {
+      const obj = parsed as Record<string, unknown>;
+      if (typeof obj.ds_session_id === 'string' && obj.ds_session_id.trim().length > 0) {
+        return true;
+      }
+      if (Array.isArray(obj.cookies)) {
+        return obj.cookies.some(
+          (c: any) =>
+            Boolean(c)
+            && typeof c === 'object'
+            && c.name === 'ds_session_id'
+            && typeof c.value === 'string'
+            && c.value.trim().length > 0,
+        );
+      }
+    }
+  } catch {
+    // Fall through to raw cookie-header check.
+  }
+  return /(?:^|;\s*)ds_session_id=[^;\s]+/.test(raw);
+}
+
+function shouldPersistNormalizedToken(
+  rawCredential: string,
+  cred: DeepSeekCredential,
+): cred is { mode: 'token'; userToken: string } {
+  return (
+    cred.mode === 'token'
+    && rawCredential.trim() !== cred.userToken
+    && !rawCredentialHasSessionId(rawCredential)
+  );
+}
+
 function generateFakeCookie(): string {
   const ts = Date.now();
   const hex = (n: number) =>
@@ -486,7 +537,7 @@ export async function probeDeepSeekWebSession(opts: DeepSeekWebProbeOptions): Pr
   const origin = resolveOrigin(opts.baseUrl);
   const platform = opts.platform ?? 'custom';
   await acquireAuth(origin, cred, platform, opts.signal, { skipCache: true });
-  if (cred.mode === 'token' && opts.credential.trim() !== cred.userToken) {
+  if (shouldPersistNormalizedToken(opts.credential, cred)) {
     opts.onCredentialUpdate?.(cred.userToken);
   }
 }
@@ -690,9 +741,25 @@ async function uploadDeepSeekFiles(
       signal,
     );
     if (!uploadResp.ok) {
+      if (uploadResp.status === 401 || uploadResp.status === 403) {
+        tokenCache.delete(auth.cacheKey);
+      }
       throw new DeepSeekWebChatError(`DeepSeek file upload failed (HTTP ${uploadResp.status})`, uploadResp.status);
     }
     const uploadJson = (await uploadResp.json().catch(() => null)) as Record<string, any> | null;
+    if (uploadJson?.code && Number(uploadJson.code) !== 0) {
+      if (Number(uploadJson.code) === 40003) {
+        tokenCache.delete(auth.cacheKey);
+        throw new DeepSeekWebChatError(
+          'DeepSeek userToken is invalid or expired — copy a fresh `userToken` from https://chat.deepseek.com Local Storage (or Cookie Editor JSON with `ds_session_id`).',
+          401,
+        );
+      }
+      throw new DeepSeekWebChatError(
+        `DeepSeek file upload error ${uploadJson.code}: ${uploadJson.msg || uploadJson?.data?.biz_msg || ''}`,
+        502,
+      );
+    }
     const biz = uploadJson?.data?.biz_data ?? uploadJson?.biz_data;
     const fileId = typeof biz?.id === 'string' ? biz.id : '';
     if (!fileId) {
@@ -752,246 +819,264 @@ export async function* streamDeepSeekWebChat(
 
   const images = extractDeepSeekImages(opts.messages);
   let auth = await acquireAuth(origin, cred, platform, signal);
-  if (cred.mode === 'token' && opts.credential.trim() !== cred.userToken) {
+  if (shouldPersistNormalizedToken(opts.credential, cred)) {
     opts.options?.onCredentialUpdate?.(cred.userToken);
   }
-  let sessionId: string;
-  try {
-    sessionId = await createSession(origin, auth, platform, signal);
-  } catch (err) {
-    const status = deepSeekWebChatErrorStatus(err);
-    if (auth.fromCache && (status === 401 || status === 403)) {
-      auth = await acquireAuth(origin, cred, platform, signal, { skipCache: true });
-      sessionId = await createSession(origin, auth, platform, signal);
-    } else {
-      throw err;
-    }
-  }
 
-  try {
-    const refFileIds = images.length > 0
-      ? await uploadDeepSeekFiles(images, origin, auth, platform, signal)
-      : [];
-    const powChallenge = await requestPowChallenge(origin, auth, platform, signal);
-    const powHeader = solveDeepSeekPowHeader(powChallenge);
-
-    const m = opts.modelId.toLowerCase();
-    const modelType = m.includes('pro') || m.includes('expert') ? 'expert' : 'default';
-    const thinkingEnabled = isThinkingModel(opts.modelId) || Boolean(opts.options?.reasoning_effort);
-    const searchEnabled = isSearchModel(opts.modelId);
-    const rawPrompt = buildConversationPrompt(opts.messages);
-    const prompt = rawPrompt.trim() || (refFileIds.length > 0 ? 'Describe or analyze this image.' : '');
-
-    const resp = await dsFetch(
-      `${origin}/api/v0/chat/completion`,
-      {
-        method: 'POST',
-        headers: {
-          ...buildAuthHeaders(auth, true),
-          'Content-Type': 'application/json',
-          'X-Ds-Pow-Response': powHeader,
-          'X-Client-Timezone-Offset': String(new Date().getTimezoneOffset() * -60),
-        },
-        body: JSON.stringify({
-          chat_session_id: sessionId,
-          parent_message_id: null,
-          model_type: modelType,
-          prompt,
-          ref_file_ids: refFileIds,
-          thinking_enabled: thinkingEnabled,
-          search_enabled: searchEnabled,
-          preempt: false,
-        }),
-      },
-      timeoutMs,
-      platform,
-      signal,
-    );
-
-    if (!resp.ok) {
-      if (resp.status === 401 || resp.status === 403) {
-        tokenCache.delete(auth.cacheKey);
-      }
-      let errMsg = `DeepSeek API error (HTTP ${resp.status})`;
-      const errText = await resp.text().catch(() => '');
-      try {
-        const errJson = JSON.parse(errText) as Record<string, any>;
-        if (errJson?.code && errJson.code !== 0) {
-          errMsg = `DeepSeek error ${errJson.code}: ${errJson.msg || errJson?.data?.biz_msg || ''}`;
-        }
-      } catch {
-        if (errText && !looksLikeHtmlDocument(errText)) {
-          errMsg = `${errMsg}: ${errText.slice(0, 200)}`;
-        }
-      }
-      throw new DeepSeekWebChatError(errMsg, resp.status);
-    }
-
-    const contentType = resp.headers.get('content-type') ?? '';
-    if (contentType.includes('text/html')) {
-      throw new DeepSeekWebChatError('DeepSeek returned an HTML challenge page.', 502);
-    }
-
-    const reader = resp.body?.getReader();
-    if (!reader) {
-      throw new DeepSeekWebChatError('DeepSeek returned an empty response body.', 502);
-    }
-
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let currentPath: '' | 'thinking' | 'content' = '';
+  let retriedStaleCache = false;
+  while (true) {
+    let sessionId: string | undefined;
     let emittedAny = false;
-    const searchResults: SearchResultEntry[] = [];
+    try {
+      sessionId = await createSession(origin, auth, platform, signal);
+      const refFileIds = images.length > 0
+        ? await uploadDeepSeekFiles(images, origin, auth, platform, signal)
+        : [];
+      const powChallenge = await requestPowChallenge(origin, auth, platform, signal);
+      const powHeader = solveDeepSeekPowHeader(powChallenge);
 
-    const emitText = (raw: string): DeepSeekWebDelta | null => {
-      const text = formatStreamContent(raw, opts.modelId);
-      if (!text) return null;
-      let path = currentPath;
-      if (!path && thinkingEnabled) path = 'thinking';
-      else if (!path && searchEnabled) path = 'content';
-      emittedAny = true;
-      return path === 'thinking' ? { reasoning_content: text } : { content: text };
-    };
+      const m = opts.modelId.toLowerCase();
+      const modelType = m.includes('pro') || m.includes('expert') ? 'expert' : 'default';
+      const thinkingEnabled = isThinkingModel(opts.modelId) || Boolean(opts.options?.reasoning_effort);
+      const searchEnabled = isSearchModel(opts.modelId);
+      const rawPrompt = buildConversationPrompt(opts.messages);
+      const prompt = rawPrompt.trim() || (refFileIds.length > 0 ? 'Describe or analyze this image.' : '');
 
-    const handleFragment = (frag: Record<string, any>): DeepSeekWebDelta | null => {
-      const type = String(frag?.type || '').toUpperCase();
-      if (type === 'THINK') currentPath = 'thinking';
-      else if (type === 'ANSWER' || type === 'RESPONSE') currentPath = 'content';
-      if (typeof frag?.content !== 'string' || frag.content.length === 0) return null;
-      return emitText(frag.content);
-    };
+      const resp = await dsFetch(
+        `${origin}/api/v0/chat/completion`,
+        {
+          method: 'POST',
+          headers: {
+            ...buildAuthHeaders(auth, true),
+            'Content-Type': 'application/json',
+            'X-Ds-Pow-Response': powHeader,
+            'X-Client-Timezone-Offset': String(new Date().getTimezoneOffset() * -60),
+          },
+          body: JSON.stringify({
+            chat_session_id: sessionId,
+            parent_message_id: null,
+            model_type: modelType,
+            prompt,
+            ref_file_ids: refFileIds,
+            thinking_enabled: thinkingEnabled,
+            search_enabled: searchEnabled,
+            preempt: false,
+          }),
+        },
+        timeoutMs,
+        platform,
+        signal,
+      );
 
-    const processLine = (line: string): DeepSeekWebDelta[] => {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith('data:')) return [];
-      const payload = trimmed.slice(5).trim();
-      if (!payload || payload === '[DONE]') return [];
-
-      let data: Record<string, any>;
-      try {
-        data = JSON.parse(payload);
-      } catch {
-        return [];
-      }
-
-      if (typeof data.code === 'number' && data.code !== 0) {
-        const msg = data.msg || data?.data?.biz_msg || `DeepSeek stream error ${data.code}`;
-        throw new DeepSeekWebChatError(String(msg), 502);
-      }
-
-      const out: DeepSeekWebDelta[] = [];
-      const p = data.p;
-      const o = data.o;
-      const v = data.v;
-
-      if (v && typeof v === 'object' && !Array.isArray(v) && v.response) {
-        if (v.response.thinking_enabled === true) currentPath = 'thinking';
-        else if (v.response.thinking_enabled === false) currentPath = 'content';
-        if (Array.isArray(v.response.fragments)) {
-          for (const frag of v.response.fragments) {
-            const delta = handleFragment(frag);
-            if (delta) out.push(delta);
-          }
+      if (!resp.ok) {
+        if (resp.status === 401 || resp.status === 403) {
+          tokenCache.delete(auth.cacheKey);
         }
-      }
-
-      if (p === 'response/fragments') {
-        if (Array.isArray(v)) {
-          for (const frag of v) {
-            const delta = handleFragment(frag);
-            if (delta) out.push(delta);
-          }
-        } else if (v && typeof v === 'object') {
-          const delta = handleFragment(v);
-          if (delta) out.push(delta);
-        }
-      }
-
-      if (p === 'response' && Array.isArray(v)) {
-        for (const entry of v) {
-          if (entry?.p === 'response' && entry?.v?.thinking_enabled === true) {
-            currentPath = 'thinking';
-          }
-        }
-      }
-
-      if (p === 'response/search_status') return out;
-
-      if (p === 'response/search_results' && Array.isArray(v)) {
-        if (o !== 'BATCH') {
-          searchResults.length = 0;
-          searchResults.push(...v);
-        } else {
-          for (const op of v) {
-            const match = String(op?.p || '').match(/^(\d+)\/cite_index$/);
-            if (match) {
-              const index = parseInt(match[1], 10);
-              if (searchResults[index]) searchResults[index].cite_index = op.v;
+        let errMsg = `DeepSeek API error (HTTP ${resp.status})`;
+        let errStatus = resp.status;
+        const errText = await resp.text().catch(() => '');
+        try {
+          const errJson = JSON.parse(errText) as Record<string, any>;
+          if (errJson?.code && errJson.code !== 0) {
+            if (Number(errJson.code) === 40003) {
+              tokenCache.delete(auth.cacheKey);
+              errStatus = 401;
             }
+            errMsg = `DeepSeek error ${errJson.code}: ${errJson.msg || errJson?.data?.biz_msg || ''}`;
+          }
+        } catch {
+          if (errText && !looksLikeHtmlDocument(errText)) {
+            errMsg = `${errMsg}: ${errText.slice(0, 200)}`;
           }
         }
-        return out;
+        throw new DeepSeekWebChatError(errMsg, errStatus);
       }
 
-      if (typeof v === 'string') {
-        const delta = emitText(v);
-        if (delta) out.push(delta);
-      } else if (Array.isArray(v) && p === 'response') {
-        for (const entry of v) {
-          if (Array.isArray(entry?.v)) {
-            const joined = entry.v.map((item: any) => item?.content || '').join('');
-            if (joined) {
-              const delta = emitText(joined);
+      const contentType = resp.headers.get('content-type') ?? '';
+      if (contentType.includes('text/html')) {
+        throw new DeepSeekWebChatError('DeepSeek returned an HTML challenge page.', 502);
+      }
+
+      const reader = resp.body?.getReader();
+      if (!reader) {
+        throw new DeepSeekWebChatError('DeepSeek returned an empty response body.', 502);
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let currentPath: '' | 'thinking' | 'content' = '';
+      const searchResults: SearchResultEntry[] = [];
+
+      const emitText = (raw: string): DeepSeekWebDelta | null => {
+        const text = formatStreamContent(raw, opts.modelId);
+        if (!text) return null;
+        let path = currentPath;
+        if (!path && thinkingEnabled) path = 'thinking';
+        else if (!path && searchEnabled) path = 'content';
+        emittedAny = true;
+        return path === 'thinking' ? { reasoning_content: text } : { content: text };
+      };
+
+      const handleFragment = (frag: Record<string, any>): DeepSeekWebDelta | null => {
+        const type = String(frag?.type || '').toUpperCase();
+        if (type === 'THINK') currentPath = 'thinking';
+        else if (type === 'ANSWER' || type === 'RESPONSE') currentPath = 'content';
+        if (typeof frag?.content !== 'string' || frag.content.length === 0) return null;
+        return emitText(frag.content);
+      };
+
+      const processLine = (line: string): DeepSeekWebDelta[] => {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) return [];
+        const payload = trimmed.slice(5).trim();
+        if (!payload || payload === '[DONE]') return [];
+
+        let data: Record<string, any>;
+        try {
+          data = JSON.parse(payload);
+        } catch {
+          return [];
+        }
+
+        if ((typeof data.code === 'number' || typeof data.code === 'string') && Number(data.code) !== 0 && !Number.isNaN(Number(data.code))) {
+          const msg = data.msg || data?.data?.biz_msg || `DeepSeek stream error ${data.code}`;
+          if (Number(data.code) === 40003) {
+            tokenCache.delete(auth.cacheKey);
+            throw new DeepSeekWebChatError(String(msg), 401);
+          }
+          throw new DeepSeekWebChatError(String(msg), 502);
+        }
+
+        const out: DeepSeekWebDelta[] = [];
+        const p = data.p;
+        const o = data.o;
+        const v = data.v;
+
+        if (v && typeof v === 'object' && !Array.isArray(v) && v.response) {
+          if (v.response.thinking_enabled === true) currentPath = 'thinking';
+          else if (v.response.thinking_enabled === false) currentPath = 'content';
+          if (Array.isArray(v.response.fragments)) {
+            for (const frag of v.response.fragments) {
+              const delta = handleFragment(frag);
               if (delta) out.push(delta);
             }
           }
         }
-      }
 
-      return out;
-    };
+        if (p === 'response/fragments') {
+          if (Array.isArray(v)) {
+            for (const frag of v) {
+              const delta = handleFragment(frag);
+              if (delta) out.push(delta);
+            }
+          } else if (v && typeof v === 'object') {
+            const delta = handleFragment(v);
+            if (delta) out.push(delta);
+          }
+        }
 
-    try {
-      while (true) {
-        const { done, value } = await readDeepSeekStreamChunk(
-          reader,
-          STREAM_IDLE_TIMEOUT_MS,
-          deadlineAt,
-          signal,
-        );
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-        for (const line of lines) {
-          for (const delta of processLine(line)) {
+        if (p === 'response' && Array.isArray(v)) {
+          for (const entry of v) {
+            if (entry?.p === 'response' && entry?.v?.thinking_enabled === true) {
+              currentPath = 'thinking';
+            }
+          }
+        }
+
+        if (p === 'response/search_status') return out;
+
+        if (p === 'response/search_results' && Array.isArray(v)) {
+          if (o !== 'BATCH') {
+            searchResults.length = 0;
+            searchResults.push(...v);
+          } else {
+            for (const op of v) {
+              const match = String(op?.p || '').match(/^(\d+)\/cite_index$/);
+              if (match) {
+                const index = parseInt(match[1], 10);
+                if (searchResults[index]) searchResults[index].cite_index = op.v;
+              }
+            }
+          }
+          return out;
+        }
+
+        if (typeof v === 'string') {
+          const delta = emitText(v);
+          if (delta) out.push(delta);
+        } else if (Array.isArray(v) && p === 'response') {
+          for (const entry of v) {
+            if (Array.isArray(entry?.v)) {
+              const joined = entry.v.map((item: any) => item?.content || '').join('');
+              if (joined) {
+                const delta = emitText(joined);
+                if (delta) out.push(delta);
+              }
+            }
+          }
+        }
+
+        return out;
+      };
+
+      try {
+        while (true) {
+          const { done, value } = await readDeepSeekStreamChunk(
+            reader,
+            STREAM_IDLE_TIMEOUT_MS,
+            deadlineAt,
+            signal,
+          );
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+          for (const line of lines) {
+            for (const delta of processLine(line)) {
+              yield delta;
+            }
+          }
+        }
+        if (buffer.trim()) {
+          for (const delta of processLine(buffer)) {
             yield delta;
           }
         }
+      } finally {
+        reader.cancel().catch(() => {});
       }
-      if (buffer.trim()) {
-        for (const delta of processLine(buffer)) {
-          yield delta;
+
+      const citations = appendSearchCitations(searchResults, opts.modelId);
+      if (citations) {
+        emittedAny = true;
+        yield { content: `\n\n${citations}` };
+      }
+
+      if (!emittedAny) {
+        throw new DeepSeekWebChatError(
+          'DeepSeek Web returned an empty completion (check that userToken is valid and not expired).',
+          502,
+        );
+      }
+      return;
+    } catch (err) {
+      const status = deepSeekWebChatErrorStatus(err);
+      if (auth.fromCache && !retriedStaleCache && !emittedAny && (status === 401 || status === 403) && !signal?.aborted) {
+        retriedStaleCache = true;
+        tokenCache.delete(auth.cacheKey);
+        if (sessionId) {
+          void deleteSession(origin, auth, sessionId, platform);
+          sessionId = undefined;
         }
+        auth = await acquireAuth(origin, cred, platform, signal, { skipCache: true });
+        continue;
       }
+      throw err;
     } finally {
-      reader.cancel().catch(() => {});
+      if (sessionId) {
+        void deleteSession(origin, auth, sessionId, platform);
+      }
     }
-
-    const citations = appendSearchCitations(searchResults, opts.modelId);
-    if (citations) {
-      emittedAny = true;
-      yield { content: `\n\n${citations}` };
-    }
-
-    if (!emittedAny) {
-      throw new DeepSeekWebChatError(
-        'DeepSeek Web returned an empty completion (check that userToken is valid and not expired).',
-        502,
-      );
-    }
-  } finally {
-    void deleteSession(origin, auth, sessionId, platform);
   }
 }
 
