@@ -31,6 +31,7 @@ import {
   requireVerifiedCloudRuntimePack,
 } from '../cloud-entitlement/service.js';
 import { buildPlatformPromptSection } from './platform-guide.js';
+import { buildKbQueryFromMessages, formatKbForPrompt, searchKb } from './kb/index.js';
 import {
   buildAccountOnlyIdentityBlock,
   buildIdentityPromptBlock,
@@ -543,6 +544,20 @@ export function matchesRequestedLocale(replyText: string, locale: 'vi' | 'en'): 
   return true;
 }
 
+/**
+ * Answer-quality rules that go with retrieved knowledge. They target the
+ * failure modes seen in real chats: listing symptoms without a cause, giving
+ * a remedy that does not fit the user's scope, and stopping before the next step.
+ */
+export const KB_ANSWER_RULES = [
+  'ANSWER QUALITY RULES (apply to every guide / diagnostic reply):',
+  '- Answer the user\'s actual question first, in plain language. When asked "why", state the specific cause and the evidence for it — never just list error categories.',
+  '- Match the remedy to the scope of the problem. A problem with a TENANT is fixed in the tenant\'s 7 setup steps or in the platform providers; a tenant has no key of its own and never takes a Personal API key. A Personal API key only authenticates one person\'s own client.',
+  '- Finish the job: after a fix, say the exact next click (page path) and how to verify it worked. If you suggest creating something, also say where it is used afterwards.',
+  '- Use ONLY the retrieved knowledge and the live workspace data above for product facts (pages, settings, fields, defaults). If they do not cover it, say so plainly and ask one short clarifying question instead of guessing.',
+  '- Never paste raw lists of every setting; pick the few that matter to this question.',
+].join('\n');
+
 export function buildHumanCoachSystemPrompt(params: {
   user?: SessionUser;
   messages: readonly SupportSetupChatMessage[];
@@ -557,6 +572,8 @@ export function buildHumanCoachSystemPrompt(params: {
   agentContext?: CopilotAgentContext;
   /** Filtered tool schemas for the agent loop (Phase 2). Only admitted tools are listed; absent = no tools offered. */
   toolSchemas?: ReadonlyArray<LlmCoachToolSchema>;
+  /** Pre-rendered "RETRIEVED PLATFORM KNOWLEDGE" section (RAG). Omitted = no retrieval block. */
+  knowledgeSection?: string;
 }): string {
   const {
     user,
@@ -570,6 +587,7 @@ export function buildHumanCoachSystemPrompt(params: {
     canEditSteps,
     agentContext,
     toolSchemas,
+    knowledgeSection,
   } = params;
 
   const editableList = canEditSteps
@@ -665,6 +683,8 @@ export function buildHumanCoachSystemPrompt(params: {
     toolSection,
     '',
     platformSection,
+    '',
+    knowledgeSection ? `${KB_ANSWER_RULES}\n\n${knowledgeSection}` : '',
     '',
     coachPack.playbookReference,
     '',
@@ -880,7 +900,20 @@ export async function runHumanLikeLlmCoach(
   params: LlmCoachTurnInput,
 ): Promise<LlmCoachTurnResult | null> {
   await ensureVerifiedCloudRuntimePack('support_copilot');
-  const systemPrompt = buildHumanCoachSystemPrompt({ ...params, toolSchemas: params.toolSchemas });
+  let knowledgeSection: string | undefined;
+  try {
+    const hits = await searchKb(buildKbQueryFromMessages(params.messages, params.currentPath), {
+      caller: params.user,
+      limit: 5,
+      locale: params.locale,
+      currentPath: params.currentPath,
+    });
+    knowledgeSection = formatKbForPrompt(hits, params.locale);
+  } catch {
+    // Retrieval must never break a chat turn.
+    knowledgeSection = undefined;
+  }
+  const systemPrompt = buildHumanCoachSystemPrompt({ ...params, toolSchemas: params.toolSchemas, knowledgeSection });
   const baseTurnMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
     { role: 'system', content: systemPrompt },
     ...params.messages.slice(-14).map((m) => ({

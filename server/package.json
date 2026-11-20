@@ -19,7 +19,8 @@
     "db:migration:down": "tsx src/db/migrate/cli.ts down",
     "db:migration:fresh": "tsx src/db/migrate/cli.ts fresh",
     "db:migration:status": "tsx src/db/migrate/cli.ts status",
-    "db:migration:create": "tsx src/db/migrate/cli.ts create"
+    "db:migration:create": "tsx src/db/migrate/cli.ts create",
+    "kb:docs": "tsx src/scripts/gen-copilot-docs-kb.ts"
   },
   "dependencies": {
     "@azure/identity": "^4.14.1",
