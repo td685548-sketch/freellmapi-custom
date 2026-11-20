@@ -19,9 +19,11 @@ vi.mock('../../custom/provider-accounts/deepseek-pow.js', async (importOriginal)
 
 import { normalizeCookieInput } from '../../custom/provider-accounts/cookie-format.js';
 import {
+  DeepSeekWebChatError,
   clearDeepSeekWebTokenCache,
   extractDeepSeekUserToken,
   parseDeepSeekCredential,
+  streamDeepSeekWebChat,
 } from '../../custom/provider-accounts/deepseek-web-chat.js';
 import { WebCookieProvider } from '../../custom/provider-accounts/web-cookie.js';
 
@@ -293,5 +295,393 @@ describe('WebCookieProvider.chatCompletion (deepseek-web)', () => {
       'Bearer access_stale',
       'Bearer access_fresh',
     ]);
+  });
+
+  it('does not drop ds_session_id via onCredentialUpdate when Cookie Editor or storageState JSON has both userToken and ds_session_id', async () => {
+    mockProxyFetch.mockImplementation(async (url: unknown) => {
+      const target = String(url);
+      if (target.endsWith('/api/v0/users/current')) {
+        return jsonResponse(200, { code: 0, data: { biz_data: { token: 'access_ok' } } });
+      }
+      if (target.endsWith('/api/v0/chat_session/create')) {
+        return jsonResponse(200, { code: 0, data: { biz_data: { chat_session: { id: 'sess_keep' } } } });
+      }
+      if (target.endsWith('/api/v0/chat/create_pow_challenge')) {
+        return jsonResponse(200, {
+          code: 0,
+          data: {
+            biz_data: {
+              challenge: {
+                algorithm: 'DeepSeekHashV1',
+                challenge: 'a'.repeat(64),
+                salt: 'salt1',
+                signature: 'sig1',
+                difficulty: 1,
+                expire_at: 1700000000,
+              },
+            },
+          },
+        });
+      }
+      if (target.endsWith('/api/v0/chat/completion')) {
+        return sseResponse([
+          'data: {"v":{"response":{"thinking_enabled":false,"fragments":[{"type":"ANSWER","content":"OK"}]}}}',
+          'data: [DONE]',
+        ]);
+      }
+      if (target.endsWith('/api/v0/chat_session/delete')) {
+        return jsonResponse(200, { code: 0 });
+      }
+      throw new Error(`Unexpected fetch URL: ${target}`);
+    });
+
+    const cookieEditorWithBoth = JSON.stringify([
+      { name: 'ds_session_id', value: 'sess_cookie_preserve' },
+      { name: 'userToken', value: '{"value":"tok_in_cookie_json","__version":"0"}' },
+    ]);
+    const storageStateWithBoth = JSON.stringify({
+      cookies: [{ name: 'ds_session_id', value: 'sess_storage_preserve' }],
+      origins: [
+        {
+          origin: 'https://chat.deepseek.com',
+          localStorage: [{ name: 'userToken', value: '{"value":"tok_in_storage","__version":"0"}' }],
+        },
+      ],
+    });
+    const flatJsonWithBoth = JSON.stringify({
+      userToken: 'tok_flat_both',
+      ds_session_id: 'sess_flat_preserve',
+    });
+
+    const provider = createDeepSeekProvider();
+    for (const cred of [cookieEditorWithBoth, storageStateWithBoth, flatJsonWithBoth]) {
+      const onCredentialUpdateValidate = vi.fn();
+      const valid = await provider.validateKey(cred, undefined, { onCredentialUpdate: onCredentialUpdateValidate });
+      expect(valid).toBe(true);
+      expect(onCredentialUpdateValidate).not.toHaveBeenCalled();
+
+      const onCredentialUpdateChat = vi.fn();
+      const res = await provider.chatCompletion(
+        cred,
+        [{ role: 'user', content: 'Hi' }],
+        'deepseek-chat',
+        { onCredentialUpdate: onCredentialUpdateChat },
+      );
+      expect(res.choices[0].message.content).toBe('OK');
+      expect(onCredentialUpdateChat).not.toHaveBeenCalled();
+    }
+
+    // By contrast, a token-only wrapped/mangled credential with no ds_session_id still normalizes via onCredentialUpdate.
+    const onUpdateTokenOnly = vi.fn();
+    await provider.chatCompletion(
+      '{"value":"tok_only_json","__version":"0"}',
+      [{ role: 'user', content: 'Hi' }],
+      'deepseek-chat',
+      { onCredentialUpdate: onUpdateTokenOnly },
+    );
+    expect(onUpdateTokenOnly).toHaveBeenCalledWith('tok_only_json');
+  });
+
+  it('recovers stale cached accessToken when create_pow_challenge fails with 40003 and deletes old session', async () => {
+    let usersCurrentCalls = 0;
+    let createSessionCalls = 0;
+    let powCalls = 0;
+    let completionCalls = 0;
+    const deletedSessions: string[] = [];
+    const powAuthHeaders: string[] = [];
+    const completionAuthHeaders: string[] = [];
+
+    mockProxyFetch.mockImplementation(async (url: unknown, init?: RequestInit) => {
+      const target = String(url);
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+
+      if (target.endsWith('/api/v0/users/current')) {
+        usersCurrentCalls += 1;
+        return jsonResponse(200, {
+          code: 0,
+          data: { biz_data: { token: usersCurrentCalls === 1 ? 'access_stale_pow' : 'access_fresh_pow' } },
+        });
+      }
+      if (target.endsWith('/api/v0/chat_session/create')) {
+        createSessionCalls += 1;
+        return jsonResponse(200, {
+          code: 0,
+          data: { biz_data: { chat_session: { id: `sess_${createSessionCalls}` } } },
+        });
+      }
+      if (target.endsWith('/api/v0/chat/create_pow_challenge')) {
+        powCalls += 1;
+        powAuthHeaders.push(headers['Authorization'] ?? '');
+        if (powCalls === 2) {
+          return jsonResponse(200, { code: 40003, msg: 'invalid token on pow' });
+        }
+        return jsonResponse(200, {
+          code: 0,
+          data: {
+            biz_data: {
+              challenge: {
+                algorithm: 'DeepSeekHashV1',
+                challenge: 'a'.repeat(64),
+                salt: 'salt1',
+                signature: 'sig1',
+                difficulty: 1,
+                expire_at: 1700000000,
+              },
+            },
+          },
+        });
+      }
+      if (target.endsWith('/api/v0/chat/completion')) {
+        completionCalls += 1;
+        completionAuthHeaders.push(headers['Authorization'] ?? '');
+        return sseResponse([
+          'data: {"v":{"response":{"thinking_enabled":false,"fragments":[{"type":"ANSWER","content":"RECOVERED_POW"}]}}}',
+          'data: [DONE]',
+        ]);
+      }
+      if (target.endsWith('/api/v0/chat_session/delete')) {
+        const parsed = JSON.parse(String(init?.body ?? '{}')) as { chat_session_id?: string };
+        if (parsed.chat_session_id) deletedSessions.push(parsed.chat_session_id);
+        return jsonResponse(200, { code: 0 });
+      }
+      throw new Error(`Unexpected fetch URL: ${target}`);
+    });
+
+    const provider = createDeepSeekProvider();
+    const messages = [{ role: 'user' as const, content: 'Hello' }];
+
+    // Turn 1 populates tokenCache with access_stale_pow.
+    const first = await provider.chatCompletion('tok_pow_user', messages, 'deepseek-chat');
+    expect(first.choices[0].message.content).toBe('RECOVERED_POW');
+
+    // Turn 2 hits 40003 on create_pow_challenge -> clears cache, re-auths, deletes sess_2, recreates sess_3, retries PoW + completion.
+    const second = await provider.chatCompletion('tok_pow_user', messages, 'deepseek-chat');
+    expect(second.choices[0].message.content).toBe('RECOVERED_POW');
+    expect(usersCurrentCalls).toBe(2);
+    expect(createSessionCalls).toBe(3);
+    expect(completionCalls).toBe(2);
+    expect(powAuthHeaders).toEqual([
+      'Bearer access_stale_pow',
+      'Bearer access_stale_pow',
+      'Bearer access_fresh_pow',
+    ]);
+    expect(completionAuthHeaders).toEqual([
+      'Bearer access_stale_pow',
+      'Bearer access_fresh_pow',
+    ]);
+    expect(deletedSessions).toContain('sess_2');
+    expect(deletedSessions).toContain('sess_3');
+  });
+
+  it('recovers stale cached accessToken when /chat/completion fails with HTTP 401 or in-band SSE code 40003 before deltas', async () => {
+    for (const mode of ['http_401', 'sse_40003'] as const) {
+      clearDeepSeekWebTokenCache();
+      let usersCurrentCalls = 0;
+      let createSessionCalls = 0;
+      let completionCalls = 0;
+      const completionAuthHeaders: string[] = [];
+
+      mockProxyFetch.mockImplementation(async (url: unknown, init?: RequestInit) => {
+        const target = String(url);
+        const headers = (init?.headers ?? {}) as Record<string, string>;
+
+        if (target.endsWith('/api/v0/users/current')) {
+          usersCurrentCalls += 1;
+          return jsonResponse(200, {
+            code: 0,
+            data: { biz_data: { token: usersCurrentCalls === 1 ? 'access_stale_comp' : 'access_fresh_comp' } },
+          });
+        }
+        if (target.endsWith('/api/v0/chat_session/create')) {
+          createSessionCalls += 1;
+          return jsonResponse(200, {
+            code: 0,
+            data: { biz_data: { chat_session: { id: `sess_${mode}_${createSessionCalls}` } } },
+          });
+        }
+        if (target.endsWith('/api/v0/chat/create_pow_challenge')) {
+          return jsonResponse(200, {
+            code: 0,
+            data: {
+              biz_data: {
+                challenge: {
+                  algorithm: 'DeepSeekHashV1',
+                  challenge: 'a'.repeat(64),
+                  salt: 'salt1',
+                  signature: 'sig1',
+                  difficulty: 1,
+                  expire_at: 1700000000,
+                },
+              },
+            },
+          });
+        }
+        if (target.endsWith('/api/v0/chat/completion')) {
+          completionCalls += 1;
+          completionAuthHeaders.push(headers['Authorization'] ?? '');
+          if (completionCalls === 2) {
+            if (mode === 'http_401') {
+              return jsonResponse(401, { code: 40003, msg: 'token expired' });
+            }
+            return sseResponse(['data: {"code":40003,"msg":"userToken is invalid or expired"}']);
+          }
+          return sseResponse([
+            `data: {"v":{"response":{"thinking_enabled":false,"fragments":[{"type":"ANSWER","content":"OK_${mode}"}]}}}`,
+            'data: [DONE]',
+          ]);
+        }
+        if (target.endsWith('/api/v0/chat_session/delete')) {
+          return jsonResponse(200, { code: 0 });
+        }
+        throw new Error(`Unexpected fetch URL: ${target}`);
+      });
+
+      const provider = createDeepSeekProvider();
+      const messages = [{ role: 'user' as const, content: 'Hello' }];
+
+      const first = await provider.chatCompletion(`tok_${mode}`, messages, 'deepseek-chat');
+      expect(first.choices[0].message.content).toBe(`OK_${mode}`);
+
+      const second = await provider.chatCompletion(`tok_${mode}`, messages, 'deepseek-chat');
+      expect(second.choices[0].message.content).toBe(`OK_${mode}`);
+      expect(usersCurrentCalls).toBe(2);
+      expect(createSessionCalls).toBe(3);
+      expect(completionCalls).toBe(3);
+      expect(completionAuthHeaders).toEqual([
+        'Bearer access_stale_comp',
+        'Bearer access_stale_comp',
+        'Bearer access_fresh_comp',
+      ]);
+    }
+  });
+
+  it('throws DeepSeekWebChatError with status 401 (not 502) and evicts tokenCache on unrecoverable SSE code 40003', async () => {
+    let usersCurrentCalls = 0;
+    mockProxyFetch.mockImplementation(async (url: unknown) => {
+      const target = String(url);
+      if (target.endsWith('/api/v0/users/current')) {
+        usersCurrentCalls += 1;
+        return jsonResponse(200, { code: 0, data: { biz_data: { token: `access_${usersCurrentCalls}` } } });
+      }
+      if (target.endsWith('/api/v0/chat_session/create')) {
+        return jsonResponse(200, { code: 0, data: { biz_data: { chat_session: { id: 'sess_401' } } } });
+      }
+      if (target.endsWith('/api/v0/chat/create_pow_challenge')) {
+        return jsonResponse(200, {
+          code: 0,
+          data: {
+            biz_data: {
+              challenge: {
+                algorithm: 'DeepSeekHashV1',
+                challenge: 'a'.repeat(64),
+                salt: 'salt1',
+                signature: 'sig1',
+                difficulty: 1,
+                expire_at: 1700000000,
+              },
+            },
+          },
+        });
+      }
+      if (target.endsWith('/api/v0/chat/completion')) {
+        return sseResponse(['data: {"code":40003,"msg":"invalid token in sse"}']);
+      }
+      if (target.endsWith('/api/v0/chat_session/delete')) {
+        return jsonResponse(200, { code: 0 });
+      }
+      throw new Error(`Unexpected fetch URL: ${target}`);
+    });
+
+    const consume = async () => {
+      for await (const _delta of streamDeepSeekWebChat({
+        credential: 'tok_sse_401',
+        messages: [{ role: 'user', content: 'Hi' }],
+        modelId: 'deepseek-chat',
+      })) {
+        // no-op
+      }
+    };
+
+    await expect(consume()).rejects.toSatisfy(
+      (err: unknown) => err instanceof DeepSeekWebChatError && err.status === 401 && /invalid token in sse/.test(err.message),
+    );
+    // Token cache was evicted, so a subsequent call must re-hit /api/v0/users/current.
+    await expect(consume()).rejects.toSatisfy(
+      (err: unknown) => err instanceof DeepSeekWebChatError && err.status === 401,
+    );
+    expect(usersCurrentCalls).toBe(2);
+  });
+
+  it('does not retry if SSE emits deltas before code 40003, and still throws 401', async () => {
+    let usersCurrentCalls = 0;
+    let completionCalls = 0;
+
+    mockProxyFetch.mockImplementation(async (url: unknown) => {
+      const target = String(url);
+      if (target.endsWith('/api/v0/users/current')) {
+        usersCurrentCalls += 1;
+        return jsonResponse(200, { code: 0, data: { biz_data: { token: 'access_midstream' } } });
+      }
+      if (target.endsWith('/api/v0/chat_session/create')) {
+        return jsonResponse(200, { code: 0, data: { biz_data: { chat_session: { id: 'sess_mid' } } } });
+      }
+      if (target.endsWith('/api/v0/chat/create_pow_challenge')) {
+        return jsonResponse(200, {
+          code: 0,
+          data: {
+            biz_data: {
+              challenge: {
+                algorithm: 'DeepSeekHashV1',
+                challenge: 'a'.repeat(64),
+                salt: 'salt1',
+                signature: 'sig1',
+                difficulty: 1,
+                expire_at: 1700000000,
+              },
+            },
+          },
+        });
+      }
+      if (target.endsWith('/api/v0/chat/completion')) {
+        completionCalls += 1;
+        if (completionCalls === 1) {
+          return sseResponse([
+            'data: {"v":{"response":{"thinking_enabled":false,"fragments":[{"type":"ANSWER","content":"WARM"}]}}}',
+            'data: [DONE]',
+          ]);
+        }
+        return sseResponse([
+          'data: {"v":{"response":{"thinking_enabled":false,"fragments":[{"type":"ANSWER","content":"PARTIAL"}]}}}',
+          'data: {"code":40003,"msg":"expired midstream"}',
+        ]);
+      }
+      if (target.endsWith('/api/v0/chat_session/delete')) {
+        return jsonResponse(200, { code: 0 });
+      }
+      throw new Error(`Unexpected fetch URL: ${target}`);
+    });
+
+    const provider = createDeepSeekProvider();
+    await provider.chatCompletion('tok_midstream', [{ role: 'user', content: 'Warm' }], 'deepseek-chat');
+
+    const deltas: string[] = [];
+    let caught: unknown;
+    try {
+      for await (const d of streamDeepSeekWebChat({
+        credential: 'tok_midstream',
+        messages: [{ role: 'user', content: 'Next' }],
+        modelId: 'deepseek-chat',
+      })) {
+        if (d.content) deltas.push(d.content);
+      }
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(deltas).toEqual(['PARTIAL']);
+    expect(caught).toBeInstanceOf(DeepSeekWebChatError);
+    expect((caught as DeepSeekWebChatError).status).toBe(401);
+    expect(usersCurrentCalls).toBe(1);
+    expect(completionCalls).toBe(2);
   });
 });

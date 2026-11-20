@@ -360,7 +360,11 @@ function finalizeCandidateRoutes(
   allRateLimited?: boolean;
   retryAfterMs?: number;
 } {
-  const filtered = filterCandidatesByCooldown(candidates);
+  const nonDrained = candidates.filter(c => !isCredentialDraining(getAccountResiliencePolicy(c.account.id).weight));
+  const statusFiltered = nonDrained.some(c => c.account.status !== 'error')
+    ? candidates.filter(c => c.account.status !== 'error')
+    : candidates;
+  const filtered = filterCandidatesByCooldown(statusFiltered);
   if (filtered.available.length === 0) {
     return {
       candidates: [],
@@ -1101,7 +1105,7 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
       const pinned = getAutoSessionRoute(autoSessionId, modality, dbRef);
       if (pinned) {
         const usableAccount = getUsableXGatewayKeys().find(
-          a => a.id === pinned.accountId && a.provider === pinned.providerId && isWithinAccountCaps(a),
+          a => a.id === pinned.accountId && a.provider === pinned.providerId && a.status !== 'error' && isWithinAccountCaps(a),
         );
         const inCooldown = getAccountCooldown(pinned.accountId, pinned.modelId).inCooldown;
         const pinnedPolicy = getAccountResiliencePolicy(pinned.accountId);
@@ -1159,7 +1163,13 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
       stickyExpanded = true;
       if (autoSessionId) clearAutoSessionRoute(autoSessionId, modality);
       const { resolved } = resolveNormalCandidates();
+      const hasNonErrorCandidate =
+        candidates.some(c => c.account.status !== 'error')
+        || resolved.some(c => c.account.status !== 'error');
       for (const candidate of resolved) {
+        if (hasNonErrorCandidate && candidate.account.status === 'error') {
+          continue;
+        }
         if (
           stickyAttempted
           && candidate.account.id === stickyAttempted.accountId
@@ -1561,11 +1571,13 @@ export async function handleXGatewayChat(req: Request, res: Response): Promise<v
         && candidateIdx === 0
         && !stickyExpanded
         && (
-          getUsableXGatewayKeys().some(a => a.id !== account.id && isWithinAccountCaps(a))
+          getUsableXGatewayKeys().some(a => a.id !== account.id && a.status !== 'error' && isWithinAccountCaps(a))
           || orderModelsForModality(accountModels(account), modality).length > 1
         )
       );
-      const peekTimeoutMs = (isAutoModel && hasFallback) ? getAutoStreamPeekTimeoutMs() : 0;
+      const peekTimeoutMs = (isAutoModel && hasFallback)
+        ? getAutoStreamPeekTimeoutMs({ webCookie: isWebCookieProvider(account.provider) })
+        : 0;
       const attemptController = new AbortController();
       const attemptSignal = AbortSignal.any([controller.signal, attemptController.signal]);
 
