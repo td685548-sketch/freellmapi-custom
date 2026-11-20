@@ -61,3 +61,6 @@ scripts/backup.mjs
 
 # Vitest coverage output (uploaded as a CI artifact, not committed).
 coverage/
+
+# Local git worktrees
+.worktrees/

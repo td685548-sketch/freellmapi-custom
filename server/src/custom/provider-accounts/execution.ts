@@ -87,6 +87,15 @@ export function resolveAccountProvider(account: AccountRow): BaseProvider | unde
           // Status bookkeeping must never mask the upstream error.
         }
       },
+      markHealthyIfRecovered: (): void => {
+        if (!isWebCookie || account.status === 'healthy') return;
+        try {
+          setAccountStatus(account.id, 'healthy');
+          account.status = 'healthy';
+        } catch {
+          // Status bookkeeping must never fail a successful chat turn.
+        }
+      },
     };
   };
 
@@ -104,7 +113,9 @@ export function resolveAccountProvider(account: AccountRow): BaseProvider | unde
         const effectiveOptions = persistence.completionOptions(baseOptions);
         effectiveOptions.signal?.throwIfAborted();
         try {
-          return await delegate!.chatCompletion(credential, messages, model, effectiveOptions, quotaContext);
+          const result = await delegate!.chatCompletion(credential, messages, model, effectiveOptions, quotaContext);
+          persistence.markHealthyIfRecovered();
+          return result;
         } catch (error) {
           persistence.markErrorIfConfirmedWebAuthFailure(error);
           throw error;
@@ -139,7 +150,10 @@ export function resolveAccountProvider(account: AccountRow): BaseProvider | unde
             iterator = delegate!.streamChatCompletion(credential, messages, model, effectiveOptions, quotaContext);
             first = await step(() => iterator.next());
           }
-          if (!first.done) yield first.value;
+          if (!first.done) {
+            yield first.value;
+            step(() => persistence.markHealthyIfRecovered());
+          }
           while (!first.done) {
             effectiveOptions?.signal?.throwIfAborted();
             try {

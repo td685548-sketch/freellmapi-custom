@@ -266,6 +266,75 @@ function cookieSpecificity(cookie: Record<string, unknown>): number {
   return domainScore * 1000 + pathScore
 }
 
+function unwrapNestedTokenValue(raw: string, depth = 0): string {
+  const trimmed = raw.trim()
+  if (!trimmed || depth >= 4) return trimmed
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith('{') && trimmed.endsWith('}'))) {
+    try {
+      const inner = JSON.parse(trimmed) as unknown
+      if (typeof inner === 'string' && inner.trim()) {
+        return unwrapNestedTokenValue(inner, depth + 1)
+      }
+      if (inner && typeof inner === 'object' && !Array.isArray(inner)) {
+        const innerObj = inner as Record<string, unknown>
+        if (typeof innerObj.value === 'string' && innerObj.value.trim()) {
+          return unwrapNestedTokenValue(innerObj.value, depth + 1)
+        }
+      }
+    } catch {
+      // Fall through to trimmed token
+    }
+  }
+  return trimmed
+}
+
+function unwrapLocalStorageCookieInput(obj: Record<string, unknown>, rawTrimmed: string): string | null {
+  const keys = Object.keys(obj)
+  if (keys.length > 0 && keys.every(k => k === 'value' || k === '__version') && 'value' in obj) {
+    if (typeof obj.value === 'string' && obj.value.trim()) {
+      return unwrapNestedTokenValue(obj.value)
+    }
+    if (obj.value && typeof obj.value === 'object') {
+      return rawTrimmed
+    }
+  }
+  if (keys.length > 0 && keys.every(k => k === 'userToken' || k === '__version') && 'userToken' in obj) {
+    if (typeof obj.userToken === 'string' && obj.userToken.trim()) {
+      return unwrapNestedTokenValue(obj.userToken)
+    }
+  }
+  if (Array.isArray(obj.origins)) {
+    const hasDsSessionCookie =
+      Array.isArray(obj.cookies) &&
+      obj.cookies.some(c => Boolean(c) && typeof c === 'object' && (c as Record<string, unknown>).name === 'ds_session_id')
+    if (!hasDsSessionCookie) {
+      for (const origin of obj.origins) {
+        const items = (origin as { localStorage?: Array<{ name?: unknown; value?: unknown }> } | null)?.localStorage
+        if (!Array.isArray(items)) continue
+        const hit = items.find(entry => entry?.name === 'userToken' && typeof entry.value === 'string')
+        if (hit && typeof hit.value === 'string' && hit.value.trim()) {
+          try {
+            const parsedHit = JSON.parse(hit.value) as unknown
+            if (
+              parsedHit &&
+              typeof parsedHit === 'object' &&
+              !Array.isArray(parsedHit) &&
+              (parsedHit as Record<string, unknown>).value &&
+              typeof (parsedHit as Record<string, unknown>).value === 'object'
+            ) {
+              return rawTrimmed
+            }
+          } catch {
+            // Fall through to string extraction
+          }
+          return unwrapNestedTokenValue(hit.value)
+        }
+      }
+    }
+  }
+  return null
+}
+
 export function extractCookieCredential(raw: string, providerId?: string): string {
   let trimmed = raw.trim()
   if (/^LLM\|[^|\s]+\|[^|\s]+$/.test(trimmed)) {
@@ -285,6 +354,10 @@ export function extractCookieCredential(raw: string, providerId?: string): strin
         rawCookies = parsed.filter((c): c is Record<string, unknown> => Boolean(c) && typeof c === 'object' && !Array.isArray(c))
       } else if (parsed && typeof parsed === 'object') {
         const obj = parsed as Record<string, unknown>
+        const unwrappedToken = unwrapLocalStorageCookieInput(obj, trimmed)
+        if (unwrappedToken !== null) {
+          return sanitizeCookiePart(unwrappedToken)
+        }
         if (Array.isArray(obj.cookies)) {
           rawCookies = obj.cookies.filter((c): c is Record<string, unknown> => Boolean(c) && typeof c === 'object' && !Array.isArray(c))
         } else {

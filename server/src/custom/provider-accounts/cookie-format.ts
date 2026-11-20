@@ -40,6 +40,85 @@ function sanitizeCookieSegment(value: unknown): string {
   return String(value ?? '').replace(/[\r\n;]+/g, ' ').trim();
 }
 
+function unwrapNestedValueString(raw: string, depth = 0): string {
+  const trimmed = raw.trim();
+  if (!trimmed || depth >= 4) return trimmed;
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith('{') && trimmed.endsWith('}'))
+  ) {
+    try {
+      const inner = JSON.parse(trimmed) as unknown;
+      if (typeof inner === 'string' && inner.trim()) {
+        return unwrapNestedValueString(inner, depth + 1);
+      }
+      if (inner && typeof inner === 'object' && !Array.isArray(inner)) {
+        const innerObj = inner as Record<string, unknown>;
+        if (typeof innerObj.value === 'string' && innerObj.value.trim()) {
+          return unwrapNestedValueString(innerObj.value, depth + 1);
+        }
+      }
+    } catch {
+      // Not nested JSON; return trimmed string
+    }
+  }
+  return trimmed;
+}
+
+/**
+ * Extracts a Local Storage `userToken` wrapper (`{ value, __version }`,
+ * `{ userToken, __version }`, or Playwright `storageState` `origins[].localStorage`)
+ * before `normalizeCookieInput` treats flat `{ name: value }` objects as cookie maps.
+ */
+function unwrapLocalStorageTokenObject(obj: Record<string, unknown>, rawTrimmed: string): string | null {
+  const keys = Object.keys(obj);
+  if (keys.length > 0 && keys.every(k => k === 'value' || k === '__version') && 'value' in obj) {
+    if (typeof obj.value === 'string' && obj.value.trim()) {
+      return unwrapNestedValueString(obj.value);
+    }
+    if (obj.value && typeof obj.value === 'object') {
+      return rawTrimmed;
+    }
+  }
+  if (keys.length > 0 && keys.every(k => k === 'userToken' || k === '__version') && 'userToken' in obj) {
+    if (typeof obj.userToken === 'string' && obj.userToken.trim()) {
+      return unwrapNestedValueString(obj.userToken);
+    }
+  }
+  if (Array.isArray(obj.origins)) {
+    const hasDsSessionCookie =
+      Array.isArray(obj.cookies) &&
+      obj.cookies.some(
+        c => Boolean(c) && typeof c === 'object' && (c as Record<string, unknown>).name === 'ds_session_id',
+      );
+    if (!hasDsSessionCookie) {
+      for (const origin of obj.origins) {
+        const items = (origin as { localStorage?: Array<{ name?: unknown; value?: unknown }> } | null)?.localStorage;
+        if (!Array.isArray(items)) continue;
+        const hit = items.find(entry => entry?.name === 'userToken' && typeof entry.value === 'string');
+        if (hit && typeof hit.value === 'string' && hit.value.trim()) {
+          try {
+            const parsedHit = JSON.parse(hit.value) as unknown;
+            if (
+              parsedHit &&
+              typeof parsedHit === 'object' &&
+              !Array.isArray(parsedHit) &&
+              (parsedHit as Record<string, unknown>).value &&
+              typeof (parsedHit as Record<string, unknown>).value === 'object'
+            ) {
+              return rawTrimmed;
+            }
+          } catch {
+            // Fall through to unwrap string token
+          }
+          return unwrapNestedValueString(hit.value);
+        }
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * Normalizes a Cookie-Editor JSON array, storage-state `{ cookies }` JSON,
  * flat `{ name: value }` object, or raw Cookie header into a clean `k=v; ...`
@@ -66,6 +145,10 @@ export function normalizeCookieInput(raw: string): string {
         );
       } else if (parsed && typeof parsed === 'object') {
         const obj = parsed as Record<string, unknown>;
+        const unwrappedToken = unwrapLocalStorageTokenObject(obj, trimmed);
+        if (unwrappedToken !== null) {
+          return unwrappedToken;
+        }
         if (Array.isArray(obj.cookies)) {
           rawCookies = obj.cookies.filter(
             (c): c is Record<string, unknown> => Boolean(c) && typeof c === 'object' && !Array.isArray(c),
