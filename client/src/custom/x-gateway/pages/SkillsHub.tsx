@@ -33,7 +33,7 @@ import {
 } from '../skills-api';
 import type { SkillCategory, SkillSummary } from '../skills-types';
 import { useUserSession } from '../../use-session';
-import { askConfirm } from '../shell/confirm'
+import { askConfirm } from '../shell/confirm-store'
 
 function getSkillIcon(category: string, iconName?: string) {
   switch (iconName || category) {

@@ -18,7 +18,7 @@ import { KEY_ROUTING_MODES, type CustomerAiAssistant, type KeyRoutingMode } from
 
 import type { UserApiKey } from '../../../shared/user-access'
 import { useCustomT } from './i18n/use-custom-t'
-import { askConfirm } from '@/custom/x-gateway/shell/confirm'
+import { askConfirm } from '@/custom/x-gateway/shell/confirm-store'
 export type { UserApiKey } from '../../../shared/user-access'
 
 export function MemberKeysView() {
@@ -80,7 +80,7 @@ export function MemberKeysView() {
       setKeyName('')
       toast.success(tc('API Key generated successfully'))
     },
-    onError: (err: any) => {
+    onError: (err) => {
       toast.error(err.message || tc('Failed to generate key'))
     },
   })
@@ -95,7 +95,7 @@ export function MemberKeysView() {
       queryClient.invalidateQueries({ queryKey: ['user-api-keys'] })
       toast.success(tc('API Key revoked'))
     },
-    onError: (err: any) => {
+    onError: (err) => {
       toast.error(err.message || tc('Failed to revoke key'))
     },
   })
@@ -110,7 +110,7 @@ export function MemberKeysView() {
       setNewlyCreatedKey({ id: res.key.id, secret: res.key.key })
       toast.success(tc('API Key rotated successfully'))
     },
-    onError: (err: any) => {
+    onError: (err) => {
       toast.error(err.message || tc('Failed to rotate key'))
     },
   })

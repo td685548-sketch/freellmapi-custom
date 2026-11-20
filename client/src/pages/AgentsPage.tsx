@@ -83,8 +83,10 @@ export default function AgentsPage() {
     enabled: hasPermission('view_analytics'),
   })
   // "Seen recently" means traffic within the last 7 days, not merely any row
-  // in the fetched 30-day window.
-  const seenCutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
+  // in the fetched 30-day window. Fixed at mount so rows don't flicker in
+  // and out as the cutoff drifts between renders.
+  const [mountedAt] = useState(Date.now)
+  const seenCutoff = mountedAt - 7 * 24 * 60 * 60 * 1000
   const seen = new Map(byClient
     .filter(row => row.lastSeenAt && Date.parse(row.lastSeenAt) >= seenCutoff)
     .map(row => [row.clientAgent, row]))

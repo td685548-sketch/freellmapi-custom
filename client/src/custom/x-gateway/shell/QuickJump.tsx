@@ -18,10 +18,18 @@ export function QuickJump({ groups, open, onClose }: { groups: NavGroup[]; open:
     return groups.flatMap(group => group.items.map(item => ({ ...item, group: group.label })))
       .filter(item => !needle || plain(`${item.label} ${item.group}`).includes(needle))
   }, [groups, query])
+  // Reset the search whenever the palette opens (render adjustment); the
+  // input focus still happens in the effect below.
+  const [wasOpen, setWasOpen] = useState(open)
+  if (open !== wasOpen) {
+    setWasOpen(open)
+    if (open) {
+      setQuery('')
+      setCursor(0)
+    }
+  }
   useEffect(() => {
     if (!open) return
-    setQuery('')
-    setCursor(0)
     input.current?.focus()
   }, [open])
   if (!open) return null

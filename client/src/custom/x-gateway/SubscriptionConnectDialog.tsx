@@ -31,7 +31,9 @@ export function SubscriptionConnectDialog({ provider, account, onClose }: { prov
   const [error, setError] = useState('')
   const mounted = useRef(true)
   const pending = useRef<string | null>(null)
-  const close = useRef(onClose); close.current = onClose
+  const close = useRef(onClose)
+  // Keep the ref pointing at the latest onClose for the async completions.
+  useEffect(() => { close.current = onClose }, [onClose])
   const done = () => { pending.current = null; setCredential(''); setCode(''); void refreshAccounts(client); close.current() }
   useEffect(() => {
     mounted.current = true

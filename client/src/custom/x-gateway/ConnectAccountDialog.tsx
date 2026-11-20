@@ -198,7 +198,7 @@ const OAUTH_CLI_GUIDES: Record<string, {
   },
 }
 
-export function extractOAuthCredential(raw: string): string {
+function extractOAuthCredential(raw: string): string {
   const trimmed = raw.trim()
   if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
     try {
@@ -266,7 +266,7 @@ function cookieSpecificity(cookie: Record<string, unknown>): number {
   return domainScore * 1000 + pathScore
 }
 
-export function extractCookieCredential(raw: string, providerId?: string): string {
+function extractCookieCredential(raw: string, providerId?: string): string {
   let trimmed = raw.trim()
   if (/^LLM\|[^|\s]+\|[^|\s]+$/.test(trimmed)) {
     return sanitizeCookiePart(trimmed)
@@ -323,7 +323,7 @@ export function extractCookieCredential(raw: string, providerId?: string): strin
   return sanitizeCookiePart(trimmed)
 }
 
-export function parseBulkCredentialLines(
+function parseBulkCredentialLines(
   raw: string,
   baseLabel: string,
   options?: { isCookie?: boolean; isOauthCli?: boolean; providerId?: string },
@@ -377,7 +377,8 @@ function LegacyConnectAccountDialog({ provider, account, onClose }: {
   const active = useRef(true)
   const attemptId = useRef<string | null>(null)
   const closeRef = useRef(onClose)
-  closeRef.current = onClose
+  // Keep the ref pointing at the latest onClose for the async completions.
+  useEffect(() => { closeRef.current = onClose }, [onClose])
 
   useEffect(() => {
     active.current = true

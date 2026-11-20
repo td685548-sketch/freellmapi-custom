@@ -442,18 +442,20 @@ export default function ProviderAccounts() {
   })
 
   // Sync Provider Config state from query/provider
-  useEffect(() => {
-    const data = modelConfigQuery.data as any
+  const [prevModelConfig, setPrevModelConfig] = useState(modelConfigQuery.data)
+  if (modelConfigQuery.data !== prevModelConfig) {
+    setPrevModelConfig(modelConfigQuery.data)
+    const data = modelConfigQuery.data
     if (data) {
-      if (data.strategy) setStrategy(data.strategy as ProviderRoutingStrategy)
+      if (data.strategy) setStrategy(data.strategy)
       if (typeof data.stickyLimit === 'number') setStickyLimit(data.stickyLimit)
-      if (data.thinkingMode) setThinkingMode(data.thinkingMode as ProviderThinkingMode)
+      if (data.thinkingMode) setThinkingMode(data.thinkingMode)
       if (data.customHeaders && typeof data.customHeaders === 'object') {
         const entries = Object.entries(data.customHeaders).map(([k, v]) => ({ key: k, value: String(v) }))
         setHeadersList(entries)
       }
     }
-  }, [modelConfigQuery.data])
+  }
 
   if (query.isPending) return <AccountLoadState />
   if (query.isError) return <AccountLoadState error retry={() => void query.refetch()} />

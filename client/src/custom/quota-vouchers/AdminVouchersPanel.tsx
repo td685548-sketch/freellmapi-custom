@@ -6,7 +6,7 @@ import { CopyButton } from '@/components/copy-button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from '@/lib/toast';
-import { askConfirm } from '@/custom/x-gateway/shell/confirm';
+import { askConfirm } from '@/custom/x-gateway/shell/confirm-store';
 import {
   createAdminQuotaVoucher,
   fetchAdminQuotaVouchers,

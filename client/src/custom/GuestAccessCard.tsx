@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Globe, TriangleAlert } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
@@ -36,7 +36,12 @@ export function GuestAccessCard({ canEdit }: { canEdit: boolean }) {
   const queryClient = useQueryClient()
   const { data } = useQuery<State>({ queryKey: ['guest-access-admin'], queryFn: () => apiFetch('/api/admin/guest-access') })
   const [draft, setDraft] = useState<Draft | null>(null)
-  useEffect(() => { setDraft(null) }, [data])
+  // A fresh server snapshot discards the in-progress draft.
+  const [prevGuestData, setPrevGuestData] = useState(data)
+  if (data !== prevGuestData) {
+    setPrevGuestData(data)
+    setDraft(null)
+  }
   const save = useMutation({
     mutationFn: (body: { permissions: GuestPermission[]; trial?: Partial<GuestTrialSettings> }) => apiFetch<State>('/api/admin/guest-access', { method: 'PUT', body: JSON.stringify(body) }),
     onSuccess: (s) => { queryClient.setQueryData(['guest-access-admin'], s); void queryClient.invalidateQueries({ queryKey: ['guest-access'] }); toast.success(tc('Guest access saved')) },

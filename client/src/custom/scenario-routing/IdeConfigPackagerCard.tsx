@@ -51,6 +51,19 @@ function downloadConfigTextFile(file: IdeGeneratedFile): void {
   setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }
 
+const POLL_WINDOW_MS = 60_000
+
+// `Date.now()` reads during render are flagged by the hooks purity rule, so
+// the time reads live in these module helpers; the values they return are
+// still read fresh on every render / event.
+function isPollingActive(until: number): boolean {
+  return until > Date.now()
+}
+
+function nextPollingDeadline(): number {
+  return Date.now() + POLL_WINDOW_MS
+}
+
 export function IdeConfigPackagerCard({
   initialRawKey,
   compact = false,
@@ -76,11 +89,12 @@ export function IdeConfigPackagerCard({
   const [rawKeyInput, setRawKeyInput] = useState<string>(initialRawKey ?? '');
   const [pollingUntil, setPollingUntil] = useState<number>(0);
 
-  useEffect(() => {
-    if (initialRawKey) {
-      setRawKeyInput(initialRawKey);
-    }
-  }, [initialRawKey]);
+  // A new pasted key from the parent replaces the input (render adjustment).
+  const [prevInitialRawKey, setPrevInitialRawKey] = useState(initialRawKey)
+  if (initialRawKey !== prevInitialRawKey) {
+    setPrevInitialRawKey(initialRawKey)
+    if (initialRawKey) setRawKeyInput(initialRawKey)
+  }
 
   const { data: keysData } = useQuery<{ keys: UserApiKey[] }>({
     queryKey: ['user-api-keys'],
@@ -151,7 +165,7 @@ export function IdeConfigPackagerCard({
     enabled: isSignedIn,
   });
 
-  const isPolling = pollingUntil > Date.now();
+  const isPolling = isPollingActive(pollingUntil);
 
   const { data: statusData, refetch: refetchStatus } = useQuery({
     queryKey: ['scenario-ide-status', resolvedKeyId ?? 'any'],
@@ -160,17 +174,16 @@ export function IdeConfigPackagerCard({
     refetchInterval: isPolling ? 3_000 : false,
   });
 
+  // Once the connection is confirmed, polling stops (render adjustment).
+  if (isPolling && statusData?.status?.connected) setPollingUntil(0);
+
   useEffect(() => {
     if (!isPolling) return;
-    if (statusData?.status?.connected) {
-      setPollingUntil(0);
-      return;
-    }
     const timer = setTimeout(() => {
       if (Date.now() >= pollingUntil) setPollingUntil(0);
     }, Math.max(500, pollingUntil - Date.now()));
     return () => clearTimeout(timer);
-  }, [isPolling, pollingUntil, statusData?.status?.connected]);
+  }, [isPolling, pollingUntil]);
 
   const verifyMutation = useMutation({
     mutationFn: () =>
@@ -182,7 +195,7 @@ export function IdeConfigPackagerCard({
     onSuccess: (res) => {
       void queryClient.invalidateQueries({ queryKey: ['scenario-ide-status'] });
       if (!res.status.connected) {
-        setPollingUntil(Date.now() + 60_000);
+        setPollingUntil(nextPollingDeadline());
       }
       void refetchStatus();
     },

@@ -71,6 +71,21 @@ import {
 } from '@/lib/playground-conversations'
 import { useI18n } from '@/i18n'
 
+// One SSE `data:` chunk from a streamed /v1/chat/completions response:
+// either a fusion panel/judge event, an error, or a content delta.
+interface StreamChunk {
+  _fusion?: {
+    event: string
+    platform: string
+    model: string
+    status?: 'ok' | 'failed'
+    content?: string
+    error?: string
+  }
+  error?: { message: string }
+  choices?: Array<{ delta?: { content?: string } }>
+}
+
 interface FallbackEntry {
   modelDbId: number
   priority: number
@@ -689,7 +704,7 @@ export default function PlaygroundPage() {
         if (!tl.startsWith('data:')) continue
         const d = tl.slice(5).trim()
         if (d === '[DONE]') continue
-        let obj: any
+        let obj: StreamChunk
         try { obj = JSON.parse(d) } catch { continue }
         if (obj._fusion) {
           if (obj._fusion.event === 'panel') {
@@ -878,7 +893,7 @@ export default function PlaygroundPage() {
 
       const isFusion = selectedModel === 'fusion'
       const sysPrompt = systemPrompt.trim()
-      const body: any = {
+      const body: Record<string, unknown> = {
         messages: [
           ...(sysPrompt ? [{ role: 'system', content: sysPrompt }] : []),
           ...(searchContext ? [{ role: 'system', content: searchContext }] : []),
@@ -968,15 +983,15 @@ export default function PlaygroundPage() {
       }]
       setMessages(answered)
       await persistConversation(answered)
-    } catch (err: any) {
+    } catch (err) {
       // Clearing the chat (or leaving the page) aborts the stream on purpose —
       // that is not a failure to report, and the transcript it belonged to is
       // already gone.
-      if (err?.name === 'AbortError') return
+      if (err instanceof Error && err.name === 'AbortError') return
       const failed: ChatMessage[] = [...newMessages, {
         role: 'assistant',
         isError: true,
-        content: err.message,
+        content: err instanceof Error ? err.message : String(err),
       }]
       setMessages(failed)
       await persistConversation(failed)

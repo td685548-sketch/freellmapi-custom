@@ -40,7 +40,7 @@ export function ExternalAuthCallback({
     return () => {
       active = false
     }
-  }, [onComplete, initialRevision])
+  }, [onComplete, initialRevision, endpoint])
   if (result?.apiKey)
     return (
       <RegistrationKeyNotice

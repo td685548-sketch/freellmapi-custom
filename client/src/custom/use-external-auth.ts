@@ -41,9 +41,8 @@ export function useExternalAuthLanding(revision: number) {
     window.addEventListener('hashchange', changed)
     return () => window.removeEventListener('hashchange', changed)
   }, [])
-  useEffect(() => {
-    if (stored && stored.revision !== revision) setStored(null)
-  }, [stored, revision])
+  // A landing captured under an older session revision is stale; drop it.
+  if (stored && stored.revision !== revision) setStored(null)
   useEffect(() => {
     if (!landing) return
     const url = new URL(window.location.href)

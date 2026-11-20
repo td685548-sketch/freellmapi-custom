@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app, dialog, ipcMain, clipboard, nativeTheme, net, screen, shell, type Tray } from 'electron';
-import { startServer, ensureSessionToken, getUnifiedApiKey, isAutoUpdateCheckEnabled, backupBeforeUpdate, outboundProxyUrl, setCatalogFallbackFetch } from './server.mjs';
+import { startServer, ensureSessionToken, regenerateUnifiedKey, isAutoUpdateCheckEnabled, backupBeforeUpdate, outboundProxyUrl, setCatalogFallbackFetch } from './server.mjs';
 import { loadConfig, saveConfig } from './config.js';
 import { installFileLogger } from './logger.js';
 import { buildTray, refreshTrayLocale } from './tray.js';
@@ -190,9 +190,14 @@ if (!app.requestSingleInstanceLock()) {
     assertTrustedDesktopSender(event);
     clipboard.writeText(`http://127.0.0.1:${resolvedPort}/v1`);
   });
-  ipcMain.handle('freeapi:copy-api-key', (event) => {
+  // The unified key is hash-only since #155: the current plaintext cannot be
+  // recovered, so "copy the key" mints a fresh one and copies that instead
+  // (same pattern as the dashboard Keys page Regenerate). The old key stops
+  // working the moment this runs — the popover button is labelled
+  // "Regenerate Key" so the click is explicit about that.
+  ipcMain.handle('freeapi:regenerate-api-key', (event) => {
     assertTrustedDesktopSender(event);
-    clipboard.writeText(getUnifiedApiKey());
+    clipboard.writeText(regenerateUnifiedKey());
   });
   ipcMain.handle('freeapi:get-login-item', (event) => {
     assertTrustedDesktopSender(event);

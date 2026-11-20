@@ -40,6 +40,39 @@ describe('validateToolArguments', () => {
     const verdict = validateToolArguments('get_weather', '{}', WEATHER_SCHEMA);
     if (!verdict.ok) expect(verdict.reason.startsWith('get_weather:')).toBe(true);
   });
+
+  it('names the violated rule but never echoes the value the model sent', () => {
+    const verdict = validateToolArguments('get_weather', '{"city":"Berlin","days":"three"}', WEATHER_SCHEMA);
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) {
+      expect(verdict.reason).toContain('[type]');
+      // The reason reaches the client inside the failover trail, so the
+      // model's arguments must not leak through it — see
+      // tool-validate-surfaces.test.ts.
+      expect(verdict.reason).not.toContain('three');
+      expect(verdict.reason).not.toContain('(got');
+    }
+  });
+
+  it('names the missing property for a required violation', () => {
+    const verdict = validateToolArguments('get_weather', '{"days":3}', WEATHER_SCHEMA);
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) {
+      expect(verdict.reason).toContain('[required]');
+      expect(verdict.reason).toContain('city');
+    }
+  });
+
+  it('never echoes a long offending value', () => {
+    const long = 'x'.repeat(200);
+    const verdict = validateToolArguments('get_weather', JSON.stringify({ city: 'Berlin', days: long }), WEATHER_SCHEMA);
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) {
+      expect(verdict.reason).not.toContain(long);
+      expect(verdict.reason).not.toContain('xxx');
+      expect(verdict.reason.length).toBeLessThan(400);
+    }
+  });
 });
 
 // Every branch where we cannot form an opinion must pass, because the cost of a

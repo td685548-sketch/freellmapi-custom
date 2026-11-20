@@ -13,7 +13,7 @@ const day = (ms: number) => new Date(ms).toISOString().slice(0, 10)
 type ExportKind = 'accounts' | 'profiles' | 'end-users'
 
 // The export is a file, not JSON, so it goes through fetch directly with the dashboard's bearer token.
-export async function downloadUsageCsv(kind: ExportKind, from: string, to: string): Promise<boolean> {
+async function downloadUsageCsv(kind: ExportKind, from: string, to: string): Promise<boolean> {
   const token = getToken()
   const base = import.meta.env.BASE_URL.replace(/\/$/, '')
   const res = await fetch(`${base}/api/usage/export/${kind}.csv?from=${from}&to=${to}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })

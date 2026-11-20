@@ -5,11 +5,11 @@ import { useEffect, useState, type ReactNode } from 'react'
 // duration of the exit animation).
 export function FloatingBar({ show, children }: { show: boolean; children: ReactNode }) {
   const [render, setRender] = useState(show)
+  // Show immediately when `show` turns true (render adjustment); the exit
+  // animation still runs through the effect's timeout below.
+  if (show && !render) setRender(true)
   useEffect(() => {
-    if (show) {
-      setRender(true)
-      return
-    }
+    if (show) return
     const t = setTimeout(() => setRender(false), 300) // match animation duration
     return () => clearTimeout(t)
   }, [show])

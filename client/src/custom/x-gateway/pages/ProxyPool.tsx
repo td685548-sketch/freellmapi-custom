@@ -27,7 +27,7 @@ import {
   type XProxyPoolTestResult,
 } from '../proxy-pool-api'
 import { usePoolStrings } from '../proxy-pool-strings'
-import { askConfirm } from '../shell/confirm'
+import { askConfirm } from '../shell/confirm-store'
 
 interface Draft {
   id?: number

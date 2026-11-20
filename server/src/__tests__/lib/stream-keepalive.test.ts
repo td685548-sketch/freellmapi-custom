@@ -67,4 +67,24 @@ describe('startStreamKeepalive (#1642)', () => {
     vi.advanceTimersByTime(5000);
     expect(keepalive).toHaveBeenCalledTimes(1);
   });
+
+  it('skips ticks while the hop has produced no token, pings once it is alive', () => {
+    // A hop that dies before its first token must never commit the response:
+    // ticks wait instead of pinging, so invisible failover stays possible.
+    let alive = false;
+    const keepalive = vi.fn();
+    startStreamKeepalive(1000, () => false, keepalive, () => alive);
+    vi.advanceTimersByTime(3500);
+    expect(keepalive).not.toHaveBeenCalled();
+    alive = true; // first token (text or reasoning) arrived
+    vi.advanceTimersByTime(2000);
+    expect(keepalive).toHaveBeenCalledTimes(2);
+  });
+
+  it('omitting isAlive keeps the pre-gate behaviour (ping from the first tick)', () => {
+    const keepalive = vi.fn();
+    startStreamKeepalive(1000, () => false, keepalive);
+    vi.advanceTimersByTime(2500);
+    expect(keepalive).toHaveBeenCalledTimes(2);
+  });
 });

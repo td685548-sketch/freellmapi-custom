@@ -1317,6 +1317,9 @@ export async function handleResponses(req: Request, res: Response): Promise<void
 
         // #1642: optional heartbeat for the silent reasoning window. A bare
         // SSE comment resets client idle watchdogs without committing content.
+        // Gated on the first token (ttfbMs): a hop that has produced nothing
+        // yet may be dead, and pinging it would commit the response and lose
+        // invisible failover — so ticks wait until the hop proves itself alive.
         let streamSettled = false;
         const keepaliveStop = startStreamKeepalive(streamKeepaliveMs(),
           () => streamSettled,
@@ -1326,7 +1329,8 @@ export async function handleResponses(req: Request, res: Response): Promise<void
             // invisibly; stop the retry budget from cancelling it.
             ctx.disarmHedge();
             res.write(': keepalive\n\n');
-          });
+          },
+          () => ttfbMs !== null);
 
         // Open the text output item and stream `text` as its first delta.
         // The text item takes the next free output index (it is NOT always 0 —

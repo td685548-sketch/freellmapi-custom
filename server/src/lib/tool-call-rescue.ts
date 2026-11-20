@@ -25,6 +25,12 @@
  *  4. Bare or ```json-fenced single JSON object: {"name": KNOWN, "arguments": {...}}
  *     (only rescued when "name" matches a requested tool — bare JSON is a
  *     legitimate answer shape, so this one is strictly schema-gated)
+ *  5. Anthropic XML: <function_calls><invoke name="NAME"><parameter
+ *     name="x">v</parameter>...</invoke></function_calls>, or a bare
+ *     <invoke name="NAME">{...json args...}</invoke>. Models trained on the
+ *     Claude tool-use shape emit this even on OpenAI-shaped endpoints.
+ *     Parameter text is the literal value: JSON-parsed when it parses
+ *     (number / object / array / bool), otherwise kept as a string.
  */
 
 export interface RescuedToolCall {
@@ -49,6 +55,8 @@ const DIALECT_MARKERS = [
   '<|tool_call_begin|>',
   '<tool_call>',
   '<function=',
+  '<function_calls>',
+  '<invoke',
 ] as const;
 
 /** Does the (trimmed) text start with a known dialect marker? */
@@ -206,6 +214,64 @@ function parseXmlDialect(text: string, toolNames: Set<string>): { calls: Rescued
   return { calls: parsedAll && calls.length > 0 ? calls : null, cleanText: clean.trim() };
 }
 
+/** Dialect 5: Anthropic XML <function_calls><invoke name="NAME">…</invoke>. */
+function decodeXmlEntities(s: string): string {
+  const entities: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+  return s.replace(/&(amp|lt|gt|quot|apos);/g, (_, e: string) => entities[e] ?? `&${e};`);
+}
+
+/** One <parameter> value: JSON when it parses, otherwise the literal string. */
+function parameterValue(raw: string): unknown {
+  const text = decodeXmlEntities(raw).trim();
+  if (text === '') return '';
+  try { return JSON.parse(text); } catch { return text; }
+}
+
+function parseInvokeDialect(text: string, toolNames: Set<string>): { calls: RescuedToolCall[] | null; cleanText: string } {
+  const calls: RescuedToolCall[] = [];
+  let parsedAll = true;
+  const spans: Array<{ from: number; to: number }> = [];
+
+  const invokeRe = /<invoke\s+name=(?:"([^"]+)"|'([^']+)')\s*>([\s\S]*?)<\/invoke>/g;
+  let m: RegExpExecArray | null;
+  while ((m = invokeRe.exec(text)) !== null) {
+    const name = m[1] ?? m[2] ?? '';
+    const body = (m[3] ?? '').trim();
+    let args: string | null = null;
+    if (body.startsWith('{')) {
+      try {
+        const parsed: unknown = JSON.parse(body);
+        if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) args = JSON.stringify(parsed);
+      } catch { /* unparseable below */ }
+    } else if (body.includes('<parameter')) {
+      const obj: Record<string, unknown> = {};
+      const paramRe = /<parameter\s+name=(?:"([^"]+)"|'([^']+)')\s*>([\s\S]*?)<\/parameter>/g;
+      let p: RegExpExecArray | null;
+      let found = false;
+      while ((p = paramRe.exec(body)) !== null) {
+        found = true;
+        obj[p[1] ?? p[2] ?? ''] = parameterValue(p[3] ?? '');
+      }
+      if (found) args = JSON.stringify(obj);
+    } else if (body === '') {
+      args = '{}'; // invoke with no parameters: a no-arg call, not a broken one
+    }
+    if (args !== null && isKnownTool(name, toolNames)) calls.push({ name, arguments: args });
+    else parsedAll = false;
+    spans.push({ from: m.index, to: m.index + m[0].length });
+  }
+  if (spans.length === 0) parsedAll = false; // marker present but no well-formed <invoke>
+  // An opening tag with no close (truncated stream) is detected-but-broken.
+  if (/<invoke(?![\s\S]*?<\/invoke>)/.test(text) || (text.includes('<function_calls>') && !text.includes('</function_calls>'))) {
+    parsedAll = false;
+  }
+
+  let clean = text;
+  for (const s of [...spans].reverse()) clean = clean.slice(0, s.from) + clean.slice(s.to);
+  clean = clean.replace(/<\/?function_calls>/g, '').replace(/<invoke[\s\S]*$/, '').trim();
+  return { calls: parsedAll && calls.length > 0 ? calls : null, cleanText: clean };
+}
+
 /**
  * Rescue inline tool-call dialects out of an assistant text answer.
  *
@@ -227,6 +293,10 @@ export function rescueInlineToolCalls(text: string, toolNames: Set<string>): Res
   }
   if (text.includes('<tool_call>')) {
     const { calls, cleanText } = parseXmlDialect(text, toolNames);
+    return { detected: true, calls, cleanText };
+  }
+  if (text.includes('<function_calls>') || text.includes('<invoke')) {
+    const { calls, cleanText } = parseInvokeDialect(text, toolNames);
     return { detected: true, calls, cleanText };
   }
 
