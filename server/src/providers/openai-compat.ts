@@ -133,6 +133,21 @@ export interface QuotaProbeSpec {
   notes?: string;
 }
 
+/**
+ * Pinned-model identity check for OpenAI-compatible gateways that silently
+ * serve a different model than the one requested. `true` requires an exact
+ * echo of the requested id; a predicate accepts gateway-specific spellings
+ * (a stripped `:free` suffix, a dropped upstream prefix). A mismatch is a
+ * 502 provider error so the fallback loop rotates instead of serving the
+ * wrong model. Off by default: most upstreams normalize ids (OpenRouter
+ * `:free` routes, Reka's literal "default"), so only gateways with a
+ * recorded substitution problem opt in. Replaces the per-adapter
+ * checkModel overrides (Airforce, Lucidity, DreamPrompting, Waterfall,
+ * Logfare); the other adapters with the same shape keep their own
+ * overrides for now.
+ */
+export type PinModelCheck = (requested: string, returned: string) => boolean;
+
 export class OpenAICompatProvider extends BaseProvider {
   readonly platform: Platform;
   readonly name: string;
@@ -152,6 +167,8 @@ export class OpenAICompatProvider extends BaseProvider {
   private readonly forwardsPartial: boolean;
   /** Optional provider-reported quota endpoint (#1403). */
   private readonly quotaProbe?: QuotaProbeSpec;
+  /** Pinned-model identity check; see PinModelCheck. */
+  private readonly pinModel?: boolean | PinModelCheck;
 
   constructor(opts: {
     platform: Platform;
@@ -163,6 +180,7 @@ export class OpenAICompatProvider extends BaseProvider {
     keyless?: boolean;
     forceSingleToolCall?: boolean;
     quotaProbe?: QuotaProbeSpec;
+    pinModel?: boolean | PinModelCheck;
   }) {
     super();
     this.platform = opts.platform;
@@ -176,6 +194,7 @@ export class OpenAICompatProvider extends BaseProvider {
     this.forceSingleToolCall = opts.forceSingleToolCall ?? false;
     this.forwardsPartial = opts.platform === 'custom' && isMoonshotEndpoint(opts.baseUrl);
     this.quotaProbe = opts.quotaProbe;
+    this.pinModel = opts.pinModel;
   }
 
   /** Resolve the parallel_tool_calls flag to send upstream. For providers that
@@ -185,6 +204,32 @@ export class OpenAICompatProvider extends BaseProvider {
   private resolveParallelToolCalls(options?: CompletionOptions): boolean | undefined {
     if (this.forceSingleToolCall && options?.tools && options.tools.length > 0) return false;
     return options?.parallel_tool_calls;
+  }
+
+  /** Enforce the pinModel option on one reported model identity. A missing
+   * or substituted identity is a 502 so the fallback loop rotates instead
+   * of serving the wrong model. */
+  private checkPinnedModel(requested: string, returned: string | undefined): void {
+    if (!this.pinModel) return;
+    const accepted = typeof this.pinModel === 'function'
+      ? this.pinModel(requested, returned ?? '')
+      : typeof returned === 'string' && returned.length > 0 && returned === requested;
+    if (!accepted) {
+      throw Object.assign(new Error(`${this.name} returned a different or missing model identity`), { status: 502 });
+    }
+  }
+
+  /** Enforce the pinModel option on every chunk of a stream before it is
+   * yielded — a substitution must fail the attempt before any content is
+   * committed, the same way the per-adapter overrides checked each chunk. */
+  private async *guardPinnedModel(
+    src: AsyncGenerator<ChatCompletionChunk>,
+    modelId: string,
+  ): AsyncGenerator<ChatCompletionChunk> {
+    for await (const chunk of src) {
+      this.checkPinnedModel(modelId, chunk.model);
+      yield chunk;
+    }
   }
 
   /** Headers the endpoint requires beyond auth. OpenCode's gateway rejects chat
@@ -417,6 +462,10 @@ export class OpenAICompatProvider extends BaseProvider {
           usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
         };
         out._routed_via = { platform: this.platform, model: modelId };
+        // The rescued turn is synthesized with the requested id, so the pin
+        // check passes by construction; run it anyway so a future predicate
+        // is enforced on every return path.
+        this.checkPinnedModel(modelId, out.model);
         return out;
       }
       const retry = this.pinnedToolChoiceRetryFor(res.status, options);
@@ -490,6 +539,7 @@ export class OpenAICompatProvider extends BaseProvider {
     if (creditsNotice) {
       throw new Error(`${this.name} API error 402: insufficient credit (upstream returned 200 with an out-of-credits notice): ${creditsNotice}`);
     }
+    this.checkPinnedModel(modelId, data.model);
     data._routed_via = { platform: this.platform, model: modelId };
     return data;
   }
@@ -543,6 +593,7 @@ export class OpenAICompatProvider extends BaseProvider {
       if (rescued) {
         console.log(`[${this.name}] Rescued ${rescued.length} inline tool call(s) from a ${res.status} tool_use_failed (stream, #264)`);
         const base = { id: `chatcmpl-rescued-${Date.now()}`, object: 'chat.completion.chunk' as const, created: Math.floor(Date.now() / 1000), model: modelId };
+        this.checkPinnedModel(modelId, modelId);
         yield { ...base, choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }] };
         yield { ...base, choices: [{ index: 0, delta: { tool_calls: rescued.map((c, i) => ({ index: i, ...c })) as unknown as ChatToolCall[] }, finish_reason: null }] };
         yield { ...base, choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] };
@@ -559,8 +610,11 @@ export class OpenAICompatProvider extends BaseProvider {
     // First-byte grace (#584): the same chat timeout that bounded the headers
     // also budgets the first stream read — NIM-style providers send SSE
     // headers instantly, then prefill long prompts for minutes.
-    yield* this.guardInBandCreditsError(
-      this.readSseStream(res, { firstByteTimeoutMs: options?.timeoutMs ?? this.timeoutMs }),
+    yield* this.guardPinnedModel(
+      this.guardInBandCreditsError(
+        this.readSseStream(res, { firstByteTimeoutMs: options?.timeoutMs ?? this.timeoutMs }),
+      ),
+      modelId,
     );
   }
 
