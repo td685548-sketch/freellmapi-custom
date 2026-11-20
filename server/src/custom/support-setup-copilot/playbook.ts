@@ -1243,7 +1243,7 @@ export function looksLikeQuestionnaire(reply: string): boolean {
   return items.length > 0 && questions / items.length >= 0.5;
 }
 
-function resolveSystemSettingsTurnResponse(params: {
+export function resolveSystemSettingsTurnResponse(params: {
   evalResult: EvaluateSystemSettingsProposalResult;
   userId: number;
   locale: 'vi' | 'en';

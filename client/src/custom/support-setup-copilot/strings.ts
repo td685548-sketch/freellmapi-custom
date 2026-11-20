@@ -12,6 +12,17 @@ export interface SupportSetupCopilotStrings {
   memberPanelSubtitle: string;
   tenantLabel: string;
   newTenantOption: string;
+  systemTargetOption: string;
+  systemTargetHint: string;
+  systemWelcomeBadge: string;
+  systemWelcomeTitle: string;
+  systemWelcomeDescription: string;
+  systemStarterSettings: string;
+  systemStarterSettingsDesc: string;
+  systemStarterSettingsPrompt: string;
+  systemStarterOverview: string;
+  systemStarterOverviewDesc: string;
+  systemStarterOverviewPrompt: string;
   expandPanel: string;
   compactPanel: string;
   clearChat: string;
@@ -170,6 +181,18 @@ const en: SupportSetupCopilotStrings = {
   memberPanelSubtitle: 'Self-diagnostics, Personal API Keys & IDE setup — always consent-gated',
   tenantLabel: 'Target',
   newTenantOption: '+ Create new AI Support tenant',
+  systemTargetOption: 'System-wide (full admin)',
+  systemTargetHint: 'System-wide scope — no tenant is modified. Changes are proposals you approve.',
+  systemWelcomeBadge: 'System admin',
+  systemWelcomeTitle: 'Manage the whole platform from here',
+  systemWelcomeDescription:
+    'Ask me to review or change system settings, or to grant and revoke permissions. Every change is a proposal — nothing is applied until you approve it.',
+  systemStarterSettings: 'Review system settings',
+  systemStarterSettingsDesc: 'See which platform settings I can switch for you',
+  systemStarterSettingsPrompt: 'What system settings can you help toggle?',
+  systemStarterOverview: 'What can I do here?',
+  systemStarterOverviewDesc: 'A plain-English overview of the System target',
+  systemStarterOverviewPrompt: 'Give me an overview of what you can do on the system-wide target',
   expandPanel: 'Expand panel',
   compactPanel: 'Compact panel',
   clearChat: 'Reset conversation',
@@ -347,6 +370,18 @@ const vi: SupportSetupCopilotStrings = {
   memberPanelSubtitle: 'Tự động bắt bệnh API, tạo Personal Key & cấu hình IDE — luôn chờ bạn xác nhận',
   tenantLabel: 'Mục tiêu',
   newTenantOption: '+ Tạo Tenant AI Support mới',
+  systemTargetOption: 'Toàn hệ thống (admin toàn quyền)',
+  systemTargetHint: 'Phạm vi toàn hệ thống — không chỉnh tenant nào. Mọi thay đổi chỉ là đề xuất chờ bạn duyệt.',
+  systemWelcomeBadge: 'Quản trị hệ thống',
+  systemWelcomeTitle: 'Quản lý toàn nền tảng ngay tại đây',
+  systemWelcomeDescription:
+    'Nhờ mình xem hoặc đổi cài đặt hệ thống, cấp và thu hồi quyền. Mọi thay đổi đều là đề xuất — chỉ áp dụng khi bạn duyệt.',
+  systemStarterSettings: 'Xem các cài đặt hệ thống',
+  systemStarterSettingsDesc: 'Biết mình có thể bật/tắt giúp bạn những cài đặt nào',
+  systemStarterSettingsPrompt: 'Bạn có thể hỗ trợ bật/tắt những cài đặt hệ thống nào?',
+  systemStarterOverview: 'Ở đây làm được gì?',
+  systemStarterOverviewDesc: 'Tổng quan dễ hiểu về mục tiêu Toàn hệ thống',
+  systemStarterOverviewPrompt: 'Cho mình tổng quan những gì bạn làm được ở mục tiêu toàn hệ thống',
   expandPanel: 'Mở rộng khung',
   compactPanel: 'Thu gọn khung',
   clearChat: 'Làm mới hội thoại',
