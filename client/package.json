@@ -6,9 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "typecheck": "tsc -b",
     "lint": "eslint .",
     "lint:support-ai": "eslint --max-warnings=0 \"src/custom/ai-platform\" \"src/custom/x-gateway/**/Support*\" \"src/custom/x-gateway/**/support-*\" \"src/custom/Context*.tsx\" \"src/custom/CacheSettingsSection.tsx\" \"src/custom/support-setup-copilot\"",
     "test": "vitest run && npm run check:i18n",
+    "test:coverage": "vitest run --coverage",
     "check:i18n": "node scripts/check-i18n.mjs",
     "preview": "vite preview"
   },
@@ -44,6 +46,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
+    "@vitest/coverage-v8": "^5.0.5",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",

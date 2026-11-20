@@ -58,3 +58,6 @@ scripts/backup.mjs
 *.dll
 *.ipa
 *.idsig
+
+# Vitest coverage output (uploaded as a CI artifact, not committed).
+coverage/

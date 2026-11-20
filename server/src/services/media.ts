@@ -1411,6 +1411,23 @@ export interface TranscriptionParams {
   responseFormat: string;
 }
 
+// Node types a Buffer as Buffer<ArrayBufferLike>, but the DOM lib (which the
+// desktop tsconfig includes for its preload script) types BlobPart/BodyInit
+// against ArrayBuffer only — so a Buffer is not assignable to `new Blob()`
+// or a fetch `body` there, even though both accept it at runtime. Re-view
+// the same bytes as a Buffer<ArrayBuffer> (no copy: Buffer.from over an
+// ArrayBufferLike with offset/length is a view) at the DOM boundary.
+function asArrayBuffer(buf: Buffer): Buffer<ArrayBuffer> {
+  const ab = buf.buffer;
+  if (ab instanceof ArrayBuffer) {
+    return Buffer.from(ab, buf.byteOffset, buf.byteLength);
+  }
+  // SharedArrayBuffer-backed (rare): copy the slice into a plain ArrayBuffer.
+  // The `unknown` step is needed because Buffer<SharedArrayBuffer> is not
+  // directly comparable to Buffer<ArrayBuffer>; the copy really is one.
+  return Buffer.from(ab.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)) as unknown as Buffer<ArrayBuffer>;
+}
+
 export interface TranscriptionResult {
   platform: string;
   modelId: string;
@@ -1498,7 +1515,7 @@ async function callTranscriptionProvider(
         if (p.temperature !== undefined) form.append('temperature', String(p.temperature));
       }
       if (m.platform === 'cohere' || p.language) form.append('language', p.language || 'en');
-      form.append('file', new Blob([p.file], { type: p.mimeType || 'application/octet-stream' }), p.filename);
+      form.append('file', new Blob([asArrayBuffer(p.file)], { type: p.mimeType || 'application/octet-stream' }), p.filename);
       const r = await mediaFetch(url, m.platform, 'transcription', {
         method: 'POST', redirect: 'error', headers: m.platform === 'ovh' ? {} : bearerAuthHeader(key), body: form,
       });
@@ -1512,7 +1529,7 @@ async function callTranscriptionProvider(
       // Voxtral accepts multipart file/model, language and temperature, not
       // Whisper's prompt or response_format. Normalize JSON/text locally.
       const form = new FormData();
-      form.append('file', new Blob([p.file], { type: p.mimeType || 'application/octet-stream' }), p.filename);
+      form.append('file', new Blob([asArrayBuffer(p.file)], { type: p.mimeType || 'application/octet-stream' }), p.filename);
       form.append('model', m.modelId);
       if (p.language) form.append('language', p.language);
       if (p.temperature !== undefined) form.append('temperature', String(p.temperature));
@@ -1529,7 +1546,7 @@ async function callTranscriptionProvider(
       // Do not forward Whisper-only options or claim native subtitle support.
       // The route derives text/JSON response formats from this normalized result.
       const form = new FormData();
-      form.append('file', new Blob([p.file], { type: p.mimeType || 'application/octet-stream' }), p.filename);
+      form.append('file', new Blob([asArrayBuffer(p.file)], { type: p.mimeType || 'application/octet-stream' }), p.filename);
       form.append('model', m.modelId);
       const r = await mediaFetch(`${TYPHOON_BASE_URL}/audio/transcriptions`, 'typhoon', 'transcription', {
         method: 'POST',
@@ -1546,7 +1563,7 @@ async function callTranscriptionProvider(
       // only the base URL and the optional key differ.
       if (!credential.baseUrl) throw new MediaError('custom transcription provider is missing base_url', 500);
       const form = new FormData();
-      form.append('file', new Blob([p.file], { type: p.mimeType || 'application/octet-stream' }), p.filename);
+      form.append('file', new Blob([asArrayBuffer(p.file)], { type: p.mimeType || 'application/octet-stream' }), p.filename);
       form.append('model', m.modelId);
       if (p.language) form.append('language', p.language);
       if (p.prompt) form.append('prompt', p.prompt);
@@ -1569,7 +1586,7 @@ async function callTranscriptionProvider(
       // Groq's OpenAI-compatible audio endpoint takes multipart form data.
       // Never set Content-Type by hand — FormData supplies the boundary.
       const form = new FormData();
-      form.append('file', new Blob([p.file], { type: p.mimeType || 'application/octet-stream' }), p.filename);
+      form.append('file', new Blob([asArrayBuffer(p.file)], { type: p.mimeType || 'application/octet-stream' }), p.filename);
       form.append('model', m.modelId);
       if (p.language) form.append('language', p.language);
       if (p.prompt) form.append('prompt', p.prompt);
@@ -1602,7 +1619,7 @@ async function callTranscriptionProvider(
         : {
             method: 'POST',
             headers: { 'Content-Type': 'application/octet-stream', Authorization: `Bearer ${token}` },
-            body: p.file,
+            body: asArrayBuffer(p.file),
           };
       // Billed per audio minute; ~1 MB a minute is a generous guess for the
       // compressed formats clients send (an uncompressed WAV overestimates).
