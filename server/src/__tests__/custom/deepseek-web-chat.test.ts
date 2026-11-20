@@ -21,6 +21,7 @@ import { normalizeCookieInput } from '../../custom/provider-accounts/cookie-form
 import {
   DeepSeekWebChatError,
   clearDeepSeekWebTokenCache,
+  describeEmptyCompletion,
   extractDeepSeekUserToken,
   parseDeepSeekCredential,
   streamDeepSeekWebChat,
@@ -683,5 +684,81 @@ describe('WebCookieProvider.chatCompletion (deepseek-web)', () => {
     expect((caught as DeepSeekWebChatError).status).toBe(401);
     expect(usersCurrentCalls).toBe(1);
     expect(completionCalls).toBe(2);
+  });
+});
+
+describe('empty DeepSeek completions explain themselves (system instruction turns)', () => {
+  beforeEach(() => {
+    mockProxyFetch.mockReset();
+    clearDeepSeekWebTokenCache();
+  });
+
+  function mockCompletion(events: string[]) {
+    mockProxyFetch.mockImplementation(async (url: unknown) => {
+      const target = String(url);
+      if (target.endsWith('/api/v0/users/current')) {
+        return jsonResponse(200, { code: 0, data: { biz_data: { token: 'access_1' } } });
+      }
+      if (target.endsWith('/api/v0/chat_session/create')) {
+        return jsonResponse(200, { code: 0, data: { biz_data: { chat_session: { id: 'sess_sys' } } } });
+      }
+      if (target.endsWith('/api/v0/chat/create_pow_challenge')) {
+        return jsonResponse(200, {
+          code: 0,
+          data: {
+            biz_data: {
+              challenge: {
+                algorithm: 'DeepSeekHashV1',
+                challenge: 'a'.repeat(64),
+                salt: 's',
+                signature: 'sig',
+                difficulty: 1,
+                expire_at: 1700000000,
+              },
+            },
+          },
+        });
+      }
+      if (target.endsWith('/api/v0/chat/completion')) return sseResponse(events);
+      if (target.endsWith('/api/v0/chat_session/delete')) return jsonResponse(200, { code: 0 });
+      throw new Error(`Unexpected fetch URL: ${target}`);
+    });
+  }
+
+  const consumeWithSystem = async () => {
+    for await (const _delta of streamDeepSeekWebChat({
+      credential: 'tok_sys',
+      messages: [
+        { role: 'system', content: 'Always answer as a pirate.' },
+        { role: 'user', content: 'Hi' },
+      ],
+      modelId: 'deepseek-v4-pro',
+    })) {
+      // no-op
+    }
+  };
+
+  it('reports a content filter instead of blaming an expired userToken', async () => {
+    mockCompletion(['data: {"p":"response/status","o":"SET","v":"CONTENT_FILTER"}']);
+    await expect(consumeWithSystem()).rejects.toSatisfy(
+      (err: unknown) =>
+        err instanceof DeepSeekWebChatError &&
+        err.status === 502 &&
+        /filtered this prompt/.test(err.message) &&
+        !/expired/.test(err.message),
+    );
+  });
+
+  it('includes a DeepSeek hint when the stream carried one', async () => {
+    mockCompletion(['data: {"type":"hint","content":"The server is busy, please try again later."}']);
+    await expect(consumeWithSystem()).rejects.toSatisfy(
+      (err: unknown) => err instanceof DeepSeekWebChatError && /server is busy/.test(err.message),
+    );
+  });
+
+  it('still falls back to the userToken advice when DeepSeek reported nothing', () => {
+    expect(describeEmptyCompletion('', '')).toMatch(/userToken is valid and not expired/);
+    expect(describeEmptyCompletion('FINISHED', '')).toMatch(/userToken is valid and not expired/);
+    expect(describeEmptyCompletion('INCOMPLETE', '')).toMatch(/status INCOMPLETE/);
   });
 });
