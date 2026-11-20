@@ -61,6 +61,7 @@ const en = {
   confirmCancel: 'Cancel',
   promptTitle: 'Enter a value',
   promptOk: 'Save',
+  about: 'About',
 }
 
 const vi: typeof en = {
@@ -124,6 +125,7 @@ const vi: typeof en = {
   confirmCancel: 'Hủy',
   promptTitle: 'Nhập giá trị',
   promptOk: 'Lưu',
+  about: 'Giới thiệu',
 }
 
 export function useShellStrings() {

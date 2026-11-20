@@ -1,7 +1,9 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Settings as SettingsIcon } from 'lucide-react'
+import { Info, Settings as SettingsIcon } from 'lucide-react'
 import { useI18n } from '@/i18n'
+import { useCustomT } from '@/custom/i18n/use-custom-t'
 import { useUserSession } from '../../use-session'
 import { useSessionRevision } from '../../session-state'
 import { settingsApi, type SsoAuthMode, type XRoutingDefaults } from '../settings-api'
@@ -204,6 +206,22 @@ function SsoSection() {
   </section>
 }
 
+function AboutSection() {
+  const tc = useCustomT()
+  return (
+    <section className="x-panel x-endpoint-panel" aria-labelledby="x-set-about">
+      <h2 id="x-set-about">{tc('About FreeLLMAPI')}</h2>
+      <p className="x-caption">{tc('View deployment links, source repository, and version details.')}</p>
+      <div>
+        <Link to="/thruline/about" className="x-button">
+          <Info size={16} />
+          <span>{tc('Open About page')}</span>
+        </Link>
+      </div>
+    </section>
+  )
+}
+
 export default function Settings() {
   const s = useSettingsStrings()
   return <>
@@ -213,5 +231,6 @@ export default function Settings() {
     <LanguageSection />
     <AccountSection />
     <SsoSection />
+    <AboutSection />
   </>
 }

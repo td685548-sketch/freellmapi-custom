@@ -31,6 +31,8 @@ import { ContextPolicyDefaultSection } from '@/custom/ContextPolicyDefaultSectio
 import { StarterQuotaDefaultSection } from '@/custom/StarterQuotaDefaultSection'
 import { TelegramBotSettingsCard } from '@/custom/TelegramBotSettingsCard'
 import { useUserSession } from '@/custom/use-session'
+import { useCustomT } from '@/custom/i18n/use-custom-t'
+import { AboutContent } from '@/custom/about/AboutContent'
 import { useDesktopLoginItem } from '@/lib/desktop-login-item'
 
 // Small info affordance used next to labels a first-time user can't be expected
@@ -285,14 +287,14 @@ const ENGINES = [
   { id: 'hard-budget', tKey: 'engineHardBudget', lossless: false },
 ] as const
 
-type SectionId = 'general' | 'compression' | 'advanced' | 'preview'
+type SectionId = 'general' | 'compression' | 'advanced' | 'preview' | 'about'
 
 const SECTIONS = [
   { id: 'general', tKey: 'sectionGeneral', icon: SlidersHorizontal },
   { id: 'compression', tKey: 'sectionCompression', icon: Gauge },
   { id: 'advanced', tKey: 'sectionAdvanced', icon: Wrench },
   { id: 'preview', tKey: 'sectionPreview', icon: FlaskConical },
-] as const satisfies ReadonlyArray<{ id: SectionId; tKey: string; icon: typeof Gauge }>
+] as const satisfies ReadonlyArray<{ id: Exclude<SectionId, 'about'>; tKey: string; icon: typeof Gauge }>
 
 type CompressionState = ReturnType<typeof useCompressionSettings>
 
@@ -608,11 +610,12 @@ export function SettingsDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const { t } = useI18n()
+  const tc = useCustomT()
   const { hasPermission } = useUserSession()
   const [section, setSection] = useState<SectionId>('general')
   const state = useCompressionSettings(open && hasPermission('view_settings'))
   const { config, busy, error, save } = state
-  const compressionSection = section !== 'general'
+  const compressionSection = section !== 'general' && section !== 'about'
   const loading = compressionSection && !config && busy === 'load'
 
   return (
@@ -655,11 +658,25 @@ export function SettingsDialog({
                 </button>
               )
             })}
+            <button
+              type="button"
+              aria-current={section === 'about' ? 'true' : undefined}
+              onClick={() => setSection('about')}
+              className={`inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-start text-xs transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 sm:text-sm ${
+                section === 'about'
+                  ? 'bg-muted font-medium text-foreground'
+                  : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+              }`}
+            >
+              <Info className="size-4 shrink-0" />
+              <span className="truncate">{tc('About')}</span>
+            </button>
           </nav>
 
           {/* min-height keeps the popup from resizing as sections are switched. */}
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:min-h-[27rem] sm:px-6 sm:py-6">
             {section === 'general' && <GeneralSection />}
+            {section === 'about' && <AboutContent compact />}
             {loading && (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
