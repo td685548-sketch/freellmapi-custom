@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { extractCookieCredential } from './custom/x-gateway/ConnectAccountDialog'
 
 // The Playground only scrolls inside its transcript pane if every ancestor
 // between <body> and that pane carries a definite height. One unconditional
@@ -52,5 +53,15 @@ describe('app shell heights', () => {
     // every call site.
     expect(app).toContain('refetchIntervalInBackground: false')
     expect(app).toContain('refetchOnWindowFocus: false')
+  })
+})
+
+describe('extractCookieCredential', () => {
+  it('unwraps DeepSeek Local Storage userToken JSON instead of flattening into cookie pairs', () => {
+    expect(extractCookieCredential('{"value":"tok_123","__version":"0"}', 'deepseek-web')).toBe('tok_123')
+  })
+
+  it('normalizes Cookie Editor JSON arrays containing ds_session_id', () => {
+    expect(extractCookieCredential('[{"name":"ds_session_id","value":"sess_1"}]', 'deepseek-web')).toBe('ds_session_id=sess_1')
   })
 })

@@ -35,6 +35,11 @@ const FAKE_HEADERS: Record<string, string> = {
 
 const tokenCache = new Map<string, { accessToken: string; expiresAt: number }>();
 
+/** Clears the in-memory DeepSeek `userToken -> accessToken` exchange cache (for tests). */
+export function clearDeepSeekWebTokenCache(): void {
+  tokenCache.clear();
+}
+
 export class DeepSeekWebChatError extends Error {
   status?: number;
 
@@ -60,6 +65,7 @@ interface DeepSeekAuthContext {
   cacheKey: string;
   cookieHeader?: string;
   accessToken?: string;
+  fromCache?: boolean;
 }
 
 function unwrapUserTokenCandidate(parsed: unknown): string | null {
@@ -68,14 +74,15 @@ function unwrapUserTokenCandidate(parsed: unknown): string | null {
     if (!trimmed) return null;
     try {
       return unwrapUserTokenCandidate(JSON.parse(trimmed)) ?? trimmed;
-    } catch {
+    } catch (err) {
+      if (err instanceof DeepSeekWebChatError) throw err;
       return trimmed;
     }
   }
   if (!parsed || typeof parsed !== 'object') return null;
   const obj = parsed as Record<string, unknown>;
   if (typeof obj.value === 'string' && obj.value.trim()) {
-    return obj.value.trim();
+    return unwrapUserTokenCandidate(obj.value) ?? obj.value.trim();
   }
   if (obj.value && typeof obj.value === 'object' && typeof (obj.value as Record<string, unknown>).id === 'string') {
     throw new DeepSeekWebChatError(
@@ -99,8 +106,35 @@ function unwrapUserTokenCandidate(parsed: unknown): string | null {
   return null;
 }
 
+function extractCookieArrayCredential(cookies: unknown[]): DeepSeekCredential | null {
+  let deferredError: DeepSeekWebChatError | null = null;
+  const tokenCookie = cookies.find(
+    (c: any) => Boolean(c) && typeof c === 'object' && c.name === 'userToken' && typeof c.value === 'string',
+  ) as { name: string; value: string } | undefined;
+  if (tokenCookie) {
+    try {
+      const tok = unwrapUserTokenCandidate(tokenCookie.value) ?? tokenCookie.value.trim();
+      if (tok) return { mode: 'token', userToken: tok };
+    } catch (err) {
+      if (err instanceof DeepSeekWebChatError) {
+        deferredError = err;
+      } else {
+        throw err;
+      }
+    }
+  }
+  const pairs = cookies
+    .filter((c: any) => Boolean(c) && typeof c === 'object' && typeof c.name === 'string' && c.name && typeof c.value === 'string')
+    .map((c: any) => `${c.name}=${c.value}`);
+  if (pairs.some(p => p.startsWith('ds_session_id='))) {
+    return { mode: 'cookie', cookieHeader: pairs.join('; ') };
+  }
+  if (deferredError) throw deferredError;
+  return null;
+}
+
 export function parseDeepSeekCredential(credential: string): DeepSeekCredential {
-  let raw = credential.trim();
+  let raw = credential.trim().replace(/^(?:cookie|authorization):\s*/i, '').trim();
   if (/^bearer\s+/i.test(raw)) {
     raw = raw.replace(/^bearer\s+/i, '').trim();
   }
@@ -111,24 +145,39 @@ export function parseDeepSeekCredential(credential: string): DeepSeekCredential 
   try {
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      const tokenCookie = parsed.find((c: any) => c?.name === 'userToken' && typeof c?.value === 'string');
-      if (tokenCookie) {
-        const tok = unwrapUserTokenCandidate(tokenCookie.value) ?? tokenCookie.value.trim();
-        if (tok) return { mode: 'token', userToken: tok };
-      }
-      const pairs = parsed
-        .filter((c: any) => typeof c?.name === 'string' && c.name && typeof c?.value === 'string')
-        .map((c: any) => `${c.name}=${c.value}`);
-      if (pairs.some(p => p.startsWith('ds_session_id='))) {
-        return { mode: 'cookie', cookieHeader: pairs.join('; ') };
-      }
+      const fromArray = extractCookieArrayCredential(parsed);
+      if (fromArray) return fromArray;
       throw new DeepSeekWebChatError(
         'Cookie Editor JSON does not contain `ds_session_id` or `userToken`.',
         401,
       );
     }
-    const extracted = unwrapUserTokenCandidate(parsed);
-    if (extracted) return { mode: 'token', userToken: extracted };
+    let deferredError: DeepSeekWebChatError | null = null;
+    try {
+      const extracted = unwrapUserTokenCandidate(parsed);
+      if (extracted) return { mode: 'token', userToken: extracted };
+    } catch (err) {
+      if (err instanceof DeepSeekWebChatError) {
+        deferredError = err;
+      } else {
+        throw err;
+      }
+    }
+    if (parsed && typeof parsed === 'object') {
+      const obj = parsed as Record<string, unknown>;
+      if (Array.isArray(obj.cookies)) {
+        const fromCookies = extractCookieArrayCredential(obj.cookies);
+        if (fromCookies) return fromCookies;
+      }
+      if (typeof obj.ds_session_id === 'string' && obj.ds_session_id.trim()) {
+        const cookieHeader = Object.entries(obj)
+          .filter(([k, v]) => Boolean(k) && typeof v === 'string')
+          .map(([k, v]) => `${k}=${v}`)
+          .join('; ');
+        return { mode: 'cookie', cookieHeader };
+      }
+    }
+    if (deferredError) throw deferredError;
   } catch (err) {
     if (err instanceof DeepSeekWebChatError) throw err;
   }
@@ -137,7 +186,15 @@ export function parseDeepSeekCredential(credential: string): DeepSeekCredential 
     return { mode: 'cookie', cookieHeader: raw };
   }
   const cookieMatch = raw.match(/(?:^|;\s*)userToken=([^;]+)/);
-  if (cookieMatch?.[1]) return { mode: 'token', userToken: cookieMatch[1].trim() };
+  if (cookieMatch?.[1]) {
+    const tok = unwrapUserTokenCandidate(cookieMatch[1]) ?? cookieMatch[1].trim();
+    if (tok) return { mode: 'token', userToken: tok };
+  }
+  const valueMatch = raw.match(/(?:^|;\s*)value=([^;]+)/);
+  if (valueMatch?.[1]) {
+    const tok = unwrapUserTokenCandidate(valueMatch[1]) ?? valueMatch[1].trim();
+    if (tok) return { mode: 'token', userToken: tok };
+  }
   return { mode: 'token', userToken: raw };
 }
 
@@ -307,6 +364,7 @@ async function acquireAuth(
   cred: DeepSeekCredential,
   platform: Platform,
   signal?: AbortSignal,
+  options?: { skipCache?: boolean },
 ): Promise<DeepSeekAuthContext> {
   if (cred.mode === 'cookie') {
     const resp = await dsFetch(
@@ -349,9 +407,11 @@ async function acquireAuth(
   }
 
   const userToken = cred.userToken;
-  const cached = tokenCache.get(userToken);
-  if (cached && cached.expiresAt > Math.floor(Date.now() / 1000)) {
-    return { cacheKey: userToken, accessToken: cached.accessToken };
+  if (!options?.skipCache) {
+    const cached = tokenCache.get(userToken);
+    if (cached && cached.expiresAt > Math.floor(Date.now() / 1000)) {
+      return { cacheKey: userToken, accessToken: cached.accessToken, fromCache: true };
+    }
   }
 
   const resp = await dsFetch(
@@ -369,6 +429,7 @@ async function acquireAuth(
   );
 
   if (resp.status === 401 || resp.status === 403) {
+    tokenCache.delete(userToken);
     throw new DeepSeekWebChatError(
       'DeepSeek token invalid or expired — get a fresh userToken from DeepSeek localStorage.',
       resp.status,
@@ -408,6 +469,28 @@ async function acquireAuth(
   return { cacheKey: userToken, accessToken };
 }
 
+export interface DeepSeekWebProbeOptions {
+  credential: string;
+  baseUrl?: string;
+  platform?: Platform;
+  signal?: AbortSignal;
+  onCredentialUpdate?: (credential: string) => void;
+}
+
+/**
+ * Validates a DeepSeek Web credential by forcing a live `/api/v0/users/current`
+ * exchange and persists unwrapped token form when a wrapped/mangled value succeeds.
+ */
+export async function probeDeepSeekWebSession(opts: DeepSeekWebProbeOptions): Promise<void> {
+  const cred = parseDeepSeekCredential(opts.credential);
+  const origin = resolveOrigin(opts.baseUrl);
+  const platform = opts.platform ?? 'custom';
+  await acquireAuth(origin, cred, platform, opts.signal, { skipCache: true });
+  if (cred.mode === 'token' && opts.credential.trim() !== cred.userToken) {
+    opts.onCredentialUpdate?.(cred.userToken);
+  }
+}
+
 async function createSession(
   origin: string,
   auth: DeepSeekAuthContext,
@@ -430,10 +513,20 @@ async function createSession(
   );
 
   if (!resp.ok) {
+    if (resp.status === 401 || resp.status === 403) {
+      tokenCache.delete(auth.cacheKey);
+    }
     throw new DeepSeekWebChatError(`DeepSeek chat_session/create HTTP ${resp.status}`, resp.status);
   }
   const json = (await resp.json()) as Record<string, any>;
   if (json?.code && json.code !== 0) {
+    if (Number(json.code) === 40003) {
+      tokenCache.delete(auth.cacheKey);
+      throw new DeepSeekWebChatError(
+        'DeepSeek userToken is invalid or expired — copy a fresh `userToken` from https://chat.deepseek.com Local Storage (or Cookie Editor JSON with `ds_session_id`).',
+        401,
+      );
+    }
     throw new DeepSeekWebChatError(
       `DeepSeek chat_session/create error ${json.code}: ${json.msg || json?.data?.biz_msg || ''}`,
       400,
@@ -494,9 +587,25 @@ async function requestPowChallenge(
     signal,
   );
   if (!resp.ok) {
+    if (resp.status === 401 || resp.status === 403) {
+      tokenCache.delete(auth.cacheKey);
+    }
     throw new DeepSeekWebChatError(`DeepSeek create_pow_challenge HTTP ${resp.status}`, resp.status);
   }
   const json = (await resp.json()) as Record<string, any>;
+  if (json?.code && json.code !== 0) {
+    if (Number(json.code) === 40003) {
+      tokenCache.delete(auth.cacheKey);
+      throw new DeepSeekWebChatError(
+        'DeepSeek userToken is invalid or expired — copy a fresh `userToken` from https://chat.deepseek.com Local Storage (or Cookie Editor JSON with `ds_session_id`).',
+        401,
+      );
+    }
+    throw new DeepSeekWebChatError(
+      `DeepSeek create_pow_challenge error ${json.code}: ${json.msg || json?.data?.biz_msg || ''}`,
+      400,
+    );
+  }
   const challenge = json?.data?.biz_data?.challenge ?? json?.biz_data?.challenge;
   if (!challenge || typeof challenge !== 'object') {
     throw new DeepSeekWebChatError('DeepSeek create_pow_challenge returned invalid challenge');
@@ -642,8 +751,22 @@ export async function* streamDeepSeekWebChat(
   const deadlineAt = Date.now() + timeoutMs;
 
   const images = extractDeepSeekImages(opts.messages);
-  const auth = await acquireAuth(origin, cred, platform, signal);
-  const sessionId = await createSession(origin, auth, platform, signal);
+  let auth = await acquireAuth(origin, cred, platform, signal);
+  if (cred.mode === 'token' && opts.credential.trim() !== cred.userToken) {
+    opts.options?.onCredentialUpdate?.(cred.userToken);
+  }
+  let sessionId: string;
+  try {
+    sessionId = await createSession(origin, auth, platform, signal);
+  } catch (err) {
+    const status = deepSeekWebChatErrorStatus(err);
+    if (auth.fromCache && (status === 401 || status === 403)) {
+      auth = await acquireAuth(origin, cred, platform, signal, { skipCache: true });
+      sessionId = await createSession(origin, auth, platform, signal);
+    } else {
+      throw err;
+    }
+  }
 
   try {
     const refFileIds = images.length > 0

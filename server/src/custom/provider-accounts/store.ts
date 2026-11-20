@@ -645,7 +645,14 @@ export function getUsableXGatewayKeys(): Array<AccountRow & { requests: number; 
   }
   for (const [providerId, list] of byProvider.entries()) {
     const cfg = getProviderModelConfig(providerId);
-    byProvider.set(providerId, sortAccountsByPriority(list, cfg.accountPriorities));
+    const prioritized = sortAccountsByPriority(list, cfg.accountPriorities);
+    byProvider.set(
+      providerId,
+      [
+        ...prioritized.filter(a => a.status !== 'error'),
+        ...prioritized.filter(a => a.status === 'error'),
+      ],
+    );
   }
   const providerQueues = new Map<string, Array<AccountRow & { requests: number; tokens: number }>>();
   for (const [providerId, list] of byProvider.entries()) {
