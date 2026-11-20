@@ -1,10 +1,12 @@
-import { describe, it, expect, afterEach } from 'vitest';
-import { loadConfig } from '../../lib/config.js';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { loadConfig, parsePort, resetConfigParseWarningsForTests } from '../../lib/config.js';
 
-const ENV_KEYS = ['PORT', 'HOST', 'FREEAPI_DB_PATH', 'DASHBOARD_ORIGINS', 'CLIENT_DIST', 'PROXY_RATE_LIMIT_RPM', 'NODE_ENV', 'TRUST_PROXY'];
+const ENV_KEYS = ['PORT', 'HOST', 'FREEAPI_DB_PATH', 'DASHBOARD_ORIGINS', 'CLIENT_DIST', 'PROXY_RATE_LIMIT_RPM', 'REQUEST_BODY_LIMIT_MB', 'NODE_ENV', 'TRUST_PROXY'];
 
 afterEach(() => {
   ENV_KEYS.forEach(k => delete process.env[k]);
+  resetConfigParseWarningsForTests();
+  vi.restoreAllMocks();
 });
 
 describe('loadConfig', () => {
@@ -31,7 +33,7 @@ describe('loadConfig', () => {
     process.env.PORT = '8080';
     process.env.HOST = '0.0.0.0';
     const cfg = loadConfig();
-    expect(cfg.port).toBe('8080');
+    expect(cfg.port).toBe(8080);
     expect(cfg.host).toBe('0.0.0.0');
   });
 
@@ -100,5 +102,87 @@ describe('loadConfig', () => {
   it('parses TRUST_PROXY as a comma-separated proxy list', () => {
     process.env.TRUST_PROXY = '100.64.0.0/10, 192.168.1.10 , ';
     expect(loadConfig().trustProxy).toEqual(['100.64.0.0/10', '192.168.1.10']);
+  });
+
+  it('falls back to the default request body limit for invalid REQUEST_BODY_LIMIT_MB', () => {
+    process.env.REQUEST_BODY_LIMIT_MB = 'not-a-number';
+    expect(loadConfig().requestBodyLimitBytes).toBe(25 * 1024 * 1024);
+    process.env.REQUEST_BODY_LIMIT_MB = '0';
+    expect(loadConfig().requestBodyLimitBytes).toBe(25 * 1024 * 1024);
+  });
+
+  it('parses REQUEST_BODY_LIMIT_MB as megabytes', () => {
+    process.env.REQUEST_BODY_LIMIT_MB = '10';
+    expect(loadConfig().requestBodyLimitBytes).toBe(10 * 1024 * 1024);
+  });
+});
+
+describe('parsePort', () => {
+  it('returns the default when unset or blank', () => {
+    expect(parsePort(undefined)).toBe(3001);
+    expect(parsePort('')).toBe(3001);
+    expect(parsePort('   ')).toBe(3001);
+  });
+
+  it('accepts valid ports, trimming surrounding whitespace', () => {
+    expect(parsePort('1')).toBe(1);
+    expect(parsePort('8080')).toBe(8080);
+    expect(parsePort('65535')).toBe(65535);
+    expect(parsePort(' 3001 ')).toBe(3001);
+  });
+
+  it.each(['abc', '0', '-1', '65536', '99999', '3001.5', '3001abc', 'NaN', '+3001', '0x3001'])(
+    'throws a clear error for invalid PORT=%s',
+    (raw) => {
+      expect(() => parsePort(raw)).toThrow(/Invalid PORT.*1 and 65535/);
+    },
+  );
+
+  it('fails fast from loadConfig on an invalid PORT', () => {
+    process.env.PORT = 'abc';
+    expect(() => loadConfig()).toThrow(/Invalid PORT="abc"/);
+    process.env.PORT = '99999';
+    expect(() => loadConfig()).toThrow(/Invalid PORT="99999"/);
+  });
+
+  it('treats a blank PORT as unset instead of binding a random port', () => {
+    process.env.PORT = '';
+    expect(loadConfig().port).toBe(3001);
+  });
+});
+
+describe('invalid numeric env fallbacks warn once per variable', () => {
+  it('warns once for PROXY_RATE_LIMIT_RPM across repeated loads', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    process.env.PROXY_RATE_LIMIT_RPM = 'not-a-number';
+    expect(loadConfig().proxyRateLimitRpm).toBe(120);
+    expect(loadConfig().proxyRateLimitRpm).toBe(120);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain('PROXY_RATE_LIMIT_RPM');
+  });
+
+  it('warns once for REQUEST_BODY_LIMIT_MB across repeated loads', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    process.env.REQUEST_BODY_LIMIT_MB = '-5';
+    expect(loadConfig().requestBodyLimitBytes).toBe(25 * 1024 * 1024);
+    expect(loadConfig().requestBodyLimitBytes).toBe(25 * 1024 * 1024);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain('REQUEST_BODY_LIMIT_MB');
+  });
+
+  it('warns separately for each invalid variable', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    process.env.PROXY_RATE_LIMIT_RPM = 'abc';
+    process.env.REQUEST_BODY_LIMIT_MB = 'abc';
+    loadConfig();
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not warn for valid values', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    process.env.PROXY_RATE_LIMIT_RPM = '60';
+    process.env.REQUEST_BODY_LIMIT_MB = '10';
+    loadConfig();
+    expect(warn).not.toHaveBeenCalled();
   });
 });
