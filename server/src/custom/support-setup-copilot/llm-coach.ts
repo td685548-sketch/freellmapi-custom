@@ -58,6 +58,11 @@ export interface LlmCoachSystemActionSuggestion {
   payload?: Record<string, unknown>;
 }
 
+export interface LlmCoachToolCall {
+  id: string;
+  input: Record<string, unknown>;
+}
+
 export interface LlmCoachOutput {
   intent?: SupportSetupChatIntent;
   reply: string;
@@ -66,6 +71,15 @@ export interface LlmCoachOutput {
   extractedRequirements?: Partial<SupportSetupRequirements>;
   targetSteps?: SupportSetupStepId[];
   systemActions?: LlmCoachSystemActionSuggestion[];
+  /** Tool calls the model wants the agent loop to execute (Phase 2). Never applied directly — gated + proposal-only. */
+  toolCalls?: LlmCoachToolCall[];
+}
+
+/** Filtered tool schemas offered to the LLM (Phase 2: only step-admitted tools). */
+export interface LlmCoachToolSchema {
+  id: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
 }
 
 export interface LlmCoachTurnInput {
@@ -81,6 +95,8 @@ export interface LlmCoachTurnInput {
   gatewayLoopback?: GatewayLoopbackContext;
   /** DB-grounded caller identity (Phase 0). When present, its trusted block is injected into the system prompt. */
   agentContext?: CopilotAgentContext;
+  /** Filtered tool schemas for the agent loop (Phase 2). Only admitted tools are listed; absent = no tools offered. */
+  toolSchemas?: ReadonlyArray<LlmCoachToolSchema>;
   /** Optional fetch override for unit/integration tests. */
   fetchImpl?: typeof fetch;
   /** Optional per-request timeout in ms (defaults to 15_000). */
@@ -306,6 +322,27 @@ function sanitizeTargetSteps(raw: unknown): SupportSetupStepId[] | undefined {
   return out.length > 0 ? out : undefined;
 }
 
+function sanitizeToolCalls(raw: unknown): LlmCoachToolCall[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: LlmCoachToolCall[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const rec = item as Record<string, unknown>;
+    if (typeof rec.id !== 'string' || !rec.id.trim()) continue;
+    const id = rec.id.trim().slice(0, 120);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const input =
+      rec.input && typeof rec.input === 'object' && !Array.isArray(rec.input)
+        ? (rec.input as Record<string, unknown>)
+        : {};
+    out.push({ id, input });
+    if (out.length >= 10) break;
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 function sanitizeSystemActions(raw: unknown): LlmCoachSystemActionSuggestion[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const out: LlmCoachSystemActionSuggestion[] = [];
@@ -359,6 +396,7 @@ function tryParseJsonCandidate(candidate: string): LlmCoachOutput | null {
       const extractedRequirements = sanitizeExtractedRequirements(parsed.extractedRequirements);
       const targetSteps = sanitizeTargetSteps(parsed.targetSteps);
       const systemActions = sanitizeSystemActions(parsed.systemActions);
+      const toolCalls = sanitizeToolCalls(parsed.toolCalls);
 
       return {
         ...(intent ? { intent } : {}),
@@ -368,6 +406,7 @@ function tryParseJsonCandidate(candidate: string): LlmCoachOutput | null {
         ...(extractedRequirements ? { extractedRequirements } : {}),
         ...(targetSteps ? { targetSteps } : {}),
         ...(systemActions ? { systemActions } : {}),
+        ...(toolCalls ? { toolCalls } : {}),
       };
     } catch {
       // Try next candidate
@@ -516,6 +555,8 @@ export function buildHumanCoachSystemPrompt(params: {
   canEditSteps?: ReadonlySet<SupportSetupStepId>;
   /** DB-grounded caller identity (Phase 0). Falls back to an account-only block when absent. */
   agentContext?: CopilotAgentContext;
+  /** Filtered tool schemas for the agent loop (Phase 2). Only admitted tools are listed; absent = no tools offered. */
+  toolSchemas?: ReadonlyArray<LlmCoachToolSchema>;
 }): string {
   const {
     user,
@@ -528,6 +569,7 @@ export function buildHumanCoachSystemPrompt(params: {
     canCreateTenant = true,
     canEditSteps,
     agentContext,
+    toolSchemas,
   } = params;
 
   const editableList = canEditSteps
@@ -581,6 +623,26 @@ export function buildHumanCoachSystemPrompt(params: {
   const platformSection = buildPlatformPromptSection(currentPath, locale);
   const systemSettingsSection = buildSystemSettingsPromptSection(user, locale);
 
+  // Phase 2: only the step-admitted tools are offered to the model. When no
+  // schemas are passed the section is omitted entirely (pre-Phase-2 callers
+  // and existing prompt tests are unaffected).
+  const toolSection =
+    toolSchemas === undefined
+      ? ''
+      : toolSchemas.length === 0
+        ? [
+            'AVAILABLE COPILOT TOOLS: none — this caller has no tool admitted in the current scope.',
+            'Do not emit any toolCalls. Answer with a terminal intent (guide / gather_requirements / propose_setup) only.',
+          ].join('\n')
+        : [
+            'AVAILABLE COPILOT TOOLS (permission-filtered — these are the ONLY tools you may call):',
+            ...toolSchemas.map(
+              (t) =>
+                `- ${t.id}: ${t.description} Input JSON schema: ${JSON.stringify(t.inputSchema)}`,
+            ),
+            'TOOL-CALL RULES: to use a tool, return a `toolCalls` array alongside your JSON reply, e.g. {"toolCalls": [{"id": "<tool id>", "input": {...}}]}. Only use the ids listed above — any other id is rejected immediately and counts against your budget. Tool calls NEVER apply anything: they only stage a proposal for the user to review on the Consent Card, and nothing changes until the user clicks Approve. If no tool is needed, omit `toolCalls` and answer with a terminal intent.',
+          ].join('\n');
+
   // Permission-aware identity (Phase 0): server-provided, trusted. The model
   // must only repeat this identity and never invent permissions.
   const identityBlock = agentContext
@@ -599,6 +661,8 @@ export function buildHumanCoachSystemPrompt(params: {
     identityBlock,
     '',
     systemSettingsSection,
+    '',
+    toolSection,
     '',
     platformSection,
     '',
@@ -816,7 +880,7 @@ export async function runHumanLikeLlmCoach(
   params: LlmCoachTurnInput,
 ): Promise<LlmCoachTurnResult | null> {
   await ensureVerifiedCloudRuntimePack('support_copilot');
-  const systemPrompt = buildHumanCoachSystemPrompt(params);
+  const systemPrompt = buildHumanCoachSystemPrompt({ ...params, toolSchemas: params.toolSchemas });
   const baseTurnMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
     { role: 'system', content: systemPrompt },
     ...params.messages.slice(-14).map((m) => ({
