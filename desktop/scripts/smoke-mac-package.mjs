@@ -49,8 +49,11 @@ try {
   const dashboard = await fetch(baseUrl, { signal: AbortSignal.timeout(10_000) });
   assert.equal(dashboard.status, 200);
   assert.match(await dashboard.text(), /<html/i);
+  // The unified key is hash-only server-side since #155, so there is no
+  // getUnifiedApiKey() export anymore: regenerate a fresh key (shown once)
+  // and use it as the Bearer token for this smoke test.
   const models = await fetch(`${baseUrl}/v1/models`, {
-    headers: { Authorization: `Bearer ${backend.getUnifiedApiKey()}` },
+    headers: { Authorization: `Bearer ${backend.regenerateUnifiedKey()}` },
     signal: AbortSignal.timeout(10_000),
   });
   assert.equal(models.status, 200);
