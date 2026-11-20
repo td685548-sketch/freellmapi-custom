@@ -1221,6 +1221,19 @@ export function buildSanitizedSetupProposal(params: {
 
 const STIFF_NUMBERED_FORM_RE = /(?:^|\n)\s*1[.)]\s+.+\n\s*2[.)]\s+/m;
 
+/**
+ * A numbered list is a *questionnaire* (the robotic "1. brand? 2. site?" form)
+ * only when most items are questions. Step-by-step instructions ("1. Open …
+ * 2. Click …") are exactly what a "how do I …" answer needs and must not be
+ * discarded in favour of a canned reply.
+ */
+export function looksLikeQuestionnaire(reply: string): boolean {
+  if (!STIFF_NUMBERED_FORM_RE.test(reply)) return false;
+  const items = reply.split('\n').filter((l) => /^\s*\d+[.)]\s+/.test(l));
+  const questions = items.filter((l) => /\?\s*(?:\*\*|_|\))?\s*$/.test(l.trim())).length;
+  return items.length > 0 && questions / items.length >= 0.5;
+}
+
 function resolveSystemSettingsTurnResponse(params: {
   evalResult: EvaluateSystemSettingsProposalResult;
   userId: number;
@@ -1626,7 +1639,7 @@ export async function runSupportSetupCopilotTurn(params: {
     const useReadOnlyLlm = Boolean(
       readOnlyLlm?.output.reply &&
         (readOnlyLlm.output.intent === 'guide' || !readOnlyLlm.output.intent) &&
-        !STIFF_NUMBERED_FORM_RE.test(readOnlyLlm.output.reply),
+        !looksLikeQuestionnaire(readOnlyLlm.output.reply),
     );
     return {
       ok: true,
@@ -1880,7 +1893,7 @@ export async function runSupportSetupCopilotTurn(params: {
         ? llm?.output.intent === 'guide' || !llm?.output.intent
         : llm?.output.intent !== 'propose_setup';
     const useLlmGuideReply = Boolean(
-      llm?.output.reply && llmMatchesGuideIntent && !llmReplyHasStiffNumberedForm,
+      llm?.output.reply && llmMatchesGuideIntent && !looksLikeQuestionnaire(llm.output.reply),
     );
     return {
       ok: true,

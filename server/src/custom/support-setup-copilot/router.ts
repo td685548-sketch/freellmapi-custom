@@ -43,6 +43,7 @@ import {
   matchPlatformKnowledgeQuestion,
   normalizePlatformPath,
 } from './platform-guide.js';
+import { tryGroundedGuideReply } from './grounded-guide.js';
 import { detectConversationLocale, runSupportSetupCopilotTurn } from './playbook.js';
 import {
   buildTenantDoctorChatResponse,
@@ -560,12 +561,21 @@ supportSetupCopilotRouter.post('/chat', async (req: Request, res: Response, next
 
     // 1. Self-Service AI Error Doctor (available to every signed-in user, strictly scoped to user.userId)
     if (matchErrorDoctorIntent(latestUserMessage)) {
-      res.json(
-        buildErrorDoctorChatResponse({
-          user,
-          locale: effectiveLocale,
-        }),
-      );
+      const personal = buildErrorDoctorChatResponse({
+        user,
+        locale: effectiveLocale,
+      });
+      // This report is about the caller's own API usage. When a tenant is the
+      // selected Target, say so and point at the tenant diagnosis, so the two
+      // are never confused (a tenant never uses a Personal API key).
+      if (scopedEntry) {
+        const hint =
+          effectiveLocale === 'vi'
+            ? `\n\n_Đây là lỗi API của **tài khoản bạn**. Muốn biết vì sao tenant **${scopedEntry.tenant.name}** bị lỗi, hãy hỏi "tenant này bị lỗi vì sao"._`
+            : `\n\n_This is about **your own account's** API usage. To see why tenant **${scopedEntry.tenant.name}** errors, ask "why does this tenant error"._`;
+        personal.reply = `${personal.reply}${hint}`;
+      }
+      res.json(personal);
       return;
     }
 
@@ -624,6 +634,19 @@ supportSetupCopilotRouter.post('/chat', async (req: Request, res: Response, next
     // Allow platform/member guidance on personal AI Hub/Agents/Keys screens; enforce 403 on tenant setup attempts.
     if (!scope.hasAccess) {
       if (isPersonalMemberRoute(currentPath) && targetMode !== 'create_tenant') {
+        // Grounded answer first (retrieved knowledge + read-only lookup tools);
+        // the scripted replies below remain the fallback when no model answers.
+        const grounded = await tryGroundedGuideReply({
+          user,
+          messages,
+          locale: effectiveLocale,
+          currentPath,
+          gatewayLoopback: extractGatewayLoopback(req),
+        });
+        if (grounded) {
+          res.json(grounded);
+          return;
+        }
         const platformMatch = matchPlatformKnowledgeQuestion(latestUserMessage, currentPath);
         if (platformMatch) {
           const priorAssistantMessages = messages
