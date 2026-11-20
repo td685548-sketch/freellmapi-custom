@@ -42,6 +42,7 @@ import {
 import {
   executeCopilotTool,
   filterAdmittedTools,
+  findCopilotTool,
   toolSchemasForPrompt,
   type CopilotToolResult,
 } from './tools.js';
@@ -125,6 +126,18 @@ export function filterLlmOutputByScope(
     else delete next.systemActions;
   }
   return next;
+}
+
+const MAX_TOOL_DATA_CHARS = 6000;
+
+function truncateForPrompt(value: unknown): string {
+  let text: string;
+  try {
+    text = JSON.stringify(value) ?? '';
+  } catch {
+    text = '';
+  }
+  return text.length > MAX_TOOL_DATA_CHARS ? `${text.slice(0, MAX_TOOL_DATA_CHARS - 1)}…` : text;
 }
 
 export async function runCopilotAgentLoop(
@@ -240,7 +253,7 @@ export async function runCopilotAgentLoop(
 
     const budgetLeft = MAX_TOOL_CALLS_PER_TURN - toolCallsMade;
     const callsThisStep = requestedCalls.slice(0, budgetLeft);
-    const stepResults: Array<{ toolId: string; status: string; detail?: string }> = [];
+    const stepResults: Array<{ toolId: string; status: string; detail?: string; reason?: string; data?: string }> = [];
     for (const call of callsThisStep) {
       const result = await executeCopilotTool({
         user,
@@ -252,11 +265,18 @@ export async function runCopilotAgentLoop(
       toolCallsMade += 1;
       records.push({ toolId: call.id, input: call.input, result });
       if (result.status === 'denied') deniedToolIds.push(call.id);
+      // Read-only tools (knowledge base, live settings, tenant diagnosis) hand
+      // their data back to the model so it can answer from facts.
+      const readOnlyData =
+        result.status === 'executed' && findCopilotTool(call.id)?.sideEffect === 'none'
+          ? truncateForPrompt(result.result)
+          : undefined;
       stepResults.push({
         toolId: call.id,
         status: result.status,
         ...(result.reason ? { reason: result.reason } : {}),
         ...(result.detailEn ? { detail: result.detailEn } : {}),
+        ...(readOnlyData !== undefined ? { data: readOnlyData } : {}),
       });
       if (toolCallsMade >= MAX_TOOL_CALLS_PER_TURN) break;
     }
@@ -265,7 +285,7 @@ export async function runCopilotAgentLoop(
       role: 'user',
       content:
         '[TOOL RESULTS — system-provided, not a user message. ' +
-        'Use these staged-proposal results to continue; never claim anything was applied.] ' +
+        'Entries with `data` are read-only facts to answer from; other entries are staged proposals. Never claim anything was applied.] ' +
         JSON.stringify(stepResults),
     });
 

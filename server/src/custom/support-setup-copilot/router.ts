@@ -45,6 +45,11 @@ import {
 } from './platform-guide.js';
 import { detectConversationLocale, runSupportSetupCopilotTurn } from './playbook.js';
 import {
+  buildTenantDoctorChatResponse,
+  buildTenantDoctorReport,
+  matchTenantDoctorIntent,
+} from './tenant-doctor.js';
+import {
   getSetupProposalForUser,
   listPendingProposalsForUser,
   markSetupProposalDeclined,
@@ -524,6 +529,34 @@ supportSetupCopilotRouter.post('/chat', async (req: Request, res: Response, next
     const effectiveLocale: 'vi' | 'en' = hasDoctorOrActionVietnameseMarkers(latestUserMessage)
       ? 'vi'
       : detectConversationLocale(messages, locale);
+
+    // 0. Tenant Doctor: "why does THIS tenant fail?" is answered from the
+    // tenant's own evidence (turns, guardrail/output events, routes, policy),
+    // not from the caller's personal API usage. Explicit tenant wording wins;
+    // a bare "why error" only counts when a tenant Target is actually selected.
+    {
+      const tenantTargetSelected = targetMode === 'update_tenant' && scopedEntry !== null;
+      const doctorEntry = scopedEntry ?? (targetMode === 'create_tenant' ? null : scope.tenants[0] ?? null);
+      if (
+        doctorEntry &&
+        doctorEntry.canViewSteps.size > 0 &&
+        matchTenantDoctorIntent(latestUserMessage, tenantTargetSelected)
+      ) {
+        const diagnostic = buildTenantSetupDiagnostic(
+          doctorEntry.tenant,
+          doctorEntry.canEditSteps,
+          resolvePublicServerOrigin(req),
+          { canViewSteps: doctorEntry.canViewSteps, isPlatformOperator: scope.isPlatformOperator },
+        );
+        res.json(
+          buildTenantDoctorChatResponse({
+            report: buildTenantDoctorReport({ tenant: doctorEntry.tenant, diagnostic }),
+            locale: effectiveLocale,
+          }),
+        );
+        return;
+      }
+    }
 
     // 1. Self-Service AI Error Doctor (available to every signed-in user, strictly scoped to user.userId)
     if (matchErrorDoctorIntent(latestUserMessage)) {

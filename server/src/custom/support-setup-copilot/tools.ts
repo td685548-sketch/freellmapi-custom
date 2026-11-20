@@ -52,6 +52,11 @@ import {
   resolveEffectiveTenantAccess,
 } from '../tenant-portal/store.js';
 import { listSupportTenants } from '../x-gateway/support-store.js';
+import { getSupportTenant } from '../x-gateway/support-store.js';
+import { getKbCorpus, searchKb } from './kb/index.js';
+import { readSystemSettingsSnapshot } from './kb/settings-state.js';
+import { buildTenantSetupDiagnostic, mapTenantPermissionsToViewSteps, resolveCopilotUserScope } from './diagnostics.js';
+import { buildTenantDoctorReport } from './tenant-doctor.js';
 import { appendSupportAuditLog } from '../x-gateway/support-enterprise-router.js';
 import type { CopilotAgentContext } from './identity.js';
 import {
@@ -62,6 +67,7 @@ import {
 import { SURGICAL_STEP_REQUIRED_PERMISSION } from './surgical-steps.js';
 import {
   buildSystemSettingAction,
+  hasAnySystemSettingPermission,
   isSupportSystemSettingId,
   REQUIRED_PERMISSION_BY_SETTING,
 } from './system-settings.js';
@@ -75,7 +81,9 @@ export type CopilotToolKind =
   | 'tenant_step'
   | 'system_setting'
   | 'personal_action'
-  | 'permission_grant';
+  | 'permission_grant'
+  /** Read-only lookups (knowledge base, live settings, tenant diagnosis). Never mutate, never stage a proposal. */
+  | 'knowledge';
 export type CopilotToolSideEffect = 'none' | 'proposal' | 'mutation';
 
 /**
@@ -246,6 +254,39 @@ function buildRegistry(): readonly CopilotToolDefinition[] {
 
   tools.push(
     {
+      id: 'kb.search',
+      kind: 'knowledge',
+      labelEn: 'Search platform knowledge', labelVi: 'Tra cứu tri thức nền tảng',
+      description:
+        'READ-ONLY. Search the product knowledge base (pages, settings, permissions, the 7 tenant steps, troubleshooting, docs). Use it BEFORE answering any "where is / how do I / what does X do / why" question you are unsure about. Returns the best-matching entries with the page path to open.',
+      requiredPermission: null,
+      inputSchema: z.object({ query: z.string().min(2).max(300), limit: z.number().int().min(1).max(6).optional() }),
+      sideEffect: 'none',
+    },
+    {
+      id: 'settings.read',
+      kind: 'knowledge',
+      labelEn: 'Read current system settings', labelVi: 'Đọc cài đặt hệ thống hiện tại',
+      description:
+        'READ-ONLY. Return the CURRENT value of every system setting this user is permitted to manage (cache, compression, token savers, TTL, MCP, Ollama, unification, update checks, Thruline gateway). Use it to answer "is X on?" or before proposing a change.',
+      requiredPermission: null,
+      inputSchema: z.object({}),
+      sideEffect: 'none',
+    },
+    {
+      id: 'tenant.diagnose',
+      kind: 'knowledge',
+      labelEn: 'Diagnose the selected tenant', labelVi: 'Chẩn đoán tenant đang chọn',
+      description:
+        'READ-ONLY. Diagnose why the SELECTED tenant fails: recent failed turns, firewall blocks, output-control events, provider-route availability and policy, each with the specific cause and fix. Use it for "why does this tenant error / not answer" instead of guessing.',
+      requiredPermission: null,
+      inputSchema: z.object({ windowHours: z.number().int().min(1).max(168).optional() }),
+      sideEffect: 'none',
+    },
+  );
+
+  tools.push(
+    {
       id: 'action.create_personal_key',
       kind: 'personal_action',
       labelEn: 'Create Personal API Key (proposal)',
@@ -395,6 +436,11 @@ export function filterAdmittedTools(params: {
 
   return COPILOT_TOOL_REGISTRY.filter((tool) => {
     if (tool.kind === 'personal_action') return true;
+    if (tool.kind === 'knowledge') {
+      if (tool.id === 'kb.search') return true;
+      if (tool.id === 'settings.read') return hasAnySystemSettingPermission(user);
+      return tenantEntry !== undefined && tenantEntry.canViewSteps.length > 0; // tenant.diagnose
+    }
     if (tool.kind === 'tenant_step') {
       return tool.stepId !== undefined && canEditSteps.has(tool.stepId);
     }
@@ -492,6 +538,23 @@ function livePermissionDenial(params: {
     // Own-account only: the account must still exist in the DB.
     return resolveLiveSessionUser(user.userId) ? null : 'account_not_found';
   }
+  if (tool.kind === 'knowledge') {
+    const liveUser = resolveLiveSessionUser(user.userId);
+    if (!liveUser) return 'account_not_found';
+    if (tool.id === 'settings.read') {
+      return hasAnySystemSettingPermission(liveUser) ? null : 'missing_system_setting_permission';
+    }
+    if (tool.id === 'tenant.diagnose') {
+      if (tenantId == null) return 'tenant_required';
+      try {
+        const access = resolveEffectiveTenantAccess(user, tenantId);
+        return mapTenantPermissionsToViewSteps(access.permissions).size > 0 ? null : 'missing_tenant_view_permission';
+      } catch {
+        return 'missing_tenant_view_permission';
+      }
+    }
+    return null; // kb.search: any signed-in account; chunks are permission-filtered at search time
+  }
   if (tool.kind === 'permission_grant') {
     if (tool.id === 'permission.grant_global' || tool.id === 'permission.revoke_global') {
       // Global grants: exact leaf global permission, live from the DB row.
@@ -563,6 +626,7 @@ function runToolHandler(params: {
   tenantId?: number | null;
 }): unknown {
   const { tool, user, input, tenantId } = params;
+  if (tool.kind === 'knowledge') return runKnowledgeTool({ tool, user, input, tenantId });
   if (tool.kind === 'tenant_step' && tool.stepId) {
     return {
       stepId: tool.stepId,
@@ -777,8 +841,14 @@ export async function executeCopilotTool(params: {
       status: 'executed',
       requiredPermission: tool.requiredPermission,
       result,
-      detailEn: `Tool '${toolId}' staged a proposal. Nothing has been applied yet.`,
-      detailVi: `Công cụ '${toolId}' đã chuẩn bị xong đề xuất. Chưa có thay đổi nào được áp dụng.`,
+      detailEn:
+        tool.sideEffect === 'none'
+          ? `Tool '${toolId}' returned read-only data. Nothing was changed.`
+          : `Tool '${toolId}' staged a proposal. Nothing has been applied yet.`,
+      detailVi:
+        tool.sideEffect === 'none'
+          ? `Công cụ '${toolId}' trả về dữ liệu chỉ-đọc. Không có gì bị thay đổi.`
+          : `Công cụ '${toolId}' đã chuẩn bị xong đề xuất. Chưa có thay đổi nào được áp dụng.`,
     };
   } catch (err) {
     // Target-level refusals (unknown target, self, primary, subset,
@@ -820,4 +890,53 @@ export async function executeCopilotTool(params: {
 /** Re-exported for tests: a setting id is only a tool when it is a known id. */
 export function isCopilotSettingTool(settingId: string): settingId is SupportSystemSettingId {
   return isSupportSystemSettingId(settingId);
+}
+
+
+/** Read-only handlers. They return plain data for the agent loop to feed back to the model. */
+async function runKnowledgeTool(params: {
+  tool: CopilotToolDefinition;
+  user: SessionUser;
+  input: Record<string, unknown>;
+  tenantId?: number | null;
+}): Promise<unknown> {
+  const { tool, user, input, tenantId } = params;
+  if (tool.id === 'kb.search') {
+    const query = String(input.query ?? '');
+    const limit = typeof input.limit === 'number' ? input.limit : 4;
+    const hits = await searchKb(query, { caller: user, limit });
+    return {
+      corpusSize: getKbCorpus().length,
+      results: hits.map((h) => ({
+        id: h.chunk.id,
+        title: h.chunk.title,
+        path: h.chunk.path ?? null,
+        doc: h.chunk.docFile ?? null,
+        text: h.chunk.text.length > 900 ? `${h.chunk.text.slice(0, 899)}…` : h.chunk.text,
+      })),
+    };
+  }
+  if (tool.id === 'settings.read') {
+    return readSystemSettingsSnapshot(user);
+  }
+  // tenant.diagnose
+  const tenant = tenantId != null ? getSupportTenant(tenantId) : null;
+  if (!tenant) throw new Error('Tenant not found.');
+  const scope = resolveCopilotUserScope(user);
+  const entry = scope.tenants.find((t) => t.tenant.id === tenant.id);
+  const diagnostic = entry
+    ? buildTenantSetupDiagnostic(entry.tenant, entry.canEditSteps, '', {
+        canViewSteps: entry.canViewSteps,
+        isPlatformOperator: scope.isPlatformOperator,
+      })
+    : null;
+  const windowHours = typeof input.windowHours === 'number' ? input.windowHours : 72;
+  const report = buildTenantDoctorReport({ tenant, diagnostic, windowHours });
+  return {
+    tenant: { name: report.tenantName, slug: report.tenantSlug },
+    evidence: report.evidence,
+    findings: report.findings.slice(0, 5).map((f) => ({
+      id: f.id, severity: f.severity, title: f.titleEn, cause: f.causeEn, evidence: f.evidenceEn, fix: f.fixEn, path: f.path,
+    })),
+  };
 }

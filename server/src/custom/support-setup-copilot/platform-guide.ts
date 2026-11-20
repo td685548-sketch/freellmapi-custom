@@ -1005,6 +1005,11 @@ const ROUTE_CATALOG: readonly RouteCatalogEntry[] = [
  * Maps a live client pathname (e.g. `/thruline/providers`, `/thruline/combos`, `/tenant-portal`,
  * `/assistants`, etc.) to an accurate, practical product-specialist guide for that exact screen.
  */
+/** Read-only view of the curated route catalog (used by the Setup Copilot knowledge base). */
+export function listPlatformRouteDescriptors(): Array<Omit<PlatformRouteDescriptor, 'normalizedPath'>> {
+  return ROUTE_CATALOG.map((entry) => entry.descriptor);
+}
+
 export function describePlatformRoute(
   currentPath: string | undefined | null,
   _locale: 'vi' | 'en' = 'vi',
