@@ -989,7 +989,9 @@ async function streamCompletion(
   // streaming protocol carries a native ping event, so no fake frame is
   // needed. Once it fires the attempt is committed to the wire and can no
   // longer fail over invisibly — that is the trade STREAM_KEEPALIVE_MS opts
-  // into (off by default).
+  // into (off by default). Gated on the hop proving itself alive (a message
+  // started, a text block open, or flushed output): a hop that has produced
+  // nothing yet may be dead, so ticks wait instead of committing it.
   let streamSettled = false;
   const keepaliveStop = startStreamKeepalive(streamKeepaliveMs(),
     () => streamSettled,
@@ -999,7 +1001,8 @@ async function streamCompletion(
       // stop the retry budget from cancelling it.
       ctx.disarmHedge();
       writeSse(res, 'ping', { type: 'ping' });
-    });
+    },
+    () => messageStarted || textBlockOpen || outputChars > 0);
 
   // Reasoning output (delta.reasoning_content from providers / the <think>
   // extractor, delta.reasoning from Ollama-style upstreams) is buffered and

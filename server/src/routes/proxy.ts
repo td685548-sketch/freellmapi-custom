@@ -1656,6 +1656,9 @@ proxyRouter.post('/completions', async (req: Request, res: Response) => {
 
         // #1642: optional heartbeat for the silent reasoning window. A bare
         // SSE comment resets client idle watchdogs without committing content.
+        // Gated on the first token (ttfbMs): a hop that has produced nothing
+        // yet may be dead, and pinging it would commit the response and lose
+        // invisible failover — so ticks wait until the hop proves itself alive.
         const keepaliveStop = startStreamKeepalive(streamKeepaliveMs(),
           () => streamSettled,
           () => {
@@ -1664,7 +1667,8 @@ proxyRouter.post('/completions', async (req: Request, res: Response) => {
             // invisibly; stop the retry budget from cancelling it.
             ctx.disarmHedge();
             res.write(': keepalive\n\n');
-          });
+          },
+          () => ttfbMs !== null);
 
         try {
           const gen = route.provider.streamChatCompletion(
@@ -2802,6 +2806,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
 
         // #1642: optional heartbeat for the silent reasoning window. A bare
         // SSE comment resets client idle watchdogs without committing content.
+        // Gated on the first token (ttfbMs) — see the non-tool pump above.
         let streamSettled = false;
         const keepaliveStop = startStreamKeepalive(streamKeepaliveMs(),
           () => streamSettled,
@@ -2811,7 +2816,8 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
             // invisibly; stop the retry budget from cancelling it.
             ctx.disarmHedge();
             res.write(': keepalive\n\n');
-          });
+          },
+          () => ttfbMs !== null);
 
         try {
           const gen = route.provider.streamChatCompletion(
