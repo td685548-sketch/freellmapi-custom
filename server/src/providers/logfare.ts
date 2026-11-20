@@ -1,13 +1,5 @@
-import type { ChatCompletionChunk, ChatCompletionResponse, ChatMessage } from '@freellmapi/shared/types.js';
-import { providerHttpError, type CompletionOptions, type KeyValidationResult } from './base.js';
-import type { QuotaObservationContext } from '../services/provider-quota.js';
+import { providerHttpError, type KeyValidationResult } from './base.js';
 import { OpenAICompatProvider } from './openai-compat.js';
-
-function checkModel(requested: string, returned: string): void {
-  if (!returned || returned !== requested) {
-    throw Object.assign(new Error('Logfare returned a different or missing model identity'), { status: 502 });
-  }
-}
 
 export class LogfareProvider extends OpenAICompatProvider {
   protected override async validationResult(response: Response): Promise<KeyValidationResult> {
@@ -21,25 +13,8 @@ export class LogfareProvider extends OpenAICompatProvider {
     // Responses carry `reasoning_content` (handled by the shared fold) and an
     // extra `neurons` usage field that is passed through untouched. Premium
     // routes answer 403 and surface as a provider error, never as a retry.
-    super({ platform: 'logfare', name: 'Logfare', baseUrl: 'https://logfare.ai/v1' });
-  }
-
-  override async chatCompletion(
-    apiKey: string, messages: ChatMessage[], modelId: string,
-    options?: CompletionOptions, quotaContext?: QuotaObservationContext,
-  ): Promise<ChatCompletionResponse> {
-    const response = await super.chatCompletion(apiKey, messages, modelId, options, quotaContext);
-    checkModel(modelId, response.model);
-    return response;
-  }
-
-  override async *streamChatCompletion(
-    apiKey: string, messages: ChatMessage[], modelId: string,
-    options?: CompletionOptions, quotaContext?: QuotaObservationContext,
-  ): AsyncGenerator<ChatCompletionChunk> {
-    for await (const chunk of super.streamChatCompletion(apiKey, messages, modelId, options, quotaContext)) {
-      checkModel(modelId, chunk.model);
-      yield chunk;
-    }
+    // The gateway must serve exactly the requested model (pinModel) — a
+    // substituted identity is a 502 so the fallback loop rotates.
+    super({ platform: 'logfare', name: 'Logfare', baseUrl: 'https://logfare.ai/v1', pinModel: true });
   }
 }
