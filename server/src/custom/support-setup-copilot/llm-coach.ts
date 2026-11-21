@@ -32,6 +32,7 @@ import {
 } from '../cloud-entitlement/service.js';
 import { buildPlatformPromptSection } from './platform-guide.js';
 import { buildKbQueryFromMessages, formatKbForPrompt, searchKb } from './kb/index.js';
+import { buildSystemAdvicePromptSection } from './system-advisor.js';
 import {
   buildAccountOnlyIdentityBlock,
   buildIdentityPromptBlock,
@@ -574,6 +575,8 @@ export function buildHumanCoachSystemPrompt(params: {
   toolSchemas?: ReadonlyArray<LlmCoachToolSchema>;
   /** Pre-rendered "RETRIEVED PLATFORM KNOWLEDGE" section (RAG). Omitted = no retrieval block. */
   knowledgeSection?: string;
+  /** Pre-rendered "LIVE SYSTEM ADVICE" section (measured state + reasons, permission-filtered). Omitted = none. */
+  systemAdviceSection?: string;
 }): string {
   const {
     user,
@@ -588,6 +591,7 @@ export function buildHumanCoachSystemPrompt(params: {
     agentContext,
     toolSchemas,
     knowledgeSection,
+    systemAdviceSection,
   } = params;
 
   const editableList = canEditSteps
@@ -679,6 +683,8 @@ export function buildHumanCoachSystemPrompt(params: {
     identityBlock,
     '',
     systemSettingsSection,
+    '',
+    systemAdviceSection ?? '',
     '',
     toolSection,
     '',
@@ -913,7 +919,14 @@ export async function runHumanLikeLlmCoach(
     // Retrieval must never break a chat turn.
     knowledgeSection = undefined;
   }
-  const systemPrompt = buildHumanCoachSystemPrompt({ ...params, toolSchemas: params.toolSchemas, knowledgeSection });
+  let systemAdviceSection: string | undefined;
+  try {
+    systemAdviceSection = buildSystemAdvicePromptSection(params.user, params.locale) || undefined;
+  } catch {
+    // Advice must never break a chat turn.
+    systemAdviceSection = undefined;
+  }
+  const systemPrompt = buildHumanCoachSystemPrompt({ ...params, toolSchemas: params.toolSchemas, knowledgeSection, systemAdviceSection });
   const baseTurnMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
     { role: 'system', content: systemPrompt },
     ...params.messages.slice(-14).map((m) => ({

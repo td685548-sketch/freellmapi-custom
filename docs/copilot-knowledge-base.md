@@ -8,7 +8,7 @@ instead of a hand-written prompt. Code: `server/src/custom/support-setup-copilot
 | Source | Where it comes from | Drift protection |
 | --- | --- | --- |
 | Permissions | generated from `PERMISSION_GROUPS` (`shared/permissions.ts`) | always in sync |
-| System settings (9) | `kb/sources/settings.ts` (a full `Record<SupportSystemSettingId, …>`) | a new setting id without an entry fails the build |
+| System settings (10) | `kb/sources/settings.ts` (a full `Record<SupportSystemSettingId, …>`) | a new setting id without an entry fails the build |
 | Tenant steps (7) | `kb/sources/tenant-steps.ts` (a full `Record<SupportSetupStepId, …>`), including each step's exact "complete" rule | same |
 | Dashboard pages | `kb/sources/pages.ts` + the platform-guide route catalog | a test reads `client/src/App.tsx` and fails on an undocumented route |
 | Troubleshooting | `kb/sources/troubleshooting.ts` (symptom → cause → fix, using the runtime's real error codes) | reviewed with the eval set |
@@ -28,7 +28,7 @@ npm run kb:docs -w server
    with answer-quality rules (cause before fix, remedy matches the problem's scope,
    name the next click, never invent pages or settings).
 2. **Tools (read-only)** — `kb.search`, `settings.read` (live values of the settings
-   the caller may manage) and `tenant.diagnose`. The agent loop feeds their data back
+   the caller may manage), `system.advise` and `tenant.diagnose`. The agent loop feeds their data back
    to the model. They never stage or apply anything.
 3. **Tenant Doctor** — "why does this tenant fail?" is answered from the tenant's own
    evidence (failed turns, firewall and output events, provider routes, runtime policy).
@@ -53,3 +53,24 @@ npm run kb:docs -w server
 `server/src/__tests__/fixtures/copilot-kb/eval-cases.json` holds real questions with the
 entries that must appear in the top 3; the test gates recall@3 ≥ 90 %. When the Copilot
 answers badly, add the question here first, then fix the KB.
+
+## Admin settings, advice and reasons
+
+The Copilot acts for the signed-in user with **exactly that user's permissions** — it can propose
+a change only to a setting the user could change by hand, and the permission is re-checked live when
+the user approves. Nothing is applied without the Consent Card.
+
+* **`ai_platform_pillars`** — the six AI Platform switches (retrieval / document vectorization,
+  prompts, prompt cache, MCP client, output guard, orchestrator), permission `edit_ai_flags`
+  (same as `PUT /api/ai-platform/flags`). Logic lives in `system-pillars.ts`.
+* **State-aware advice** — `system-advisor.ts` measures the live system (switches, knowledge
+  documents, embedding keys, last-24h 429 rate and prompt sizes) and returns recommendations, each
+  with a **reason and the evidence** it rests on. Thresholds are heuristics and are labelled as such;
+  anything it could not read is reported instead of being treated as healthy. It is exposed to the
+  model as the read-only `system.advise` tool and as a "LIVE SYSTEM ADVICE" prompt section, and
+  the System target answers "what should I change?" / "why enable X?" from it without a model call.
+* **Reasons travel with the change** — a proposal that matches a recommendation carries
+  `reasonVi/En` and `evidence` on the Consent Card, and they are written to the audit log on apply.
+* **Tool pipeline** — gate (live permission) → deny-only guards (`COPILOT_TOOL_GUARDS`) → handler,
+  after the DeepSeek Harness `ToolGuard` pattern. Secrets (API keys, passwords, backups, invites)
+  stay out of chat by a hard rule, regardless of the user's permissions.

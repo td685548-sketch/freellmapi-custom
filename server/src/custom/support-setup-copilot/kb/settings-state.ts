@@ -13,6 +13,7 @@ import type { SessionUser } from '../../../services/auth.js';
 import { isCacheEnabled } from '../../../services/cache.js';
 import { getCompressionConfig } from '../../../services/compression/config.js';
 import { isUnifyEnabled, UNIFY_ENABLED_KEY } from '../../../services/model-groups.js';
+import { getFlags } from '../../ai-platform/flags.js';
 import { getConfigSnapshot } from '../../x-gateway/config.js';
 import { REQUIRED_PERMISSION_BY_SETTING } from '../system-settings.js';
 
@@ -40,6 +41,7 @@ function readValue(id: SupportSystemSettingId): unknown {
     case 'mcp_server': return { enabled: isMcpServerEnabled() };
     case 'auto_update_check': return { enabled: isAutoUpdateCheckEnabled() };
     case 'ollama_emulation': return { mode: getOllamaEmulationMode() };
+    case 'ai_platform_pillars': return getFlags();
   }
 }
 

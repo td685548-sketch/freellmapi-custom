@@ -59,9 +59,11 @@ import {
   SupportSetupCopilotError,
 } from './store.js';
 import {
+  hasAnySystemSettingPermission,
   reprojectSystemActionsForUser,
   SYSTEM_SETTING_IDS,
 } from './system-settings.js';
+import { buildTenantAdviceResponse, isTenantAdviceRequest } from './tenant-advice.js';
 import {
   buildActionProposalChatResponse,
   buildOnboardingChecklist,
@@ -562,6 +564,33 @@ supportSetupCopilotRouter.post('/chat', async (req: Request, res: Response, next
       }
     }
 
+    // 0b. "Do you suggest anything to fix?": answered from the tenant's own readiness diagnostic and
+    // recent failures, plus system advice limited to what THIS user may change. The System target
+    // answers its own advice questions further below.
+    if (targetMode !== 'system' && !baseProposalId && isTenantAdviceRequest(latestUserMessage)) {
+      const adviceEntry = scopedEntry ?? (targetMode === 'create_tenant' ? null : scope.tenants[0] ?? null);
+      const canSeeTenant = adviceEntry !== null && adviceEntry.canViewSteps.size > 0;
+      if (canSeeTenant || hasAnySystemSettingPermission(user)) {
+        const adviceDiagnostic = canSeeTenant
+          ? buildTenantSetupDiagnostic(
+              adviceEntry.tenant,
+              adviceEntry.canEditSteps,
+              resolvePublicServerOrigin(req),
+              { canViewSteps: adviceEntry.canViewSteps, isPlatformOperator: scope.isPlatformOperator },
+            )
+          : null;
+        res.json(
+          buildTenantAdviceResponse({
+            user,
+            diagnostic: adviceDiagnostic,
+            locale: effectiveLocale,
+            canEditAny: Boolean(adviceEntry && adviceEntry.canEditSteps.size > 0),
+          }),
+        );
+        return;
+      }
+    }
+
     // 1. Self-Service AI Error Doctor (available to every signed-in user, strictly scoped to user.userId)
     if (matchErrorDoctorIntent(latestUserMessage)) {
       const personal = buildErrorDoctorChatResponse({
@@ -633,7 +662,7 @@ supportSetupCopilotRouter.post('/chat', async (req: Request, res: Response, next
       return;
     }
 
-    // 2d. System Target (platform-wide, full-power admins only): system
+    // 2d. System Target (platform-wide, any account that can change a system setting): system
     // settings + platform guidance, never a tenant. Placed after the
     // identity / grant handlers above and before any tenant gate.
     if (targetMode === 'system') {
@@ -641,7 +670,7 @@ supportSetupCopilotRouter.post('/chat', async (req: Request, res: Response, next
         throw new SupportSetupCopilotError(
           403,
           'forbidden',
-          'The System target is only available to administrators with full access.',
+          'The System target needs permission to change at least one system setting.',
         );
       }
       res.json(

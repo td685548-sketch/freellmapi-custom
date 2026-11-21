@@ -69,6 +69,7 @@ import {
   type EvaluateSystemSettingsProposalResult,
 } from './system-settings.js';
 import { buildKbGroundedFallback, isTroubleshootingQuestion } from './kb/answer.js';
+import { attachAdviceToActions } from './system-advisor.js';
 
 export { parseLlmCoachResponse, type GatewayLoopbackContext, type LlmCoachOutput };
 
@@ -1247,11 +1248,13 @@ export function looksLikeQuestionnaire(reply: string): boolean {
 export function resolveSystemSettingsTurnResponse(params: {
   evalResult: EvaluateSystemSettingsProposalResult;
   userId: number;
+  /** Session user, used to attach advisor reasons for exactly the settings they may change. */
+  user?: SessionUser;
   locale: 'vi' | 'en';
   llmReply?: string;
   modelUsed?: string | null;
 }): SupportSetupChatResponse | null {
-  const { evalResult, userId, locale, llmReply, modelUsed = null } = params;
+  const { evalResult, userId, user: reasonUser, locale, llmReply, modelUsed = null } = params;
   if (evalResult.outcome === 'none') {
     return null;
   }
@@ -1287,7 +1290,8 @@ export function resolveSystemSettingsTurnResponse(params: {
     summary: locale === 'vi' ? evalResult.summaryVi : evalResult.summaryEn,
     requirements: {},
     steps: [],
-    systemActions: evalResult.actions,
+    // Reasons come from the advisor's measured state (never model text); only matching recommendations get one.
+    systemActions: attachAdviceToActions(evalResult.actions, reasonUser),
     createdAt,
     expiresAt,
   });
@@ -1465,6 +1469,7 @@ export async function runSupportSetupCopilotTurn(params: {
     const preSysResponse = resolveSystemSettingsTurnResponse({
       evalResult: preSysEval,
       userId: user.userId,
+      user,
       locale,
     });
     if (preSysResponse) {
@@ -1627,6 +1632,7 @@ export async function runSupportSetupCopilotTurn(params: {
       const sysResp = resolveSystemSettingsTurnResponse({
         evalResult: postReadOnlySys,
         userId: user.userId,
+        user,
         locale,
         llmReply:
           readOnlyLlm.output.intent === 'propose_setup' ? readOnlyLlm.output.reply : undefined,
@@ -1725,6 +1731,7 @@ export async function runSupportSetupCopilotTurn(params: {
     const sysResp = resolveSystemSettingsTurnResponse({
       evalResult: postLlmSys,
       userId: user.userId,
+      user,
       locale,
       llmReply: llm.output.intent === 'propose_setup' ? llm.output.reply : undefined,
       modelUsed: llm.modelUsed,

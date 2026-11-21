@@ -106,6 +106,16 @@ const SETTING_DOCS: Readonly<Record<SupportSystemSettingId, SettingDoc>> = {
     whereVi: 'Trang Keys → mục tương thích agent.',
     tags: ['ollama', 'emulation', 'gia lap', 'loopback', 'key'],
   },
+  ai_platform_pillars: {
+    titleEn: 'AI Platform switches (retrieval / document vectorization, prompts, prompt cache, MCP client, output guard, orchestrator)',
+    titleVi: 'Công tắc AI Platform (retrieval / vector hóa tài liệu, prompts, prompt cache, MCP client, output guard, orchestrator)',
+    en: 'Six independent switches, all OFF on a fresh install. `retrieval` turns on semantic search over knowledge documents: documents are split into chunks and embedded by an embedding provider (stored in the database), and customer chat then blends keyword and vector search; without it only keyword matching is used. Turn it on when tenants have knowledge documents and an embedding provider is enabled; remember document text is sent to that provider and uses its quota (e.g. Cloudflare Workers AI 10,000 Neurons/day). `promptCache` reuses answers for semantically similar prompts. `outputGuard` applies the output policy to model replies. `mcpClient` lets the platform call external MCP tool servers. `orchestrator` runs multi-step agent flows. `prompts` enables the prompt library. Turning a switch off keeps its data; turning it on again restores the earlier configuration. Payload: any subset of { retrieval, prompts, promptCache, mcpClient, outputGuard, orchestrator } as booleans — keys left out keep their value.',
+    vi: 'Sáu công tắc độc lập, mặc định đều TẮT trên bản cài mới. `retrieval` bật tìm kiếm ngữ nghĩa trên tài liệu tri thức: tài liệu được cắt đoạn và vector hóa bằng nhà cung cấp embedding (lưu trong database), rồi chat với khách kết hợp tìm theo từ khóa và theo vector; khi tắt chỉ còn khớp từ khóa. Nên bật khi tenant đã có tài liệu tri thức và có nhà cung cấp embedding đang bật; lưu ý nội dung tài liệu được gửi tới nhà cung cấp đó và tốn hạn mức của họ (ví dụ Cloudflare Workers AI 10.000 Neurons/ngày). `promptCache` tái dùng câu trả lời cho prompt tương tự về ngữ nghĩa. `outputGuard` áp chính sách đầu ra lên câu trả lời của model. `mcpClient` cho nền tảng gọi máy chủ công cụ MCP bên ngoài. `orchestrator` chạy luồng agent nhiều bước. `prompts` bật thư viện prompt. Tắt công tắc vẫn giữ dữ liệu; bật lại là khôi phục cấu hình cũ. Tham số: bất kỳ tập con của { retrieval, prompts, promptCache, mcpClient, outputGuard, orchestrator } dạng true/false — khoá không gửi giữ nguyên.',
+    path: '/ai-platform',
+    whereEn: 'AI Platform → Overview (/ai-platform).',
+    whereVi: 'AI Platform → Tổng quan (/ai-platform).',
+    tags: ['ai platform', 'pillar', 'retrieval', 'rag', 'vector', 'vector hoa', 'embedding', 'tim kiem ngu nghia', 'prompt cache', 'output guard', 'orchestrator', 'mcp client', 'tri thuc', 'tai lieu khach hang', 'bat', 'tat'],
+  },
 };
 
 export function buildSettingChunks(): KbChunk[] {

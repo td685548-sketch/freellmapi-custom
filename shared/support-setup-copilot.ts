@@ -58,6 +58,7 @@ export const SYSTEM_SETTING_IDS = [
   'mcp_server',
   'auto_update_check',
   'ollama_emulation',
+  'ai_platform_pillars',
 ] as const;
 
 export type SupportSystemSettingId = (typeof SYSTEM_SETTING_IDS)[number];
@@ -75,6 +76,15 @@ export interface SupportSystemSettingAction {
   currentValueEn: string;
   proposedValueVi: string;
   proposedValueEn: string;
+  /**
+   * Why the Copilot suggests this change, grounded in the live system state it
+   * read (never free-form model text). Shown on the Consent Card and written to
+   * the audit log when the change is applied.
+   */
+  reasonVi?: string;
+  reasonEn?: string;
+  /** Facts the reason rests on, e.g. "12 knowledge documents are keyword-searched only". */
+  evidence?: string[];
   payload: Record<string, unknown>;
 }
 

@@ -50,14 +50,14 @@ describe('Setup Copilot — read-only knowledge tools (kb.search / settings.read
     const all = await run(admin, 'settings.read', {}, false);
     expect(all.status).toBe('executed');
     const snap = all.result as { readable: Array<{ settingId: string }>; hidden: string[] };
-    expect(snap.readable).toHaveLength(9);
+    expect(snap.readable).toHaveLength(10);
     expect(snap.hidden).toHaveLength(0);
 
     const some = await run(cacheMember, 'settings.read', {}, false);
     expect(some.status).toBe('executed');
     const partial = some.result as { readable: Array<{ settingId: string }>; hidden: string[] };
     expect(partial.readable.map((r) => r.settingId)).toEqual(['response_cache']);
-    expect(partial.hidden).toHaveLength(8);
+    expect(partial.hidden).toHaveLength(9);
 
     const none = await run(outsider, 'settings.read', {}, false);
     expect(none.status).toBe('denied');
@@ -85,8 +85,8 @@ describe('Setup Copilot — read-only knowledge tools (kb.search / settings.read
     const ids = (u: SessionUser, t: number | null) =>
       filterAdmittedTools({ agentContext: ctx(u), user: u, tenantId: t }).filter((x) => x.kind === 'knowledge').map((x) => x.id);
     expect(ids(outsider, null)).toEqual(['kb.search']);
-    expect(ids(cacheMember, null)).toEqual(['kb.search', 'settings.read']);
-    expect(ids(admin, tenantId)).toEqual(['kb.search', 'settings.read', 'tenant.diagnose']);
+    expect(ids(cacheMember, null)).toEqual(['kb.search', 'settings.read', 'system.advise']);
+    expect(ids(admin, tenantId)).toEqual(['kb.search', 'settings.read', 'system.advise', 'tenant.diagnose']);
   });
 
   it('the agent loop hands read-only tool data back to the model for the next step', async () => {
