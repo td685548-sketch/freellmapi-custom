@@ -361,6 +361,16 @@ describe('SupportSetupCopilot widget', () => {
     expect(rows[0]!.getAttribute('data-status')).toBe('done');
     expect(rows[0]!.textContent).toContain('3 mục liên quan');
 
+    // Live reasoning: the model step shows what the model is thinking, not just a spinner.
+    await act(async () => {
+      controller.enqueue(sse('step', step('s2', 'running', { kind: 'model', titleVi: 'Hỏi mô hình AI', reasoning: 'Người dùng hỏi về cache; cần trả lời ngắn gọn.' })));
+    });
+    await flush();
+    const reasoningEl = container.querySelector('[data-testid="support-setup-step-reasoning"]');
+    expect(reasoningEl).not.toBeNull();
+    expect(reasoningEl!.textContent).toContain('Suy luận');
+    expect(reasoningEl!.textContent).toContain('Người dùng hỏi về cache');
+
     // Finish: answer appears, live panel goes away, the steps stay as a collapsed list.
     await act(async () => {
       controller.enqueue(sse('step', step('s2', 'done')));

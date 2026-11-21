@@ -217,6 +217,67 @@ describe('why a model attempt failed is shown on the "ask the model" step', () =
   });
 });
 
+describe('live reasoning while the model streams its answer', () => {
+  let admin: SessionUser;
+  beforeAll(() => {
+    process.env.ENCRYPTION_KEY = 'e'.repeat(64);
+    initDb(':memory:');
+    installMockCloudLease();
+    admin = createUser('trace-reasoning-admin@example.com', 'AdminPass123!');
+  });
+  afterAll(() => {
+    configureCloudEntitlementForTesting(null);
+    delete process.env.FREEAPI_AI_ACTIVATION_TOKEN;
+    setCopilotModelSource('both');
+  });
+
+  it('shows the model thinking, then the reply as it forms — in a single streamed request', async () => {
+    setCopilotModelSource('freellmapi');
+    const sse = (payload: string): string => `data: ${payload}\n\n`;
+    const chunks = [
+      sse(JSON.stringify({ model: 'fake/stream', choices: [{ delta: { reasoning_content: 'Người dùng hỏi về cache; cần trả lời ngắn gọn.' } }] })),
+      sse(JSON.stringify({ choices: [{ delta: { content: '{"intent":"guide","reply":"Response cache' } }] })),
+      sse(JSON.stringify({ choices: [{ delta: { content: ' giúp giảm số lần gọi nhà cung cấp."}' } }] })),
+      'data: [DONE]\n\n',
+    ];
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      const stream = new ReadableStream({
+        start(controller) {
+          for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+          controller.close();
+        },
+      });
+      return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    }) as unknown as typeof fetch;
+
+    const seen: SupportSetupTraceStep[] = [];
+    const result = await runWithTrace((st) => seen.push(st), () =>
+      runHumanLikeLlmCoach({
+        user: admin,
+        messages: [{ role: 'user' as const, content: 'cho mình hỏi về cài đặt cache' }],
+        locale: 'vi' as const, targetMode: 'update_tenant' as const, diagnostic: null, extracted: {},
+        gatewayLoopback: { host: '127.0.0.1', port: 9, forceLoopback: true },
+        fetchImpl,
+      }),
+    );
+
+    expect(calls).toBe(1); // streamed once; no second plain request for the same attempt
+    expect(result?.output.reply).toContain('Response cache');
+    expect(result?.routeSource).toBe('main_gateway_loopback');
+    const modelSteps = seen.filter((st) => st.kind === 'model');
+    const withReasoning = modelSteps.filter((st) => st.reasoning);
+    expect(withReasoning.length).toBeGreaterThanOrEqual(2);
+    expect(withReasoning[0]?.reasoning).toContain('Người dùng hỏi về cache');
+    expect(withReasoning[withReasoning.length - 1]?.reasoning).toContain('Response cache');
+    // The finished step keeps the last reasoning, so the panel can be reviewed afterwards.
+    expect(modelSteps[modelSteps.length - 1]?.status).toBe('done');
+    expect(modelSteps[modelSteps.length - 1]?.reasoning).toContain('Response cache');
+    setCopilotModelSource('both');
+  });
+});
+
 describe('System target: model answer first for unrecognised messages, honest fallback last', () => {
   let admin: SessionUser;
   beforeAll(() => {

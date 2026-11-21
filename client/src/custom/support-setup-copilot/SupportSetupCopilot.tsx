@@ -1940,6 +1940,7 @@ export function SupportSetupCopilot() {
                     locale={uiLocale}
                     title={s.processTitle}
                     countLabel={(n) => s.processCount.replace('{n}', String(n))}
+                    reasoningLabel={s.reasoningLabel}
                   />
                 )}
 
@@ -2137,6 +2138,7 @@ export function SupportSetupCopilot() {
                     locale={uiLocale}
                     title={s.processTitle}
                     countLabel={(n) => s.processCount.replace('{n}', String(n))}
+                    reasoningLabel={s.reasoningLabel}
                   />
                 )}
               </div>
