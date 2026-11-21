@@ -13,6 +13,7 @@ export type KbSource =
   | 'tenant_step'
   | 'page'
   | 'troubleshooting'
+  | 'option'
   | 'doc';
 
 export interface KbChunk {

@@ -97,7 +97,7 @@ const ALL_DETECTORS: SupportInjectionDetector[] = [
   'sql_injection_probe',
 ];
 
-function defaultRoleQuotas(): Record<string, SupportRoleQuotaRule> {
+export function defaultRoleQuotas(): Record<string, SupportRoleQuotaRule> {
   return {
     guest: { maxRequestsPerWindow: 15, maxTokensPerWindow: 8000, windowSeconds: 3600 },
     customer: { maxRequestsPerWindow: 60, maxTokensPerWindow: 40000, windowSeconds: 3600 },

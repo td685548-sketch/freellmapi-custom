@@ -255,9 +255,9 @@ const ISSUE_COPY: Record<
     rootCauseVi:
       'Tốc độ gửi request dồn dập vượt ngưỡng RPM mỗi phút của khóa hoặc chạm phiên nghỉ (cooldown) tạm thời của model.',
     remediationEn:
-      'Switch your Personal API Key to ECO or BALANCED mode and use model "auto" so requests spread smoothly across fast pools.',
+      'Slow the client down and honour Retry-After; use model "auto" with ECO or BALANCED routing so load spreads across providers. If the message says "Your plan limit is N requests per minute", an admin can raise that key\'s RPM on Users (/users); if every provider route is cooling down, connect more accounts at Thruline → Providers or add a fallback chain in Combos.',
     remediationVi:
-      'Chuyển Personal API Key sang chế độ ECO hoặc BALANCED và để model "auto" để tự động phân tải qua dàn model tốc độ cao.',
+      'Giảm tốc độ gọi và tôn trọng Retry-After; dùng model "auto" với định tuyến ECO hoặc BALANCED để phân tải qua nhiều nhà cung cấp. Nếu thông báo ghi "Your plan limit is N requests per minute", admin có thể nâng RPM của key ở Users (/users); nếu mọi route nhà cung cấp đang nghỉ (cooldown), hãy kết nối thêm tài khoản ở Thruline → Providers hoặc thêm chuỗi dự phòng ở Combos.',
   },
   bad_request_400: {
     severity: 'warning',

@@ -44,6 +44,7 @@ import {
   normalizePlatformPath,
 } from './platform-guide.js';
 import { tryGroundedGuideReply } from './grounded-guide.js';
+import { buildKbGroundedFallback, isTroubleshootingQuestion } from './kb/answer.js';
 import { detectConversationLocale, runSupportSetupCopilotTurn } from './playbook.js';
 import { canUseSystemTarget, handleSystemTargetChatTurn } from './system-target.js';
 import {
@@ -670,6 +671,30 @@ supportSetupCopilotRouter.post('/chat', async (req: Request, res: Response, next
         if (grounded) {
           res.json(grounded);
           return;
+        }
+        if (isTroubleshootingQuestion(latestUserMessage)) {
+          const kbReply = await buildKbGroundedFallback({
+            messages,
+            locale: effectiveLocale,
+            caller: user,
+            currentPath,
+          });
+          if (kbReply) {
+            res.json({
+              ok: true,
+              replyLocale: effectiveLocale,
+              reply: kbReply.reply,
+              intent: 'guide',
+              missingQuestions: [],
+              suggestedQuickReplies: kbReply.suggestedQuickReplies,
+              proposal: null,
+              userDiagnostic: null,
+              actionProposal: null,
+              modelUsed: null,
+              usedFallback: true,
+            } satisfies SupportSetupChatResponse);
+            return;
+          }
         }
         const platformMatch = matchPlatformKnowledgeQuestion(latestUserMessage, currentPath);
         if (platformMatch) {
