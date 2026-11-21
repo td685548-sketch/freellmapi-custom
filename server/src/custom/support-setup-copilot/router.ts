@@ -66,6 +66,7 @@ import {
 import { buildTenantAdviceResponse, isTenantAdviceRequest } from './tenant-advice.js';
 import {
   buildActionProposalChatResponse,
+  buildKeyClarificationResponse,
   buildOnboardingChecklist,
   executeCopilotUserAction,
   matchUserActionIntent,
@@ -613,6 +614,18 @@ supportSetupCopilotRouter.post('/chat', async (req: Request, res: Response, next
 
     // 2. Consent-gated Personal API Key & Onboarding Action Proposals (zero state mutation on chat)
     const matchedAction = matchUserActionIntent(latestUserMessage, user);
+    if (!matchedAction) {
+      // A key was named (e.g. "…c86c") but matched none/several of the user's keys: ask, never guess.
+      const keyClarification = buildKeyClarificationResponse({
+        message: latestUserMessage,
+        user,
+        locale: effectiveLocale,
+      });
+      if (keyClarification) {
+        res.json(keyClarification);
+        return;
+      }
+    }
     if (matchedAction) {
       res.json(
         buildActionProposalChatResponse({

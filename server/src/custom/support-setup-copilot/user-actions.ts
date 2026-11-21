@@ -325,6 +325,41 @@ function parseRequestedKeyName(raw: string, folded: string): string {
   return 'Personal IDE Key';
 }
 
+/** True when the message asks to switch a key's routing mode (with or without naming which key). */
+export function isSwitchKeyModeRequest(rawMessage: string): boolean {
+  const folded = foldVietnameseAscii(rawMessage.trim());
+  if (!folded || EXCLUDE_TENANT_SETUP_RE.test(folded)) return false;
+  return SWITCH_KEY_MODE_VI_RE.test(folded) || SWITCH_KEY_MODE_EN_RE.test(folded);
+}
+
+/**
+ * Hex fragments the user explicitly used to point at a key. The key list shows keys masked as
+ * `sk-flm-6025…c359`, so people write "…c359", "...c359", "sk-flm-6025…c359" or "key c359".
+ * Only explicit references count; a stray number elsewhere in the sentence is ignored.
+ */
+export function extractKeyReferences(rawMessage: string): string[] {
+  const text = rawMessage.toLowerCase();
+  const out = new Set<string>();
+  for (const m of text.matchAll(/(?:sk-flm-|[\u2026*\u2022]|\.{2,})\s*([0-9a-f]{3,24})/g)) out.add(m[1]!);
+  for (const m of text.matchAll(/\bkeys?\s+([0-9a-f]{4,24})\b/g)) {
+    if (/\d/.test(m[1]!)) out.add(m[1]!);
+  }
+  return [...out];
+}
+
+/** A masked prefix looks like `sk-flm-6025…c359`: the first and last characters are all that is shown. */
+function keyMatchesReference(keyPrefix: string, fragment: string): boolean {
+  const lower = keyPrefix.toLowerCase().replace(/^sk-flm-/, '');
+  const [head = '', tail = ''] = lower.split('\u2026');
+  return head.startsWith(fragment) || tail.endsWith(fragment) || `${head}${tail}`.includes(fragment);
+}
+
+export function findKeysByReference<K extends { keyPrefix: string }>(keys: readonly K[], rawMessage: string): { referenced: boolean; matches: K[] } {
+  const refs = extractKeyReferences(rawMessage);
+  if (refs.length === 0) return { referenced: false, matches: [] };
+  return { referenced: true, matches: keys.filter((k) => refs.some((f) => keyMatchesReference(k.keyPrefix, f))) };
+}
+
 export interface MatchedUserActionIntent {
   actionType: CopilotActionType;
   proposal: CopilotActionProposal;
@@ -345,10 +380,10 @@ const CREATE_PERSONAL_KEY_EN_RE =
   /\b(?:create|mint|generate|issue|make)\s+(?:me\s+|for\s+me\s+)?(?:a\s+|an\s+|another\s+|new\s+)?(?:personal\s*(?:api\s*)?key|api\s*key|ide\s*key|member\s*key)\b/i;
 
 const SWITCH_KEY_MODE_VI_RE =
-  /\b(?:chuyen|doi|dat|bat|set|cap\s+nhat)\s+(?:che\s+do\s+|routing(?:\s*mode)?\s+)?(?:tat\s+ca\s+|cac\s+|cua\s+)?(?:personal\s*|api\s*)?(?:keys?|khoa)[\s\w"-]{0,36}?\b(?:sang|qua|thanh|ve|len|o\s+che\s+do)\s+(?:che\s+do\s+)?(?:eco|balanced|max|tiet\s+kiem|can\s+bang|toi\s+da)\b|\b(?:bat|chuyen\s+sang|doi\s+sang)\s+(?:che\s+do\s+)?(?:eco|balanced|max)(?:\s+mode)?\s+(?:cho\s+)?(?:personal\s*|api\s*)?(?:keys?|khoa)\b/i;
+  /\b(?:chuyen|doi|dat|bat|set|cap\s+nhat)\s+(?:che\s+do\s+|routing(?:\s*mode)?\s+)?(?:tat\s+ca\s+|cac\s+|cua\s+)?(?:personal\s*|api\s*)?(?:keys?|khoa)[\s\w"'\u2026.*\u2022:,-]{0,48}?\b(?:sang|qua|thanh|ve|len|o\s+che\s+do)\s+(?:che\s+do\s+)?(?:eco|balanced|max|tiet\s+kiem|can\s+bang|toi\s+da)\b|\b(?:bat|chuyen\s+sang|doi\s+sang)\s+(?:che\s+do\s+)?(?:eco|balanced|max)(?:\s+mode)?\s+(?:cho\s+)?(?:personal\s*|api\s*)?(?:keys?|khoa)\b/i;
 
 const SWITCH_KEY_MODE_EN_RE =
-  /\b(?:switch|change|set|update|move|turn)\s+(?:my\s+|the\s+|active\s+|personal\s+)?(?:api\s*)?keys?[\s\w"-]{0,36}?\b(?:to|into|on)\s+(?:eco|balanced|max)(?:\s+(?:mode|routing|tier))?\b|\b(?:enable|activate|use)\s+(?:eco|balanced|max)\s+(?:routing\s+)?mode\s+(?:on|for)\s+(?:my\s+|the\s+)?(?:personal\s+)?(?:api\s*)?keys?\b/i;
+  /\b(?:switch|change|set|update|move|turn)\s+(?:my\s+|the\s+|active\s+|personal\s+)?(?:api\s*)?keys?[\s\w"'\u2026.*\u2022:,-]{0,48}?\b(?:to|into|on)\s+(?:eco|balanced|max)(?:\s+(?:mode|routing|tier))?\b|\b(?:enable|activate|use)\s+(?:eco|balanced|max)\s+(?:routing\s+)?mode\s+(?:on|for)\s+(?:my\s+|the\s+)?(?:personal\s+)?(?:api\s*)?keys?\b/i;
 
 const ONBOARDING_GUIDE_VI_RE =
   /\b(?:mo\s+|xem\s+|cho\s+(?:minh|toi)\s+xem\s+)?(?:huong\s+dan|checklist|lo\s+trinh)\s+(?:nguoi\s+moi|thanh\s+vien(?:\s+moi)?|onboarding|3\s*buoc(?:\s+bat\s+dau)?|bat\s+dau)\b|\b(?:minh|toi)\s+(?:moi\s+tao\s+tai\s+khoan|la\s+nguoi\s+moi|la\s+thanh\s+vien\s+moi)\b|\bbat\s+dau\s+su\s+dung\s+(?:tai\s+khoan|cong\s+api)\s+(?:nhu\s+the\s+nao|ra\s+sao|tu\s+dau)\b/i;
@@ -390,7 +425,11 @@ export function matchUserActionIntent(
       };
     }
 
-    const matchedByName = activeKeys.find(
+    const byReference = findKeysByReference(activeKeys, trimmed);
+    // The user pointed at a specific key. Switch exactly that one, or nothing: guessing could change a
+    // key they did not mean. The router asks which key when this returns null (see buildKeyClarificationResponse).
+    if (byReference.referenced && byReference.matches.length !== 1) return null;
+    const matchedByName = byReference.matches[0] ?? activeKeys.find(
       (k) =>
         folded.includes(foldVietnameseAscii(k.name)) ||
         trimmed.toLowerCase().includes(k.keyPrefix.slice(0, 10).toLowerCase()),
@@ -460,6 +499,56 @@ export function matchUserActionIntent(
   }
 
   return null;
+}
+
+/**
+ * The user named a key by its masked tail/head, but it matched none of their active keys (or several).
+ * Instead of guessing, show the active keys so they can pick one. Returns null when there is nothing to ask.
+ */
+export function buildKeyClarificationResponse(params: {
+  message: string;
+  user: SessionUser;
+  locale: 'vi' | 'en';
+}): SupportSetupChatResponse | null {
+  const { message, user, locale } = params;
+  if (!isSwitchKeyModeRequest(message)) return null;
+  const activeKeys = listUserApiKeys(user.userId).filter((k) => !k.revoked);
+  if (activeKeys.length === 0) return null;
+  const { referenced, matches } = findKeysByReference(activeKeys, message);
+  if (!referenced || matches.length === 1) return null;
+
+  const folded = foldVietnameseAscii(message.trim());
+  const mode = (parseRequestedRoutingMode(message.trim(), folded) ?? 'eco').toUpperCase();
+  const shown = (matches.length > 1 ? matches : activeKeys).slice(0, 8);
+  const refs = extractKeyReferences(message).map((r) => `\`${r}\``).join(', ');
+  const list = shown
+    .map((k) => `- **${k.name}** (\`${k.keyPrefix}\` · ${locale === 'vi' ? 'chế độ' : 'mode'} \`${normalizeRoutingMode(k.routingMode, 'default')}\`)`)
+    .join('\n');
+
+  const reply =
+    locale === 'vi'
+      ? matches.length === 0
+        ? `Mình không thấy Personal API Key nào đang bật của bạn có phần ${refs} nên **chưa đổi gì** (mình không đoán key để tránh đổi nhầm). Các key đang bật của bạn:\n${list}\n\nBạn chọn đúng key giúp mình nhé.`
+        : `Có ${matches.length} key khớp với ${refs} nên mình **chưa đổi gì**. Bạn chọn đúng key giúp mình:\n${list}`
+      : matches.length === 0
+        ? `None of your active Personal API Keys contains ${refs}, so I **changed nothing** (I will not guess a key and risk switching the wrong one). Your active keys:\n${list}\n\nPlease pick the exact key.`
+        : `${matches.length} keys match ${refs}, so I **changed nothing**. Please pick the exact key:\n${list}`;
+
+  return {
+    ok: true,
+    replyLocale: locale,
+    reply,
+    intent: 'guide',
+    missingQuestions: [],
+    suggestedQuickReplies: shown
+      .slice(0, 4)
+      .map((k) => (locale === 'vi' ? `Chuyển key ${k.keyPrefix} sang ${mode}` : `Switch key ${k.keyPrefix} to ${mode}`)),
+    proposal: null,
+    userDiagnostic: null,
+    actionProposal: null,
+    modelUsed: null,
+    usedFallback: true,
+  };
 }
 
 export function buildActionProposalChatResponse(params: {
