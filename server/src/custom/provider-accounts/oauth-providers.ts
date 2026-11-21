@@ -97,6 +97,26 @@ export const OAUTH_PROVIDERS: Record<OAuthKind, OAuthProviderDescriptor> = {
     refreshLeadMs: 5 * 60_000,
     authMethod: 'oauth_pkce',
   },
+  opencode: {
+    // OpenCode Console OAuth (same device flow the OpenCode CLI performs with
+    // client_id "opencode-cli"). There is no PKCE/browser authorization URL:
+    // authorizeUrl is the Console sign-in page and is never used to build a
+    // code URL — login goes through the device-code endpoints in
+    // opencode-oauth.ts, and only the token endpoint + refresh matter here.
+    kind: 'opencode',
+    name: 'OpenCode Console',
+    clientId: 'opencode-cli',
+    authorizeUrl: 'https://opencode.ai/console/auth',
+    tokenUrl: 'https://opencode.ai/console/auth/device/token',
+    scope: '',
+    redirectUri: '',
+    usePkce: false,
+    extraAuthorizeParams: {},
+    exchangeEncoding: 'json',
+    refreshEncoding: 'json',
+    refreshLeadMs: 5 * 60_000,
+    authMethod: 'oauth_pkce',
+  },
 };
 
 export function oauthDescriptor(kind: string): OAuthProviderDescriptor | null {
@@ -150,6 +170,7 @@ const tokenHosts = new Set([
   new URL(OAUTH_PROVIDERS.codex.tokenUrl).host,
   new URL(OAUTH_PROVIDERS.claude.tokenUrl).host,
   new URL(OAUTH_PROVIDERS['gemini-cli'].tokenUrl).host,
+  new URL(OAUTH_PROVIDERS.opencode.tokenUrl).host,
 ]);
 
 async function tokenRequest(url: string, init: RequestInit): Promise<RawTokenResponse> {

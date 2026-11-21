@@ -17,6 +17,7 @@ import {
 import { proxyFetch } from '../../lib/proxy.js';
 import { assertSafeHttpBaseUrlSync } from '../../lib/url-guard.js';
 import { recordQuotaObservationsFromResponse, type QuotaObservationContext } from '../../services/provider-quota.js';
+import { credentialExpired, parseOAuthCredential } from './oauth-credentials.js';
 import {
   DEFAULT_STREAM_STALL_MS,
   aggregateStreamToCompletion,
@@ -40,11 +41,12 @@ export interface OpenCodeProviderOptions {
   extraHeaders?: Record<string, string>;
 }
 
-const OPENCODE_UA = 'opencode/latest/2.0.26/cli';
+export const OPENCODE_UA = 'opencode/latest/2.0.26/cli';
 const OPENCODE_CLIENT = 'cli';
-const BASE62_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-const SESSION_PREFIX_MASK = (1n << 48n) - 1n;
-export const OPENCODE_SESSION_RE = /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/;
+// The real client uses `ses_` + 32 random bytes, hex (see the promptCacheKey
+// regex in the OpenCode source). The gateway used to mint `ses_` + 12 hex +
+// 14 base62 — a different shape — so session ids are now minted the same way.
+export const OPENCODE_SESSION_RE = /^ses_[0-9a-f]{64}$/;
 
 // Capped so a slow/overloaded free tier cannot eat the whole playground
 // first-token budget (25s TTFT) in retries before the router can fail over.
@@ -112,8 +114,6 @@ const ENV_PROMPT_MARKER = [
   '</env>',
 ].join('\n');
 
-let lastTimestamp = 0;
-let sessionCounter = 0;
 const stableSessions = new Map<string, { sessionId: string; lastUsed: number }>();
 
 interface CachedJwt {
@@ -127,26 +127,9 @@ export function _resetOpenCodeStateForTests(): void {
   mimoJwtCache.clear();
 }
 
-function unstableRandom(): string {
-  const bytes = randomBytes(14);
-  let out = '';
-  for (let i = 0; i < 14; i++) out += BASE62_CHARS[bytes[i] % 62];
-  return out;
-}
-
-function descendingTimeHex(timestampMs: number, counterVal: number): string {
-  return (~(BigInt(timestampMs) * 0x1000n + BigInt(counterVal)) & SESSION_PREFIX_MASK)
-    .toString(16)
-    .padStart(12, '0');
-}
-
-export function generateOpenCodeSessionId(timestamp = Date.now()): string {
-  if (timestamp !== lastTimestamp) {
-    lastTimestamp = timestamp;
-    sessionCounter = 0;
-  }
-  sessionCounter += 1;
-  return `ses_${descendingTimeHex(timestamp, sessionCounter)}${unstableRandom()}`;
+/** Mint a client-shaped session id: `ses_` + 32 random bytes, hex. */
+export function generateOpenCodeSessionId(): string {
+  return `ses_${randomBytes(32).toString('hex')}`;
 }
 
 function getOrCreateStableSession(identity: string): string {
@@ -611,7 +594,19 @@ export class OpenCodeProvider extends BaseProvider {
         ? applyFingerprintToolsToBody(body, lane === 'responses' ? 'responses' : lane === 'messages' ? 'claude' : 'chat')
         : new Map<string, string>();
 
-    const authValue = this.variant === 'opencode' ? 'Bearer public' : `Bearer ${apiKey}`;
+    // The free lane used to send the literal `Bearer public` and ignore any
+    // stored credential. When the account holds a Console OAuth login (see
+    // opencode-oauth.ts) the resolved credential is that login's JSON blob:
+    // send its access token (the account lifecycle refreshes it before it
+    // expires) and the chosen org, and fall back to `Bearer public` when the
+    // account is not logged in or the stored token is already expired.
+    const consoleOAuth = this.variant === 'opencode' ? parseOAuthCredential(apiKey) : null;
+    const consoleAccessToken =
+      consoleOAuth?.kind === 'opencode' && !credentialExpired(consoleOAuth) ? consoleOAuth.accessToken : null;
+    const authValue =
+      this.variant === 'opencode'
+        ? consoleAccessToken ? `Bearer ${consoleAccessToken}` : 'Bearer public'
+        : `Bearer ${apiKey}`;
     const maxAttempts = this.variant === 'opencode' ? OPENCODE_OVERLOAD_ATTEMPTS : 1;
 
     let res!: Response;
@@ -630,6 +625,7 @@ export class OpenCodeProvider extends BaseProvider {
         headers['x-session-affinity'] = sessionId;
         headers['x-session-id'] = sessionId;
         headers['x-opencode-project'] = 'global';
+        if (consoleOAuth?.orgId) headers['x-org-id'] = consoleOAuth.orgId;
       }
       if (lane === 'messages') headers['anthropic-version'] = '2023-06-01';
 

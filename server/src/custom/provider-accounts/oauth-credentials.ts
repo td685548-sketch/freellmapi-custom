@@ -8,7 +8,7 @@
  */
 export const OAUTH_CREDENTIAL_VERSION = 1 as const;
 
-export type OAuthKind = 'codex' | 'claude' | 'gemini-cli' | 'kiro';
+export type OAuthKind = 'codex' | 'claude' | 'gemini-cli' | 'kiro' | 'opencode';
 
 export interface OAuthCredential {
   v: typeof OAUTH_CREDENTIAL_VERSION;
@@ -24,6 +24,8 @@ export interface OAuthCredential {
   subject?: string;
   /** ChatGPT account id (Codex header). */
   accountId?: string;
+  /** OpenCode Console organisation chosen at login (sent as x-org-id). */
+  orgId?: string;
   planType?: string;
   /** Google Cloud Code Assist project (Gemini CLI). */
   projectId?: string;
@@ -35,7 +37,7 @@ export interface OAuthCredential {
   clientSecret?: string;
 }
 
-const KINDS: readonly OAuthKind[] = ['codex', 'claude', 'gemini-cli', 'kiro'];
+const KINDS: readonly OAuthKind[] = ['codex', 'claude', 'gemini-cli', 'kiro', 'opencode'];
 
 export function isOAuthKind(value: unknown): value is OAuthKind {
   return typeof value === 'string' && (KINDS as readonly string[]).includes(value);
@@ -91,7 +93,7 @@ export function parseOAuthCredential(raw: string): OAuthCredential | null {
   if (scope) credential.scope = scope;
   const lastRefreshAt = milliseconds(data.lastRefreshAt);
   if (lastRefreshAt) credential.lastRefreshAt = lastRefreshAt;
-  for (const name of ['region', 'profileArn', 'clientId', 'clientSecret'] as const) {
+  for (const name of ['region', 'profileArn', 'clientId', 'clientSecret', 'orgId'] as const) {
     const value = text(data[name]);
     if (value) credential[name] = value;
   }

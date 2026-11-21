@@ -77,6 +77,26 @@ export type ProviderAccountAuthStartResponse = {
 
 export type ProviderAccountAuthResult = { status: 'connected'; accountId: number };
 export type ProviderAccountPollResponse = ProviderAccountAuthResult | { status: 'pending'; interval: number };
+
+/** OpenCode Console device login (see server/src/custom/provider-accounts/opencode-oauth.ts). */
+export interface OpenCodeConsoleLoginStartResponse {
+  flow: 'device_code';
+  attemptId: string;
+  verificationUri: string;
+  verificationUriComplete: string;
+  userCode: string;
+  interval: number;
+  expiresAt: number;
+}
+export type OpenCodeConsoleLoginPollResponse =
+  | { status: 'pending'; interval: number }
+  | { status: 'connected'; accountId: number }
+  | { status: 'expired' };
+export interface OpenCodeConsoleLoginStatusResponse {
+  connected: boolean;
+  identity: string | null;
+  expiresAt: number | null;
+}
 export interface ProviderAccountUpdateRequest { label?: string; enabled?: boolean; proxyUrl?: string; proxyPoolId?: number | null }
 export interface ProviderAccountTestRequest { model?: string; message?: string }
 export interface ProviderAccountTestResponse { ok: boolean; message?: string }
