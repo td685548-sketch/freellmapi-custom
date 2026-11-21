@@ -15,7 +15,10 @@ import { proxyFetch } from '../../lib/proxy.js';
 import {
   fetchSentinelHeaders,
   fetchUsableChatGptWebAccessToken,
+  mergeChatGptWebResponseCookies,
   normalizeChatGptWebCookie,
+  recordRotatedChatGptWebCookie,
+  resolveLiveChatGptWebCookie,
 } from './chatgpt-web-image.js';
 import { looksLikeHtmlDocument } from './cookie-format.js';
 
@@ -59,6 +62,7 @@ export interface ChatGptWebChatOptions {
   platform?: Platform;
   userAgent?: string;
   signal?: AbortSignal;
+  onCredentialUpdate?: (next: string) => void;
 }
 
 /** proxyFetch plus a timeout, with auth redirects reported as expired sessions. */
@@ -399,12 +403,32 @@ export async function runChatGptWebChat(opts: ChatGptWebChatOptions): Promise<st
   const baseUrl = (opts.baseUrl?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, '');
   const userAgent = opts.userAgent?.trim() || DEFAULT_USER_AGENT;
   const platform: Platform = opts.platform ?? 'custom';
-  const cookie = normalizeChatGptWebCookie(opts.credential);
+  let cookie = resolveLiveChatGptWebCookie(normalizeChatGptWebCookie(opts.credential));
 
-  const accessToken = await fetchUsableChatGptWebAccessToken(cookie, userAgent, baseUrl, platform, opts.signal);
+  let accessToken = await fetchUsableChatGptWebAccessToken(
+    cookie,
+    userAgent,
+    baseUrl,
+    platform,
+    opts.signal,
+    opts.onCredentialUpdate,
+  );
   if (opts.signal?.aborted) throw new ChatGptWebChatError('Request aborted', 499);
+  cookie = resolveLiveChatGptWebCookie(cookie);
 
-  const sentinel = await fetchSentinelHeaders({ baseUrl, accessToken, cookie, userAgent, platform, signal: opts.signal });
+  const sentinel = await fetchSentinelHeaders({
+    baseUrl,
+    accessToken,
+    cookie,
+    userAgent,
+    platform,
+    signal: opts.signal,
+    onCredentialUpdate: opts.onCredentialUpdate,
+    onAccessTokenUpdate: (token) => {
+      accessToken = token;
+    },
+  });
+  cookie = resolveLiveChatGptWebCookie(cookie);
   const headers: Record<string, string> = {
     ...sentinel,
     Authorization: `Bearer ${accessToken}`,
@@ -478,6 +502,12 @@ export async function runChatGptWebChat(opts: ChatGptWebChatOptions): Promise<st
     opts.signal,
   );
   const prepared = await readJsonResponse(prepare, 'prepare');
+  const preparedMerged = mergeChatGptWebResponseCookies(cookie, prepare);
+  if (preparedMerged.changed) {
+    recordRotatedChatGptWebCookie(cookie, preparedMerged.nextHeader, opts.onCredentialUpdate);
+    cookie = preparedMerged.nextHeader;
+    headers.Cookie = cookie;
+  }
 
   const turnSignal = opts.signal
     ? AbortSignal.any([opts.signal, AbortSignal.timeout(SSE_READ_DEADLINE_MS)])
@@ -526,6 +556,11 @@ export async function runChatGptWebChat(opts: ChatGptWebChatOptions): Promise<st
       `ChatGPT conversation failed (HTTP ${conversation.status})${detail ? `: ${detail}` : ''}`,
       conversation.status || 502,
     );
+  }
+  const convMerged = mergeChatGptWebResponseCookies(cookie, conversation);
+  if (convMerged.changed) {
+    recordRotatedChatGptWebCookie(cookie, convMerged.nextHeader, opts.onCredentialUpdate);
+    cookie = convMerged.nextHeader;
   }
 
   const sseText = await readSseText(conversation, turnSignal);
