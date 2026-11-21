@@ -831,6 +831,18 @@ it('renders surgical proposal badge and defaults only targeted steps to checked'
     expect(appliedCard).not.toBeNull();
     expect(appliedCard?.textContent).toContain('Đã áp dụng cấu hình hệ thống thành công');
     expect(appliedCard?.textContent).toContain('Đã bật Response Cache thành công.');
+
+    // "Mở Cài đặt" opens the Settings DIALOG (there is no /settings route) and leaves the URL alone.
+    const opened = vi.fn();
+    window.addEventListener('freellmapi:open-settings', opened);
+    const openBtns = appliedCard!.querySelectorAll<HTMLButtonElement>('[data-testid="support-setup-open-setting"]');
+    expect(openBtns).toHaveLength(1);
+    expect(openBtns[0]!.textContent).toContain('Mở Cài đặt');
+    const pathBefore = container.querySelector('[data-testid="current-path"]')?.textContent;
+    act(() => openBtns[0]!.click());
+    window.removeEventListener('freellmapi:open-settings', opened);
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[data-testid="current-path"]')?.textContent).toBe(pathBefore);
   });
 
   it('renders permission-grant proposal with target/scope/diff and approves with no step selection', async () => {
