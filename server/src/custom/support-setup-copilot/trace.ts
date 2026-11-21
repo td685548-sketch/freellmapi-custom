@@ -14,12 +14,25 @@ interface TraceContext {
   sink: Sink;
   seq: number;
   open: Map<string, SupportSetupTraceStep>;
+  modelCalls: number;
+  toolCalls: number;
+  source?: 'thruline' | 'freellmapi';
+  attempts: TraceAttempt[];
+}
+
+/** One model attempt that did not produce a usable answer, with a secret-free reason. */
+export interface TraceAttempt {
+  route: string;
+  reasonVi: string;
+  reasonEn: string;
+  /** The source was never tried (nothing connected / turned off): only worth showing when no model answered. */
+  skipped?: boolean;
 }
 
 const als = new AsyncLocalStorage<TraceContext>();
 
 export function runWithTrace<T>(sink: Sink, fn: () => T): T {
-  return als.run({ sink, seq: 0, open: new Map() }, fn);
+  return als.run({ sink, seq: 0, open: new Map(), modelCalls: 0, toolCalls: 0, attempts: [] }, fn);
 }
 
 export function isTracing(): boolean {
@@ -80,4 +93,47 @@ export async function traceStep<T>(
     traceFinish(id, 'error');
     throw err;
   }
+}
+
+/** Counts one real upstream model request (a retry or a failover attempt counts again). No-op outside a trace. */
+export function traceCountModelCall(): void {
+  const ctx = als.getStore();
+  if (ctx) ctx.modelCalls += 1;
+}
+
+/** Counts one tool call made while answering. No-op outside a trace. */
+export function traceCountToolCall(): void {
+  const ctx = als.getStore();
+  if (ctx) ctx.toolCalls += 1;
+}
+
+/** Records which model source answered (the last one wins). No-op outside a trace. */
+export function traceNoteSource(source: 'thruline' | 'freellmapi'): void {
+  const ctx = als.getStore();
+  if (ctx) ctx.source = source;
+}
+
+/** What the current traced turn has cost so far, or null outside a trace. */
+export function traceUsage(): { modelCalls: number; toolCalls: number; source?: 'thruline' | 'freellmapi' } | null {
+  const ctx = als.getStore();
+  if (!ctx) return null;
+  return { modelCalls: ctx.modelCalls, toolCalls: ctx.toolCalls, ...(ctx.source ? { source: ctx.source } : {}) };
+}
+
+/** Remembers a failed model attempt for this turn (shown on the "ask the model" step). No-op outside a trace. */
+export function traceNoteAttempt(attempt: TraceAttempt): void {
+  const ctx = als.getStore();
+  if (ctx) ctx.attempts.push(attempt);
+}
+
+export function traceAttempts(): readonly TraceAttempt[] {
+  return als.getStore()?.attempts ?? [];
+}
+
+/** Replaces a still-running step's detail (live progress), keeping its status. */
+export function traceDetail(id: string, detail: Pick<SupportSetupTraceStep, 'detailVi' | 'detailEn'>): void {
+  const ctx = als.getStore();
+  const prev = id ? ctx?.open.get(id) : undefined;
+  if (!ctx || !prev) return;
+  emit(ctx, { ...prev, ...detail });
 }

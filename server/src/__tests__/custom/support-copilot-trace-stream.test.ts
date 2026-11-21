@@ -11,7 +11,9 @@ import {
   buildSystemTargetOverviewReply,
   handleSystemTargetChatTurnGrounded,
 } from '../../custom/support-setup-copilot/system-target.js';
-import { runWithTrace, traceDone, traceFinish, traceStart, traceStep } from '../../custom/support-setup-copilot/trace.js';
+import { runHumanLikeLlmCoach } from '../../custom/support-setup-copilot/llm-coach.js';
+import { setCopilotModelSource } from '../../custom/support-setup-copilot/model-source.js';
+import { runWithTrace, traceDone, traceFinish, traceStart, traceStep, traceUsage } from '../../custom/support-setup-copilot/trace.js';
 import { getDb, initDb } from '../../db/index.js';
 import { createSession, createUser, type SessionUser } from '../../services/auth.js';
 import { setUserPermissions } from '../../services/users.js';
@@ -61,6 +63,154 @@ describe('trace helpers', () => {
     await runWithTrace(() => { throw new Error('closed'); }, async () => {
       await expect(traceStep({ kind: 'tool', titleVi: 'x', titleEn: 'x' }, () => 1)).resolves.toBe(1);
     });
+  });
+});
+
+describe('usage: what a reply actually cost', () => {
+  let admin: SessionUser;
+  beforeAll(() => {
+    process.env.ENCRYPTION_KEY = 'a'.repeat(64);
+    initDb(':memory:');
+    admin = createUser('trace-usage-admin@example.com', 'AdminPass123!');
+    installMockCloudLease();
+  });
+  afterAll(() => {
+    configureCloudEntitlementForTesting(null);
+    delete process.env.FREEAPI_AI_ACTIVATION_TOKEN;
+  });
+
+  const completion = (content: string) =>
+    new Response(JSON.stringify({ model: 'fake/m', choices: [{ message: { content } }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  const coachInput = (fetchImpl: typeof fetch) => ({
+    user: admin,
+    messages: [{ role: 'user' as const, content: 'cho mình hỏi về cài đặt cache' }],
+    locale: 'vi' as const,
+    targetMode: 'update_tenant' as const,
+    diagnostic: null,
+    extracted: {},
+    gatewayLoopback: { host: '127.0.0.1', port: 9, forceLoopback: true },
+    fetchImpl,
+  });
+
+  it('is null outside a trace and zero for a turn that never reaches a model', async () => {
+    expect(traceUsage()).toBeNull();
+    await runWithTrace(() => {}, async () => {
+      expect(traceUsage()).toEqual({ modelCalls: 0, toolCalls: 0 });
+    });
+  });
+
+  it('counts one real model request for a normal answer', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => { calls += 1; return completion(JSON.stringify({ intent: 'guide', reply: 'Response cache giúp giảm số lần gọi nhà cung cấp khi câu hỏi lặp lại.' })); }) as unknown as typeof fetch;
+    const usage = await runWithTrace(() => {}, async () => {
+      const res = await runHumanLikeLlmCoach(coachInput(fetchImpl));
+      expect(res?.output.reply).toContain('Response cache');
+      return traceUsage();
+    });
+    expect(calls).toBe(1);
+    expect(usage?.modelCalls).toBe(1);
+  });
+
+  it('counts the corrective retry too (every request that spends tokens)', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      return completion(JSON.stringify({
+        intent: 'guide',
+        reply: calls === 1
+          ? 'Response cache reduces repeated provider calls when the same question comes in again and again.'
+          : 'Response cache giúp giảm số lần gọi nhà cung cấp khi câu hỏi lặp lại.',
+      }));
+    }) as unknown as typeof fetch;
+    const usage = await runWithTrace(() => {}, async () => {
+      await runHumanLikeLlmCoach(coachInput(fetchImpl));
+      return traceUsage();
+    });
+    expect(usage?.modelCalls).toBe(calls);
+    expect(calls).toBe(2);
+  });
+});
+
+describe('why a model attempt failed is shown on the "ask the model" step', () => {
+  let admin: SessionUser;
+  beforeAll(() => {
+    process.env.ENCRYPTION_KEY = 'd'.repeat(64);
+    initDb(':memory:');
+    installMockCloudLease();
+    admin = createUser('trace-reason-admin@example.com', 'AdminPass123!');
+  });
+  afterAll(() => {
+    configureCloudEntitlementForTesting(null);
+    delete process.env.FREEAPI_AI_ACTIVATION_TOKEN;
+    setCopilotModelSource('both');
+  });
+
+  const input = (fetchImpl: typeof fetch) => ({
+    user: admin,
+    messages: [{ role: 'user' as const, content: 'cho mình hỏi về cài đặt cache' }],
+    locale: 'vi' as const, targetMode: 'update_tenant' as const, diagnostic: null, extracted: {},
+    gatewayLoopback: { host: '127.0.0.1', port: 9, forceLoopback: true },
+    fetchImpl,
+  });
+  const run = async (fetchImpl: typeof fetch) => {
+    const seen: SupportSetupTraceStep[] = [];
+    const result = await runWithTrace((st) => seen.push(st), () => runHumanLikeLlmCoach(input(fetchImpl)));
+    const model = [...seen].reverse().find((st) => st.kind === 'model');
+    return { result, model, seen };
+  };
+
+  it('a provider error is explained with its status, for each route it tried', async () => {
+    setCopilotModelSource('both');
+    const fetchImpl = (async () => new Response('{}', { status: 503 })) as unknown as typeof fetch;
+    const { result, model } = await run(fetchImpl);
+    expect(result).toBeNull();
+    expect(model?.status).toBe('error');
+    expect(model?.detailVi).toContain('Chưa có mô hình nào trả lời');
+    expect(model?.detailVi).toContain('FreeLLMAPI auto: chưa có nhà cung cấp nào sẵn sàng (HTTP 503)');
+    expect(model?.detailVi).toContain('FreeLLMAPI auto:balanced'); // auto failed over, and that is shown too
+    expect(model?.detailEn).toContain('No model answered');
+    expect(model?.detailEn).toContain('no provider is ready (HTTP 503)');
+  });
+
+  it('a slow model is reported as a timeout with the real limit, not as a mystery', async () => {
+    const fetchImpl = (async () => { throw new DOMException('The operation timed out.', 'TimeoutError'); }) as unknown as typeof fetch;
+    const { model } = await run(fetchImpl);
+    expect(model?.detailVi).toContain('quá 15 giây chưa trả lời');
+    expect(model?.detailEn).toContain('no answer within 15 s');
+  });
+
+  it('an unusable answer and a refused key each get their own reason', async () => {
+    const badFormat = (async () => new Response(JSON.stringify({ choices: [{ message: { content: '' } }] }), { status: 200 })) as unknown as typeof fetch;
+    expect((await run(badFormat)).model?.detailVi).toContain('trả lời sai định dạng');
+    const denied = (async () => new Response('{}', { status: 401 })) as unknown as typeof fetch;
+    expect((await run(denied)).model?.detailVi).toContain('bị từ chối xác thực (HTTP 401)');
+  });
+
+  it('"Thruline only" with no account says so, and says FreeLLMAPI was turned off by the setting', async () => {
+    setCopilotModelSource('thruline');
+    let calls = 0;
+    const { model } = await run((async () => { calls += 1; return new Response('{}', { status: 200 }); }) as unknown as typeof fetch);
+    expect(calls).toBe(0);
+    expect(model?.detailVi).toContain('Thruline: chưa nối tài khoản nhà cung cấp nào');
+    expect(model?.detailVi).toContain('FreeLLMAPI: đang tắt trong mục chọn Mô hình');
+    setCopilotModelSource('both');
+  });
+
+  it('an answer after a failed route still mentions what failed first', async () => {
+    setCopilotModelSource('both');
+    let n = 0;
+    const fetchImpl = (async () => {
+      n += 1;
+      return n === 1
+        ? new Response('{}', { status: 429 })
+        : new Response(JSON.stringify({ model: 'fake/m', choices: [{ message: { content: JSON.stringify({ intent: 'guide', reply: 'Response cache giúp giảm số lần gọi nhà cung cấp.' }) } }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const { result, model } = await run(fetchImpl);
+    expect(result?.output.reply).toContain('Response cache');
+    expect(model?.status).toBe('done');
+    expect(model?.detailVi).toContain('fake/m');
+    expect(model?.detailVi).toContain('trước đó: FreeLLMAPI auto: đang bị giới hạn tốc độ');
+    expect(model?.detailVi).not.toContain('Thruline: chưa nối'); // never tried: noise once a model answered
   });
 });
 
@@ -179,6 +329,8 @@ describe('POST /chat as an event stream', () => {
     expect(last.event).toBe('final');
     expect(last.data.status).toBe(200);
     expect(last.data.body.proposal.systemActions[0]).toMatchObject({ settingId: 'response_cache' });
+    // answered by rules: no model request, no tool call, and it says so
+    expect(last.data.body.usage).toEqual({ modelCalls: 0, toolCalls: 0 });
   });
 
   it('reports an error as the final event with its status and the usual error shape', async () => {
@@ -198,5 +350,6 @@ describe('POST /chat as an event stream', () => {
     expect(res.headers.get('content-type')).toContain('application/json');
     const body = (await res.json()) as any;
     expect(body.proposal.systemActions[0].settingId).toBe('response_cache');
+    expect(body.usage).toBeUndefined(); // usage is only reported on the streamed path
   });
 });

@@ -366,7 +366,7 @@ describe('SupportSetupCopilot widget', () => {
       controller.enqueue(sse('step', step('s2', 'done')));
       controller.enqueue(sse('final', {
         status: 200,
-        body: { ok: true, reply: 'Đây là câu trả lời.', intent: 'guide', missingQuestions: [], suggestedQuickReplies: [], proposal: null, modelUsed: null, usedFallback: true },
+        body: { ok: true, reply: 'Đây là câu trả lời.', intent: 'guide', missingQuestions: [], suggestedQuickReplies: [], proposal: null, modelUsed: null, usedFallback: true, usage: { modelCalls: 2, toolCalls: 1, source: 'thruline' } },
       }));
       controller.close();
     });
@@ -378,6 +378,51 @@ describe('SupportSetupCopilot widget', () => {
     expect(done!.textContent).toContain('Quá trình xử lý');
     expect(done!.textContent).toContain('(2 bước)');
     expect(container.textContent).toContain('Đây là câu trả lời.');
+    expect(container.querySelector('[data-testid="support-setup-usage"]')?.textContent).toBe(
+      '2 lần gọi mô hình qua Thruline · 1 lần gọi công cụ',
+    );
+  });
+
+  it('says plainly when a reply used no model at all, and shows nothing when the cost is unknown', async () => {
+    let n = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.endsWith('/api/user/session')) {
+          return json({ userId: 1, email: 'admin@example.com', role: 'admin', isPrimary: true, permissions: ['*'] });
+        }
+        if (url.includes('/api/support-setup-copilot/status')) return json(sampleStatus(true));
+        if (url.endsWith('/api/support-setup-copilot/chat')) {
+          n += 1;
+          const base = { ok: true, reply: `Trả lời số ${n}`, intent: 'guide', missingQuestions: [], suggestedQuickReplies: [], proposal: null, modelUsed: null, usedFallback: true };
+          return json(n === 1 ? { ...base, usage: { modelCalls: 0, toolCalls: 0 } } : base);
+        }
+        return json({});
+      }),
+    );
+    mount('/thruline/providers', 'en');
+    await flush();
+    act(() => (container.querySelector('[data-testid="support-setup-copilot-launcher"]') as HTMLButtonElement).click());
+    await flush();
+    const send = async (text: string) => {
+      const textarea = container.querySelector('.ssc-composer textarea') as HTMLTextAreaElement;
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+      act(() => {
+        setter?.call(textarea, text);
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        textarea.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      await flush();
+      act(() => (container.querySelector('[data-testid="support-setup-send-btn"]') as HTMLButtonElement).click());
+      await flush();
+    };
+    await send('one');
+    expect(container.querySelector('[data-testid="support-setup-usage"]')?.textContent).toBe(
+      'No model call — answered by rules, no tokens used',
+    );
+    await send('two');
+    expect(container.textContent).toContain('Trả lời số 2');
+    expect(container.querySelectorAll('[data-testid="support-setup-usage"]')).toHaveLength(1); // unknown cost: no line
   });
 
   it('a streamed error shows its message and leaves no live panel behind', async () => {

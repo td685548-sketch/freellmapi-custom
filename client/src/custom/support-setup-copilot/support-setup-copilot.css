@@ -1634,3 +1634,41 @@ details.ssc-process[open] .ssc-process-chevron {
     animation: none;
   }
 }
+
+.ssc-usage {
+  margin-top: 3px;
+  padding-left: 4px;
+  font-size: 10.5px;
+  color: var(--ssc-muted);
+}
+
+.ssc-model-source {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--ssc-border);
+  font-size: 11.5px;
+  color: var(--ssc-muted);
+}
+
+.ssc-model-source-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 600;
+}
+
+.ssc-model-source .ssc-select {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.ssc-model-source-warn {
+  flex: 1 1 100%;
+  margin: 0;
+  color: #d97706;
+  font-size: 11px;
+  line-height: 1.4;
+}

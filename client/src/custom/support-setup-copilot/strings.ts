@@ -134,6 +134,24 @@ export interface SupportSetupCopilotStrings {
   processTitle: string;
   /** `{n}` is replaced with the number of steps. */
   processCount: string;
+  /** Under an answer: no model was called. */
+  usageNone: string;
+  /** `{n}` = number of upstream model requests. */
+  usageModel: string;
+  /** `{n}` = number of tool calls. */
+  usageTools: string;
+  /** `{n}` = model requests, `{source}` = Thruline | FreeLLMAPI. */
+  usageModelVia: string;
+  modelSourceLabel: string;
+  modelSourceBoth: string;
+  modelSourceThruline: string;
+  modelSourceFreellmapi: string;
+  modelSourceReadOnly: string;
+  modelSourceHelp: string;
+  modelSourceNoThruline: string;
+  modelSourceNoFreellmapi: string;
+  modelSourceNoneAvailable: string;
+  modelSourceSaved: string;
   consentBanner: string;
   selectedStepsCount: string;
   consentTargetCreate: string;
@@ -308,6 +326,20 @@ const en: SupportSetupCopilotStrings = {
   thinking: 'Thinking & putting together a helpful reply…',
   processTitle: 'How I worked on this',
   processCount: '({n} steps)',
+  usageNone: 'No model call — answered by rules, no tokens used',
+  usageModel: '{n} model call(s) on your connected providers',
+  usageTools: '{n} tool call(s)',
+  usageModelVia: '{n} model call(s) via {source}',
+  modelSourceLabel: 'Models',
+  modelSourceBoth: 'Both (Thruline first, then FreeLLMAPI)',
+  modelSourceThruline: 'Thruline models only',
+  modelSourceFreellmapi: 'FreeLLMAPI models only',
+  modelSourceReadOnly: 'Changing this needs the edit_settings permission',
+  modelSourceHelp: 'Which models the Copilot may call when it needs AI. Applies to everyone.',
+  modelSourceNoThruline: 'No Thruline provider account is connected, so the Copilot would answer by rules only.',
+  modelSourceNoFreellmapi: 'No FreeLLMAPI key or route is configured, so the Copilot would answer by rules only.',
+  modelSourceNoneAvailable: 'Neither source has a connected model, so the Copilot answers by rules only.',
+  modelSourceSaved: 'Model source updated.',
   consentBanner: 'Consent required — no changes applied yet',
   selectedStepsCount: '{selected}/{total} selected',
   consentTargetCreate: 'New tenant: {name} ({slug})',
@@ -499,6 +531,20 @@ const vi: SupportSetupCopilotStrings = {
   thinking: 'Đang lắng nghe & chuẩn bị câu trả lời cho bạn…',
   processTitle: 'Quá trình xử lý',
   processCount: '({n} bước)',
+  usageNone: 'Không gọi mô hình — trả lời theo quy tắc, không tốn token',
+  usageModel: '{n} lần gọi mô hình trên các nhà cung cấp bạn đã nối',
+  usageTools: '{n} lần gọi công cụ',
+  usageModelVia: '{n} lần gọi mô hình qua {source}',
+  modelSourceLabel: 'Mô hình',
+  modelSourceBoth: 'Cả hai (Thruline trước, rồi FreeLLMAPI)',
+  modelSourceThruline: 'Chỉ mô hình của Thruline',
+  modelSourceFreellmapi: 'Chỉ mô hình của FreeLLMAPI',
+  modelSourceReadOnly: 'Cần quyền edit_settings để thay đổi mục này',
+  modelSourceHelp: 'Copilot được gọi mô hình nào khi cần AI. Áp dụng cho mọi người dùng.',
+  modelSourceNoThruline: 'Chưa nối tài khoản nhà cung cấp nào ở Thruline, nên Copilot sẽ chỉ trả lời theo quy tắc.',
+  modelSourceNoFreellmapi: 'Chưa cấu hình key hay tuyến nào của FreeLLMAPI, nên Copilot sẽ chỉ trả lời theo quy tắc.',
+  modelSourceNoneAvailable: 'Cả hai nguồn đều chưa có mô hình nào được nối, nên Copilot chỉ trả lời theo quy tắc.',
+  modelSourceSaved: 'Đã cập nhật nguồn mô hình.',
   consentBanner: 'Chờ xác nhận — chưa thay đổi dữ liệu hệ thống',
   selectedStepsCount: 'Đã chọn {selected}/{total} bước',
   consentTargetCreate: 'Tạo tenant mới: {name} ({slug})',

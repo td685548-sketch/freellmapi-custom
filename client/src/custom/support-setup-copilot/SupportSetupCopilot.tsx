@@ -56,6 +56,7 @@ import type {
   SupportSetupTone,
   SupportSystemSettingId,
   SupportSetupTraceStep,
+  SupportSetupUsage,
 } from '../../../../shared/support-setup-copilot';
 import {
   fetchCopilotUserDiagnostics,
@@ -72,6 +73,7 @@ import {
   formatSetupString,
   getSupportSetupCopilotStrings,
 } from './strings';
+import { ModelSourcePicker } from './ModelSourcePicker';
 import { ProcessSteps } from './ProcessSteps';
 import { upsertStep } from './process-steps-state';
 import './support-setup-copilot.css';
@@ -94,6 +96,8 @@ interface ChatTurn {
   actionResult?: CopilotExecuteActionResponse | null;
   /** How the Copilot worked on this answer (kept collapsed under the message). */
   trace?: SupportSetupTraceStep[];
+  /** What this reply cost (model / tool calls); only known for streamed replies. */
+  usage?: SupportSetupUsage;
 }
 
 interface BriefDraft {
@@ -305,6 +309,7 @@ export function SupportSetupCopilot() {
           userDiagnostic: res.userDiagnostic ?? null,
           actionProposal: res.actionProposal ?? null,
           trace: stepsRef.current.length > 0 ? stepsRef.current : undefined,
+          usage: res.usage,
         },
       ]);
     },
@@ -1467,6 +1472,8 @@ export function SupportSetupCopilot() {
             )}
           </div>
 
+          <ModelSourcePicker s={s} enabled={canQueryStatus} />
+
           {whoamiOpen && (
             <div className="ssc-diag-card" data-testid="copilot-whoami-card">
               <div className="ssc-diag-head">
@@ -1943,6 +1950,20 @@ export function SupportSetupCopilot() {
                     turn.content
                   )}
                 </div>
+                {turn.role === 'assistant' && turn.usage && (
+                  <div className="ssc-usage" data-testid="support-setup-usage">
+                    {turn.usage.modelCalls === 0
+                      ? s.usageNone
+                      : [
+                          turn.usage.source
+                            ? s.usageModelVia
+                                .replace('{n}', String(turn.usage.modelCalls))
+                                .replace('{source}', turn.usage.source === 'thruline' ? 'Thruline' : 'FreeLLMAPI')
+                            : s.usageModel.replace('{n}', String(turn.usage.modelCalls)),
+                          ...(turn.usage.toolCalls > 0 ? [s.usageTools.replace('{n}', String(turn.usage.toolCalls))] : []),
+                        ].join(' · ')}
+                  </div>
+                )}
 
                 {turn.userDiagnostic && renderUserDiagnosticCard(turn.userDiagnostic, turn.id)}
 

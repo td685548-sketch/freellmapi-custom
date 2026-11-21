@@ -33,7 +33,9 @@ import {
 import { buildPlatformPromptSection } from './platform-guide.js';
 import { buildKbQueryFromMessages, formatKbForPrompt, searchKb } from './kb/index.js';
 import { buildSystemAdvicePromptSection } from './system-advisor.js';
-import { traceFinish, traceStart, traceStep } from './trace.js';
+import { getCopilotModelSource } from './model-source.js';
+import { extractErrorStatus } from '../x-gateway/route-cooldown.js';
+import { traceAttempts, traceCountModelCall, traceDetail, traceNoteAttempt, traceNoteSource, traceFinish, traceStart, traceStep } from './trace.js';
 import {
   buildAccountOnlyIdentityBlock,
   buildIdentityPromptBlock,
@@ -900,6 +902,32 @@ function validateParsedCoachOutput(
   };
 }
 
+/** Why a model attempt failed, in words an operator can act on. Never includes raw provider text. */
+function statusReason(status: number): { vi: string; en: string } {
+  if (status === 401 || status === 403) return { vi: `bị từ chối xác thực (HTTP ${status})`, en: `authentication refused (HTTP ${status})` };
+  if (status === 429) return { vi: 'đang bị giới hạn tốc độ hoặc hết hạn mức (HTTP 429)', en: 'rate-limited or out of quota (HTTP 429)' };
+  if (status === 400 || status === 404) return { vi: `chưa có tuyến mô hình nào dùng được (HTTP ${status})`, en: `no usable model route (HTTP ${status})` };
+  if (status === 408 || status === 504) return { vi: `quá thời gian chờ (HTTP ${status})`, en: `timed out (HTTP ${status})` };
+  if (status === 503) return { vi: 'chưa có nhà cung cấp nào sẵn sàng (HTTP 503)', en: 'no provider is ready (HTTP 503)' };
+  if (status >= 500) return { vi: `nhà cung cấp báo lỗi (HTTP ${status})`, en: `the provider reported an error (HTTP ${status})` };
+  return { vi: `bị từ chối (HTTP ${status})`, en: `rejected (HTTP ${status})` };
+}
+
+function errorReason(err: unknown, timeoutMs: number): { vi: string; en: string } {
+  const name = err instanceof Error ? err.name : '';
+  const message = err instanceof Error ? err.message : '';
+  const secs = Math.round(timeoutMs / 1000);
+  if (name === 'TimeoutError' || name === 'AbortError' || /timed?\s*out|aborted/i.test(message)) {
+    return { vi: `quá ${secs} giây chưa trả lời`, en: `no answer within ${secs} s` };
+  }
+  const status = extractErrorStatus(err);
+  if (status !== undefined) return statusReason(status);
+  if (/ECONNREFUSED|ENOTFOUND|EAI_AGAIN|fetch failed|socket/i.test(message)) {
+    return { vi: 'không kết nối được tới nhà cung cấp', en: 'could not reach the provider' };
+  }
+  return { vi: 'lỗi không xác định', en: 'unknown error' };
+}
+
 /**
  * Executes a warm, empathetic, human-like onboarding coach turn via any available LLM route:
  * 1. Thruline `provider_accounts` (`x_gateway_keys`: OAuth, freeTier, webCookie, API keys, custom nodes)
@@ -916,12 +944,24 @@ export async function runHumanLikeLlmCoach(
   // whichever model answered (or a cross when none did).
   const modelStep = { id: '' };
   const result = await runHumanLikeLlmCoachCore(params, modelStep);
+  // A source that was never tried (nothing connected, or turned off) is only worth mentioning when
+  // nothing answered; once a model answered it is just noise.
+  const failed = result ? traceAttempts().filter((a) => !a.skipped) : traceAttempts();
+  const summary = (lang: 'vi' | 'en') =>
+    failed
+      .slice(0, 4)
+      .map((a) => `${a.route}: ${lang === 'vi' ? a.reasonVi : a.reasonEn}`)
+      .join(' · ');
   if (result) {
-    traceFinish(modelStep.id, 'done', { detailVi: result.modelUsed, detailEn: result.modelUsed });
+    traceNoteSource(result.routeSource === 'thruline_account' ? 'thruline' : 'freellmapi');
+    traceFinish(modelStep.id, 'done', {
+      detailVi: failed.length ? `${result.modelUsed} — trước đó: ${summary('vi')}` : result.modelUsed,
+      detailEn: failed.length ? `${result.modelUsed} — before that: ${summary('en')}` : result.modelUsed,
+    });
   } else {
     traceFinish(modelStep.id, 'error', {
-      detailVi: 'Chưa có mô hình nào trả lời',
-      detailEn: 'No model answered',
+      detailVi: failed.length ? `Chưa có mô hình nào trả lời — ${summary('vi')}` : 'Chưa có mô hình nào trả lời',
+      detailEn: failed.length ? `No model answered — ${summary('en')}` : 'No model answered',
     });
   }
   return result;
@@ -994,10 +1034,25 @@ async function runHumanLikeLlmCoachCore(
 
   const timeoutMs = params.timeoutMs ?? 15_000;
 
+  // Every attempt that fails is remembered with its reason and shown live on the "ask the model" step.
+  const failAttempt = (route: string, reason: { vi: string; en: string }, skipped = false): void => {
+    traceNoteAttempt({ route, reasonVi: reason.vi, reasonEn: reason.en, ...(skipped ? { skipped: true } : {}) });
+    const all = traceAttempts().slice(0, 4);
+    traceDetail(modelStep.id, {
+      detailVi: all.map((a) => `${a.route}: ${a.reasonVi}`).join(' · '),
+      detailEn: all.map((a) => `${a.route}: ${a.reasonEn}`).join(' · '),
+    });
+  };
+
   // -------------------------------------------------------------------------
   // Tier 1: Thruline provider accounts (`x_gateway_keys`)
   // -------------------------------------------------------------------------
-  const candidates = collectThrulineCandidates(params.diagnostic?.tenant.defaultModel);
+  const modelSource = getCopilotModelSource();
+  const candidates =
+    modelSource === 'freellmapi' ? [] : collectThrulineCandidates(params.diagnostic?.tenant.defaultModel);
+  if (modelSource !== 'freellmapi' && candidates.length === 0) {
+    failAttempt('Thruline', { vi: 'chưa nối tài khoản nhà cung cấp nào', en: 'no provider account is connected' }, true);
+  }
   if (candidates.length > 0) {
     for (const candidate of candidates.slice(0, 4)) {
       const { account, modelId } = candidate;
@@ -1017,6 +1072,7 @@ async function runHumanLikeLlmCoachCore(
 
       try {
         const signal = AbortSignal.timeout(Math.min(timeoutMs, 12_000));
+        traceCountModelCall();
         const res = await withQuotaTracking(account, modelId, proxy, () =>
           provider.chatCompletion(
             credential,
@@ -1039,6 +1095,9 @@ async function runHumanLikeLlmCoachCore(
             routeSource: 'thruline_account',
           };
         }
+        if (!check.needsRetry) {
+          failAttempt(`${account.provider}/${modelId}`, { vi: 'trả lời sai định dạng', en: 'answered in an unusable format' });
+        }
 
         if (check.needsRetry) {
           const retrySignal = AbortSignal.timeout(Math.min(timeoutMs, 10_000));
@@ -1046,6 +1105,7 @@ async function runHumanLikeLlmCoachCore(
             ...baseTurnMessages,
             { role: 'system', content: buildCorrectiveRetryNotice(params.locale) },
           ];
+          traceCountModelCall();
           const retryRes = await withQuotaTracking(account, modelId, proxy, () =>
             provider.chatCompletion(
               credential,
@@ -1064,8 +1124,10 @@ async function runHumanLikeLlmCoachCore(
               routeSource: 'thruline_account',
             };
           }
+          failAttempt(`${account.provider}/${modelId}`, { vi: 'vẫn trả lời sai sau khi yêu cầu viết lại', en: 'still unusable after asking it to rewrite' });
         }
       } catch (err) {
+        failAttempt(`${account.provider}/${modelId}`, errorReason(err, Math.min(timeoutMs, 12_000)));
         try {
           recordCandidateFailure(account.id, modelId, err);
           recordRouteOutcome(`${account.id}:${modelId}`, { error: true });
@@ -1079,8 +1141,14 @@ async function runHumanLikeLlmCoachCore(
   // -------------------------------------------------------------------------
   // Tier 2: Main FreeLLMAPI `/v1/chat/completions` loopback
   // -------------------------------------------------------------------------
+  if (modelSource === 'thruline') {
+    // The operator limited the Copilot to Thruline's own models.
+    failAttempt('FreeLLMAPI', { vi: 'đang tắt trong mục chọn Mô hình', en: 'turned off in the Models setting' }, true);
+    return null;
+  }
   const loopbackTarget = normalizeLoopbackTarget(params.gatewayLoopback);
   if (!loopbackTarget || !shouldAttemptMainGatewayLoopback(params, loopbackTarget.port)) {
+    failAttempt('FreeLLMAPI', { vi: 'chưa cấu hình key hay tuyến mô hình nào', en: 'no key or model route is configured' }, true);
     return null;
   }
 
@@ -1103,6 +1171,7 @@ async function runHumanLikeLlmCoachCore(
     temperature: number,
     bypassCache: boolean,
   ): Promise<Response> => {
+    traceCountModelCall();
     const headers = bypassCache
       ? { ...baseHeaders, 'cache-control': 'no-cache' }
       : baseHeaders;
@@ -1138,6 +1207,7 @@ async function runHumanLikeLlmCoachCore(
     try {
       const upstream = await postLoopback(modelCandidate, baseTurnMessages, 0.45, false);
       if (!upstream.ok) {
+        failAttempt(`FreeLLMAPI ${modelCandidate}`, statusReason(upstream.status));
         if (
           i === 0 &&
           (upstream.status === 400 ||
@@ -1184,6 +1254,9 @@ async function runHumanLikeLlmCoachCore(
           } | null;
           const retryText = extractCompletionText(retryBody?.choices?.[0]?.message?.content);
           const retryCheck = validateParsedCoachOutput(retryText, params);
+          if (!retryCheck.valid) {
+            failAttempt(`FreeLLMAPI ${modelCandidate}`, { vi: 'vẫn trả lời sai sau khi yêu cầu viết lại', en: 'still unusable after asking it to rewrite' });
+          }
           if (retryCheck.valid) {
             const retryRoutedHeader = retryUpstream.headers?.get?.('x-routed-via') ?? undefined;
             return {
@@ -1199,11 +1272,24 @@ async function runHumanLikeLlmCoachCore(
         }
       }
 
+      if (!check.needsRetry) {
+        failAttempt(`FreeLLMAPI ${modelCandidate}`, { vi: 'trả lời sai định dạng', en: 'answered in an unusable format' });
+      }
       return null;
-    } catch {
+    } catch (err) {
+      failAttempt(`FreeLLMAPI ${modelCandidate}`, errorReason(err, timeoutMs));
       return null;
     }
   }
 
   return null;
+}
+
+/** Whether each model source currently has something the Copilot could call (for the source picker). */
+export function describeModelSourceAvailability(): { thruline: boolean; freellmapi: boolean } {
+  let thruline = false;
+  let freellmapi = false;
+  try { thruline = collectThrulineCandidates().length > 0; } catch { /* unreadable = not available */ }
+  try { freellmapi = hasConfiguredMainGatewayRoutes(); } catch { /* unreadable = not available */ }
+  return { thruline, freellmapi };
 }

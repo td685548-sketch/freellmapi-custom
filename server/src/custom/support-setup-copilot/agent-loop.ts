@@ -46,7 +46,7 @@ import {
   toolSchemasForPrompt,
   type CopilotToolResult,
 } from './tools.js';
-import { traceFinish, traceStart } from './trace.js';
+import { traceCountToolCall, traceFinish, traceStart } from './trace.js';
 import { REQUIRED_PERMISSION_BY_SETTING } from './system-settings.js';
 
 /** Short, secret-free summary of a tool's input for the live step list (keys and short values only). */
@@ -277,6 +277,7 @@ export async function runCopilotAgentLoop(
         detailVi: describeToolInput(call.input),
         detailEn: describeToolInput(call.input),
       });
+      traceCountToolCall();
       const result = await executeCopilotTool({
         user,
         toolId: call.id,
