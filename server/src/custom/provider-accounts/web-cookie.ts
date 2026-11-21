@@ -28,9 +28,10 @@ import {
   spliceClaudeThinkingSegmentsIntoContent,
 } from '../x-gateway/thinking-normalize.js';
 import {
-  fetchChatGptWebAccessToken,
+  fetchUsableChatGptWebAccessToken,
   normalizeChatGptWebCookie,
   probeChatGptWebSentinelPrepare,
+  resolveLiveChatGptWebCookie,
 } from './chatgpt-web-image.js';
 import { isMetaLlamaKey, looksLikeCookieHeader, looksLikeHtmlDocument, normalizeCookieInput } from './cookie-format.js';
 
@@ -554,6 +555,7 @@ export class WebCookieProvider extends BaseProvider {
           baseUrl: this.baseUrl,
           platform: this.platform,
           signal,
+          onCredentialUpdate: options?.onCredentialUpdate,
         }),
         effectiveTimeoutMs,
         options?.signal,
@@ -854,6 +856,7 @@ export class WebCookieProvider extends BaseProvider {
         baseUrl: this.baseUrl,
         platform: this.platform,
         signal,
+        onCredentialUpdate: options?.onCredentialUpdate,
       }),
       effectiveTimeoutMs,
       options?.signal,
@@ -1101,19 +1104,27 @@ export class WebCookieProvider extends BaseProvider {
     if (this.providerId !== 'chatgpt-web') return true;
 
     try {
-      const cookie = normalizeChatGptWebCookie(apiKey);
-      const accessToken = await fetchChatGptWebAccessToken(cookie, BROWSER_USER_AGENT, this.baseUrl, this.platform);
+      const cookie = resolveLiveChatGptWebCookie(normalizeChatGptWebCookie(apiKey));
+      const accessToken = await fetchUsableChatGptWebAccessToken(
+        cookie,
+        BROWSER_USER_AGENT,
+        this.baseUrl,
+        this.platform,
+        undefined,
+        options?.onCredentialUpdate,
+      );
       // A session can still mint an access token while every chat fails at
-      // Sentinel prepare (expired token), so probe prepare as well. This only
-      // fetches a prepare_token — no conversation is started and no
+      // Sentinel prepare (expired token), so probe prepare (with a single
+      // re-exchange retry) as well. No conversation is started and no
       // proof-of-work is solved — so the probe stays cheap enough for health
-      // checks. A 401/403 here means the account cannot chat at all.
+      // checks. A 401/403 after retry means the account cannot chat at all.
       await probeChatGptWebSentinelPrepare({
         baseUrl: this.baseUrl,
         accessToken,
-        cookie,
+        cookie: resolveLiveChatGptWebCookie(cookie),
         userAgent: BROWSER_USER_AGENT,
         platform: this.platform,
+        onCredentialUpdate: options?.onCredentialUpdate,
       });
       return true;
     } catch (err) {

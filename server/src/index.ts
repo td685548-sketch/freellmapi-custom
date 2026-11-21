@@ -30,6 +30,7 @@ import { loadCacheFromDb } from './services/cache.js';
 import { installGracefulShutdown } from './lib/graceful-shutdown.js';
 import { startWorkerLifecycle } from './custom/x-gateway/support-runtime-router.js';
 import { rotateGeminiWebAccountsOnce, startGeminiWebKeepAlive } from './custom/provider-accounts/gemini-web-keepalive.js';
+import { rotateChatGptWebAccountsOnce, startChatGptWebKeepAlive } from './custom/provider-accounts/chatgpt-web-keepalive.js';
 import { createResourceAwareScheduler } from './custom/render-resource-saver.js';
 import { applyLocalTunnelDirectOutbound } from './custom/local-tunnel-direct-outbound.js';
 import { applyLocalSqlitePerformancePragmas } from './custom/sqlite-performance.js';
@@ -119,6 +120,7 @@ async function main() {
     startCustomModelSync(getDb(), scheduler);
     startBuiltinModelDiscovery(getDb(), scheduler);
     startGeminiWebKeepAlive(scheduler);
+    startChatGptWebKeepAlive(scheduler);
 
     // Post-sleep recovery: while the host was suspended (laptop lid, VM
     // pause) timers and keep-alive sockets froze, so the first requests after
@@ -132,6 +134,7 @@ async function main() {
         console.log(`[wake] resumed after ~${idle}s (${event.reason}${event.signal ? `:${event.signal}` : ''}) — flushing stale sockets, re-probing keys`);
         flushProxyCache();
         void rotateGeminiWebAccountsOnce();
+        void rotateChatGptWebAccountsOnce();
         if (isTursoDatabase(getDb())) {
           // On hosted runtimes (e.g. Render) with synchronous Turso storage,
           // waking from container freeze coincides with the 5s HTTP health check.

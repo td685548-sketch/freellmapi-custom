@@ -8,7 +8,7 @@ import {
 import { generateChatGptWebImages } from '../provider-accounts/chatgpt-web-image.js';
 import { decodeJwtPayload, parseOAuthCredential } from '../provider-accounts/oauth-credentials.js';
 import { parseOAuthBundle } from '../provider-accounts/oauth-wire-executors.js';
-import { updateAccountCredential, type AccountRow } from '../provider-accounts/store.js';
+import { accountRow, updateAccountCredential, type AccountRow } from '../provider-accounts/store.js';
 import { generateUcWebImages } from '../provider-accounts/uc-web.js';
 import { proxyFetch } from '../../lib/proxy.js';
 
@@ -595,6 +595,19 @@ async function generateHuggingfaceImages(input: ImageGenerationInput): Promise<I
   return { created: Math.floor(Date.now() / 1000), data: [{ b64_json: buf.toString('base64') }] };
 }
 
+function createImageCredentialUpdater(account: AccountRow): (nextCredential: string) => void {
+  let expectedCipher = account.encrypted_key;
+  return (nextCredential) => {
+    if (updateAccountCredential(account.id, nextCredential, expectedCipher)) {
+      try {
+        expectedCipher = accountRow(account.id).encrypted_key;
+      } catch {
+        expectedCipher = '';
+      }
+    }
+  };
+}
+
 export async function executeImageGeneration(input: ImageGenerationInput): Promise<{
   result: ImageGenerationResult;
   usageUnits: number;
@@ -609,12 +622,12 @@ export async function executeImageGeneration(input: ImageGenerationInput): Promi
       size,
       baseUrl,
       platform: account.platform,
+      onCredentialUpdate: createImageCredentialUpdater(account),
     });
     return { result, usageUnits: Math.max(1, n) };
   }
 
   if (account.provider === 'uc-web') {
-    let expectedCipher = account.encrypted_key;
     const result = await generateUcWebImages({
       credential,
       prompt,
@@ -622,11 +635,7 @@ export async function executeImageGeneration(input: ImageGenerationInput): Promi
       size,
       resolution: typeof extraBody?.resolution === 'string' ? extraBody.resolution : undefined,
       platform: account.platform,
-      onCredentialUpdate: (nextCredential) => {
-        if (updateAccountCredential(account.id, nextCredential, expectedCipher)) {
-          expectedCipher = '';
-        }
-      },
+      onCredentialUpdate: createImageCredentialUpdater(account),
     });
     return { result, usageUnits: Math.max(1, result.data.length) };
   }

@@ -16,6 +16,29 @@ function isGoogleCookieDomain(domain: unknown): boolean {
   return host === 'google.com' || host.endsWith('.google.com')
 }
 
+function isChatGptCookieDomain(domain: unknown): boolean {
+  if (domain === undefined || domain === null) return true
+  if (typeof domain !== 'string') return false
+  const host = domain.trim().toLowerCase().replace(/^\.+/, '').replace(/\.+$/, '')
+  if (!host) return true
+  return (
+    host === 'chatgpt.com' ||
+    host.endsWith('.chatgpt.com') ||
+    host === 'openai.com' ||
+    host.endsWith('.openai.com')
+  )
+}
+
+function isDurableSessionCookieName(name: string): boolean {
+  return (
+    name === '__Secure-1PSID' ||
+    name === '__Secure-next-auth.session-token' ||
+    name.startsWith('__Secure-next-auth.session-token.') ||
+    name === '__client' ||
+    name === 'ds_session_id'
+  )
+}
+
 function isExpiredCookie(cookie: Record<string, unknown>, nowMs: number): boolean {
   const rawExpiry = cookie.expirationDate ?? cookie.expires
   if (rawExpiry === undefined || rawExpiry === null || rawExpiry === '') return false
@@ -157,7 +180,8 @@ export function extractCookieCredential(raw: string, providerId?: string): strin
           const value = sanitizeCookiePart(c.value)
           if (!name || /[=;]/.test(name)) continue
           if (providerId === 'gemini-web' && !isGoogleCookieDomain(c.domain)) continue
-          if (name !== '__Secure-1PSID' && isExpiredCookie(c, nowMs)) continue
+          if (providerId === 'chatgpt-web' && !isChatGptCookieDomain(c.domain)) continue
+          if (!isDurableSessionCookieName(name) && isExpiredCookie(c, nowMs)) continue
 
           const specificity = cookieSpecificity(c)
           const existing = deduped.get(name)
