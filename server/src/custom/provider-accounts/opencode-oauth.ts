@@ -336,17 +336,28 @@ export function cancelOpenCodeConsoleLogin(attemptId: string, actor: AccountActo
 
 /** Whether an account currently holds a Console OAuth login. */
 export function openCodeConsoleLoginStatus(accountId: number): OpenCodeConsoleLoginStatus {
-  assertOpenCodeAccount(accountId);
-  const row = accountRow(accountId);
-  const credential = oauthCredentialForAccount(row);
-  if (!credential || credential.kind !== 'opencode') {
-    return { connected: false, identity: row.subject, expiresAt: null };
+  try {
+    assertOpenCodeAccount(accountId);
+    const row = accountRow(accountId);
+    const credential = oauthCredentialForAccount(row);
+    if (!credential || credential.kind !== 'opencode') {
+      return { connected: false, identity: row.subject, expiresAt: null };
+    }
+    return {
+      connected: true,
+      identity: oauthIdentity(credential) ?? row.subject,
+      expiresAt: credential.expiresAt,
+    };
+  } catch (error) {
+    // A missing account or a non-OpenCode account is a real client error and
+    // keeps its 404/400. Anything else (e.g. an unreadable stored
+    // credential) must not break the login dialog: the dialog treats a
+    // failed status read as "not logged in" and lets the user start the
+    // device flow, so degrade to that instead of surfacing a 500.
+    if (error instanceof AccountError) throw error;
+    console.error('[opencode-oauth] status read failed, treating as not logged in', error);
+    return { connected: false, identity: null, expiresAt: null };
   }
-  return {
-    connected: true,
-    identity: oauthIdentity(credential) ?? row.subject,
-    expiresAt: credential.expiresAt,
-  };
 }
 
 /** Drop the stored Console login and restore the keyless credential. */

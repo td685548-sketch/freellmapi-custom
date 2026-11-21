@@ -190,6 +190,26 @@ describe('OpenCode Console OAuth device login', () => {
     deleteAccount(accountId);
   });
 
+  it('reports not logged in for accounts holding a plain key or a pasted CLI auth blob', () => {
+    // Regression: the Console login dialog opens by reading this status. An
+    // OpenCode Free account created before Console login existed stores a
+    // plain personal key — or a pasted CLI auth.json blob — not an OAuth
+    // credential. Status must answer { connected: false } for those instead
+    // of failing, so the dialog can offer the device flow.
+    const keyAccountId = createApiKeyAccount({ provider: 'opencode', key: 'opencode_sk_live_4f2a9c1e7b3d5a6f8e0c2b4a6d8f0a2c4e6', label: 'Luu Manh OpenCode', userId: testUserId });
+    const blobAccountId = createApiKeyAccount({
+      provider: 'opencode',
+      key: JSON.stringify({ opencode: { type: 'oauth', access: 'ya29.fake-access-token', refresh: '1//fake-refresh-token', expires: Date.now() + 3600_000 } }),
+      label: 'CLI auth.json',
+      userId: testUserId,
+    });
+    invalidateXGatewayKeyCache();
+    expect(openCodeConsoleLoginStatus(keyAccountId)).toMatchObject({ connected: false });
+    expect(openCodeConsoleLoginStatus(blobAccountId)).toMatchObject({ connected: false });
+    deleteAccount(keyAccountId);
+    deleteAccount(blobAccountId);
+  });
+
   it('refuses Console login for non-OpenCode accounts', async () => {
     const accountId = createApiKeyAccount({ provider: 'opencode-zen', key: 'test-key', label: 'Zen', userId: testUserId });
     invalidateXGatewayKeyCache();
@@ -410,6 +430,15 @@ describe('OpenCode Console OAuth routes', () => {
 
       const badRes = await call('/api/thruline-accounts/opencode-oauth/999999/status', 'GET');
       expect(badRes.status).toBe(404);
+
+      // An account holding a plain personal key (created before Console
+      // login existed) answers { connected: false } instead of failing.
+      const plainId = createApiKeyAccount({ provider: 'opencode', key: 'opencode_sk_live_4f2a9c1e7b3d5a6f8e0c2b4a6d8f0a2c4e6', label: 'Plain key', userId: user.userId });
+      invalidateXGatewayKeyCache();
+      const plainRes = await call(`/api/thruline-accounts/opencode-oauth/${plainId}/status`, 'GET');
+      expect(plainRes.status).toBe(200);
+      expect(await plainRes.json()).toMatchObject({ connected: false });
+      deleteAccount(plainId);
     } finally {
       deleteAccount(accountId);
       await new Promise<void>(resolve => server.close(() => resolve()));
