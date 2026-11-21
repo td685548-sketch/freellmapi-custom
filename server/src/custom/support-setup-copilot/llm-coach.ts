@@ -35,7 +35,7 @@ import { buildKbQueryFromMessages, formatKbForPrompt, searchKb } from './kb/inde
 import { buildSystemAdvicePromptSection } from './system-advisor.js';
 import { getCopilotModelSource } from './model-source.js';
 import { extractErrorStatus } from '../x-gateway/route-cooldown.js';
-import { traceAttempts, traceCountModelCall, traceDetail, traceNoteAttempt, traceNoteSource, traceFinish, traceStart, traceStep } from './trace.js';
+import { traceAttempts, traceCountModelCall, traceDetail, traceNoteAttempt, traceNoteSource, traceFinish, traceReasoning, traceStart, traceStep } from './trace.js';
 import {
   buildAccountOnlyIdentityBlock,
   buildIdentityPromptBlock,
@@ -174,6 +174,68 @@ function stripReasoningBlocks(raw: string): string | null {
     return null;
   }
   return text || null;
+}
+
+/** Text inside a `<think>…</think>` block, closed or still open (partial stream). */
+function extractThinkText(fullContent: string): string {
+  const open = fullContent.search(/<(?:think|thinking)\b[^>]*>/i);
+  if (open === -1) return '';
+  const afterOpen = fullContent.slice(open).replace(/<(?:think|thinking)\b[^>]*>/i, '');
+  const close = afterOpen.search(/<\/(?:think|thinking)>/i);
+  return (close === -1 ? afterOpen : afterOpen.slice(0, close)).trim();
+}
+
+/**
+ * Reads the `reply` string value out of a partially streamed coach JSON object, decoding the
+ * escapes seen so far. Returns '' when the value has not started yet (or the key is absent).
+ */
+export function extractPartialCoachReply(fullContent: string): string {
+  const keyIdx = fullContent.search(/"reply"\s*:/);
+  if (keyIdx === -1) return '';
+  let i = fullContent.indexOf(':', keyIdx) + 1;
+  while (i < fullContent.length && /\s/.test(fullContent[i]!)) i += 1;
+  if (fullContent[i] !== '"') return '';
+  i += 1;
+  let out = '';
+  while (i < fullContent.length) {
+    const ch = fullContent[i]!;
+    if (ch === '"') break;
+    if (ch === '\\') {
+      if (i + 1 >= fullContent.length) break;
+      const esc = fullContent[i + 1]!;
+      if (esc === 'n') { out += '\n'; i += 2; continue; }
+      if (esc === 't') { out += '\t'; i += 2; continue; }
+      if (esc === 'r') { out += '\r'; i += 2; continue; }
+      if (esc === 'u') {
+        if (i + 5 >= fullContent.length) break;
+        const code = Number.parseInt(fullContent.slice(i + 2, i + 6), 16);
+        out += Number.isNaN(code) ? 'u' : String.fromCharCode(code);
+        i += 6;
+        continue;
+      }
+      out += esc;
+      i += 2;
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
+
+/**
+ * What the "ask the model" step shows live while the answer streams in: the model's own
+ * reasoning first (`reasoning_content` deltas, or a `<think>` block), then — once it starts
+ * answering — the reply it is forming underneath it, so the panel keeps moving through both
+ * phases. The final answer still comes from the validated full JSON, never from this.
+ */
+export function extractLiveReasoning(fullContent: string, fullReasoning: string): string {
+  const thought = (fullReasoning.trim() || extractThinkText(fullContent)).slice(0, 1200);
+  const reply = extractPartialCoachReply(fullContent).trim().slice(0, 1200);
+  if (thought && reply) return `${thought}\n\n${reply}`;
+  if (thought) return thought;
+  if (reply) return reply;
+  return fullContent.trim().slice(-600);
 }
 
 /**
@@ -1174,8 +1236,8 @@ async function runHumanLikeLlmCoachCore(
     turnMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
     temperature: number,
     bypassCache: boolean,
+    stream = false,
   ): Promise<Response> => {
-    traceCountModelCall();
     const headers = bypassCache
       ? { ...baseHeaders, 'cache-control': 'no-cache' }
       : baseHeaders;
@@ -1187,6 +1249,7 @@ async function runHumanLikeLlmCoachCore(
         temperature,
         max_tokens: 1000,
         messages: turnMessages,
+        ...(stream ? { stream: true } : {}),
       }),
       signal: AbortSignal.timeout(timeoutMs),
     };
@@ -1201,6 +1264,172 @@ async function runHumanLikeLlmCoachCore(
     }
   };
 
+  type LoopbackCompletionBody = {
+    model?: string;
+    _routed_via?: { model?: string };
+    choices?: Array<{ message?: { content?: unknown } }>;
+  };
+  type LoopbackCompletion = {
+    ok: boolean;
+    status: number;
+    body: LoopbackCompletionBody | null;
+    routedHeader?: string;
+  };
+
+  /** A stream that was aborted (timeout) must fail the attempt, not be retried plain. */
+  const isAbortError = (err: unknown): boolean => {
+    const name = err instanceof Error ? err.name : '';
+    const message = err instanceof Error ? err.message : '';
+    return name === 'TimeoutError' || name === 'AbortError' || /timed?\s*out|aborted/i.test(message);
+  };
+
+  /**
+   * Reads a streamed chat-completion response (gateway SSE: `data: {chunk}` + `data: [DONE]`),
+   * accumulating `delta.content` and `delta.reasoning_content`, and reports the live preview
+   * (throttled) so the panel shows the model's reasoning / forming reply instead of a spinner.
+   * Returns null when the body carried nothing usable as a stream; a plain (non-SSE) JSON
+   * completion body is accepted as-is, so a mocked upstream still costs exactly one request.
+   */
+  const readLoopbackStreamText = async (
+    res: Response,
+    onProgress: (preview: string) => void,
+  ): Promise<{ text: string; reasoning: string; model?: string } | null> => {
+    const body = res.body;
+    if (!body) return null;
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let raw = '';
+    let text = '';
+    let reasoning = '';
+    let model: string | undefined;
+    let sawChunk = false;
+    let lastEmitAt = 0;
+    const maybeEmit = (force = false): void => {
+      const now = Date.now();
+      if (!force && now - lastEmitAt < 200) return;
+      lastEmitAt = now;
+      onProgress(extractLiveReasoning(text, reasoning));
+    };
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (value) {
+          const decoded = decoder.decode(value, { stream: !done }).replace(/\r\n/g, '\n');
+          buffer += decoded;
+          raw += decoded;
+        }
+        let cut = buffer.indexOf('\n\n');
+        while (cut !== -1) {
+          const block = buffer.slice(0, cut);
+          buffer = buffer.slice(cut + 2);
+          for (const line of block.split('\n')) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('data:')) continue;
+            const data = trimmed.slice(5).trim();
+            if (!data || data === '[DONE]') continue;
+            let parsed: unknown;
+            try {
+              parsed = JSON.parse(data);
+            } catch {
+              continue;
+            }
+            const choice = (parsed as { choices?: Array<{ delta?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown } }> }).choices?.[0];
+            if (typeof (parsed as { model?: unknown }).model === 'string') {
+              model = (parsed as { model: string }).model;
+            }
+            const delta = choice?.delta;
+            if (delta && typeof delta.content === 'string') {
+              text += delta.content;
+              sawChunk = true;
+            }
+            const deltaReasoning =
+              delta && typeof delta.reasoning_content === 'string'
+                ? delta.reasoning_content
+                : delta && typeof delta.reasoning === 'string'
+                  ? delta.reasoning
+                  : '';
+            if (deltaReasoning) {
+              reasoning += deltaReasoning;
+              sawChunk = true;
+            }
+          }
+          maybeEmit();
+          cut = buffer.indexOf('\n\n');
+        }
+        if (done) break;
+      }
+    } catch {
+      // A dropped stream mid-answer: keep what arrived; nothing at all means unusable.
+      if (!sawChunk && !text && !reasoning) return null;
+    }
+    maybeEmit(true);
+    if (sawChunk) return { text, reasoning, ...(model ? { model } : {}) };
+    const parsed = ((): LoopbackCompletionBody | null => {
+      try {
+        return JSON.parse(raw) as LoopbackCompletionBody;
+      } catch {
+        return null;
+      }
+    })();
+    if (parsed && Array.isArray(parsed.choices)) {
+      return {
+        text: extractCompletionText(parsed.choices[0]?.message?.content),
+        reasoning: '',
+        ...(typeof parsed.model === 'string' ? { model: parsed.model } : {}),
+      };
+    }
+    return null;
+  };
+
+  /**
+   * One FreeLLMAPI attempt: stream the loopback completion so the panel shows the model's
+   * reasoning live, then return the full answer in the same shape the non-streaming path
+   * produced. If the stream yields nothing usable (or the body is not SSE), the same request
+   * is made once as a plain completion; a timeout is never retried plain — it fails the
+   * attempt, and the loop tries the next model. Counts one model call per attempt.
+   */
+  const fetchLoopbackCompletion = async (
+    model: string,
+    turnMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+    temperature: number,
+    bypassCache: boolean,
+  ): Promise<LoopbackCompletion> => {
+    traceCountModelCall();
+    let lastPreview = '';
+    const onProgress = (preview: string): void => {
+      if (!preview || preview === lastPreview) return;
+      lastPreview = preview;
+      traceReasoning(modelStep.id, preview);
+    };
+    const routedHeaderOf = (res: Response): string | undefined =>
+      res.headers?.get?.('x-routed-via') ?? undefined;
+    try {
+      const res = await postLoopback(model, turnMessages, temperature, bypassCache, true);
+      if (!res.ok) {
+        return { ok: false, status: res.status, body: null, routedHeader: routedHeaderOf(res) };
+      }
+      const streamed = await readLoopbackStreamText(res, onProgress);
+      if (streamed) {
+        return {
+          ok: true,
+          status: res.status,
+          body: { model: streamed.model, choices: [{ message: { content: streamed.text } }] },
+          routedHeader: routedHeaderOf(res),
+        };
+      }
+    } catch (err) {
+      if (isAbortError(err)) throw err;
+      // Any other streaming failure falls through to the plain call below.
+    }
+    const upstream = await postLoopback(model, turnMessages, temperature, bypassCache, false);
+    if (!upstream.ok) {
+      return { ok: false, status: upstream.status, body: null, routedHeader: routedHeaderOf(upstream) };
+    }
+    const body = (await upstream.json().catch(() => null)) as LoopbackCompletionBody | null;
+    return { ok: true, status: upstream.status, body, routedHeader: routedHeaderOf(upstream) };
+  };
+
   // Try `'auto'` first; if the active routing profile chain has 0 enabled models (`400`/`404`) OR
   // its seeded models have no active provider keys while another custom/catalog key is configured
   // outside `profile_models` (`503 no_providers_configured` / `429 routing_exhausted`),
@@ -1209,7 +1438,7 @@ async function runHumanLikeLlmCoachCore(
   for (let i = 0; i < modelsToTry.length; i += 1) {
     const modelCandidate = modelsToTry[i]!;
     try {
-      const upstream = await postLoopback(modelCandidate, baseTurnMessages, 0.45, false);
+      const upstream = await fetchLoopbackCompletion(modelCandidate, baseTurnMessages, 0.45, false);
       if (!upstream.ok) {
         failAttempt(`FreeLLMAPI ${modelCandidate}`, statusReason(upstream.status));
         if (
@@ -1224,13 +1453,9 @@ async function runHumanLikeLlmCoachCore(
         return null;
       }
 
-      const body = (await upstream.json().catch(() => null)) as {
-        model?: string;
-        _routed_via?: { model?: string };
-        choices?: Array<{ message?: { content?: unknown } }>;
-      } | null;
+      const body = upstream.body;
 
-      const routedHeader = upstream.headers?.get?.('x-routed-via') ?? undefined;
+      const routedHeader = upstream.routedHeader;
       const modelUsed =
         body?._routed_via?.model || routedHeader || body?.model || modelCandidate;
 
@@ -1249,20 +1474,16 @@ async function runHumanLikeLlmCoachCore(
           ...baseTurnMessages,
           { role: 'system', content: buildCorrectiveRetryNotice(params.locale) },
         ];
-        const retryUpstream = await postLoopback(modelCandidate, retryMessages, 0.65, true);
+        const retryUpstream = await fetchLoopbackCompletion(modelCandidate, retryMessages, 0.65, true);
         if (retryUpstream.ok) {
-          const retryBody = (await retryUpstream.json().catch(() => null)) as {
-            model?: string;
-            _routed_via?: { model?: string };
-            choices?: Array<{ message?: { content?: unknown } }>;
-          } | null;
+          const retryBody = retryUpstream.body;
           const retryText = extractCompletionText(retryBody?.choices?.[0]?.message?.content);
           const retryCheck = validateParsedCoachOutput(retryText, params);
           if (!retryCheck.valid) {
             failAttempt(`FreeLLMAPI ${modelCandidate}`, { vi: 'vẫn trả lời sai sau khi yêu cầu viết lại', en: 'still unusable after asking it to rewrite' });
           }
           if (retryCheck.valid) {
-            const retryRoutedHeader = retryUpstream.headers?.get?.('x-routed-via') ?? undefined;
+            const retryRoutedHeader = retryUpstream.routedHeader;
             return {
               output: retryCheck.valid,
               modelUsed:

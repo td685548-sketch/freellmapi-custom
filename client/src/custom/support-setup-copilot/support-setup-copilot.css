@@ -1619,6 +1619,35 @@ details.ssc-process[open] .ssc-process-chevron {
   overflow-wrap: anywhere;
 }
 
+.ssc-step-reasoning {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--ssc-border);
+  background: var(--ssc-bg, transparent);
+}
+
+.ssc-step-reasoning-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ssc-muted);
+}
+
+.ssc-step-reasoning-text {
+  display: block;
+  max-height: 160px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  color: var(--ssc-text, inherit);
+}
+
 .ssc-spin {
   animation: ssc-spin 0.9s linear infinite;
 }

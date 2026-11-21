@@ -137,3 +137,11 @@ export function traceDetail(id: string, detail: Pick<SupportSetupTraceStep, 'det
   if (!ctx || !prev) return;
   emit(ctx, { ...prev, ...detail });
 }
+
+/** Replaces a still-running step's live reasoning text (the model's thinking / forming draft). */
+export function traceReasoning(id: string, reasoning: string): void {
+  const ctx = als.getStore();
+  const prev = id ? ctx?.open.get(id) : undefined;
+  if (!ctx || !prev) return;
+  emit(ctx, { ...prev, reasoning });
+}

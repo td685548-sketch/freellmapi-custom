@@ -8,6 +8,8 @@ import { invalidateXGatewayKeyCache } from '../../custom/provider-accounts/store
 import {
   buildHumanCoachSystemPrompt,
   enforceReplySecurityInvariant,
+  extractLiveReasoning,
+  extractPartialCoachReply,
   hasConfiguredMainGatewayRoutes,
   isRepetitiveAssistantReply,
   matchesRequestedLocale,
@@ -628,5 +630,24 @@ describe('Support Setup Copilot — Human-Like LLM Coach & Resilient Gateway Bri
       configureCloudEntitlementForTesting(null);
       delete process.env.FREEAPI_AI_ACTIVATION_TOKEN;
     }
+  });
+});
+
+describe('live reasoning preview while the model streams (extractPartialCoachReply / extractLiveReasoning)', () => {
+  it('reads the reply value out of a partially streamed JSON object', () => {
+    expect(extractPartialCoachReply('{"intent":"guide","reply":"Cache giúp giảm')).toBe('Cache giúp giảm');
+    expect(extractPartialCoachReply('{"reply":"a\\"b\\n c')).toBe('a"b\n c');
+    expect(extractPartialCoachReply('{"reply":"abc\\')).toBe('abc');
+    expect(extractPartialCoachReply('{"intent":"guide"')).toBe('');
+    expect(extractPartialCoachReply('')).toBe('');
+  });
+
+  it('shows the thinking, then the forming reply underneath it', () => {
+    expect(extractLiveReasoning('{"reply":"x"}', 'Người dùng hỏi về cache')).toBe('Người dùng hỏi về cache\n\nx');
+    expect(extractLiveReasoning('<think>cần tra KB trước</think>{"intent":"guide"}', '')).toBe('cần tra KB trước');
+    expect(extractLiveReasoning('<think>cần tra KB trước</think>{"intent":"guide","reply":"ok"}', '')).toBe('cần tra KB trước\n\nok');
+    expect(extractLiveReasoning('<think>đang nghĩ dở', '')).toBe('đang nghĩ dở');
+    expect(extractLiveReasoning('{"intent":"guide","reply":"Cache giúp', '')).toBe('Cache giúp');
+    expect(extractLiveReasoning('{"intent":"guide"', '')).toBe('{"intent":"guide"');
   });
 });

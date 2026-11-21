@@ -134,6 +134,8 @@ export interface SupportSetupCopilotStrings {
   processTitle: string;
   /** `{n}` is replaced with the number of steps. */
   processCount: string;
+  /** Label of the live reasoning text under a running step. */
+  reasoningLabel: string;
   /** Under an answer: no model was called. */
   usageNone: string;
   /** `{n}` = number of upstream model requests. */
@@ -326,6 +328,7 @@ const en: SupportSetupCopilotStrings = {
   thinking: 'Thinking & putting together a helpful reply…',
   processTitle: 'How I worked on this',
   processCount: '({n} steps)',
+  reasoningLabel: 'Reasoning',
   usageNone: 'No model call — answered by rules, no tokens used',
   usageModel: '{n} model call(s) on your connected providers',
   usageTools: '{n} tool call(s)',
@@ -531,6 +534,7 @@ const vi: SupportSetupCopilotStrings = {
   thinking: 'Đang lắng nghe & chuẩn bị câu trả lời cho bạn…',
   processTitle: 'Quá trình xử lý',
   processCount: '({n} bước)',
+  reasoningLabel: 'Suy luận',
   usageNone: 'Không gọi mô hình — trả lời theo quy tắc, không tốn token',
   usageModel: '{n} lần gọi mô hình trên các nhà cung cấp bạn đã nối',
   usageTools: '{n} lần gọi công cụ',

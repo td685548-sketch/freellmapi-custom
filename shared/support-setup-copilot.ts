@@ -607,6 +607,12 @@ export interface SupportSetupTraceStep {
   titleEn: string;
   detailVi?: string;
   detailEn?: string;
+  /**
+   * Live reasoning/draft text while the step runs (the model's thinking, or the reply it is
+   * forming). Updated in place on the same step id, so the panel shows the work as it happens
+   * instead of a spinner; kept on the finished step so it can be reviewed afterwards.
+   */
+  reasoning?: string;
 }
 
 export interface SupportSetupApplyRequest {
