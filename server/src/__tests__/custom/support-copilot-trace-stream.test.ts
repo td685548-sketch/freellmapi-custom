@@ -175,8 +175,11 @@ describe('why a model attempt failed is shown on the "ask the model" step', () =
   it('a slow model is reported as a timeout with the real limit, not as a mystery', async () => {
     const fetchImpl = (async () => { throw new DOMException('The operation timed out.', 'TimeoutError'); }) as unknown as typeof fetch;
     const { model } = await run(fetchImpl);
-    expect(model?.detailVi).toContain('quá 15 giây chưa trả lời');
-    expect(model?.detailEn).toContain('no answer within 15 s');
+    expect(model?.detailVi).toContain('quá 30 giây chưa trả lời');
+    expect(model?.detailEn).toContain('no answer within 30 s');
+    // A timeout on 'auto' no longer ends the turn: 'auto:balanced' is tried too.
+    expect(model?.detailVi).toContain('FreeLLMAPI auto: quá 30 giây chưa trả lời');
+    expect(model?.detailVi).toContain('FreeLLMAPI auto:balanced: quá 30 giây chưa trả lời');
   });
 
   it('an unusable answer and a refused key each get their own reason', async () => {

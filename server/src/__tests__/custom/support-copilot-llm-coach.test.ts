@@ -1,7 +1,9 @@
 import http, { type Server } from 'node:http';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import type { CloudAiRuntimePack, CloudSignedLease } from '@freellmapi/shared/cloud-entitlement.js';
 import { createApp } from '../../app.js';
 import { recordServerLocalAddress } from '../../custom/ai-platform/orchestrator/engine.js';
+import { configureCloudEntitlementForTesting } from '../../custom/cloud-entitlement/service.js';
 import { invalidateXGatewayKeyCache } from '../../custom/provider-accounts/store.js';
 import {
   buildHumanCoachSystemPrompt,
@@ -540,5 +542,91 @@ describe('Support Setup Copilot — Human-Like LLM Coach & Resilient Gateway Bri
     expect(coachRes?.routeSource).toBe('main_gateway_loopback');
     expect(coachRes?.modelUsed).toContain('outside-profile-coach');
     expect(upstreamCalls).toHaveLength(1);
+  });
+
+  it('fails over from model="auto" to model="auto:balanced" when the "auto" loopback call times out', async () => {
+    // Regression test for the live Setup Copilot failure "FreeLLMAPI auto: quá
+    // 15 giây chưa trả lời": a slow first 'auto' candidate used to end the
+    // whole turn because the Tier 2 catch returned null instead of trying the
+    // next model. A fake fetch keeps this deterministic: the first call throws
+    // like an aborted loopback request, the second answers normally.
+    // A mock cloud lease (same pattern as support-copilot-model-source.test.ts)
+    // is installed just for this test so it can run without a real activation
+    // token; the other tests in this file keep relying on the real lease.
+    process.env.FREEAPI_AI_ACTIVATION_TOKEN = ['test', 'fake', 'token'].join('-');
+    const mockLease: CloudSignedLease = {
+      licenseId: 'test-lic-coach-timeout', label: 'Test License', instanceId: 'test-inst-coach-timeout',
+      scopes: ['ai_platform', 'customer_ai', 'support_copilot', 'support_suite', 'tenant_portal'],
+      packVersion: 4, packHash: 'hash-coach-timeout',
+      issuedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+    };
+    const mockPack: CloudAiRuntimePack = {
+      version: 4,
+      supportCoachPack: { personaVi: 'Persona Vi', personaEn: 'Persona En', playbookReference: 'Playbook', outputContract: 'Contract' },
+      supportAgentCopilotInstruction: 'x', customerAiDirective: 'ACTIVE', supportGatewayDirective: 'ACTIVE', aiPlatformCapabilityGrant: 'ACTIVE',
+    };
+    configureCloudEntitlementForTesting({
+      activeLeaseRecord: { lease: mockLease, tokenHash: 'dummy-hash', signature: 'dummy-sig', runtimePack: mockPack, verifiedAtMs: Date.now() },
+    });
+    try {
+      const seenModels: Array<string | undefined> = [];
+      const coachJson = JSON.stringify({
+        intent: 'guide',
+        reply:
+          'Chào bạn! Mình hiểu rồi, để mình hướng dẫn bạn tạo tenant AI Support mới nhé. Trước tiên bạn cho mình biết tên shop và ngành hàng của bạn được không?',
+      });
+      let calls = 0;
+      const fetchImpl = (async (_input: unknown, init?: { body?: unknown }) => {
+        calls += 1;
+        let model: string | undefined;
+        try {
+          model = (JSON.parse(String((init?.body as string) ?? '{}')) as { model?: string }).model;
+        } catch {
+          model = undefined;
+        }
+        seenModels.push(model);
+        if (calls === 1) {
+          throw Object.assign(new Error('The operation timed out.'), { name: 'TimeoutError' });
+        }
+        return new Response(
+          JSON.stringify({
+            id: 'chatcmpl_mock_timeout_failover',
+            object: 'chat.completion',
+            created: Math.floor(Date.now() / 1000),
+            model: 'mock-balanced-coach',
+            choices: [
+              {
+                index: 0,
+                message: { role: 'assistant', content: coachJson },
+                finish_reason: 'stop',
+              },
+            ],
+            usage: { prompt_tokens: 120, completion_tokens: 60, total_tokens: 180 },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }) as unknown as typeof fetch;
+
+      const coachRes = await runHumanLikeLlmCoach({
+        messages: [{ role: 'user', content: 'tôi đang có web boardgame, và muốn setup' }],
+        locale: 'vi',
+        targetMode: 'create_tenant',
+        diagnostic: null,
+        extracted: {},
+        gatewayLoopback: { host: '127.0.0.1', port: gatewayPort },
+        fetchImpl,
+        timeoutMs: 5_000,
+      });
+
+      expect(calls).toBe(2);
+      expect(seenModels).toEqual(['auto', 'auto:balanced']);
+      expect(coachRes).not.toBeNull();
+      expect(coachRes?.routeSource).toBe('main_gateway_loopback');
+      expect(coachRes?.modelUsed).toBe('mock-balanced-coach');
+      expect(coachRes?.output.intent).toBe('guide');
+    } finally {
+      configureCloudEntitlementForTesting(null);
+      delete process.env.FREEAPI_AI_ACTIVATION_TOKEN;
+    }
   });
 });
