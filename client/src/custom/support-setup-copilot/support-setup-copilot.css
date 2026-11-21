@@ -246,10 +246,13 @@
 .ssc-header-text p {
   margin: 2px 0 0;
   font-size: 11px;
+  line-height: 1.35;
   color: var(--ssc-muted);
-  white-space: nowrap;
+  /* Up to two lines so the subtitle is not cut mid-sentence. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .ssc-header-actions {
@@ -314,6 +317,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  /* Wrap instead of squeezing: longer (English) labels used to shrink the Target
+     select to a sliver and let the pills overlap it. */
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -321,8 +327,9 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  min-width: 0;
-  flex: 1;
+  /* Keep the select readable; the pills drop to the next line when there is no room. */
+  flex: 1 1 190px;
+  min-width: min(100%, 170px);
 }
 
 .ssc-tenant-select-wrap label {
