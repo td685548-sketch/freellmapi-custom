@@ -1520,3 +1520,117 @@
   line-height: 1.45;
   opacity: 0.78;
 }
+
+/* ── The Copilot's working steps (live, then collapsed on the answer) ───────── */
+.ssc-process {
+  margin: 0 0 6px;
+  padding: 8px 11px;
+  border-radius: 12px;
+  border: 1px solid var(--ssc-border);
+  background: var(--ssc-bg-subtle);
+  font-size: 11.5px;
+  color: var(--ssc-muted);
+}
+
+.ssc-process--live {
+  margin-top: 6px;
+}
+
+.ssc-process-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: default;
+}
+
+details.ssc-process > summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+details.ssc-process > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ssc-process-chevron {
+  transition: transform 0.15s ease;
+}
+
+details.ssc-process[open] .ssc-process-chevron {
+  transform: rotate(90deg);
+}
+
+.ssc-steps {
+  list-style: none;
+  margin: 7px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ssc-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  line-height: 1.4;
+}
+
+.ssc-step-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  border-radius: 999px;
+  color: var(--ssc-accent);
+}
+
+.ssc-step--done .ssc-step-icon {
+  color: #16a34a;
+}
+
+.ssc-step--error .ssc-step-icon {
+  color: #d97706;
+}
+
+.ssc-step-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ssc-step-title {
+  color: var(--ssc-text, inherit);
+}
+
+.ssc-step--running .ssc-step-title {
+  font-weight: 600;
+}
+
+.ssc-step-detail {
+  color: var(--ssc-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.ssc-spin {
+  animation: ssc-spin 0.9s linear infinite;
+}
+
+@keyframes ssc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ssc-spin {
+    animation: none;
+  }
+}

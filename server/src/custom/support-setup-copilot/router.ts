@@ -46,7 +46,9 @@ import {
 import { tryGroundedGuideReply } from './grounded-guide.js';
 import { buildKbGroundedFallback, isTroubleshootingQuestion } from './kb/answer.js';
 import { detectConversationLocale, runSupportSetupCopilotTurn } from './playbook.js';
-import { canUseSystemTarget, handleSystemTargetChatTurn } from './system-target.js';
+import { copilotChatStream, copilotChatStreamError } from './chat-stream.js';
+import { traceDone } from './trace.js';
+import { canUseSystemTarget, handleSystemTargetChatTurnGrounded } from './system-target.js';
 import {
   buildTenantDoctorChatResponse,
   buildTenantDoctorReport,
@@ -482,7 +484,7 @@ supportSetupCopilotRouter.post(
 );
 
 // POST /api/support-setup-copilot/chat
-supportSetupCopilotRouter.post('/chat', async (req: Request, res: Response, next: NextFunction) => {
+supportSetupCopilotRouter.post('/chat', copilotChatStream, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = (req as Request & { user?: SessionUser }).user!;
     const scope = resolveCopilotUserScope(user);
@@ -516,6 +518,14 @@ supportSetupCopilotRouter.post('/chat', async (req: Request, res: Response, next
       requirementsHint,
       baseProposalId,
     } = parsed.data;
+
+    traceDone({
+      kind: 'analyze',
+      titleVi: 'Đọc yêu cầu và đối chiếu quyền của tài khoản',
+      titleEn: 'Reading your request and checking your account\'s permissions',
+      detailVi: targetMode === 'system' ? 'Mục tiêu: toàn hệ thống' : undefined,
+      detailEn: targetMode === 'system' ? 'Target: system-wide' : undefined,
+    });
 
     let scopedEntry = null;
     if (tenantId !== undefined && tenantId !== null) {
@@ -687,11 +697,12 @@ supportSetupCopilotRouter.post('/chat', async (req: Request, res: Response, next
         );
       }
       res.json(
-        handleSystemTargetChatTurn({
+        await handleSystemTargetChatTurnGrounded({
           user,
           messages,
           locale: effectiveLocale,
           currentPath,
+          gatewayLoopback: extractGatewayLoopback(req),
         }),
       );
       return;
@@ -806,6 +817,7 @@ supportSetupCopilotRouter.post('/chat', async (req: Request, res: Response, next
     next(err);
   }
 });
+supportSetupCopilotRouter.use('/chat', copilotChatStreamError);
 
 // Phase 3: a permission_grant proposal is owned by its creator and
 // enforced by the apply branch — it must stay applicable/declinable even

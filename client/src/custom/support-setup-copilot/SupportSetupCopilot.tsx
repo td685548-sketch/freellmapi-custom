@@ -55,6 +55,7 @@ import type {
   SupportSetupStepId,
   SupportSetupTone,
   SupportSystemSettingId,
+  SupportSetupTraceStep,
 } from '../../../../shared/support-setup-copilot';
 import {
   fetchCopilotUserDiagnostics,
@@ -64,13 +65,15 @@ import {
   isSupportSetupCopilotRoute,
   postCopilotExecuteAction,
   postSupportSetupApply,
-  postSupportSetupChat,
+  postSupportSetupChatStream,
   postSupportSetupDecline,
 } from './api';
 import {
   formatSetupString,
   getSupportSetupCopilotStrings,
 } from './strings';
+import { ProcessSteps } from './ProcessSteps';
+import { upsertStep } from './process-steps-state';
 import './support-setup-copilot.css';
 
 const CLIENT_VI_MARKER_RE =
@@ -89,6 +92,8 @@ interface ChatTurn {
   userDiagnostic?: CopilotUserDiagnosticReport | null;
   actionProposal?: CopilotActionProposal | null;
   actionResult?: CopilotExecuteActionResponse | null;
+  /** How the Copilot worked on this answer (kept collapsed under the message). */
+  trace?: SupportSetupTraceStep[];
 }
 
 interface BriefDraft {
@@ -251,13 +256,18 @@ export function SupportSetupCopilot() {
     return undefined;
   })();
 
+  // The Copilot's working steps for the message being processed (live), kept in a ref too so the
+  // finished answer can keep them.
+  const [liveSteps, setLiveSteps] = useState<SupportSetupTraceStep[]>([]);
+  const stepsRef = useRef<SupportSetupTraceStep[]>([]);
+
   const chatMutation = useMutation({
     mutationFn: (payload: {
       nextTurns: ChatTurn[];
       requirementsHint?: Partial<SupportSetupRequirements>;
       effectiveLocale?: 'vi' | 'en';
     }) =>
-      postSupportSetupChat({
+      postSupportSetupChatStream({
         ...(isTenantSetupVisible
           ? isSystemTarget
             ? { tenantId: null, targetMode: 'system' as const }
@@ -268,7 +278,17 @@ export function SupportSetupCopilot() {
         messages: payload.nextTurns.slice(-20).map((t) => ({ role: t.role, content: t.content })),
         requirementsHint: payload.requirementsHint,
         baseProposalId: lastProposalId,
+      }, (step) => {
+        stepsRef.current = upsertStep(stepsRef.current, step);
+        setLiveSteps(stepsRef.current);
       }),
+    onMutate: () => {
+      stepsRef.current = [];
+      setLiveSteps([]);
+    },
+    onSettled: () => {
+      setLiveSteps([]);
+    },
     onSuccess: (res) => {
       if (res.replyLocale === 'vi' || res.replyLocale === 'en') {
         setLangOverride(res.replyLocale);
@@ -284,6 +304,7 @@ export function SupportSetupCopilot() {
           modelUsed: !res.usedFallback && res.modelUsed ? res.modelUsed : undefined,
           userDiagnostic: res.userDiagnostic ?? null,
           actionProposal: res.actionProposal ?? null,
+          trace: stepsRef.current.length > 0 ? stepsRef.current : undefined,
         },
       ]);
     },
@@ -1906,6 +1927,15 @@ export function SupportSetupCopilot() {
                   </div>
                 )}
 
+                {turn.role === 'assistant' && turn.trace && turn.trace.length > 0 && (
+                  <ProcessSteps
+                    steps={turn.trace}
+                    locale={uiLocale}
+                    title={s.processTitle}
+                    countLabel={(n) => s.processCount.replace('{n}', String(n))}
+                  />
+                )}
+
                 <div className={`ssc-bubble ssc-bubble--${turn.role}`}>
                   {turn.role === 'assistant' ? (
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{turn.content}</ReactMarkdown>
@@ -2079,6 +2109,15 @@ export function SupportSetupCopilot() {
                   </span>
                   <span>{s.thinking}</span>
                 </div>
+                {chatMutation.isPending && (
+                  <ProcessSteps
+                    live
+                    steps={liveSteps}
+                    locale={uiLocale}
+                    title={s.processTitle}
+                    countLabel={(n) => s.processCount.replace('{n}', String(n))}
+                  />
+                )}
               </div>
             )}
           </div>

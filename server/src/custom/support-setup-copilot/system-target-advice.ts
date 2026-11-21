@@ -16,6 +16,7 @@ import type { SessionUser } from '../../services/auth.js';
 import { searchKbLexical } from './kb/index.js';
 import { buildKbQueryFromMessages } from './kb/prompt.js';
 import { buildSystemAdvice, type SystemAdviceItem } from './system-advisor.js';
+import { traceFinish, traceStart } from './trace.js';
 
 function fold(input: string): string {
   return input
@@ -108,7 +109,16 @@ export function tryBuildSystemAdviceReply(params: {
   const isAdvice = isAdviceRequest(latest);
   if (!isWhy && !isAdvice) return null;
 
+  const measureStep = traceStart({
+    kind: 'measure',
+    titleVi: 'Đo trạng thái hệ thống thật (theo quyền của bạn)',
+    titleEn: 'Measuring the live system state (within your permissions)',
+  });
   const advice = buildSystemAdvice(user);
+  traceFinish(measureStep, 'done', {
+    detailVi: advice.items.length ? `${advice.items.length} gợi ý dựa trên số liệu` : 'Chưa thấy cài đặt nào cần đổi',
+    detailEn: advice.items.length ? `${advice.items.length} suggestion(s) backed by data` : 'Nothing needs changing',
+  });
 
   // "Why should I enable X?" — explain from the setting's knowledge entry plus what the advisor measured for it.
   if (isWhy) {
