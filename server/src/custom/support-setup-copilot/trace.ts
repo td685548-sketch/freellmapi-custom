@@ -14,12 +14,14 @@ interface TraceContext {
   sink: Sink;
   seq: number;
   open: Map<string, SupportSetupTraceStep>;
+  modelCalls: number;
+  toolCalls: number;
 }
 
 const als = new AsyncLocalStorage<TraceContext>();
 
 export function runWithTrace<T>(sink: Sink, fn: () => T): T {
-  return als.run({ sink, seq: 0, open: new Map() }, fn);
+  return als.run({ sink, seq: 0, open: new Map(), modelCalls: 0, toolCalls: 0 }, fn);
 }
 
 export function isTracing(): boolean {
@@ -80,4 +82,22 @@ export async function traceStep<T>(
     traceFinish(id, 'error');
     throw err;
   }
+}
+
+/** Counts one real upstream model request (a retry or a failover attempt counts again). No-op outside a trace. */
+export function traceCountModelCall(): void {
+  const ctx = als.getStore();
+  if (ctx) ctx.modelCalls += 1;
+}
+
+/** Counts one tool call made while answering. No-op outside a trace. */
+export function traceCountToolCall(): void {
+  const ctx = als.getStore();
+  if (ctx) ctx.toolCalls += 1;
+}
+
+/** What the current traced turn has cost so far, or null outside a trace. */
+export function traceUsage(): { modelCalls: number; toolCalls: number } | null {
+  const ctx = als.getStore();
+  return ctx ? { modelCalls: ctx.modelCalls, toolCalls: ctx.toolCalls } : null;
 }

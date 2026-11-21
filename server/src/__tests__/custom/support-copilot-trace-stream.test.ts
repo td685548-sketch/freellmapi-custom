@@ -11,7 +11,8 @@ import {
   buildSystemTargetOverviewReply,
   handleSystemTargetChatTurnGrounded,
 } from '../../custom/support-setup-copilot/system-target.js';
-import { runWithTrace, traceDone, traceFinish, traceStart, traceStep } from '../../custom/support-setup-copilot/trace.js';
+import { runHumanLikeLlmCoach } from '../../custom/support-setup-copilot/llm-coach.js';
+import { runWithTrace, traceDone, traceFinish, traceStart, traceStep, traceUsage } from '../../custom/support-setup-copilot/trace.js';
 import { getDb, initDb } from '../../db/index.js';
 import { createSession, createUser, type SessionUser } from '../../services/auth.js';
 import { setUserPermissions } from '../../services/users.js';
@@ -61,6 +62,71 @@ describe('trace helpers', () => {
     await runWithTrace(() => { throw new Error('closed'); }, async () => {
       await expect(traceStep({ kind: 'tool', titleVi: 'x', titleEn: 'x' }, () => 1)).resolves.toBe(1);
     });
+  });
+});
+
+describe('usage: what a reply actually cost', () => {
+  let admin: SessionUser;
+  beforeAll(() => {
+    process.env.ENCRYPTION_KEY = 'a'.repeat(64);
+    initDb(':memory:');
+    admin = createUser('trace-usage-admin@example.com', 'AdminPass123!');
+    installMockCloudLease();
+  });
+  afterAll(() => {
+    configureCloudEntitlementForTesting(null);
+    delete process.env.FREEAPI_AI_ACTIVATION_TOKEN;
+  });
+
+  const completion = (content: string) =>
+    new Response(JSON.stringify({ model: 'fake/m', choices: [{ message: { content } }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  const coachInput = (fetchImpl: typeof fetch) => ({
+    user: admin,
+    messages: [{ role: 'user' as const, content: 'cho mình hỏi về cài đặt cache' }],
+    locale: 'vi' as const,
+    targetMode: 'update_tenant' as const,
+    diagnostic: null,
+    extracted: {},
+    gatewayLoopback: { host: '127.0.0.1', port: 9, forceLoopback: true },
+    fetchImpl,
+  });
+
+  it('is null outside a trace and zero for a turn that never reaches a model', async () => {
+    expect(traceUsage()).toBeNull();
+    await runWithTrace(() => {}, async () => {
+      expect(traceUsage()).toEqual({ modelCalls: 0, toolCalls: 0 });
+    });
+  });
+
+  it('counts one real model request for a normal answer', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => { calls += 1; return completion(JSON.stringify({ intent: 'guide', reply: 'Response cache giúp giảm số lần gọi nhà cung cấp khi câu hỏi lặp lại.' })); }) as unknown as typeof fetch;
+    const usage = await runWithTrace(() => {}, async () => {
+      const res = await runHumanLikeLlmCoach(coachInput(fetchImpl));
+      expect(res?.output.reply).toContain('Response cache');
+      return traceUsage();
+    });
+    expect(calls).toBe(1);
+    expect(usage?.modelCalls).toBe(1);
+  });
+
+  it('counts the corrective retry too (every request that spends tokens)', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      return completion(JSON.stringify({
+        intent: 'guide',
+        reply: calls === 1
+          ? 'Response cache reduces repeated provider calls when the same question comes in again and again.'
+          : 'Response cache giúp giảm số lần gọi nhà cung cấp khi câu hỏi lặp lại.',
+      }));
+    }) as unknown as typeof fetch;
+    const usage = await runWithTrace(() => {}, async () => {
+      await runHumanLikeLlmCoach(coachInput(fetchImpl));
+      return traceUsage();
+    });
+    expect(usage?.modelCalls).toBe(calls);
+    expect(calls).toBe(2);
   });
 });
 
@@ -179,6 +245,8 @@ describe('POST /chat as an event stream', () => {
     expect(last.event).toBe('final');
     expect(last.data.status).toBe(200);
     expect(last.data.body.proposal.systemActions[0]).toMatchObject({ settingId: 'response_cache' });
+    // answered by rules: no model request, no tool call, and it says so
+    expect(last.data.body.usage).toEqual({ modelCalls: 0, toolCalls: 0 });
   });
 
   it('reports an error as the final event with its status and the usual error shape', async () => {
@@ -198,5 +266,6 @@ describe('POST /chat as an event stream', () => {
     expect(res.headers.get('content-type')).toContain('application/json');
     const body = (await res.json()) as any;
     expect(body.proposal.systemActions[0].settingId).toBe('response_cache');
+    expect(body.usage).toBeUndefined(); // usage is only reported on the streamed path
   });
 });

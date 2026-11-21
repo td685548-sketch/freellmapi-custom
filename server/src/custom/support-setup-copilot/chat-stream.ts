@@ -7,7 +7,7 @@
  * branches in the route needed to change.
  */
 import type { NextFunction, Request, Response } from 'express';
-import { runWithTrace } from './trace.js';
+import { runWithTrace, traceUsage } from './trace.js';
 
 const HEARTBEAT_MS = 15_000;
 
@@ -40,7 +40,12 @@ export function copilotChatStream(req: Request, res: Response, next: NextFunctio
   // The route ends every request with res.json(...) — directly or through the error handler.
   res.json = ((body: unknown) => {
     clearInterval(heartbeat);
-    write('final', { status: res.statusCode, body });
+    const usage = traceUsage();
+    const ok = res.statusCode >= 200 && res.statusCode < 300;
+    write('final', {
+      status: res.statusCode,
+      body: ok && usage && body && typeof body === 'object' && !Array.isArray(body) ? { ...body, usage } : body,
+    });
     if (!res.writableEnded) res.end();
     return res;
   }) as Response['json'];

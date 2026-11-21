@@ -56,6 +56,7 @@ import type {
   SupportSetupTone,
   SupportSystemSettingId,
   SupportSetupTraceStep,
+  SupportSetupUsage,
 } from '../../../../shared/support-setup-copilot';
 import {
   fetchCopilotUserDiagnostics,
@@ -94,6 +95,8 @@ interface ChatTurn {
   actionResult?: CopilotExecuteActionResponse | null;
   /** How the Copilot worked on this answer (kept collapsed under the message). */
   trace?: SupportSetupTraceStep[];
+  /** What this reply cost (model / tool calls); only known for streamed replies. */
+  usage?: SupportSetupUsage;
 }
 
 interface BriefDraft {
@@ -305,6 +308,7 @@ export function SupportSetupCopilot() {
           userDiagnostic: res.userDiagnostic ?? null,
           actionProposal: res.actionProposal ?? null,
           trace: stepsRef.current.length > 0 ? stepsRef.current : undefined,
+          usage: res.usage,
         },
       ]);
     },
@@ -1943,6 +1947,16 @@ export function SupportSetupCopilot() {
                     turn.content
                   )}
                 </div>
+                {turn.role === 'assistant' && turn.usage && (
+                  <div className="ssc-usage" data-testid="support-setup-usage">
+                    {turn.usage.modelCalls === 0
+                      ? s.usageNone
+                      : [
+                          s.usageModel.replace('{n}', String(turn.usage.modelCalls)),
+                          ...(turn.usage.toolCalls > 0 ? [s.usageTools.replace('{n}', String(turn.usage.toolCalls))] : []),
+                        ].join(' · ')}
+                  </div>
+                )}
 
                 {turn.userDiagnostic && renderUserDiagnosticCard(turn.userDiagnostic, turn.id)}
 

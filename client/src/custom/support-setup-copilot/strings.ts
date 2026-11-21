@@ -134,6 +134,12 @@ export interface SupportSetupCopilotStrings {
   processTitle: string;
   /** `{n}` is replaced with the number of steps. */
   processCount: string;
+  /** Under an answer: no model was called. */
+  usageNone: string;
+  /** `{n}` = number of upstream model requests. */
+  usageModel: string;
+  /** `{n}` = number of tool calls. */
+  usageTools: string;
   consentBanner: string;
   selectedStepsCount: string;
   consentTargetCreate: string;
@@ -308,6 +314,9 @@ const en: SupportSetupCopilotStrings = {
   thinking: 'Thinking & putting together a helpful reply…',
   processTitle: 'How I worked on this',
   processCount: '({n} steps)',
+  usageNone: 'No model call — answered by rules, no tokens used',
+  usageModel: '{n} model call(s) on your connected providers',
+  usageTools: '{n} tool call(s)',
   consentBanner: 'Consent required — no changes applied yet',
   selectedStepsCount: '{selected}/{total} selected',
   consentTargetCreate: 'New tenant: {name} ({slug})',
@@ -499,6 +508,9 @@ const vi: SupportSetupCopilotStrings = {
   thinking: 'Đang lắng nghe & chuẩn bị câu trả lời cho bạn…',
   processTitle: 'Quá trình xử lý',
   processCount: '({n} bước)',
+  usageNone: 'Không gọi mô hình — trả lời theo quy tắc, không tốn token',
+  usageModel: '{n} lần gọi mô hình trên các nhà cung cấp bạn đã nối',
+  usageTools: '{n} lần gọi công cụ',
   consentBanner: 'Chờ xác nhận — chưa thay đổi dữ liệu hệ thống',
   selectedStepsCount: 'Đã chọn {selected}/{total} bước',
   consentTargetCreate: 'Tạo tenant mới: {name} ({slug})',

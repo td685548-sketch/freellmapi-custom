@@ -33,7 +33,7 @@ import {
 import { buildPlatformPromptSection } from './platform-guide.js';
 import { buildKbQueryFromMessages, formatKbForPrompt, searchKb } from './kb/index.js';
 import { buildSystemAdvicePromptSection } from './system-advisor.js';
-import { traceFinish, traceStart, traceStep } from './trace.js';
+import { traceCountModelCall, traceFinish, traceStart, traceStep } from './trace.js';
 import {
   buildAccountOnlyIdentityBlock,
   buildIdentityPromptBlock,
@@ -1017,6 +1017,7 @@ async function runHumanLikeLlmCoachCore(
 
       try {
         const signal = AbortSignal.timeout(Math.min(timeoutMs, 12_000));
+        traceCountModelCall();
         const res = await withQuotaTracking(account, modelId, proxy, () =>
           provider.chatCompletion(
             credential,
@@ -1046,6 +1047,7 @@ async function runHumanLikeLlmCoachCore(
             ...baseTurnMessages,
             { role: 'system', content: buildCorrectiveRetryNotice(params.locale) },
           ];
+          traceCountModelCall();
           const retryRes = await withQuotaTracking(account, modelId, proxy, () =>
             provider.chatCompletion(
               credential,
@@ -1103,6 +1105,7 @@ async function runHumanLikeLlmCoachCore(
     temperature: number,
     bypassCache: boolean,
   ): Promise<Response> => {
+    traceCountModelCall();
     const headers = bypassCache
       ? { ...baseHeaders, 'cache-control': 'no-cache' }
       : baseHeaders;

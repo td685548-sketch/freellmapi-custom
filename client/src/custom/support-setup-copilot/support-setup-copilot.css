@@ -1634,3 +1634,10 @@ details.ssc-process[open] .ssc-process-chevron {
     animation: none;
   }
 }
+
+.ssc-usage {
+  margin-top: 3px;
+  padding-left: 4px;
+  font-size: 10.5px;
+  color: var(--ssc-muted);
+}

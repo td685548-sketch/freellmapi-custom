@@ -566,6 +566,16 @@ export interface SupportSetupChatResponse {
   actionProposal?: CopilotActionProposal | null;
   modelUsed: string | null;
   usedFallback: boolean;
+  /**
+   * What this reply actually cost: real upstream model requests and tool calls made while answering.
+   * Only present when the reply was streamed (see `SupportSetupTraceStep`); 0 model calls = answered by rules.
+   */
+  usage?: SupportSetupUsage;
+}
+
+export interface SupportSetupUsage {
+  modelCalls: number;
+  toolCalls: number;
 }
 
 /**
