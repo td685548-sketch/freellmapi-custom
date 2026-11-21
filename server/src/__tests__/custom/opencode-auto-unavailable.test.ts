@@ -100,3 +100,67 @@ describe('OpenCode unavailable model fallback', () => {
     }
   });
 });
+
+describe('a 400 that says the model is dead cools the route down (any provider)', () => {
+  beforeAll(() => {
+    process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'c'.repeat(64);
+    initDb(':memory:');
+  });
+
+  it('classifies "model does not exist" 400s as model_unavailable, not request-scoped', () => {
+    for (const message of [
+      'Codex request failed (HTTP 400): The model `gpt-6-sol` does not exist',
+      'OpenAI API error 400: Unknown model: gpt-6-sol',
+      'Provider error 400: model_not_found',
+    ]) {
+      const err = Object.assign(new Error(message), { status: 400 });
+      expect(classifyRouteError(err)).toMatchObject({
+        shouldFallback: true,
+        requestScoped: false,
+        cooldownMs: 30_000,
+        reason: 'model_unavailable',
+      });
+    }
+  });
+
+  it('honours an adapter that says it cannot serve this model (providerRejection: model)', () => {
+    const err = Object.assign(new Error('This account cannot serve gpt-6-sol'), {
+      status: 400,
+      providerRejection: 'model',
+    });
+    expect(classifyRouteError(err)).toMatchObject({ requestScoped: false, reason: 'model_unavailable' });
+  });
+
+  it('records the cooldown, skips the route next time, and does not pollute the OpenCode list', () => {
+    const err = Object.assign(
+      new Error('Codex request failed (HTTP 400): The model `gpt-6-sol` does not exist'),
+      { status: 400 },
+    );
+    expect(recordCandidateFailure(141, 'gpt-6-sol[1m]', err)).toMatchObject({ reason: 'model_unavailable' });
+    expect(getAccountCooldown(141, 'gpt-6-sol[1m]').inCooldown).toBe(true);
+    const candidates = [
+      { account: { id: 141 }, modelId: 'gpt-6-sol[1m]' },
+      { account: { id: 141 }, modelId: 'claude-sonnet-4.5' },
+    ];
+    expect(filterCandidatesByCooldown(candidates).available).toEqual(candidates.slice(1));
+    expect(listUnavailableOpenCodeModels()).toEqual([]);
+    clearAccountCooldown(141, 'gpt-6-sol[1m]');
+    expect(getAccountCooldown(141, 'gpt-6-sol[1m]').inCooldown).toBe(false);
+  });
+
+  it('a genuinely malformed request 400 stays request-scoped with no cooldown', () => {
+    const err = Object.assign(new Error("Invalid request: 'messages' must be a non-empty array"), { status: 400 });
+    expect(classifyRouteError(err)).toMatchObject({ requestScoped: true, reason: 'request_scoped' });
+    recordCandidateFailure(142, 'some-model', err);
+    expect(getAccountCooldown(142, 'some-model').inCooldown).toBe(false);
+    // Kiro's "Invalid model ID" stays request-scoped by design (x-account-resilience):
+    // an auto-picked request tries the next model in the same provider.
+    const kiro = Object.assign(
+      new Error('Kiro inference failed (HTTP 400): {"message":"Invalid model ID. Please select a different model to continue.","reason":"INVALID_MODEL_ID"}'),
+      { status: 400 },
+    );
+    expect(classifyRouteError(kiro)).toMatchObject({ requestScoped: true, reason: 'request_scoped' });
+    recordCandidateFailure(143, 'bad-model', kiro);
+    expect(getAccountCooldown(143, 'bad-model').inCooldown).toBe(false);
+  });
+});

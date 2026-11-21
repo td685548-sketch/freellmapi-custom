@@ -17,6 +17,7 @@ import type {
   TokenUsage,
 } from '@freellmapi/shared/types.js';
 import { estimateInputTokens } from '../../lib/content.js';
+import { sanitizeProviderErrorMessage } from '../../lib/error-redaction.js';
 import {
   BaseProvider,
   providerHttpError,
@@ -38,6 +39,25 @@ interface ResponsesTool {
   description?: string;
   parameters: Record<string, unknown>;
   strict?: boolean;
+}
+
+/**
+ * The one-line upstream reason out of a Responses API error body
+ * (`{ error: { message, code } }`), or the HTTP status text when the body says nothing.
+ * The detail matters: without it a 400 for a dead model ("The model `gpt-6-sol` does not
+ * exist") is indistinguishable from a malformed request, so the route is never cooled down.
+ */
+function upstreamErrorDetail(body: unknown, fallback: string): string {
+  if (body && typeof body === 'object') {
+    const record = body as { error?: unknown; message?: unknown };
+    const nested = record.error;
+    if (nested && typeof nested === 'object' && typeof (nested as { message?: unknown }).message === 'string') {
+      return (nested as { message: string }).message;
+    }
+    if (typeof record.message === 'string' && record.message) return record.message;
+  }
+  if (typeof body === 'string' && body.trim()) return body.trim();
+  return fallback;
 }
 
 export function codexUpstreamModel(modelId: string): string {
@@ -271,8 +291,15 @@ export class CodexProvider extends BaseProvider {
     }, options?.timeoutMs ?? this.timeoutMs, { signal: options?.signal, timeoutBounds: 'headers' });
 
     if (!res.ok) {
-      await res.body?.cancel();
-      throw providerHttpError(res, `Codex request failed (HTTP ${res.status}).`, '');
+      const raw = await res.text().catch(() => '');
+      let parsed: unknown = null;
+      try {
+        parsed = raw ? JSON.parse(raw) : null;
+      } catch {
+        parsed = null;
+      }
+      const detail = sanitizeProviderErrorMessage(upstreamErrorDetail(parsed ?? raw, res.statusText));
+      throw providerHttpError(res, `Codex request failed (HTTP ${res.status}): ${detail}`, parsed ?? raw);
     }
 
     const id = this.makeId();

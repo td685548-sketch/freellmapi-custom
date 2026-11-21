@@ -38,6 +38,18 @@ const RATE_LIMIT_RE =
 const AUTH_OR_CONFIG_RE =
   /\b(no credentials|invalid api key|invalid_api_key|improperly formed request|unauthorized|authentication failed)\b/i;
 const NOT_ALLOWED_RE = /\brequest not allowed\b/i;
+/**
+ * A 400 that says the *model* is dead — not the request: the upstream does not know
+ * this model id ("The model `x` does not exist", "Unknown model", "model_not_found").
+ * Deliberately narrower than "model is unavailable", which other providers also use for
+ * transient capacity and stays OpenCode-only below. "Invalid model" is NOT here on
+ * purpose: Kiro's "Invalid model ID" 400 is request-scoped by design (x-account-resilience:
+ * an auto-picked request tries the next model in the same provider, only an explicit
+ * request skips the provider), so only the unambiguous dead-model wordings cool a route.
+ */
+const MODEL_NOT_FOUND_RE =
+  /\b(model_not_found|unknown model|unsupported model|no such model|model not found)\b/i;
+const MODEL_DOES_NOT_EXIST_RE = /\bmodel\b[\s\S]{0,80}?\b(does not|doesn't) exist\b/i;
 const STATUS_IN_MSG_RE = /\b(400|401|402|403|404|408|409|413|422|429|500|502|503|504|520|524|529)\b/;
 
 const backoffLevels = new Map<string, number>();
@@ -80,6 +92,8 @@ export function extractErrorStatus(err: unknown): number | undefined {
 /**
  * Classify an upstream error using 9router's error rules:
  * rate-limit/capacity -> exponential backoff; 401-404/auth -> 2m cooldown;
+ * a 400 that says the model itself is unknown/dead -> 30s cooldown (the route is
+ * retried after the cooldown, not on every turn);
  * other 4xx -> request-scoped (no cooldown, skip same-provider rotation);
  * 5xx/network/empty stream -> 30s transient cooldown.
  */
@@ -89,6 +103,19 @@ export function classifyRouteError(err: unknown): RouteErrorClassification {
 
   if (status === 400 && /^OpenCode Free API error 400:/i.test(message)
     && /\bmodel is unavailable\b/i.test(message)) {
+    return { shouldFallback: true, requestScoped: false, cooldownMs: TRANSIENT_COOLDOWN_MS, useBackoff: false, status, reason: 'model_unavailable' };
+  }
+
+  // The adapter said so itself: it cannot serve this model (providerRequestError 'model'),
+  // so the route — not the request — is the problem.
+  const rejection = (err as { providerRejection?: unknown } | null)?.providerRejection;
+  if (rejection === 'model') {
+    return { shouldFallback: true, requestScoped: false, cooldownMs: TRANSIENT_COOLDOWN_MS, useBackoff: false, status, reason: 'model_unavailable' };
+  }
+
+  // A 400 that names a dead model ("The model `gpt-6-sol` does not exist") is a route
+  // problem too: retrying the same model on the next turn would fail the same way.
+  if (status === 400 && (MODEL_NOT_FOUND_RE.test(message) || MODEL_DOES_NOT_EXIST_RE.test(message))) {
     return { shouldFallback: true, requestScoped: false, cooldownMs: TRANSIENT_COOLDOWN_MS, useBackoff: false, status, reason: 'model_unavailable' };
   }
 
@@ -134,8 +161,14 @@ export function recordCandidateFailure(
   err: unknown,
 ): RouteErrorClassification {
   const classification = classifyRouteError(err);
+  // The persistent "unavailable" list is OpenCode-only: a dead Codex (or other provider)
+  // model cools down through the transient cooldown below, it must not be written into
+  // the OpenCode list.
   if (classification.reason === 'model_unavailable') {
-    try { rememberUnavailableOpenCodeModel(accountId, modelId); } catch { /* Keep the in-memory cooldown on storage failure. */ }
+    const message = err instanceof Error ? err.message : String(err ?? '');
+    if (/^OpenCode Free API error 400:/i.test(message) && /\bmodel is unavailable\b/i.test(message)) {
+      try { rememberUnavailableOpenCodeModel(accountId, modelId); } catch { /* Keep the in-memory cooldown on storage failure. */ }
+    }
   }
   if (classification.requestScoped) {
     return classification;
