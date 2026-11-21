@@ -1032,7 +1032,11 @@ async function runHumanLikeLlmCoachCore(
     })),
   ];
 
-  const timeoutMs = params.timeoutMs ?? 15_000;
+  // 30s, not 15s: the gateway's own fallback budget is 45s (lib/fallback-loop.ts)
+  // and a web-cookie provider's first-content window is 25s, so a 15s abort
+  // killed healthy multi-hop 'auto' resolutions before the gateway could
+  // answer. Tier 1 Thruline attempts stay capped at 12s each (see below).
+  const timeoutMs = params.timeoutMs ?? 30_000;
 
   // Every attempt that fails is remembered with its reason and shown live on the "ask the model" step.
   const failAttempt = (route: string, reason: { vi: string; en: string }, skipped = false): void => {
@@ -1278,7 +1282,11 @@ async function runHumanLikeLlmCoachCore(
       return null;
     } catch (err) {
       failAttempt(`FreeLLMAPI ${modelCandidate}`, errorReason(err, timeoutMs));
-      return null;
+      // A timeout / dropped connection on 'auto' must not end the turn: a slow
+      // first candidate can eat the whole per-attempt budget while the gateway
+      // is still working, so try the next model the same way an HTTP
+      // 400/404/503/429 already does. Only the last candidate gives up.
+      continue;
     }
   }
 
