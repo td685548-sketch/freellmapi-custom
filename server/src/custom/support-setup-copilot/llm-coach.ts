@@ -106,8 +106,15 @@ export interface LlmCoachTurnInput {
   toolSchemas?: ReadonlyArray<LlmCoachToolSchema>;
   /** Optional fetch override for unit/integration tests. */
   fetchImpl?: typeof fetch;
-  /** Optional per-request timeout in ms (defaults to 15_000). */
+  /** Optional per-request timeout in ms (defaults to 30_000). */
   timeoutMs?: number;
+  /**
+   * Optional streaming budgets for the FreeLLMAPI loopback attempt (tests only;
+   * production uses the defaults in `runHumanLikeLlmCoachCore`). `idleMs` is the
+   * silence allowed between streamed chunks once the first token arrived;
+   * `totalMs` is the absolute cap for one streaming attempt.
+   */
+  streamTimeouts?: { idleMs?: number; totalMs?: number };
 }
 
 export interface LlmCoachTurnResult {
@@ -1237,6 +1244,7 @@ async function runHumanLikeLlmCoachCore(
     temperature: number,
     bypassCache: boolean,
     stream = false,
+    signal?: AbortSignal,
   ): Promise<Response> => {
     const headers = bypassCache
       ? { ...baseHeaders, 'cache-control': 'no-cache' }
@@ -1251,16 +1259,15 @@ async function runHumanLikeLlmCoachCore(
         messages: turnMessages,
         ...(stream ? { stream: true } : {}),
       }),
-      signal: AbortSignal.timeout(timeoutMs),
+      // A streaming attempt passes its own watchdog signal (inactivity +
+      // overall cap); a plain completion keeps the plain per-attempt deadline.
+      signal: signal ?? AbortSignal.timeout(timeoutMs),
     };
     try {
       return await doFetch(loopbackTarget.primaryUrl, init);
     } catch (primaryErr) {
       if (!loopbackTarget.fallbackUrl) throw primaryErr;
-      return await doFetch(loopbackTarget.fallbackUrl, {
-        ...init,
-        signal: AbortSignal.timeout(timeoutMs),
-      });
+      return await doFetch(loopbackTarget.fallbackUrl, { ...init });
     }
   };
 
@@ -1293,6 +1300,7 @@ async function runHumanLikeLlmCoachCore(
   const readLoopbackStreamText = async (
     res: Response,
     onProgress: (preview: string) => void,
+    onActivity?: () => void,
   ): Promise<{ text: string; reasoning: string; model?: string } | null> => {
     const body = res.body;
     if (!body) return null;
@@ -1315,6 +1323,8 @@ async function runHumanLikeLlmCoachCore(
       for (;;) {
         const { done, value } = await reader.read();
         if (value) {
+          // Signal from the model: a chunk arrived, so the stream is alive.
+          onActivity?.();
           const decoded = decoder.decode(value, { stream: !done }).replace(/\r\n/g, '\n');
           buffer += decoded;
           raw += decoded;
@@ -1388,6 +1398,13 @@ async function runHumanLikeLlmCoachCore(
    * produced. If the stream yields nothing usable (or the body is not SSE), the same request
    * is made once as a plain completion; a timeout is never retried plain — it fails the
    * attempt, and the loop tries the next model. Counts one model call per attempt.
+   *
+   * The stream is NOT killed by the per-attempt deadline while the model is still
+   * producing tokens: the first token still has to arrive within `timeoutMs`, but
+   * every chunk that arrives extends the deadline — the attempt only aborts after
+   * `idleMs` of silence, or at the `totalMs` absolute cap. A slow reasoning model
+   * that trickles tokens therefore finishes its answer instead of being cut off
+   * mid-sentence; a stalled stream still fails fast and the loop tries the next model.
    */
   const fetchLoopbackCompletion = async (
     model: string,
@@ -1404,12 +1421,24 @@ async function runHumanLikeLlmCoachCore(
     };
     const routedHeaderOf = (res: Response): string | undefined =>
       res.headers?.get?.('x-routed-via') ?? undefined;
+    // 15s of silence mid-answer, 120s absolute cap per streaming attempt.
+    // (Overridable via params.streamTimeouts in tests.)
+    const streamIdleMs = params.streamTimeouts?.idleMs ?? 15_000;
+    const streamTotalMs = params.streamTimeouts?.totalMs ?? 120_000;
+    const streamController = new AbortController();
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    const armIdle = (ms: number): void => {
+      if (idleTimer !== undefined) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => streamController.abort(), ms);
+    };
+    const totalTimer = setTimeout(() => streamController.abort(), streamTotalMs);
+    armIdle(timeoutMs); // first token within the per-attempt budget, as before
     try {
-      const res = await postLoopback(model, turnMessages, temperature, bypassCache, true);
+      const res = await postLoopback(model, turnMessages, temperature, bypassCache, true, streamController.signal);
       if (!res.ok) {
         return { ok: false, status: res.status, body: null, routedHeader: routedHeaderOf(res) };
       }
-      const streamed = await readLoopbackStreamText(res, onProgress);
+      const streamed = await readLoopbackStreamText(res, onProgress, () => armIdle(streamIdleMs));
       if (streamed) {
         return {
           ok: true,
@@ -1421,6 +1450,11 @@ async function runHumanLikeLlmCoachCore(
     } catch (err) {
       if (isAbortError(err)) throw err;
       // Any other streaming failure falls through to the plain call below.
+    } finally {
+      // The watchdog belongs to the stream attempt only: the plain call below
+      // has its own per-attempt deadline.
+      clearTimeout(totalTimer);
+      if (idleTimer !== undefined) clearTimeout(idleTimer);
     }
     const upstream = await postLoopback(model, turnMessages, temperature, bypassCache, false);
     if (!upstream.ok) {

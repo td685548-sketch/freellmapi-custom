@@ -276,6 +276,114 @@ describe('live reasoning while the model streams its answer', () => {
     expect(modelSteps[modelSteps.length - 1]?.reasoning).toContain('Response cache');
     setCopilotModelSource('both');
   });
+
+  it('a slow-but-alive stream is not cut off by the per-attempt deadline while tokens keep arriving', async () => {
+    setCopilotModelSource('freellmapi');
+    const sse = (payload: string): string => `data: ${payload}\n\n`;
+    // Chunks arrive ~350ms apart, so the whole answer takes ~700ms — well past
+    // the 300ms per-attempt budget. The old total-deadline abort would kill it
+    // after the first chunk (reasoning only) and the turn would fail; with the
+    // inactivity watchdog every chunk extends the deadline and it completes.
+    const timedChunks = [
+      { delayMs: 0, sse: sse(JSON.stringify({ model: 'fake/stream', choices: [{ delta: { reasoning_content: 'Người dùng hỏi về cache; cần trả lời ngắn gọn.' } }] })) },
+      { delayMs: 350, sse: sse(JSON.stringify({ choices: [{ delta: { content: '{"intent":"guide","reply":"Response cache' } }] })) },
+      { delayMs: 350, sse: sse(JSON.stringify({ choices: [{ delta: { content: ' giúp giảm số lần gọi nhà cung cấp."}' } }] })) },
+      { delayMs: 0, sse: 'data: [DONE]\n\n' },
+    ];
+    let calls = 0;
+    const fetchImpl = (async (_url: unknown, init?: { signal?: AbortSignal }) => {
+      calls += 1;
+      const stream = new ReadableStream({
+        async start(controller) {
+          // Like a real fetch body, an abort errors the stream mid-read.
+          init?.signal?.addEventListener('abort', () => {
+            try {
+              controller.error(init.signal?.reason ?? new Error('aborted'));
+            } catch {
+              // Already closed.
+            }
+          });
+          for (const { delayMs, sse: chunk } of timedChunks) {
+            if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+            if (init?.signal?.aborted) return;
+            controller.enqueue(new TextEncoder().encode(chunk));
+          }
+          controller.close();
+        },
+      });
+      return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    }) as unknown as typeof fetch;
+
+    const seen: SupportSetupTraceStep[] = [];
+    const result = await runWithTrace((st) => seen.push(st), () =>
+      runHumanLikeLlmCoach({
+        user: admin,
+        messages: [{ role: 'user' as const, content: 'cho mình hỏi về cài đặt cache' }],
+        locale: 'vi' as const, targetMode: 'update_tenant' as const, diagnostic: null, extracted: {},
+        gatewayLoopback: { host: '127.0.0.1', port: 9, forceLoopback: true },
+        fetchImpl,
+        timeoutMs: 300,
+        streamTimeouts: { idleMs: 600, totalMs: 3000 },
+      }),
+    );
+
+    expect(calls).toBe(1); // one streamed request; no plain retry, no corrective retry
+    expect(result?.output.reply).toContain('Response cache');
+    expect(result?.routeSource).toBe('main_gateway_loopback');
+    const modelSteps = seen.filter((st) => st.kind === 'model');
+    expect(modelSteps[modelSteps.length - 1]?.status).toBe('done');
+    expect(modelSteps[modelSteps.length - 1]?.reasoning).toContain('Người dùng hỏi về cache');
+    setCopilotModelSource('both');
+  });
+
+  it('a stalled stream still aborts on silence instead of holding the turn until the total cap', async () => {
+    setCopilotModelSource('freellmapi');
+    const sse = (payload: string): string => `data: ${payload}\n\n`;
+    let calls = 0;
+    const fetchImpl = (async (_url: unknown, init?: { signal?: AbortSignal }) => {
+      calls += 1;
+      const stream = new ReadableStream({
+        start(controller) {
+          init?.signal?.addEventListener('abort', () => {
+            try {
+              controller.error(init.signal?.reason ?? new Error('aborted'));
+            } catch {
+              // Already closed.
+            }
+          });
+          // One reasoning chunk, then silence forever: the stream never
+          // yields another chunk and never closes.
+          controller.enqueue(
+            new TextEncoder().encode(
+              sse(JSON.stringify({ choices: [{ delta: { reasoning_content: 'Đang suy nghĩ…' } }] })),
+            ),
+          );
+        },
+      });
+      return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    }) as unknown as typeof fetch;
+
+    const startedAt = Date.now();
+    const result = await runHumanLikeLlmCoach({
+      user: admin,
+      messages: [{ role: 'user' as const, content: 'cho mình hỏi về cài đặt cache' }],
+      locale: 'vi' as const, targetMode: 'update_tenant' as const, diagnostic: null, extracted: {},
+      gatewayLoopback: { host: '127.0.0.1', port: 9, forceLoopback: true },
+      fetchImpl,
+      timeoutMs: 300,
+      streamTimeouts: { idleMs: 200, totalMs: 5000 },
+    });
+    const elapsedMs = Date.now() - startedAt;
+
+    // The turn fails (a stalled stream is unusable), but it fails fast: the
+    // attempt aborts ~200ms after its only chunk, not at the 5s total cap.
+    // (A format failure stops after one model — the known "unusable answer
+    // ends the turn" behaviour — so 'auto:balanced' is never tried here.)
+    expect(result).toBeNull();
+    expect(calls).toBe(1); // only 'auto': the empty partial answer ends the turn
+    expect(elapsedMs).toBeLessThan(2000);
+    setCopilotModelSource('both');
+  });
 });
 
 describe('System target: model answer first for unrecognised messages, honest fallback last', () => {
