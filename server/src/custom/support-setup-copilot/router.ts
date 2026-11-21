@@ -47,6 +47,8 @@ import { tryGroundedGuideReply } from './grounded-guide.js';
 import { buildKbGroundedFallback, isTroubleshootingQuestion } from './kb/answer.js';
 import { detectConversationLocale, runSupportSetupCopilotTurn } from './playbook.js';
 import { copilotChatStream, copilotChatStreamError } from './chat-stream.js';
+import { describeModelSourceAvailability } from './llm-coach.js';
+import { getCopilotModelSource, isCopilotModelSource, setCopilotModelSource } from './model-source.js';
 import { traceDone } from './trace.js';
 import { canUseSystemTarget, handleSystemTargetChatTurnGrounded } from './system-target.js';
 import {
@@ -77,7 +79,8 @@ import {
   authorizePermissionGrant,
   handlePermissionGrantChatTurn,
 } from './permission-grants.js';
-import type { CopilotPermissionGrant } from '@freellmapi/shared/support-setup-copilot.js';
+import type { CopilotModelSourceResponse, CopilotPermissionGrant } from '@freellmapi/shared/support-setup-copilot.js';
+import { permissionGranted } from '@freellmapi/shared/permissions.js';
 
 export const supportSetupCopilotRouter = Router();
 
@@ -392,6 +395,47 @@ supportSetupCopilotRouter.get('/status', (req: Request, res: Response) => {
   };
 
   res.json(payload);
+});
+
+// GET/PUT /api/support-setup-copilot/model-source — which models the Copilot may call
+// (Thruline's own accounts, FreeLLMAPI's gateway, or both). Anyone using the Copilot can read it;
+// changing it is a system setting and needs `edit_settings`.
+function modelSourceResponse(user: SessionUser): CopilotModelSourceResponse {
+  return {
+    ok: true,
+    source: getCopilotModelSource(),
+    canEdit: permissionGranted(user, 'edit_settings'),
+    available: describeModelSourceAvailability(),
+  };
+}
+
+supportSetupCopilotRouter.get('/model-source', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(modelSourceResponse((req as Request & { user?: SessionUser }).user!));
+  } catch (err) {
+    next(err);
+  }
+});
+
+supportSetupCopilotRouter.put('/model-source', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = (req as Request & { user?: SessionUser }).user!;
+    if (!permissionGranted(user, 'edit_settings')) {
+      throw new SupportSetupCopilotError(
+        403,
+        'forbidden',
+        'Changing the Copilot model source needs the `edit_settings` permission.',
+      );
+    }
+    const source = (req.body as { source?: unknown } | undefined)?.source;
+    if (!isCopilotModelSource(source)) {
+      throw new SupportSetupCopilotError(400, 'invalid_input', 'source must be "both", "thruline" or "freellmapi".');
+    }
+    setCopilotModelSource(source);
+    res.json(modelSourceResponse(user));
+  } catch (err) {
+    next(err);
+  }
 });
 
 // GET /api/support-setup-copilot/whoami — the caller's OWN identity only.

@@ -73,6 +73,7 @@ import {
   formatSetupString,
   getSupportSetupCopilotStrings,
 } from './strings';
+import { ModelSourcePicker } from './ModelSourcePicker';
 import { ProcessSteps } from './ProcessSteps';
 import { upsertStep } from './process-steps-state';
 import './support-setup-copilot.css';
@@ -1471,6 +1472,8 @@ export function SupportSetupCopilot() {
             )}
           </div>
 
+          <ModelSourcePicker s={s} enabled={canQueryStatus} />
+
           {whoamiOpen && (
             <div className="ssc-diag-card" data-testid="copilot-whoami-card">
               <div className="ssc-diag-head">
@@ -1952,7 +1955,11 @@ export function SupportSetupCopilot() {
                     {turn.usage.modelCalls === 0
                       ? s.usageNone
                       : [
-                          s.usageModel.replace('{n}', String(turn.usage.modelCalls)),
+                          turn.usage.source
+                            ? s.usageModelVia
+                                .replace('{n}', String(turn.usage.modelCalls))
+                                .replace('{source}', turn.usage.source === 'thruline' ? 'Thruline' : 'FreeLLMAPI')
+                            : s.usageModel.replace('{n}', String(turn.usage.modelCalls)),
                           ...(turn.usage.toolCalls > 0 ? [s.usageTools.replace('{n}', String(turn.usage.toolCalls))] : []),
                         ].join(' · ')}
                   </div>

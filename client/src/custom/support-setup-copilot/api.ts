@@ -1,6 +1,8 @@
 import { apiFetch, clearToken, getToken, UNAUTHORIZED_EVENT, type ApiError } from '@/lib/api';
 import type {
   CopilotDiagnosticsResponse,
+  CopilotModelSource,
+  CopilotModelSourceResponse,
   CopilotExecuteActionRequest,
   CopilotExecuteActionResponse,
   CopilotWhoAmIResponse,
@@ -55,6 +57,17 @@ export function fetchCopilotUserDiagnostics(windowHours = 72): Promise<CopilotDi
   return apiFetch<CopilotDiagnosticsResponse>(
     `/api/support-setup-copilot/diagnostics?windowHours=${encodeURIComponent(String(windowHours))}`,
   );
+}
+
+export function fetchCopilotModelSource(): Promise<CopilotModelSourceResponse> {
+  return apiFetch<CopilotModelSourceResponse>('/api/support-setup-copilot/model-source');
+}
+
+export function putCopilotModelSource(source: CopilotModelSource): Promise<CopilotModelSourceResponse> {
+  return apiFetch<CopilotModelSourceResponse>('/api/support-setup-copilot/model-source', {
+    method: 'PUT',
+    body: JSON.stringify({ source }),
+  });
 }
 
 export function postSupportSetupChat(body: SupportSetupChatRequest): Promise<SupportSetupChatResponse> {

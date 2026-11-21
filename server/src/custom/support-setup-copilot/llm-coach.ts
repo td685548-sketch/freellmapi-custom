@@ -33,7 +33,8 @@ import {
 import { buildPlatformPromptSection } from './platform-guide.js';
 import { buildKbQueryFromMessages, formatKbForPrompt, searchKb } from './kb/index.js';
 import { buildSystemAdvicePromptSection } from './system-advisor.js';
-import { traceCountModelCall, traceFinish, traceStart, traceStep } from './trace.js';
+import { getCopilotModelSource } from './model-source.js';
+import { traceCountModelCall, traceNoteSource, traceFinish, traceStart, traceStep } from './trace.js';
 import {
   buildAccountOnlyIdentityBlock,
   buildIdentityPromptBlock,
@@ -917,6 +918,7 @@ export async function runHumanLikeLlmCoach(
   const modelStep = { id: '' };
   const result = await runHumanLikeLlmCoachCore(params, modelStep);
   if (result) {
+    traceNoteSource(result.routeSource === 'thruline_account' ? 'thruline' : 'freellmapi');
     traceFinish(modelStep.id, 'done', { detailVi: result.modelUsed, detailEn: result.modelUsed });
   } else {
     traceFinish(modelStep.id, 'error', {
@@ -997,7 +999,9 @@ async function runHumanLikeLlmCoachCore(
   // -------------------------------------------------------------------------
   // Tier 1: Thruline provider accounts (`x_gateway_keys`)
   // -------------------------------------------------------------------------
-  const candidates = collectThrulineCandidates(params.diagnostic?.tenant.defaultModel);
+  const modelSource = getCopilotModelSource();
+  const candidates =
+    modelSource === 'freellmapi' ? [] : collectThrulineCandidates(params.diagnostic?.tenant.defaultModel);
   if (candidates.length > 0) {
     for (const candidate of candidates.slice(0, 4)) {
       const { account, modelId } = candidate;
@@ -1081,6 +1085,7 @@ async function runHumanLikeLlmCoachCore(
   // -------------------------------------------------------------------------
   // Tier 2: Main FreeLLMAPI `/v1/chat/completions` loopback
   // -------------------------------------------------------------------------
+  if (modelSource === 'thruline') return null; // the operator limited the Copilot to Thruline's own models
   const loopbackTarget = normalizeLoopbackTarget(params.gatewayLoopback);
   if (!loopbackTarget || !shouldAttemptMainGatewayLoopback(params, loopbackTarget.port)) {
     return null;
@@ -1209,4 +1214,13 @@ async function runHumanLikeLlmCoachCore(
   }
 
   return null;
+}
+
+/** Whether each model source currently has something the Copilot could call (for the source picker). */
+export function describeModelSourceAvailability(): { thruline: boolean; freellmapi: boolean } {
+  let thruline = false;
+  let freellmapi = false;
+  try { thruline = collectThrulineCandidates().length > 0; } catch { /* unreadable = not available */ }
+  try { freellmapi = hasConfiguredMainGatewayRoutes(); } catch { /* unreadable = not available */ }
+  return { thruline, freellmapi };
 }

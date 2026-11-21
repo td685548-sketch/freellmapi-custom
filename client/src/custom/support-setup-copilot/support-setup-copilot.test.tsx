@@ -366,7 +366,7 @@ describe('SupportSetupCopilot widget', () => {
       controller.enqueue(sse('step', step('s2', 'done')));
       controller.enqueue(sse('final', {
         status: 200,
-        body: { ok: true, reply: 'Đây là câu trả lời.', intent: 'guide', missingQuestions: [], suggestedQuickReplies: [], proposal: null, modelUsed: null, usedFallback: true, usage: { modelCalls: 2, toolCalls: 1 } },
+        body: { ok: true, reply: 'Đây là câu trả lời.', intent: 'guide', missingQuestions: [], suggestedQuickReplies: [], proposal: null, modelUsed: null, usedFallback: true, usage: { modelCalls: 2, toolCalls: 1, source: 'thruline' } },
       }));
       controller.close();
     });
@@ -379,7 +379,7 @@ describe('SupportSetupCopilot widget', () => {
     expect(done!.textContent).toContain('(2 bước)');
     expect(container.textContent).toContain('Đây là câu trả lời.');
     expect(container.querySelector('[data-testid="support-setup-usage"]')?.textContent).toBe(
-      '2 lần gọi mô hình trên các nhà cung cấp bạn đã nối · 1 lần gọi công cụ',
+      '2 lần gọi mô hình qua Thruline · 1 lần gọi công cụ',
     );
   });
 

@@ -16,6 +16,7 @@ interface TraceContext {
   open: Map<string, SupportSetupTraceStep>;
   modelCalls: number;
   toolCalls: number;
+  source?: 'thruline' | 'freellmapi';
 }
 
 const als = new AsyncLocalStorage<TraceContext>();
@@ -96,8 +97,15 @@ export function traceCountToolCall(): void {
   if (ctx) ctx.toolCalls += 1;
 }
 
-/** What the current traced turn has cost so far, or null outside a trace. */
-export function traceUsage(): { modelCalls: number; toolCalls: number } | null {
+/** Records which model source answered (the last one wins). No-op outside a trace. */
+export function traceNoteSource(source: 'thruline' | 'freellmapi'): void {
   const ctx = als.getStore();
-  return ctx ? { modelCalls: ctx.modelCalls, toolCalls: ctx.toolCalls } : null;
+  if (ctx) ctx.source = source;
+}
+
+/** What the current traced turn has cost so far, or null outside a trace. */
+export function traceUsage(): { modelCalls: number; toolCalls: number; source?: 'thruline' | 'freellmapi' } | null {
+  const ctx = als.getStore();
+  if (!ctx) return null;
+  return { modelCalls: ctx.modelCalls, toolCalls: ctx.toolCalls, ...(ctx.source ? { source: ctx.source } : {}) };
 }

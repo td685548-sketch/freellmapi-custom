@@ -576,6 +576,21 @@ export interface SupportSetupChatResponse {
 export interface SupportSetupUsage {
   modelCalls: number;
   toolCalls: number;
+  /** Which model source answered (when a model did): Thruline's own accounts or FreeLLMAPI's main gateway. */
+  source?: 'thruline' | 'freellmapi';
+}
+
+/** Where the Copilot may send its model requests. `both` tries Thruline first, then FreeLLMAPI. */
+export const COPILOT_MODEL_SOURCES = ['both', 'thruline', 'freellmapi'] as const;
+export type CopilotModelSource = (typeof COPILOT_MODEL_SOURCES)[number];
+
+export interface CopilotModelSourceResponse {
+  ok: true;
+  source: CopilotModelSource;
+  /** Whether the caller may change it (needs `edit_settings`). */
+  canEdit: boolean;
+  /** Whether each source currently has something to call (accounts connected / gateway routes configured). */
+  available: { thruline: boolean; freellmapi: boolean };
 }
 
 /**
