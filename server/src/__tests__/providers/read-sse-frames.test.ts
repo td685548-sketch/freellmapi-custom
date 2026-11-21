@@ -109,4 +109,77 @@ describe('readSseFrames data: prefix (issue #1087)', () => {
     expect(err.message).toContain('stream ended unexpectedly');
     expect(err.message).toContain('no [DONE], no finish_reason');
   });
+
+  it('accepts a complete plain-JSON chat completion instead of SSE', async () => {
+    // Some OpenAI-compatible upstreams ignore `stream: true` and answer with a
+    // plain JSON completion (this is what PR #194's copilot loopback hit: the
+    // gateway used to 502 the whole request with "stream ended unexpectedly"
+    // and cool the route down). A finished answer is surfaced as one chunk.
+    const completion = JSON.stringify({
+      id: 'chatcmpl_plain_1',
+      object: 'chat.completion',
+      created: 1234567890,
+      model: 'mock-model',
+      choices: [{ index: 0, message: { role: 'assistant', content: 'hello plain' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    });
+    const provider = makeProvider();
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(completion, { status: 200, headers: { 'content-type': 'application/json' } }),
+    );
+
+    const chunks = await collect(provider.streamChatCompletion('k', MESSAGES, 'm'));
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]?.choices?.[0]?.delta?.content).toBe('hello plain');
+    expect(chunks[0]?.choices?.[0]?.finish_reason).toBe('stop');
+    expect(chunks[0]?.model).toBe('mock-model');
+    expect(chunks[0]?.id).toBe('chatcmpl_plain_1');
+  });
+
+  it('accepts a pretty-printed plain-JSON completion', async () => {
+    const completion = JSON.stringify(
+      {
+        id: 'chatcmpl_plain_2',
+        object: 'chat.completion',
+        created: 1234567890,
+        model: 'mock-model',
+        choices: [{ index: 0, message: { role: 'assistant', content: 'multi\nline' }, finish_reason: 'stop' }],
+      },
+      null,
+      2,
+    );
+    const provider = makeProvider();
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(completion, { status: 200, headers: { 'content-type': 'application/json' } }),
+    );
+
+    const chunks = await collect(provider.streamChatCompletion('k', MESSAGES, 'm'));
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]?.choices?.[0]?.delta?.content).toBe('multi\nline');
+    expect(chunks[0]?.choices?.[0]?.finish_reason).toBe('stop');
+  });
+
+  it('still throws on a truncated plain-JSON body', async () => {
+    const truncated = '{"id":"c1","object":"chat.completion","choices":[{"index":0,"message":{"content":"hel';
+    const provider = makeProvider();
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(truncated, { status: 200, headers: { 'content-type': 'application/json' } }),
+    );
+
+    const err = await collect(provider.streamChatCompletion('k', MESSAGES, 'm')).then(() => null, e => e);
+    expect(err).not.toBeNull();
+    expect(err.message).toContain('stream ended unexpectedly');
+  });
+
+  it('still throws on a plain-JSON error body', async () => {
+    const body = JSON.stringify({ error: { message: 'boom', type: 'server_error' } });
+    const provider = makeProvider();
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(body, { status: 200, headers: { 'content-type': 'application/json' } }),
+    );
+
+    const err = await collect(provider.streamChatCompletion('k', MESSAGES, 'm')).then(() => null, e => e);
+    expect(err).not.toBeNull();
+    expect(err.message).toContain('stream ended unexpectedly');
+  });
 });

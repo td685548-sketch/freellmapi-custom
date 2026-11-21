@@ -258,6 +258,54 @@ export interface KeyValidationOptions {
   onCredentialUpdate?: (nextCredential: string) => void;
 }
 
+/**
+ * Some OpenAI-compatible upstreams ignore `stream: true` and answer with a
+ * complete plain-JSON chat completion instead of SSE. That body is a finished
+ * answer, not a truncated stream: convert it to the single chunk a stream
+ * reader would have produced for it, so the caller succeeds instead of
+ * failing with "stream ended unexpectedly" (and cooling the route down).
+ * Returns null unless the body parses as a complete completion — an object
+ * with `choices[0].message.content` as a string. A genuinely truncated
+ * stream, an SSE body, or an error body never qualifies, so those keep their
+ * existing behaviour.
+ */
+function plainJsonCompletionToChunk(raw: string): ChatCompletionChunk | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw.trim()) as unknown;
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const body = parsed as Record<string, unknown>;
+  const choices = body.choices;
+  if (!Array.isArray(choices) || choices.length === 0) return null;
+  const first = choices[0] as Record<string, unknown> | null;
+  if (!first || typeof first !== 'object') return null;
+  const message = first.message as Record<string, unknown> | null;
+  if (!message || typeof message.content !== 'string') return null;
+  const finishReason = typeof first.finish_reason === 'string' ? first.finish_reason : 'stop';
+  return {
+    id: typeof body.id === 'string' ? body.id : '',
+    object: 'chat.completion.chunk',
+    created: typeof body.created === 'number' ? body.created : Math.floor(Date.now() / 1000),
+    model: typeof body.model === 'string' ? body.model : '',
+    choices: [
+      {
+        index: 0,
+        delta: {
+          role: 'assistant',
+          content: message.content,
+          ...(typeof message.reasoning_content === 'string'
+            ? { reasoning_content: message.reasoning_content }
+            : {}),
+        },
+        finish_reason: finishReason,
+      },
+    ],
+  };
+}
+
 export abstract class BaseProvider {
   abstract readonly platform: Platform;
   abstract readonly name: string;
@@ -504,7 +552,10 @@ export abstract class BaseProvider {
    *    to end the generator silently (truncation logged as success); it now
    *    throws a retryable error so the proxy can fail over or report it.
    *    Providers that skip `[DONE]` but do send a terminal finish_reason
-   *    (several compat shims) still complete normally.
+   *    (several compat shims) still complete normally. An upstream that
+   *    ignores `stream: true` and answers with a complete plain-JSON chat
+   *    completion is likewise a finished answer, not a truncation: it is
+   *    surfaced as a single chunk instead of throwing.
    *
    * Malformed data lines are skipped, matching previous behavior.
    *
@@ -544,6 +595,7 @@ export abstract class BaseProvider {
 
     const decoder = new TextDecoder();
     let buffer = '';
+    let raw = '';
     let sawFinishReason = false;
     let awaitingFirstByte = true;
 
@@ -555,7 +607,9 @@ export abstract class BaseProvider {
         awaitingFirstByte = false;
         if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
+        const decoded = decoder.decode(value, { stream: true });
+        buffer += decoded;
+        raw += decoded;
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';
 
@@ -578,6 +632,14 @@ export abstract class BaseProvider {
     }
 
     if (!sawFinishReason) {
+      // A complete plain-JSON completion body (an upstream that ignored
+      // `stream: true`) is a finished answer, not a truncation — surface it
+      // as one chunk. Anything else still throws below.
+      const completed = plainJsonCompletionToChunk(raw);
+      if (completed) {
+        yield completed;
+        return;
+      }
       throw new Error(`${this.name} stream ended unexpectedly (no [DONE], no finish_reason) — connection reset or truncated upstream`);
     }
   }
