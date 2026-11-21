@@ -24,6 +24,8 @@ export async function tryGroundedGuideReply(params: {
   gatewayLoopback?: GatewayLoopbackContext;
   /** Quick replies used when the model supplies none. */
   fallbackQuickReplies?: string[];
+  /** Extra trusted instructions for the model (scope rules). */
+  extraInstructions?: string;
   /** Inject a fake LLM turn (unit tests). */
   llmCall?: CopilotLlmCall;
 }): Promise<SupportSetupChatResponse | null> {
@@ -44,6 +46,7 @@ export async function tryGroundedGuideReply(params: {
       canCreateTenant: false,
       canEditSteps: new Set(),
       gatewayLoopback,
+      ...(params.extraInstructions ? { extraInstructions: params.extraInstructions } : {}),
       ...(params.llmCall ? { llmCall: params.llmCall } : {}),
     });
     const out = loop.output;

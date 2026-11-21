@@ -131,6 +131,9 @@ export interface SupportSetupCopilotStrings {
   composerHint: string;
   send: string;
   thinking: string;
+  processTitle: string;
+  /** `{n}` is replaced with the number of steps. */
+  processCount: string;
   consentBanner: string;
   selectedStepsCount: string;
   consentTargetCreate: string;
@@ -303,6 +306,8 @@ const en: SupportSetupCopilotStrings = {
   composerHint: 'Enter to send · Shift+Enter for new line',
   send: 'Send',
   thinking: 'Thinking & putting together a helpful reply…',
+  processTitle: 'How I worked on this',
+  processCount: '({n} steps)',
   consentBanner: 'Consent required — no changes applied yet',
   selectedStepsCount: '{selected}/{total} selected',
   consentTargetCreate: 'New tenant: {name} ({slug})',
@@ -492,6 +497,8 @@ const vi: SupportSetupCopilotStrings = {
   composerHint: 'Enter để gửi · Shift+Enter xuống dòng',
   send: 'Gửi',
   thinking: 'Đang lắng nghe & chuẩn bị câu trả lời cho bạn…',
+  processTitle: 'Quá trình xử lý',
+  processCount: '({n} bước)',
   consentBanner: 'Chờ xác nhận — chưa thay đổi dữ liệu hệ thống',
   selectedStepsCount: 'Đã chọn {selected}/{total} bước',
   consentTargetCreate: 'Tạo tenant mới: {name} ({slug})',

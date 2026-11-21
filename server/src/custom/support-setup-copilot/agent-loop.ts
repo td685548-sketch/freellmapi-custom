@@ -46,7 +46,18 @@ import {
   toolSchemasForPrompt,
   type CopilotToolResult,
 } from './tools.js';
+import { traceFinish, traceStart } from './trace.js';
 import { REQUIRED_PERMISSION_BY_SETTING } from './system-settings.js';
+
+/** Short, secret-free summary of a tool's input for the live step list (keys and short values only). */
+function describeToolInput(input: unknown): string | undefined {
+  if (!input || typeof input !== 'object') return undefined;
+  const parts = Object.entries(input as Record<string, unknown>)
+    .filter(([, v]) => ['string', 'number', 'boolean'].includes(typeof v))
+    .slice(0, 3)
+    .map(([k, v]) => `${k}=${String(v).slice(0, 40)}`);
+  return parts.length ? parts.join(', ') : undefined;
+}
 
 export const MAX_LOOP_STEPS = 3;
 export const MAX_TOOL_CALLS_PER_TURN = 5;
@@ -92,6 +103,8 @@ export interface RunCopilotAgentLoopParams {
   canCreateTenant?: boolean;
   canEditSteps?: ReadonlySet<SupportSetupStepId>;
   gatewayLoopback?: GatewayLoopbackContext;
+  /** Extra trusted instructions for the model (e.g. the System target's scope rules). */
+  extraInstructions?: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
   llmCall?: CopilotLlmCall;
@@ -156,6 +169,7 @@ export async function runCopilotAgentLoop(
     canCreateTenant,
     canEditSteps,
     gatewayLoopback,
+    extraInstructions,
     fetchImpl,
     timeoutMs,
     llmCall = runHumanLikeLlmCoach,
@@ -201,6 +215,7 @@ export async function runCopilotAgentLoop(
       gatewayLoopback,
       agentContext,
       toolSchemas,
+      ...(extraInstructions ? { extraInstructions } : {}),
       fetchImpl,
       timeoutMs,
     });
@@ -255,12 +270,23 @@ export async function runCopilotAgentLoop(
     const callsThisStep = requestedCalls.slice(0, budgetLeft);
     const stepResults: Array<{ toolId: string; status: string; detail?: string; reason?: string; data?: string }> = [];
     for (const call of callsThisStep) {
+      const toolStep = traceStart({
+        kind: 'tool',
+        titleVi: `Gọi công cụ \`${call.id}\``,
+        titleEn: `Calling tool \`${call.id}\``,
+        detailVi: describeToolInput(call.input),
+        detailEn: describeToolInput(call.input),
+      });
       const result = await executeCopilotTool({
         user,
         toolId: call.id,
         input: call.input,
         tenantId: tenantId ?? null,
         timeoutMs: COPILOT_TOOL_TIMEOUT_MS,
+      });
+      traceFinish(toolStep, result.status === 'denied' || result.status === 'rejected' ? 'error' : 'done', {
+        detailVi: result.detailVi ?? result.reason ?? result.status,
+        detailEn: result.detailEn ?? result.reason ?? result.status,
       });
       toolCallsMade += 1;
       records.push({ toolId: call.id, input: call.input, result });

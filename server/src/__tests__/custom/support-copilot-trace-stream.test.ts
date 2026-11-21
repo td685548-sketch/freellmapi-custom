@@ -1,0 +1,202 @@
+import type { Server } from 'node:http';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import type { CloudAiRuntimePack, CloudSignedLease } from '@freellmapi/shared/cloud-entitlement.js';
+import type { SupportSetupTraceStep } from '@freellmapi/shared/support-setup-copilot.js';
+import { createApp } from '../../app.js';
+import { recordServerLocalAddress } from '../../custom/ai-platform/orchestrator/engine.js';
+import { configureCloudEntitlementForTesting } from '../../custom/cloud-entitlement/service.js';
+import type { CopilotLlmCall } from '../../custom/support-setup-copilot/agent-loop.js';
+import {
+  buildSystemTargetFallbackReply,
+  buildSystemTargetOverviewReply,
+  handleSystemTargetChatTurnGrounded,
+} from '../../custom/support-setup-copilot/system-target.js';
+import { runWithTrace, traceDone, traceFinish, traceStart, traceStep } from '../../custom/support-setup-copilot/trace.js';
+import { getDb, initDb } from '../../db/index.js';
+import { createSession, createUser, type SessionUser } from '../../services/auth.js';
+import { setUserPermissions } from '../../services/users.js';
+
+function installMockCloudLease(): void {
+  process.env.FREEAPI_AI_ACTIVATION_TOKEN = 'dummy-test-token-never-sent';
+  const lease: CloudSignedLease = {
+    licenseId: 'test-lic-trace', label: 'Test License', instanceId: 'test-inst-trace',
+    scopes: ['ai_platform', 'customer_ai', 'support_copilot', 'support_suite', 'tenant_portal'],
+    packVersion: 4, packHash: 'hash-trace',
+    issuedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+  };
+  const pack: CloudAiRuntimePack = {
+    version: 4,
+    supportCoachPack: { personaVi: 'Persona Vi', personaEn: 'Persona En', playbookReference: 'Playbook', outputContract: 'Contract' },
+    supportAgentCopilotInstruction: 'x', customerAiDirective: 'ACTIVE', supportGatewayDirective: 'ACTIVE', aiPlatformCapabilityGrant: 'ACTIVE',
+  };
+  configureCloudEntitlementForTesting({
+    activeLeaseRecord: { lease, tokenHash: 'dummy-hash', signature: 'dummy-sig', runtimePack: pack, verifiedAtMs: Date.now() },
+  });
+}
+
+const fakeModel = (output: Record<string, unknown> | null, seen?: { extra?: string }): CopilotLlmCall => async (input) => {
+  if (seen) seen.extra = input.extraInstructions;
+  return output ? { output: output as never, modelUsed: 'fake-model', routeSource: 'main_gateway_loopback' } : null;
+};
+
+describe('trace helpers', () => {
+  it('are silent no-ops outside a trace', async () => {
+    expect(traceStart({ kind: 'analyze', titleVi: 'a', titleEn: 'a' })).toBe('');
+    traceFinish('', 'done');
+    traceDone({ kind: 'analyze', titleVi: 'a', titleEn: 'a' });
+    await expect(traceStep({ kind: 'tool', titleVi: 'a', titleEn: 'a' }, () => 7)).resolves.toBe(7);
+  });
+
+  it('inside a trace: a step runs, then finishes with its detail, and a failing step shows as error', async () => {
+    const seen: SupportSetupTraceStep[] = [];
+    await runWithTrace((s) => seen.push(s), async () => {
+      await traceStep({ kind: 'knowledge', titleVi: 'Tra', titleEn: 'Search' }, () => 3, (n) => ({ detailVi: `${n} mục`, detailEn: `${n} items` }));
+      await expect(traceStep({ kind: 'tool', titleVi: 'x', titleEn: 'x' }, () => { throw new Error('boom'); })).rejects.toThrow('boom');
+    });
+    expect(seen.map((s) => `${s.id}:${s.status}`)).toEqual(['s1:running', 's1:done', 's2:running', 's2:error']);
+    expect(seen[1]).toMatchObject({ detailEn: '3 items', titleEn: 'Search' });
+  });
+
+  it('a throwing sink (closed connection) never breaks the turn', async () => {
+    await runWithTrace(() => { throw new Error('closed'); }, async () => {
+      await expect(traceStep({ kind: 'tool', titleVi: 'x', titleEn: 'x' }, () => 1)).resolves.toBe(1);
+    });
+  });
+});
+
+describe('System target: model answer first for unrecognised messages, honest fallback last', () => {
+  let admin: SessionUser;
+  beforeAll(() => {
+    process.env.ENCRYPTION_KEY = 'e'.repeat(64);
+    initDb(':memory:');
+    admin = createUser('trace-sys-admin@example.com', 'AdminPass123!');
+    installMockCloudLease();
+  });
+  afterAll(() => {
+    configureCloudEntitlementForTesting(null);
+    delete process.env.FREEAPI_AI_ACTIVATION_TOKEN;
+  });
+
+  const ask = (content: string, llmCall: CopilotLlmCall) =>
+    handleSystemTargetChatTurnGrounded({ user: admin, messages: [{ role: 'user', content }], locale: 'vi', llmCall });
+
+  it('"giờ là mấy giờ": the model answers (with the System scope rules attached), no overview recital', async () => {
+    const seen: { extra?: string } = {};
+    const res = await ask('giờ là mấy giờ', fakeModel({ intent: 'guide', reply: 'Mình không xem được giờ, nhưng mình giúp được phần cài đặt hệ thống.', suggestedQuickReplies: [] }, seen));
+    expect(res.reply).toContain('không xem được giờ');
+    expect(res.reply).not.toContain('Bạn đang ở mục tiêu');
+    expect(res.usedFallback).toBe(false);
+    expect(res.proposal).toBeNull();
+    expect(seen.extra).toContain('NEVER invent facts such as the time');
+    expect(seen.extra).toContain('NO tenant here');
+    expect(res.suggestedQuickReplies.length).toBeGreaterThan(0); // falls back to the System quick replies
+  });
+
+  it('with no model route, an unrecognised message gets an honest "did not understand" lead, then the overview', async () => {
+    const res = await ask('giờ là mấy giờ', fakeModel(null));
+    expect(res.usedFallback).toBe(true);
+    expect(res.reply).toContain('chưa hiểu');
+    expect(res.reply).toContain('chưa đổi gì');
+    expect(res.reply).toContain('Toàn hệ thống');
+  });
+
+  it('a greeting still gets just the overview; the lead only appears for non-greetings', () => {
+    expect(buildSystemTargetFallbackReply('xin chào', 'vi')).toBe(buildSystemTargetOverviewReply('vi'));
+    expect(buildSystemTargetFallbackReply('Hello there', 'en')).toBe(buildSystemTargetOverviewReply('en'));
+    expect(buildSystemTargetFallbackReply('what time is it', 'en')).toContain('changed nothing');
+    expect(buildSystemTargetFallbackReply('', 'en')).toBe(buildSystemTargetOverviewReply('en'));
+  });
+
+  it('rule-based requests never reach the model (exact, free, consent-gated)', async () => {
+    let called = false;
+    const res = await ask('Bật response cache', async () => { called = true; return null; });
+    expect(called).toBe(false);
+    expect(res.intent).toBe('propose_setup');
+    expect(res.proposal?.systemActions?.[0]).toMatchObject({ settingId: 'response_cache' });
+  });
+
+  it('a model that proposes a setup or asks a questionnaire is not trusted on this target', async () => {
+    const a = await ask('hmm lạ quá', fakeModel({ intent: 'propose_setup', reply: 'Kế hoạch' }));
+    expect(a.usedFallback).toBe(true);
+    const b = await ask('hmm lạ quá', fakeModel({ intent: 'guide', reply: '1. Tên shop là gì?\n2. Web là gì?' }));
+    expect(b.usedFallback).toBe(true);
+  });
+});
+
+describe('POST /chat as an event stream', () => {
+  let server: Server;
+  let base: string;
+  let adminToken: string;
+  let viewerToken: string;
+
+  const stream = async (token: string, content: string, extra: Record<string, unknown> = {}) => {
+    const res = await fetch(`${base}/api/support-setup-copilot/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ locale: 'vi', currentPath: '/thruline/support', messages: [{ role: 'user', content }], ...extra }),
+    });
+    const text = await res.text();
+    const events = text.split('\n\n').filter((b) => b.startsWith('event:')).map((block) => {
+      const [ev, ...data] = block.split('\n');
+      return { event: ev!.slice('event: '.length), data: JSON.parse(data.join('\n').slice('data: '.length)) as any };
+    });
+    return { res, events };
+  };
+
+  beforeAll(async () => {
+    process.env.ENCRYPTION_KEY = 'f'.repeat(64);
+    initDb(':memory:');
+    installMockCloudLease();
+    server = createApp().listen(0, '127.0.0.1');
+    await new Promise<void>((r) => server.once('listening', () => r()));
+    const { port } = server.address() as { port: number };
+    base = `http://127.0.0.1:${port}`;
+    recordServerLocalAddress({ socket: { localAddress: '127.0.0.1', localPort: port } } as never);
+    const admin = createUser('trace-http-admin@example.com', 'AdminPass123!');
+    adminToken = createSession(admin.userId);
+    const viewer = createUser('trace-http-viewer@example.com', 'UserPass123!', 'member');
+    setUserPermissions(viewer.userId, ['view_cache'], admin.userId);
+    viewerToken = createSession(viewer.userId);
+  });
+  afterAll(async () => {
+    configureCloudEntitlementForTesting(null);
+    delete process.env.FREEAPI_AI_ACTIVATION_TOKEN;
+    await new Promise<void>((r) => server.close(() => r()));
+  });
+  beforeEach(() => {
+    getDb().prepare('DELETE FROM auth_request_limits').run();
+  });
+
+  it('streams its working steps, then the normal response as the final event', async () => {
+    const { res, events } = await stream(adminToken, 'Bật response cache', { targetMode: 'system' });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/event-stream');
+    const steps = events.filter((e) => e.event === 'step').map((e) => e.data as SupportSetupTraceStep);
+    expect(steps.length).toBeGreaterThanOrEqual(3);
+    expect(steps[0]).toMatchObject({ kind: 'analyze', status: 'running' });
+    expect(steps.some((s) => s.kind === 'decide')).toBe(true);
+    const last = events[events.length - 1]!;
+    expect(last.event).toBe('final');
+    expect(last.data.status).toBe(200);
+    expect(last.data.body.proposal.systemActions[0]).toMatchObject({ settingId: 'response_cache' });
+  });
+
+  it('reports an error as the final event with its status and the usual error shape', async () => {
+    const { events } = await stream(viewerToken, 'Bật response cache', { targetMode: 'system' });
+    const last = events[events.length - 1]!;
+    expect(last.event).toBe('final');
+    expect(last.data.status).toBe(403);
+    expect(last.data.body.error.message).toBeTruthy();
+  });
+
+  it('a request that does not ask for a stream still gets plain JSON, with no steps', async () => {
+    const res = await fetch(`${base}/api/support-setup-copilot/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ locale: 'vi', currentPath: '/thruline/support', targetMode: 'system', messages: [{ role: 'user', content: 'Bật response cache' }] }),
+    });
+    expect(res.headers.get('content-type')).toContain('application/json');
+    const body = (await res.json()) as any;
+    expect(body.proposal.systemActions[0].settingId).toBe('response_cache');
+  });
+});

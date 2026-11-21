@@ -568,6 +568,22 @@ export interface SupportSetupChatResponse {
   usedFallback: boolean;
 }
 
+/**
+ * One visible step of how the Copilot is working on a message (shown live while it runs, kept
+ * collapsed afterwards). Streamed as Server-Sent Events from POST /chat when the client sends
+ * `Accept: text/event-stream`: `event: step` (this shape; same `id` = update that step) and a
+ * final `event: final` carrying `{ status, body }` (the usual JSON response or error body).
+ */
+export interface SupportSetupTraceStep {
+  id: string;
+  kind: 'analyze' | 'knowledge' | 'measure' | 'model' | 'tool' | 'decide';
+  status: 'running' | 'done' | 'error';
+  titleVi: string;
+  titleEn: string;
+  detailVi?: string;
+  detailEn?: string;
+}
+
 export interface SupportSetupApplyRequest {
   approved: boolean;
   selectedSteps?: SupportSetupStepId[];

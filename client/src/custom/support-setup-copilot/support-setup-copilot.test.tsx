@@ -301,6 +301,129 @@ describe('SupportSetupCopilot widget', () => {
     expect(container.querySelector('[data-testid="support-setup-copilot-panel"]')).not.toBeNull();
   });
 
+  it('shows the Copilot\'s working steps live, then keeps them collapsed under the answer', async () => {
+    const enc = new TextEncoder();
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const sse = (event: string, data: unknown) => enc.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    const step = (id: string, status: 'running' | 'done', extra: Record<string, unknown> = {}) => ({
+      id, kind: 'knowledge', status, titleVi: `Tra kho tri thức ${id}`, titleEn: `Searching ${id}`, ...extra,
+    });
+    let acceptHeader = '';
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith('/api/user/session')) {
+          return json({ userId: 1, email: 'admin@example.com', role: 'admin', isPrimary: true, permissions: ['*'] });
+        }
+        if (url.includes('/api/support-setup-copilot/status')) return json(sampleStatus(true));
+        if (url.endsWith('/api/support-setup-copilot/chat')) {
+          acceptHeader = String((init?.headers as Record<string, string>)?.Accept ?? '');
+          const body = new ReadableStream<Uint8Array>({ start: (c) => { controller = c; } });
+          return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+        }
+        return json({});
+      }),
+    );
+
+    mount('/thruline/providers', 'vi');
+    await flush();
+    act(() => (container.querySelector('[data-testid="support-setup-copilot-launcher"]') as HTMLButtonElement).click());
+    await flush();
+
+    const textarea = container.querySelector('.ssc-composer textarea') as HTMLTextAreaElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+    act(() => {
+      setter?.call(textarea, 'hỏi gì đó');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      textarea.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+    act(() => (container.querySelector('[data-testid="support-setup-send-btn"]') as HTMLButtonElement).click());
+    await flush();
+
+    // Live: first step running, then updated to done while a second one starts.
+    expect(acceptHeader).toContain('text/event-stream');
+    await act(async () => { controller.enqueue(sse('step', step('s1', 'running'))); });
+    await flush();
+    const live = container.querySelector('[data-testid="support-setup-process-live"]');
+    expect(live).not.toBeNull();
+    expect(live!.textContent).toContain('Tra kho tri thức s1');
+    expect(live!.querySelector('[data-status="running"]')).not.toBeNull();
+
+    await act(async () => {
+      controller.enqueue(sse('step', step('s1', 'done', { detailVi: '3 mục liên quan' })));
+      controller.enqueue(sse('step', step('s2', 'running', { kind: 'model', titleVi: 'Hỏi mô hình AI' })));
+    });
+    await flush();
+    const rows = container.querySelectorAll('[data-testid="support-setup-process-live"] [data-testid="support-setup-process-step"]');
+    expect(rows).toHaveLength(2); // s1 was UPDATED in place, not duplicated
+    expect(rows[0]!.getAttribute('data-status')).toBe('done');
+    expect(rows[0]!.textContent).toContain('3 mục liên quan');
+
+    // Finish: answer appears, live panel goes away, the steps stay as a collapsed list.
+    await act(async () => {
+      controller.enqueue(sse('step', step('s2', 'done')));
+      controller.enqueue(sse('final', {
+        status: 200,
+        body: { ok: true, reply: 'Đây là câu trả lời.', intent: 'guide', missingQuestions: [], suggestedQuickReplies: [], proposal: null, modelUsed: null, usedFallback: true },
+      }));
+      controller.close();
+    });
+    await flush();
+    expect(container.querySelector('[data-testid="support-setup-process-live"]')).toBeNull();
+    const done = container.querySelector('[data-testid="support-setup-process-done"]') as HTMLDetailsElement | null;
+    expect(done).not.toBeNull();
+    expect(done!.open).toBe(false);
+    expect(done!.textContent).toContain('Quá trình xử lý');
+    expect(done!.textContent).toContain('(2 bước)');
+    expect(container.textContent).toContain('Đây là câu trả lời.');
+  });
+
+  it('a streamed error shows its message and leaves no live panel behind', async () => {
+    const enc = new TextEncoder();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.endsWith('/api/user/session')) {
+          return json({ userId: 1, email: 'admin@example.com', role: 'admin', isPrimary: true, permissions: ['*'] });
+        }
+        if (url.includes('/api/support-setup-copilot/status')) return json(sampleStatus(true));
+        if (url.endsWith('/api/support-setup-copilot/chat')) {
+          const frame = (event: string, data: unknown) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+          const text = frame('step', { id: 's1', kind: 'analyze', status: 'running', titleVi: 'Đọc yêu cầu', titleEn: 'Reading' }) +
+            frame('final', { status: 429, body: { error: { message: 'Too many requests', type: 'rate_limit_error' } } });
+          // Split mid-event on purpose: parsing must not depend on chunk boundaries.
+          const cut = Math.floor(text.length / 2);
+          const body = new ReadableStream<Uint8Array>({
+            start(c) { c.enqueue(enc.encode(text.slice(0, cut))); c.enqueue(enc.encode(text.slice(cut))); c.close(); },
+          });
+          return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+        }
+        return json({});
+      }),
+    );
+
+    mount('/thruline/providers', 'vi');
+    await flush();
+    act(() => (container.querySelector('[data-testid="support-setup-copilot-launcher"]') as HTMLButtonElement).click());
+    await flush();
+    const textarea = container.querySelector('.ssc-composer textarea') as HTMLTextAreaElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+    act(() => {
+      setter?.call(textarea, 'xin chào');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      textarea.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+    act(() => (container.querySelector('[data-testid="support-setup-send-btn"]') as HTMLButtonElement).click());
+    await flush();
+
+    expect(container.querySelector('[data-testid="support-setup-process-live"]')).toBeNull();
+    expect(container.querySelector('[data-testid="support-setup-process-done"]')).toBeNull();
+    expect(container.textContent).not.toContain('Đây là câu trả lời');
+  });
+
   it('guides requirement discovery, renders consent proposal, and deploys on explicit approval', async () => {
     const applyCalls: Array<{ approved: boolean; selectedSteps?: string[] }> = [];
     let turnIndex = 0;

@@ -33,6 +33,7 @@ import {
 import { buildPlatformPromptSection } from './platform-guide.js';
 import { buildKbQueryFromMessages, formatKbForPrompt, searchKb } from './kb/index.js';
 import { buildSystemAdvicePromptSection } from './system-advisor.js';
+import { traceFinish, traceStart, traceStep } from './trace.js';
 import {
   buildAccountOnlyIdentityBlock,
   buildIdentityPromptBlock,
@@ -86,6 +87,8 @@ export interface LlmCoachToolSchema {
 
 export interface LlmCoachTurnInput {
   user?: SessionUser;
+  /** Extra trusted instructions appended to the system prompt (e.g. the System target's scope rules). */
+  extraInstructions?: string;
   messages: SupportSetupChatMessage[];
   locale: 'vi' | 'en';
   targetMode: 'create_tenant' | 'update_tenant';
@@ -577,6 +580,8 @@ export function buildHumanCoachSystemPrompt(params: {
   knowledgeSection?: string;
   /** Pre-rendered "LIVE SYSTEM ADVICE" section (measured state + reasons, permission-filtered). Omitted = none. */
   systemAdviceSection?: string;
+  /** Extra trusted instructions appended last (scope rules). */
+  extraInstructions?: string;
 }): string {
   const {
     user,
@@ -592,6 +597,7 @@ export function buildHumanCoachSystemPrompt(params: {
     toolSchemas,
     knowledgeSection,
     systemAdviceSection,
+    extraInstructions,
   } = params;
 
   const editableList = canEditSteps
@@ -695,6 +701,7 @@ export function buildHumanCoachSystemPrompt(params: {
     coachPack.playbookReference,
     '',
     coachPack.outputContract,
+    extraInstructions ? `\n${extraInstructions}` : '',
   ].join('\n');
 }
 
@@ -905,15 +912,49 @@ function validateParsedCoachOutput(
 export async function runHumanLikeLlmCoach(
   params: LlmCoachTurnInput,
 ): Promise<LlmCoachTurnResult | null> {
+  // The "ask the model" step is opened by the core once the prompt is built, and closed here with
+  // whichever model answered (or a cross when none did).
+  const modelStep = { id: '' };
+  const result = await runHumanLikeLlmCoachCore(params, modelStep);
+  if (result) {
+    traceFinish(modelStep.id, 'done', { detailVi: result.modelUsed, detailEn: result.modelUsed });
+  } else {
+    traceFinish(modelStep.id, 'error', {
+      detailVi: 'Chưa có mô hình nào trả lời',
+      detailEn: 'No model answered',
+    });
+  }
+  return result;
+}
+
+async function runHumanLikeLlmCoachCore(
+  params: LlmCoachTurnInput,
+  modelStep: { id: string },
+): Promise<LlmCoachTurnResult | null> {
   await ensureVerifiedCloudRuntimePack('support_copilot');
   let knowledgeSection: string | undefined;
   try {
-    const hits = await searchKb(buildKbQueryFromMessages(params.messages, params.currentPath), {
-      caller: params.user,
-      limit: 5,
-      locale: params.locale,
-      currentPath: params.currentPath,
-    });
+    const hits = await traceStep(
+      {
+        kind: 'knowledge',
+        titleVi: 'Tra kho tri thức của nền tảng',
+        titleEn: 'Searching the platform knowledge base',
+      },
+      () =>
+        searchKb(buildKbQueryFromMessages(params.messages, params.currentPath), {
+          caller: params.user,
+          limit: 5,
+          locale: params.locale,
+          currentPath: params.currentPath,
+        }),
+      (found) => {
+        const names = found.slice(0, 3).map((h) => (params.locale === 'vi' && h.chunk.titleVi ? h.chunk.titleVi : h.chunk.title));
+        return {
+          detailVi: found.length ? `${found.length} mục liên quan: ${names.join(' · ')}` : 'Không có mục nào khớp',
+          detailEn: found.length ? `${found.length} related entries: ${names.join(' · ')}` : 'No matching entries',
+        };
+      },
+    );
     knowledgeSection = formatKbForPrompt(hits, params.locale);
   } catch {
     // Retrieval must never break a chat turn.
@@ -921,12 +962,28 @@ export async function runHumanLikeLlmCoach(
   }
   let systemAdviceSection: string | undefined;
   try {
-    systemAdviceSection = buildSystemAdvicePromptSection(params.user, params.locale) || undefined;
+    systemAdviceSection = await traceStep(
+      {
+        kind: 'measure',
+        titleVi: 'Đo trạng thái hệ thống thật (theo quyền của bạn)',
+        titleEn: 'Measuring the live system state (within your permissions)',
+      },
+      () => buildSystemAdvicePromptSection(params.user, params.locale) || undefined,
+      (section) => ({
+        detailVi: section ? 'Có số liệu để đối chiếu' : 'Chưa có gợi ý nào dựa trên số liệu',
+        detailEn: section ? 'Measured data available' : 'No measured signal to act on',
+      }),
+    );
   } catch {
     // Advice must never break a chat turn.
     systemAdviceSection = undefined;
   }
   const systemPrompt = buildHumanCoachSystemPrompt({ ...params, toolSchemas: params.toolSchemas, knowledgeSection, systemAdviceSection });
+  modelStep.id = traceStart({
+    kind: 'model',
+    titleVi: 'Hỏi mô hình AI để soạn câu trả lời',
+    titleEn: 'Asking the AI model to draft the answer',
+  });
   const baseTurnMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
     { role: 'system', content: systemPrompt },
     ...params.messages.slice(-14).map((m) => ({
