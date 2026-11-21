@@ -3,6 +3,7 @@ import { buildSettingChunks } from './sources/settings.js';
 import { buildPageChunks } from './sources/pages.js';
 import { buildTenantStepChunks } from './sources/tenant-steps.js';
 import { buildTroubleshootingChunks } from './sources/troubleshooting.js';
+import { buildWebOptionChunks } from './sources/web-options.js';
 import { DOCS_KB } from './docs.generated.js';
 import type { KbChunk } from './types.js';
 
@@ -22,6 +23,7 @@ export function getKbCorpus(): readonly KbChunk[] {
   const all = [
     ...buildTenantStepChunks(),
     ...buildTroubleshootingChunks(),
+    ...buildWebOptionChunks(),
     ...buildSettingChunks(),
     ...buildPageChunks(),
     ...buildPermissionChunks(),

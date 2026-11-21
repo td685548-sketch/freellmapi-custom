@@ -68,6 +68,7 @@ import {
   hasAnySystemSettingPermission,
   type EvaluateSystemSettingsProposalResult,
 } from './system-settings.js';
+import { buildKbGroundedFallback, isTroubleshootingQuestion } from './kb/answer.js';
 
 export { parseLlmCoachResponse, type GatewayLoopbackContext, type LlmCoachOutput };
 
@@ -1650,6 +1651,23 @@ export async function runSupportSetupCopilotTurn(params: {
         (readOnlyLlm.output.intent === 'guide' || !readOnlyLlm.output.intent) &&
         !looksLikeQuestionnaire(readOnlyLlm.output.reply),
     );
+    if (!useReadOnlyLlm && isTroubleshootingQuestion(latestUserMessage)) {
+      // No model answered an error/limit question: answer from the real web options (RAG), not the scripted roadmap.
+      const kbReply = await buildKbGroundedFallback({ messages, locale, caller: user, currentPath });
+      if (kbReply) {
+        return {
+          ok: true,
+          replyLocale: locale,
+          reply: kbReply.reply,
+          intent: 'guide',
+          missingQuestions: [],
+          suggestedQuickReplies: kbReply.suggestedQuickReplies,
+          proposal: null,
+          modelUsed: null,
+          usedFallback: true,
+        };
+      }
+    }
     return {
       ok: true,
       replyLocale: locale,
@@ -1724,6 +1742,33 @@ export async function runSupportSetupCopilotTurn(params: {
     locale,
   });
   if (loopGrantResponse) return loopGrantResponse;
+
+  // Error / limit questions ("làm sao xử lý lỗi HTTP 429?") are answered from the
+  // real web options in the knowledge base when no model produced a usable guide.
+  // Without this they fell through to the 7-step roadmap or the intake questionnaire.
+  if (!explicitBriefSubmitted && !baseProposalId && isTroubleshootingQuestion(latestUserMessage)) {
+    const llmAnsweredGuide = Boolean(
+      llm?.output.reply &&
+        (!llm.output.intent || llm.output.intent === 'guide') &&
+        !looksLikeQuestionnaire(llm.output.reply),
+    );
+    if (!llmAnsweredGuide) {
+      const kbReply = await buildKbGroundedFallback({ messages, locale, caller: user, currentPath });
+      if (kbReply) {
+        return {
+          ok: true,
+          replyLocale: locale,
+          reply: kbReply.reply,
+          intent: 'guide',
+          missingQuestions: [],
+          suggestedQuickReplies: kbReply.suggestedQuickReplies,
+          proposal: null,
+          modelUsed: llm?.modelUsed ?? null,
+          usedFallback: true,
+        };
+      }
+    }
+  }
 
   const mergedRequirements =
     !latestPlatformMatch && llm?.output.extractedRequirements

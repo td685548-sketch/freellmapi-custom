@@ -195,5 +195,47 @@
   "expect": [
    "step:runtime_policy"
   ]
+ },
+ {
+  "q": "Cần xử lý ngay: Lỗi HTTP 429 — Chạm trần tốc độ gọi (Rate-Limit). Làm sao xử lý?",
+  "expect": [
+   "opt:429-which-limit"
+  ]
+ },
+ {
+  "q": "xử lý lỗi 429 như thế nào",
+  "expect": [
+   "opt:429-which-limit"
+  ]
+ },
+ {
+  "q": "too many requests 429 how do I fix it",
+  "expect": [
+   "opt:429-which-limit"
+  ]
+ },
+ {
+  "q": "khách chat trên web bị chặn quota_exceeded thì chỉnh quota ở đâu",
+  "expect": [
+   "opt:tenant-role-quotas"
+  ]
+ },
+ {
+  "q": "nâng giới hạn RPM của key cho người dùng ở đâu",
+  "expect": [
+   "opt:user-key-rpm"
+  ]
+ },
+ {
+  "q": "routing_exhausted mọi route đang cooldown, làm sao chịu được rate limit của nhà cung cấp",
+  "expect": [
+   "opt:upstream-rate-limit-options"
+  ]
+ },
+ {
+  "q": "hết hạn mức ngày tháng user_quota_exceeded thì sao",
+  "expect": [
+   "opt:user-usage-allowance"
+  ]
  }
 ]

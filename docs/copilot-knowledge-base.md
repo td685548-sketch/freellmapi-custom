@@ -12,6 +12,7 @@ instead of a hand-written prompt. Code: `server/src/custom/support-setup-copilot
 | Tenant steps (7) | `kb/sources/tenant-steps.ts` (a full `Record<SupportSetupStepId, …>`), including each step's exact "complete" rule | same |
 | Dashboard pages | `kb/sources/pages.ts` + the platform-guide route catalog | a test reads `client/src/App.tsx` and fails on an undocumented route |
 | Troubleshooting | `kb/sources/troubleshooting.ts` (symptom → cause → fix, using the runtime's real error codes) | reviewed with the eval set |
+| Web options (6) | `kb/sources/web-options.ts` — the controls a person can change on the web, tied to the error each one fixes (the 429 decision hub, per-key RPM, tenant role quotas, runtime bounds, upstream rate-limit absorbers, account allowances). Defaults are imported from the runtime constants | a test pins every literal that has no exported constant; recall is gated by the eval set |
 | Docs | `docs/en/**` and a few top-level docs, baked into `kb/docs.generated.ts` | a test fails when the generated file is stale |
 
 Regenerate the docs part after editing docs:
@@ -31,6 +32,11 @@ npm run kb:docs -w server
    to the model. They never stage or apply anything.
 3. **Tenant Doctor** — "why does this tenant fail?" is answered from the tenant's own
    evidence (failed turns, firewall and output events, provider routes, runtime policy).
+4. **Grounded fallback** — when no model route answers an error/limit question
+   ("làm sao xử lý lỗi HTTP 429?"), `kb/answer.ts` composes the reply from the retrieved
+   *option / troubleshooting / setting* entries instead of the canned 7-step roadmap or the
+   intake questionnaire. `isTroubleshootingQuestion` is deliberately narrow (error vocabulary
+   plus a system noun) so ordinary setup chatter is never intercepted.
 
 ## Retrieval
 
