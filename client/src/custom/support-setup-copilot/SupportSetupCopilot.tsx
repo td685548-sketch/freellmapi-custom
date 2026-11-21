@@ -1360,14 +1360,16 @@ export function SupportSetupCopilot() {
                       <ClipboardList size={13} />
                       <span>{s.briefToggle}</span>
                     </button>
-                  ) : (
+                  ) : !isSystemTarget ? (
+                    // Tenant targets only: on the System target the user's rights are per setting, so a
+                    // blanket "Read-only access" badge would contradict "Changes are proposals you approve".
                     <span
                       className="ssc-status-pill ssc-status-pill--restricted"
                       data-testid="support-setup-readonly-badge"
                     >
                       {s.readOnlyBadge}
                     </span>
-                  )}
+                  ) : null}
                 </div>
 
                 {isSystemTarget && (

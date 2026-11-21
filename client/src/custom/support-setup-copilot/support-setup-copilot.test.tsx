@@ -1490,6 +1490,8 @@ it('renders surgical proposal badge and defaults only targeted steps to checked'
 
     expect(container.querySelector('[data-testid="copilot-system-target-hint"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="support-setup-roadmap-toggle"]')).toBeNull();
+    // On the System target rights are per setting: a blanket "Read-only access" badge would contradict the hint.
+    expect(container.querySelector('[data-testid="support-setup-readonly-badge"]')).toBeNull();
     expect(container.textContent).toContain('Manage the whole platform from here');
 
     const starter = container.querySelector('[data-testid="copilot-starter-system-settings"]') as HTMLButtonElement;
