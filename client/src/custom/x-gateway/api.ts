@@ -10,6 +10,9 @@ import type {
   ProviderAccountTestResponse,
   ProviderRoutingStrategy,
   ProviderThinkingMode,
+  OpenCodeConsoleLoginPollResponse,
+  OpenCodeConsoleLoginStartResponse,
+  OpenCodeConsoleLoginStatusResponse,
 } from '../../../../shared/x-accounts'
 
 const base = '/api/thruline-accounts'
@@ -78,6 +81,19 @@ export const accountsApi = {
     apiFetch<ProviderAccountAuthResult>(`${base}/auth/${encodeURIComponent(attemptId)}/complete`, { method: 'POST', body: JSON.stringify({ code }) }),
   poll: (attemptId: string) => apiFetch<ProviderAccountPollResponse>(`${base}/auth/${encodeURIComponent(attemptId)}/poll`, { method: 'POST' }),
   cancel: (attemptId: string) => apiFetch<void>(`${base}/auth/${encodeURIComponent(attemptId)}`, { method: 'DELETE' }),
+  /** OpenCode Console OAuth device login for an OpenCode Free account. */
+  opencodeOAuth: {
+    start: (accountId: number) =>
+      apiFetch<OpenCodeConsoleLoginStartResponse>(`${base}/opencode-oauth/${accountId}/start`, { method: 'POST' }),
+    poll: (attemptId: string) =>
+      apiFetch<OpenCodeConsoleLoginPollResponse>(`${base}/opencode-oauth/${encodeURIComponent(attemptId)}/poll`, { method: 'POST' }),
+    status: (accountId: number, signal?: AbortSignal) =>
+      apiFetch<OpenCodeConsoleLoginStatusResponse>(`${base}/opencode-oauth/${accountId}/status`, { signal }),
+    disconnect: (accountId: number) =>
+      apiFetch<{ connected: boolean }>(`${base}/opencode-oauth/${accountId}/disconnect`, { method: 'POST' }),
+    cancel: (attemptId: string) =>
+      apiFetch<void>(`${base}/opencode-oauth/${encodeURIComponent(attemptId)}`, { method: 'DELETE' }),
+  },
   edit: (id: number, body: { label?: string; enabled?: boolean; proxyUrl?: string; proxyPoolId?: number | null }) =>
     apiFetch<void>(`${base}/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   remove: (id: number) => apiFetch<void>(`${base}/${id}`, { method: 'DELETE' }),
@@ -169,7 +185,7 @@ export function callbackAddress() {
 export function trustedLoginUrl(value: string, provider: string) {
   try {
     const url = new URL(value)
-    const host = provider === 'openrouter' ? 'openrouter.ai' : provider === 'github-copilot' ? 'github.com' : ''
+    const host = provider === 'openrouter' ? 'openrouter.ai' : provider === 'github-copilot' ? 'github.com' : provider === 'opencode' ? 'opencode.ai' : ''
     return url.protocol === 'https:' && url.hostname === host && !url.username && !url.password && !url.port ? url.href : null
   } catch { return null }
 }

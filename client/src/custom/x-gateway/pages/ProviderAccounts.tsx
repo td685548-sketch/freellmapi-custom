@@ -41,6 +41,7 @@ import { usePoolStrings } from '../proxy-pool-strings'
 import { useXStrings } from '../strings'
 import { useXGatewayCopy } from '../copy'
 import { ConnectAccountDialog } from '../ConnectAccountDialog'
+import { OpenCodeConsoleLogin } from '../OpenCodeConsoleLogin'
 import { AccountLoadState, ProviderMark } from './Providers'
 
 const BLOCKED_CUSTOM_HEADERS = new Set([
@@ -158,6 +159,7 @@ export default function ProviderAccounts() {
   const resilienceSemaphores = resilienceQuery.data?.semaphores ?? {}
 
   const [connect, setConnect] = useState<true | ProviderAccount | null>(null)
+  const [consoleLogin, setConsoleLogin] = useState<ProviderAccount | null>(null)
   const [edit, setEdit] = useState<ProviderAccount | null>(null)
   const [label, setLabel] = useState('')
   const [proxyUrl, setProxyUrl] = useState('')
@@ -1020,6 +1022,12 @@ export default function ProviderAccounts() {
                   </button>
                 )}
 
+                {permissions.edit && provider.id === 'opencode' && (
+                  <button className="x-button x-small" disabled={change.isPending} onClick={() => setConsoleLogin(account)}>
+                    <KeyRound size={14} />{s.consoleLogin}
+                  </button>
+                )}
+
                 <span className="x-spacer" />
 
                 {permissions.edit && (
@@ -1563,6 +1571,8 @@ export default function ProviderAccounts() {
     )}
 
     {connect && <ConnectAccountDialog provider={provider} account={connect === true ? undefined : connect} onClose={() => setConnect(null)} />}
+
+    {consoleLogin && <OpenCodeConsoleLogin account={consoleLogin} onClose={() => setConsoleLogin(null)} />}
 
     {/* Auto-Ping Schedule Modal */}
     {autoPingAccount && (

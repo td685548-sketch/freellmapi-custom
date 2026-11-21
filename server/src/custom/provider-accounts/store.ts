@@ -981,6 +981,51 @@ export function updateAccountCredential(id: number, credential: OAuthCredential 
   return result.changes > 0;
 }
 
+/**
+ * Persist an OpenCode Console device login on an existing free account.
+ * The stored credential becomes the OAuth blob, the subject the Console org
+ * id (shown as the account identity), and the auth method `device_code` so
+ * the account card offers reconnect. A previous plain credential on the
+ * account is replaced — the free lane never sends it (it sent `Bearer public`
+ * before login), so nothing the router uses is lost.
+ */
+export function setAccountDeviceLogin(id: number, credential: OAuthCredential, subject: string | null): void {
+  const row = accountRow(id);
+  if (row.provider !== 'opencode') throw new AccountError(400, 'Only OpenCode Free accounts support Console login.');
+  if (subject !== null) {
+    const duplicate = getDb()
+      .prepare('SELECT id FROM x_gateway_keys WHERE provider = ? AND subject = ?')
+      .get('opencode', subject) as { id: number } | undefined;
+    if (duplicate && duplicate.id !== id) {
+      throw new AccountError(409, 'This OpenCode Console account is already connected. Use reconnect to replace its grant.');
+    }
+  }
+  const { encrypted, iv, authTag } = encrypt(serializeOAuthCredential(credential));
+  getDb().prepare(`
+    UPDATE x_gateway_keys
+    SET encrypted_key = ?, iv = ?, auth_tag = ?, subject = ?, auth_method = 'device_code',
+        status = 'unknown', last_checked_at = NULL
+    WHERE id = ?
+  `).run(encrypted, iv, authTag, subject, id);
+  invalidateXGatewayKeyCache();
+  clearCooldownsForKey(id);
+}
+
+/** Drop an OpenCode Console login and restore the keyless `no-auth` credential. */
+export function clearAccountDeviceLogin(id: number): void {
+  const row = accountRow(id);
+  if (row.provider !== 'opencode') throw new AccountError(400, 'Only OpenCode Free accounts support Console login.');
+  const { encrypted, iv, authTag } = encrypt('no-auth');
+  getDb().prepare(`
+    UPDATE x_gateway_keys
+    SET encrypted_key = ?, iv = ?, auth_tag = ?, subject = NULL, auth_method = 'api_key',
+        status = 'unknown', last_checked_at = NULL
+    WHERE id = ?
+  `).run(encrypted, iv, authTag, id);
+  invalidateXGatewayKeyCache();
+  clearCooldownsForKey(id);
+}
+
 export function toggleProviderAccounts(providerId: string, enabled: boolean): number {
   const normalized = normalizeXGatewayProviderId(providerId) ?? providerId.trim().toLowerCase();
   const result = getDb()

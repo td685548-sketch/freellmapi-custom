@@ -36,6 +36,7 @@ import { ollamaRouter } from './routes/ollama.js';
 import { urlTokenRouter } from './routes/url-tokens.js';
 import { updateRouter } from './routes/update.js';
 import { moderationRouter } from './routes/moderation.js';
+import { opencodeConsoleOAuthRouter } from './routes/opencode-console-oauth.js';
 import { requireAuth } from './middleware/requireAuth.js';
 import { createHostGuard, warnOnWideBind } from './middleware/allowed-hosts.js';
 import { createProxyRateLimiter, createAdminRateLimiter } from './middleware/rateLimit.js';
@@ -275,6 +276,11 @@ export function createApp(config?: Config) {
   app.use('/api', modelListCacheInvalidation);
   app.use(['/v1beta', '/thruline/v1beta'], proxyRateLimiter);
   registerCustomRoutes(app);
+
+  // OpenCode Console OAuth device login for OpenCode Free accounts. The
+  // router carries its own requireAuth + use_x_gateway gate (same as the
+  // other Thruline provider-account routes).
+  app.use('/api/thruline-accounts/opencode-oauth', opencodeConsoleOAuthRouter);
 
   // Dashboard auth (#35): /api/auth/{status,setup,login} bootstrap without a
   // session; everything else under /api/* requires a logged-in dashboard user.
