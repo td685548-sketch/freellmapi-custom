@@ -17,12 +17,22 @@ interface TraceContext {
   modelCalls: number;
   toolCalls: number;
   source?: 'thruline' | 'freellmapi';
+  attempts: TraceAttempt[];
+}
+
+/** One model attempt that did not produce a usable answer, with a secret-free reason. */
+export interface TraceAttempt {
+  route: string;
+  reasonVi: string;
+  reasonEn: string;
+  /** The source was never tried (nothing connected / turned off): only worth showing when no model answered. */
+  skipped?: boolean;
 }
 
 const als = new AsyncLocalStorage<TraceContext>();
 
 export function runWithTrace<T>(sink: Sink, fn: () => T): T {
-  return als.run({ sink, seq: 0, open: new Map(), modelCalls: 0, toolCalls: 0 }, fn);
+  return als.run({ sink, seq: 0, open: new Map(), modelCalls: 0, toolCalls: 0, attempts: [] }, fn);
 }
 
 export function isTracing(): boolean {
@@ -108,4 +118,22 @@ export function traceUsage(): { modelCalls: number; toolCalls: number; source?: 
   const ctx = als.getStore();
   if (!ctx) return null;
   return { modelCalls: ctx.modelCalls, toolCalls: ctx.toolCalls, ...(ctx.source ? { source: ctx.source } : {}) };
+}
+
+/** Remembers a failed model attempt for this turn (shown on the "ask the model" step). No-op outside a trace. */
+export function traceNoteAttempt(attempt: TraceAttempt): void {
+  const ctx = als.getStore();
+  if (ctx) ctx.attempts.push(attempt);
+}
+
+export function traceAttempts(): readonly TraceAttempt[] {
+  return als.getStore()?.attempts ?? [];
+}
+
+/** Replaces a still-running step's detail (live progress), keeping its status. */
+export function traceDetail(id: string, detail: Pick<SupportSetupTraceStep, 'detailVi' | 'detailEn'>): void {
+  const ctx = als.getStore();
+  const prev = id ? ctx?.open.get(id) : undefined;
+  if (!ctx || !prev) return;
+  emit(ctx, { ...prev, ...detail });
 }

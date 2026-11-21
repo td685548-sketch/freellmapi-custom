@@ -12,6 +12,7 @@ import {
   handleSystemTargetChatTurnGrounded,
 } from '../../custom/support-setup-copilot/system-target.js';
 import { runHumanLikeLlmCoach } from '../../custom/support-setup-copilot/llm-coach.js';
+import { setCopilotModelSource } from '../../custom/support-setup-copilot/model-source.js';
 import { runWithTrace, traceDone, traceFinish, traceStart, traceStep, traceUsage } from '../../custom/support-setup-copilot/trace.js';
 import { getDb, initDb } from '../../db/index.js';
 import { createSession, createUser, type SessionUser } from '../../services/auth.js';
@@ -127,6 +128,89 @@ describe('usage: what a reply actually cost', () => {
     });
     expect(usage?.modelCalls).toBe(calls);
     expect(calls).toBe(2);
+  });
+});
+
+describe('why a model attempt failed is shown on the "ask the model" step', () => {
+  let admin: SessionUser;
+  beforeAll(() => {
+    process.env.ENCRYPTION_KEY = 'd'.repeat(64);
+    initDb(':memory:');
+    installMockCloudLease();
+    admin = createUser('trace-reason-admin@example.com', 'AdminPass123!');
+  });
+  afterAll(() => {
+    configureCloudEntitlementForTesting(null);
+    delete process.env.FREEAPI_AI_ACTIVATION_TOKEN;
+    setCopilotModelSource('both');
+  });
+
+  const input = (fetchImpl: typeof fetch) => ({
+    user: admin,
+    messages: [{ role: 'user' as const, content: 'cho mình hỏi về cài đặt cache' }],
+    locale: 'vi' as const, targetMode: 'update_tenant' as const, diagnostic: null, extracted: {},
+    gatewayLoopback: { host: '127.0.0.1', port: 9, forceLoopback: true },
+    fetchImpl,
+  });
+  const run = async (fetchImpl: typeof fetch) => {
+    const seen: SupportSetupTraceStep[] = [];
+    const result = await runWithTrace((st) => seen.push(st), () => runHumanLikeLlmCoach(input(fetchImpl)));
+    const model = [...seen].reverse().find((st) => st.kind === 'model');
+    return { result, model, seen };
+  };
+
+  it('a provider error is explained with its status, for each route it tried', async () => {
+    setCopilotModelSource('both');
+    const fetchImpl = (async () => new Response('{}', { status: 503 })) as unknown as typeof fetch;
+    const { result, model } = await run(fetchImpl);
+    expect(result).toBeNull();
+    expect(model?.status).toBe('error');
+    expect(model?.detailVi).toContain('Chưa có mô hình nào trả lời');
+    expect(model?.detailVi).toContain('FreeLLMAPI auto: chưa có nhà cung cấp nào sẵn sàng (HTTP 503)');
+    expect(model?.detailVi).toContain('FreeLLMAPI auto:balanced'); // auto failed over, and that is shown too
+    expect(model?.detailEn).toContain('No model answered');
+    expect(model?.detailEn).toContain('no provider is ready (HTTP 503)');
+  });
+
+  it('a slow model is reported as a timeout with the real limit, not as a mystery', async () => {
+    const fetchImpl = (async () => { throw new DOMException('The operation timed out.', 'TimeoutError'); }) as unknown as typeof fetch;
+    const { model } = await run(fetchImpl);
+    expect(model?.detailVi).toContain('quá 15 giây chưa trả lời');
+    expect(model?.detailEn).toContain('no answer within 15 s');
+  });
+
+  it('an unusable answer and a refused key each get their own reason', async () => {
+    const badFormat = (async () => new Response(JSON.stringify({ choices: [{ message: { content: '' } }] }), { status: 200 })) as unknown as typeof fetch;
+    expect((await run(badFormat)).model?.detailVi).toContain('trả lời sai định dạng');
+    const denied = (async () => new Response('{}', { status: 401 })) as unknown as typeof fetch;
+    expect((await run(denied)).model?.detailVi).toContain('bị từ chối xác thực (HTTP 401)');
+  });
+
+  it('"Thruline only" with no account says so, and says FreeLLMAPI was turned off by the setting', async () => {
+    setCopilotModelSource('thruline');
+    let calls = 0;
+    const { model } = await run((async () => { calls += 1; return new Response('{}', { status: 200 }); }) as unknown as typeof fetch);
+    expect(calls).toBe(0);
+    expect(model?.detailVi).toContain('Thruline: chưa nối tài khoản nhà cung cấp nào');
+    expect(model?.detailVi).toContain('FreeLLMAPI: đang tắt trong mục chọn Mô hình');
+    setCopilotModelSource('both');
+  });
+
+  it('an answer after a failed route still mentions what failed first', async () => {
+    setCopilotModelSource('both');
+    let n = 0;
+    const fetchImpl = (async () => {
+      n += 1;
+      return n === 1
+        ? new Response('{}', { status: 429 })
+        : new Response(JSON.stringify({ model: 'fake/m', choices: [{ message: { content: JSON.stringify({ intent: 'guide', reply: 'Response cache giúp giảm số lần gọi nhà cung cấp.' }) } }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const { result, model } = await run(fetchImpl);
+    expect(result?.output.reply).toContain('Response cache');
+    expect(model?.status).toBe('done');
+    expect(model?.detailVi).toContain('fake/m');
+    expect(model?.detailVi).toContain('trước đó: FreeLLMAPI auto: đang bị giới hạn tốc độ');
+    expect(model?.detailVi).not.toContain('Thruline: chưa nối'); // never tried: noise once a model answered
   });
 });
 
