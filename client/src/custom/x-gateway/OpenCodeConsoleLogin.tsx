@@ -34,9 +34,11 @@ export function OpenCodeConsoleLogin({ account, onClose }: { account: ProviderAc
       if (cancelled || !active.current) return
       setIdentity(result.identity)
       setPhase(result.connected ? 'connected' : 'logged-out')
-    }).catch(cause => {
+    }).catch(() => {
+      // A failed status read must not block the dialog: treat the account as
+      // not logged in and let the user start the device flow. Starting the
+      // login reports its own errors if it fails too.
       if (!cancelled && active.current) {
-        setError(cause instanceof Error ? cause.message : s.callbackError)
         setPhase('logged-out')
       }
     })
