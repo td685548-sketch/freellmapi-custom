@@ -1079,6 +1079,7 @@ export function SupportSetupCopilot() {
               const summary = uiLocale === 'vi' ? action.summaryVi : action.summaryEn;
               const curVal = uiLocale === 'vi' ? action.currentValueVi : action.currentValueEn;
               const propVal = uiLocale === 'vi' ? action.proposedValueVi : action.proposedValueEn;
+              const reason = uiLocale === 'vi' ? action.reasonVi : action.reasonEn;
               const disabled = !isPending || !action.canApply;
               return (
                 <label className="ssc-proposal-step ssc-proposal-system-action" key={action.settingId}>
@@ -1107,6 +1108,19 @@ export function SupportSetupCopilot() {
                       <span className="ssc-action-diff-arrow">➔</span>
                       <span className="ssc-action-diff-new">{propVal}</span>
                     </div>
+                    {reason && (
+                      <div className="ssc-proposal-step-summary" data-testid="support-setup-system-action-reason">
+                        <strong>{uiLocale === 'vi' ? 'Lý do đề xuất: ' : 'Why this is suggested: '}</strong>
+                        {reason}
+                        {action.evidence && action.evidence.length > 0 && (
+                          <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                            {action.evidence.map((fact) => (
+                              <li key={fact}>{fact}</li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </label>
               );

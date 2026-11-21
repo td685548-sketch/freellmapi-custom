@@ -76,6 +76,8 @@ import {
   buildOpenOnboardingGuideProposal,
   buildSwitchKeyRoutingModeProposal,
 } from './user-actions.js';
+import { attachAdviceToActions, buildSystemAdvice } from './system-advisor.js';
+import { normalizePillarPatch } from './system-pillars.js';
 
 export type CopilotToolKind =
   | 'tenant_step'
@@ -180,6 +182,14 @@ const SETTING_INPUT_SCHEMAS: Readonly<Record<SupportSystemSettingId, z.ZodType<R
   mcp_server: z.object({ enabled: z.boolean() }),
   auto_update_check: z.object({ enabled: z.boolean() }),
   ollama_emulation: z.object({ mode: z.enum(['off', 'open-loopback', 'key-required']) }),
+  ai_platform_pillars: z.object({
+    retrieval: z.boolean().optional(),
+    prompts: z.boolean().optional(),
+    promptCache: z.boolean().optional(),
+    mcpClient: z.boolean().optional(),
+    outputGuard: z.boolean().optional(),
+    orchestrator: z.boolean().optional(),
+  }),
 };
 
 const SETTING_TOOL_DESCRIPTIONS: Readonly<Record<SupportSystemSettingId, { en: string; vi: string }>> = {
@@ -218,6 +228,10 @@ const SETTING_TOOL_DESCRIPTIONS: Readonly<Record<SupportSystemSettingId, { en: s
   ollama_emulation: {
     en: 'Propose the Ollama emulation mode (Consent Card only).',
     vi: 'Đề xuất chế độ giả lập Ollama (chỉ qua thẻ chờ duyệt).',
+  },
+  ai_platform_pillars: {
+    en: 'Propose turning AI Platform pillars on/off — retrieval (document vectorization), prompts, promptCache, mcpClient, outputGuard, orchestrator; send only the pillars to change (Consent Card only).',
+    vi: 'Đề xuất bật/tắt trụ cột AI Platform — retrieval (vector hóa tài liệu), prompts, promptCache, mcpClient, outputGuard, orchestrator; chỉ gửi trụ cột cần đổi (chỉ qua thẻ chờ duyệt).',
   },
 };
 
@@ -269,6 +283,16 @@ function buildRegistry(): readonly CopilotToolDefinition[] {
       labelEn: 'Read current system settings', labelVi: 'Đọc cài đặt hệ thống hiện tại',
       description:
         'READ-ONLY. Return the CURRENT value of every system setting this user is permitted to manage (cache, compression, token savers, TTL, MCP, Ollama, unification, update checks, Thruline gateway). Use it to answer "is X on?" or before proposing a change.',
+      requiredPermission: null,
+      inputSchema: z.object({}),
+      sideEffect: 'none',
+    },
+    {
+      id: 'system.advise',
+      kind: 'knowledge',
+      labelEn: 'Advise on system settings', labelVi: 'Gợi ý chỉnh cài đặt hệ thống',
+      description:
+        'READ-ONLY. Measure the live system (AI Platform switches, knowledge documents, embedding keys, last-24h 429 rate and prompt sizes) and return recommendations — each with the reason and evidence — limited to settings this user may change. Use it when the user asks "what should I turn on/off?", "is X worth enabling?" or "why do you suggest that?". A recommendation marked recommend can then be staged with the matching setting.* tool.',
       requiredPermission: null,
       inputSchema: z.object({}),
       sideEffect: 'none',
@@ -438,7 +462,7 @@ export function filterAdmittedTools(params: {
     if (tool.kind === 'personal_action') return true;
     if (tool.kind === 'knowledge') {
       if (tool.id === 'kb.search') return true;
-      if (tool.id === 'settings.read') return hasAnySystemSettingPermission(user);
+      if (tool.id === 'settings.read' || tool.id === 'system.advise') return hasAnySystemSettingPermission(user);
       return tenantEntry !== undefined && tenantEntry.canViewSteps.length > 0; // tenant.diagnose
     }
     if (tool.kind === 'tenant_step') {
@@ -526,6 +550,35 @@ export class CopilotToolDenialError extends Error {
   }
 }
 
+/**
+ * Final pre-dispatch guards (DeepSeek Harness `ToolGuard` pattern): they run
+ * AFTER the permission gate and can only DENY — a guard never grants anything
+ * the gate refused. Each returns a denial reason or null.
+ */
+type CopilotToolGuard = (ctx: { tool: CopilotToolDefinition; input: Record<string, unknown> }) => string | null;
+
+/** Secrets, credentials, backups and invites are never changed through chat — even if a future tool tried. */
+const SECRET_SURFACE_RE = /(?:api_?key|secret|password|credential|backup|restore|invite)/i;
+
+export const COPILOT_TOOL_GUARDS: readonly CopilotToolGuard[] = [
+  ({ tool }) =>
+    tool.kind === 'system_setting' && SECRET_SURFACE_RE.test(`${tool.id} ${tool.settingId ?? ''}`)
+      ? 'secret_surface_not_allowed_via_chat'
+      : null,
+  ({ tool, input }) =>
+    tool.settingId === 'ai_platform_pillars' && Object.keys(normalizePillarPatch(input)).length === 0
+      ? 'empty_pillar_patch'
+      : null,
+];
+
+function runToolGuards(ctx: { tool: CopilotToolDefinition; input: Record<string, unknown> }): string | null {
+  for (const guard of COPILOT_TOOL_GUARDS) {
+    const denial = guard(ctx);
+    if (denial) return denial;
+  }
+  return null;
+}
+
 /** Live gate check for one tool. Returns the denial reason, or null when permitted. */
 function livePermissionDenial(params: {
   tool: CopilotToolDefinition;
@@ -541,7 +594,7 @@ function livePermissionDenial(params: {
   if (tool.kind === 'knowledge') {
     const liveUser = resolveLiveSessionUser(user.userId);
     if (!liveUser) return 'account_not_found';
-    if (tool.id === 'settings.read') {
+    if (tool.id === 'settings.read' || tool.id === 'system.advise') {
       return hasAnySystemSettingPermission(liveUser) ? null : 'missing_system_setting_permission';
     }
     if (tool.id === 'tenant.diagnose') {
@@ -637,11 +690,10 @@ function runToolHandler(params: {
     };
   }
   if (tool.kind === 'system_setting' && tool.settingId) {
-    const action: SupportSystemSettingAction = buildSystemSettingAction(
-      tool.settingId,
-      input,
-      true,
-    );
+    const [action] = attachAdviceToActions(
+      [buildSystemSettingAction(tool.settingId, input, true)],
+      user,
+    ) as [SupportSystemSettingAction];
     return { settingId: tool.settingId, action };
   }
   if (tool.id === 'action.create_personal_key') {
@@ -807,6 +859,25 @@ export async function executeCopilotTool(params: {
     };
   }
 
+  const guardDenial = runToolGuards({ tool, input: parsed.data });
+  if (guardDenial) {
+    appendSupportAuditLog({
+      tenantId: auditTenantId,
+      action: 'support.setup_copilot.tool_denied',
+      userId: String(user.userId),
+      role: user.role,
+      details: { toolId, reason: guardDenial, guard: true },
+    });
+    return {
+      toolId,
+      status: 'denied',
+      reason: guardDenial,
+      requiredPermission: tool.requiredPermission,
+      detailEn: `Tool '${toolId}' was blocked by a safety guard (${guardDenial}). No change was made.`,
+      detailVi: `Công cụ '${toolId}' bị chặn bởi chốt an toàn (${guardDenial}). Không có thay đổi nào được thực hiện.`,
+    };
+  }
+
   try {
     const result = await Promise.race([
       Promise.resolve().then(() =>
@@ -918,6 +989,9 @@ async function runKnowledgeTool(params: {
   }
   if (tool.id === 'settings.read') {
     return readSystemSettingsSnapshot(user);
+  }
+  if (tool.id === 'system.advise') {
+    return buildSystemAdvice(user);
   }
   // tenant.diagnose
   const tenant = tenantId != null ? getSupportTenant(tenantId) : null;

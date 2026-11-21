@@ -627,7 +627,7 @@ describe('Setup Copilot — Permission Grant / Revoke (Phase 3)', () => {
       expect(
         mgrAdmitted.filter((t) => t.kind === 'permission_grant').map((t) => t.id),
       ).toEqual(['permission.grant_tenant', 'permission.revoke_tenant']);
-      expect(COPILOT_TOOL_REGISTRY).toHaveLength(26);
+      expect(COPILOT_TOOL_REGISTRY).toHaveLength(28);
     });
 
     it('tenant grant tool stages only — membership unchanged until Approve', async () => {

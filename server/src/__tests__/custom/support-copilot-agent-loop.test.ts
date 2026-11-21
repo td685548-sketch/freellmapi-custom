@@ -179,16 +179,17 @@ describe('Setup Copilot — Agent Harness Loop (Phase 2)', () => {
   });
 
   describe('COPILOT_TOOL_REGISTRY', () => {
-    it('registers 7 tenant steps + 9 system settings + 3 personal actions + 4 permission tools + 3 read-only knowledge tools', () => {
-      expect(COPILOT_TOOL_REGISTRY).toHaveLength(26);
+    it('registers 7 tenant steps + 10 system settings + 3 personal actions + 4 permission tools + 4 read-only knowledge tools', () => {
+      expect(COPILOT_TOOL_REGISTRY).toHaveLength(28);
       expect(COPILOT_TOOL_REGISTRY.filter((t) => t.kind === 'knowledge').map((t) => t.id)).toEqual([
         'kb.search',
         'settings.read',
+        'system.advise',
         'tenant.diagnose',
       ]);
       expect(COPILOT_TOOL_REGISTRY.filter((t) => t.kind === 'knowledge').every((t) => t.sideEffect === 'none')).toBe(true);
       expect(COPILOT_TOOL_REGISTRY.filter((t) => t.kind === 'tenant_step')).toHaveLength(7);
-      expect(COPILOT_TOOL_REGISTRY.filter((t) => t.kind === 'system_setting')).toHaveLength(9);
+      expect(COPILOT_TOOL_REGISTRY.filter((t) => t.kind === 'system_setting')).toHaveLength(10);
       expect(COPILOT_TOOL_REGISTRY.filter((t) => t.kind === 'personal_action')).toHaveLength(3);
       expect(COPILOT_TOOL_REGISTRY.filter((t) => t.kind === 'permission_grant')).toHaveLength(4);
       expect(
@@ -243,13 +244,13 @@ describe('Setup Copilot — Agent Harness Loop (Phase 2)', () => {
       expect(admitted.filter((t) => t.kind === 'personal_action')).toHaveLength(3);
     });
 
-    it('platform operator is admitted to all 26 tools', () => {
+    it('platform operator is admitted to all 28 tools', () => {
       const admitted = filterAdmittedTools({
         agentContext: identityFor(primaryAdmin),
         user: primaryAdmin,
         tenantId: existingTenantId,
       });
-      expect(admitted).toHaveLength(26);
+      expect(admitted).toHaveLength(28);
     });
   });
 

@@ -726,6 +726,9 @@ it('renders surgical proposal badge and defaults only targeted steps to checked'
           currentValueEn: 'Disabled',
           proposedValueVi: 'Bật',
           proposedValueEn: 'Enabled',
+          reasonVi: 'Có 13/33 lượt gọi bị 429 trong 24 giờ qua.',
+          reasonEn: '13 of 33 requests were rate-limited in the last 24h.',
+          evidence: ['13 rate-limited of 33 requests in 24h (39%).'],
           payload: { enabled: true },
         },
         {
@@ -799,6 +802,13 @@ it('renders surgical proposal badge and defaults only targeted steps to checked'
     expect(actionsContainer?.textContent).toContain('Tắt');
     expect(actionsContainer?.textContent).toContain('Bật');
     expect(actionsContainer?.textContent).toContain('edit_settings'); // locked permission badge
+
+    // The advisor's reason + evidence are shown for the action that has them, and only for that one
+    const reasons = actionsContainer!.querySelectorAll('[data-testid="support-setup-system-action-reason"]');
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]!.textContent).toContain('Lý do đề xuất');
+    expect(reasons[0]!.textContent).toContain('Có 13/33 lượt gọi bị 429');
+    expect(reasons[0]!.textContent).toContain('13 rate-limited of 33 requests in 24h (39%).');
 
     const checkboxes = actionsContainer!.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
     expect(checkboxes).toHaveLength(2);

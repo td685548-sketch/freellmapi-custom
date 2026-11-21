@@ -237,5 +237,23 @@
   "expect": [
    "opt:user-usage-allowance"
   ]
+ },
+ {
+  "q": "bật vector hóa tài liệu khách hàng ở đâu",
+  "expect": [
+   "setting:ai_platform_pillars"
+  ]
+ },
+ {
+  "q": "retrieval là gì, có nên bật cho tài liệu tri thức không",
+  "expect": [
+   "setting:ai_platform_pillars"
+  ]
+ },
+ {
+  "q": "how do I turn on semantic search over my knowledge documents",
+  "expect": [
+   "setting:ai_platform_pillars"
+  ]
  }
 ]

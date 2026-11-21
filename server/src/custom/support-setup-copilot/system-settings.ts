@@ -7,6 +7,7 @@ import {
 } from '@freellmapi/shared/support-setup-copilot.js';
 import type { Permission } from '@freellmapi/shared/user-access.js';
 import { getDb, getSetting, setSetting } from '../../db/index.js';
+import { applyPillarsPatch, buildPillarsAction, effectivePillarPatch, mentionsAnyPillar, normalizePillarPatch, parsePillarsFromClause } from './system-pillars.js';
 import { hasPermission } from '../../middleware/requirePermission.js';
 import { isMcpServerEnabled, MCP_ENABLED_SETTING } from '../../routes/mcp.js';
 import { getOllamaEmulationMode, type OllamaEmulationMode } from '../../routes/ollama.js';
@@ -42,6 +43,7 @@ export const SYSTEM_SETTING_PERMISSIONS = [
   'edit_cache',
   'manage_compression',
   'edit_settings',
+  'edit_ai_flags',
 ] as const satisfies readonly Permission[];
 
 export const REQUIRED_PERMISSION_BY_SETTING: Readonly<
@@ -56,6 +58,7 @@ export const REQUIRED_PERMISSION_BY_SETTING: Readonly<
   mcp_server: 'edit_settings',
   auto_update_check: 'edit_settings',
   ollama_emulation: 'edit_settings',
+  ai_platform_pillars: 'edit_ai_flags',
 };
 
 export interface SystemSettingChangeRequest {
@@ -150,6 +153,12 @@ const PERMISSION_LABELS: Readonly<
     screenVi: 'trang `/keys` (Agent compatibility) hoặc hộp thoại Cài đặt hệ thống',
     screenEn: '`/keys` (Agent compatibility) or the System Settings dialog',
   },
+  edit_ai_flags: {
+    vi: 'Bật/tắt trụ cột AI Platform (`edit_ai_flags`)',
+    en: 'Toggle AI Platform pillars (`edit_ai_flags`)',
+    screenVi: '`/ai-platform` (Tổng quan)',
+    screenEn: '`/ai-platform` (Overview)',
+  },
 };
 
 export function isSupportSystemSettingId(value: unknown): value is SupportSystemSettingId {
@@ -162,7 +171,8 @@ export function hasAnySystemSettingPermission(user: SessionUser | undefined): bo
     hasPermission(user, 'edit_x_settings') ||
     hasPermission(user, 'edit_cache') ||
     hasPermission(user, 'manage_compression') ||
-    hasPermission(user, 'edit_settings')
+    hasPermission(user, 'edit_settings') ||
+    hasPermission(user, 'edit_ai_flags')
   );
 }
 
@@ -410,7 +420,7 @@ function isExclusivelyTenantSupportClause(foldedClause: string): boolean {
       foldedClause,
     );
 
-  if (hasSystemKeyword) return false;
+  if (hasSystemKeyword || mentionsAnyPillar(foldedClause)) return false;
 
   return /\b(?:widget|nut\s+chat|mau\s+(?:nut|chu\s+dao|widget)|sla|phan\s+luong|che\s+pii|pii\s+masking|masking|tuong\s+lua\s+prompt|prompt\s+firewall|prompt\s+injection|guardrail|guardrails|model\s+mac\s+dinh|default\s+model|cors|allowed\s*origins|domain|system\s+prompt|loi\s+chao|welcome\s+message|khach\s+vang\s+lai|guest\s+chat|faq|knowledge\s+base|tai\s+lieu\s+tri\s+thuc|output\s+policy|kiem\s+soat\s+dau\s+ra)\b/.test(
     foldedClause,
@@ -711,6 +721,7 @@ function extractRequestsFromClause(
   // 7. MCP Server (gateway /mcp endpoint — exclude managing external AI platform MCP tool servers unless /mcp or mcp server toggle)
   if (
     /\b(?:mcp\s+server|cong\s+mcp|may\s+chu\s+mcp|enable[-\s]mcp|\/mcp)\b/.test(foldedClause) &&
+    !/\bmcp\s+client\b/.test(foldedClause) &&
     (effectivePolarity === 'enable' || effectivePolarity === 'disable')
   ) {
     out.push({
@@ -730,6 +741,12 @@ function extractRequestsFromClause(
       settingId: 'auto_update_check',
       payload: { enabled: effectivePolarity === 'enable' },
     });
+  }
+
+  // 10. AI Platform pillars (retrieval/vectorization, prompt cache, output guard, orchestrator, ...)
+  const pillarPatch = parsePillarsFromClause(foldedClause, effectivePolarity);
+  if (pillarPatch) {
+    out.push({ settingId: 'ai_platform_pillars', payload: pillarPatch as Record<string, unknown> });
   }
 
   // 9. Ollama Emulation
@@ -798,7 +815,7 @@ export function detectSystemSettingsIntent(
     if (polarity) carriedPolarity = polarity;
     for (const req of requests) {
       const existing = mergedById.get(req.settingId);
-      if (existing && req.settingId === 'thruline_token_savers') {
+      if (existing && (req.settingId === 'thruline_token_savers' || req.settingId === 'ai_platform_pillars')) {
         mergedById.set(req.settingId, { ...existing, ...req.payload });
       } else {
         mergedById.set(req.settingId, req.payload);
@@ -906,6 +923,9 @@ function normalizeActionPayload(
           : 'key-required';
       return { mode };
     }
+
+    case 'ai_platform_pillars':
+      return normalizePillarPatch(rawPayload) as Record<string, unknown>;
 
     default:
       return rawPayload;
@@ -1150,6 +1170,9 @@ export function buildSystemSettingAction(
         payload: { mode },
       };
     }
+
+    case 'ai_platform_pillars':
+      return buildPillarsAction(payload, requiredPermission, canApply);
   }
 }
 
@@ -1201,6 +1224,13 @@ export function evaluateSystemSettingsProposal(
           : {};
       requestMap.set(item.settingId, safePayload);
     }
+  }
+
+  // A pillar request that would not change anything (already in the requested state, or nothing valid)
+  // is not worth a Consent Card; the model answers it in plain text from the live state instead.
+  const pillarRequest = requestMap.get('ai_platform_pillars');
+  if (pillarRequest !== undefined && Object.keys(effectivePillarPatch(normalizePillarPatch(pillarRequest))).length === 0) {
+    requestMap.delete('ai_platform_pillars');
   }
 
   if (requestMap.size === 0) {
@@ -1521,6 +1551,11 @@ function executeSingleSystemSettingWrite(
       };
     }
 
+    case 'ai_platform_pillars': {
+      const outcome = applyPillarsPatch(payload);
+      return { detailVi: outcome.detailVi, detailEn: outcome.detailEn };
+    }
+
     default:
       throw new SupportSetupCopilotError(
         400,
@@ -1649,7 +1684,13 @@ export function applySystemSettingsActions(
     action: 'support.setup_copilot.system_settings_apply',
     userId: String(liveUser.userId),
     role: liveUser.role,
-    details: { appliedIds },
+    details: {
+      appliedIds,
+      // Why the change was suggested (advisor-built, measured) travels with the audit record.
+      reasons: actions
+        .filter((a) => selectedLookup.has(a.settingId) && a.reasonEn)
+        .map((a) => ({ settingId: a.settingId, reason: a.reasonEn, evidence: a.evidence ?? [] })),
+    },
   });
 
   return results;

@@ -27,6 +27,7 @@ import { CACHE_ENABLED_SETTING, isCacheEnabled } from '../../services/cache.js';
 import { getCompressionConfig, setCompressionConfig } from '../../services/compression/config.js';
 import { setUnifyEnabled, UNIFY_ENABLED_KEY } from '../../services/model-groups.js';
 import { setUserPermissions } from '../../services/users.js';
+import { getFlags, setFlags } from '../../custom/ai-platform/flags.js';
 
 describe('Support Copilot Platform & Thruline System Settings Engine', () => {
   let primaryAdmin: SessionUser;
@@ -51,12 +52,12 @@ describe('Support Copilot Platform & Thruline System Settings Engine', () => {
 
     setUserPermissions(
       multiPermMember.userId,
-      ['edit_x_settings', 'edit_cache', 'manage_compression', 'edit_settings'],
+      ['edit_x_settings', 'edit_cache', 'manage_compression', 'edit_settings', 'edit_ai_flags'],
       primaryAdmin.userId,
     );
     multiPermMember = {
       ...multiPermMember,
-      permissions: ['edit_x_settings', 'edit_cache', 'manage_compression', 'edit_settings'],
+      permissions: ['edit_x_settings', 'edit_cache', 'manage_compression', 'edit_settings', 'edit_ai_flags'],
     };
 
     setUserPermissions(
@@ -69,7 +70,8 @@ describe('Support Copilot Platform & Thruline System Settings Engine', () => {
       permissions: ['view_cache', 'view_settings', 'use_x_gateway', 'view_users'],
     };
 
-    // Reset all 9 system settings to deterministic baseline values
+    // Reset all 10 system settings to deterministic baseline values
+    setFlags({ retrieval: false, prompts: false, promptCache: false, mcpClient: false, outputGuard: false, orchestrator: false });
     setEnabled(false, primaryAdmin.userId);
     setDefaultSavers({ caveman: false, ponytail: 'off', input: 'off' }, primaryAdmin.userId);
     setRouteHealthTtlMinutes(5, primaryAdmin.userId);
@@ -416,8 +418,8 @@ describe('Support Copilot Platform & Thruline System Settings Engine', () => {
     });
   });
 
-  describe('applySystemSettingsActions (All 9 Settings, Partial Savers, Audit & Live TOCTOU Protection)', () => {
-    it('applies all 9 system settings accurately, preserves untouched token saver fields, and records audit logs', () => {
+  describe('applySystemSettingsActions (All 10 Settings, Partial Savers, Audit & Live TOCTOU Protection)', () => {
+    it('applies all 10 system settings accurately, preserves untouched token saver fields, and records audit logs', () => {
       // Seed existing Thruline token savers to verify untouched fields are preserved!
       setDefaultSavers({ caveman: true, ponytail: 'full', input: 'off' }, primaryAdmin.userId);
       invalidateConfigCache();
@@ -429,7 +431,7 @@ describe('Support Copilot Platform & Thruline System Settings Engine', () => {
           {
             role: 'user',
             content:
-              'enable thruline gateway, set thruline input saver to standard, set route health ttl to 45 minutes, enable response cache, enable prompt compression lossless, disable model unification, enable mcp server, enable auto update check, and set ollama emulation to key-required',
+              'enable thruline gateway, set thruline input saver to standard, set route health ttl to 45 minutes, enable response cache, enable prompt compression lossless, disable model unification, enable mcp server, enable auto update check, enable retrieval, and set ollama emulation to key-required',
           },
         ],
       });
@@ -449,10 +451,10 @@ describe('Support Copilot Platform & Thruline System Settings Engine', () => {
         actions: proposal.actions,
       });
 
-      expect(results).toHaveLength(9);
+      expect(results).toHaveLength(10);
       expect(results.every((r) => r.status === 'applied')).toBe(true);
 
-      // Verify all 9 persisted states
+      // Verify all 10 persisted states
       invalidateConfigCache();
       const snap = getConfigSnapshot();
       expect(snap.enabled).toBe(true);
@@ -469,6 +471,8 @@ describe('Support Copilot Platform & Thruline System Settings Engine', () => {
       expect(isMcpServerEnabled()).toBe(true);
       expect(isAutoUpdateCheckEnabled()).toBe(true);
       expect(getOllamaEmulationMode()).toBe('key-required');
+      expect(getFlags().retrieval).toBe(true);
+      expect(getFlags().promptCache).toBe(false);
 
       // Verify audit log recorded under tenantId='system'
       const audits = listSupportAuditLogs('system');
@@ -478,7 +482,7 @@ describe('Support Copilot Platform & Thruline System Settings Engine', () => {
           a.userId === String(multiPermMember.userId),
       );
       expect(latestAudit).toBeDefined();
-      expect((latestAudit?.details as { appliedIds?: string[] })?.appliedIds).toHaveLength(9);
+      expect((latestAudit?.details as { appliedIds?: string[] })?.appliedIds).toHaveLength(10);
     });
 
     it('applies only selectedIds and marks unselected actions as skipped', () => {
