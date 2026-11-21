@@ -35,6 +35,24 @@ const TOKEN_EXPIRED_RE = /token_expired|authentication token is expired/i;
 
 const DEFAULT_TIMEZONE = 'UTC';
 const DEFAULT_TZ_OFFSET_MIN = 0;
+const CACHE_MAX_SIZE = 100;
+
+const rotatedCookieMap = new Map<string, string>();
+const rotateInFlight = new Map<string, Promise<RotateChatGptWebSessionResult>>();
+
+/** Clear in-memory ChatGPT Web cookie rotation caches (used by tests). */
+export function clearChatGptWebCaches(): void {
+  rotatedCookieMap.clear();
+  rotateInFlight.clear();
+}
+
+function setBoundedMap<K, V>(map: Map<K, V>, key: K, value: V): void {
+  if (map.size >= CACHE_MAX_SIZE && !map.has(key)) {
+    const oldestKey = map.keys().next().value;
+    if (oldestKey !== undefined) map.delete(oldestKey);
+  }
+  map.set(key, value);
+}
 
 const SENTINEL_HEADERS = {
   prepare: 'OpenAI-Sentinel-Chat-Requirements-Prepare-Token',
@@ -68,6 +86,13 @@ export interface ChatGptWebImageOptions {
   platform?: Platform;
   userAgent?: string;
   signal?: AbortSignal;
+  onCredentialUpdate?: (next: string) => void;
+}
+
+export interface RotateChatGptWebSessionResult {
+  cookieHeader: string;
+  accessToken: string;
+  rotated: boolean;
 }
 
 interface ImageContext {
@@ -105,16 +130,271 @@ export function chatGptWebImageErrorStatus(error: unknown): number | undefined {
     : undefined;
 }
 
+function sanitizeCookiePart(raw: string): string {
+  return raw.replace(/[\r\n\0]+/g, '');
+}
+
+function isChatGptCookieDomain(domain: unknown): boolean {
+  if (domain === undefined || domain === null) return true;
+  if (typeof domain !== 'string') return false;
+  const host = domain.trim().toLowerCase().replace(/^\.+/, '').replace(/\.+$/, '');
+  if (!host) return true;
+  return (
+    host === 'chatgpt.com'
+    || host.endsWith('.chatgpt.com')
+    || host === 'openai.com'
+    || host.endsWith('.openai.com')
+  );
+}
+
+function isSessionTokenCookieName(name: string): boolean {
+  return name === '__Secure-next-auth.session-token' || name.startsWith('__Secure-next-auth.session-token.');
+}
+
+function isExpiredCookie(cookie: Record<string, unknown>, nowMs: number): boolean {
+  const rawExpiry = cookie.expirationDate ?? cookie.expires;
+  if (rawExpiry === undefined || rawExpiry === null || rawExpiry === '') return false;
+  let expiryMs: number | undefined;
+  if (typeof rawExpiry === 'number') {
+    if (!Number.isFinite(rawExpiry) || rawExpiry <= 0) return false;
+    expiryMs = rawExpiry > 1e12 ? rawExpiry : rawExpiry * 1000;
+  } else if (typeof rawExpiry === 'string') {
+    const s = rawExpiry.trim();
+    if (!s) return false;
+    if (/^-?\d+(?:\.\d+)?$/.test(s)) {
+      const num = Number(s);
+      if (!Number.isFinite(num) || num <= 0) return false;
+      expiryMs = num > 1e12 ? num : num * 1000;
+    } else {
+      const parsedMs = Date.parse(s);
+      if (Number.isFinite(parsedMs)) expiryMs = parsedMs;
+    }
+  }
+  return expiryMs !== undefined && expiryMs <= nowMs;
+}
+
+function cookieSpecificity(cookie: Record<string, unknown>): number {
+  const domainStr = typeof cookie.domain === 'string' ? cookie.domain.trim().toLowerCase() : '';
+  const hostPart = domainStr.replace(/^\.+/, '').replace(/\.+$/, '');
+  const domainScore = !hostPart ? 0 : hostPart.length * 2 + (domainStr.startsWith('.') ? 0 : 1);
+  const pathScore = typeof cookie.path === 'string' ? cookie.path.length : 0;
+  return domainScore * 1000 + pathScore;
+}
+
+function parseCookieHeader(header: string): Map<string, string> {
+  const cookies = new Map<string, string>();
+  for (const part of header.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq <= 0) continue;
+    const name = sanitizeCookiePart(part.slice(0, eq)).trim();
+    const value = sanitizeCookiePart(part.slice(eq + 1)).trim();
+    if (!name || /[=;]/.test(name)) continue;
+    cookies.set(name, value);
+  }
+  return cookies;
+}
+
+function formatCookieHeader(cookies: Map<string, string>): string {
+  return Array.from(cookies.entries(), ([name, value]) => `${name}=${value}`).join('; ');
+}
+
+function splitCombinedSetCookie(headerValue: string): string[] {
+  const cookies: string[] = [];
+  let start = 0;
+  let inExpires = false;
+  for (let i = 0; i < headerValue.length; i++) {
+    const ch = headerValue[i];
+    if (ch === ',') {
+      if (inExpires) {
+        inExpires = false;
+        continue;
+      }
+      const rest = headerValue.slice(i + 1);
+      if (/^\s*[!#$%&'*+\-.^_`|~0-9A-Za-z]+=/.test(rest)) {
+        const piece = headerValue.slice(start, i).trim();
+        if (piece) cookies.push(piece);
+        start = i + 1;
+      }
+    } else if (ch === ';') {
+      inExpires = false;
+    } else if (headerValue.slice(i, i + 8).toLowerCase() === 'expires=') {
+      inExpires = true;
+    }
+  }
+  const tail = headerValue.slice(start).trim();
+  if (tail) cookies.push(tail);
+  return cookies;
+}
+
+function getSetCookieValues(headers: Headers | undefined | null): string[] {
+  if (!headers) return [];
+  const withGetSetCookie = headers as Headers & { getSetCookie?: () => string[] };
+  if (typeof withGetSetCookie.getSetCookie === 'function') {
+    const list = withGetSetCookie.getSetCookie();
+    if (Array.isArray(list) && list.length > 0) {
+      return list.flatMap(splitCombinedSetCookie);
+    }
+  }
+  const single = typeof headers.get === 'function' ? headers.get('set-cookie') : null;
+  return single ? splitCombinedSetCookie(single) : [];
+}
+
+function isSetCookieDeletion(attrs: string[], value: string, nowMs: number): boolean {
+  if (!value || value.toLowerCase() === 'deleted') return true;
+  for (const rawAttr of attrs) {
+    const eq = rawAttr.indexOf('=');
+    if (eq <= 0) continue;
+    const attrName = rawAttr.slice(0, eq).trim().toLowerCase();
+    const attrVal = rawAttr.slice(eq + 1).trim();
+    if (attrName === 'max-age') {
+      const num = Number(attrVal);
+      if (Number.isFinite(num) && num <= 0) return true;
+    } else if (attrName === 'expires') {
+      const parsed = Date.parse(attrVal);
+      if (Number.isFinite(parsed) && parsed <= nowMs) return true;
+    }
+  }
+  return false;
+}
+
+function getSetCookieDomain(attrs: string[]): string | undefined {
+  for (const rawAttr of attrs) {
+    const eq = rawAttr.indexOf('=');
+    if (eq <= 0) continue;
+    if (rawAttr.slice(0, eq).trim().toLowerCase() === 'domain') {
+      return rawAttr.slice(eq + 1).trim();
+    }
+  }
+  return undefined;
+}
+
+/** Merge rotated `Set-Cookie` headers from a ChatGPT response into `cookieHeader`. */
+export function mergeChatGptWebResponseCookies(
+  cookieHeader: string,
+  res: Pick<Response, 'headers'>,
+): { nextHeader: string; changed: boolean } {
+  const setCookies = getSetCookieValues(res?.headers);
+  if (setCookies.length === 0) {
+    return { nextHeader: cookieHeader, changed: false };
+  }
+
+  const cookies = parseCookieHeader(cookieHeader);
+  const nowMs = Date.now();
+  const parsedEntries: Array<{ name: string; value: string; deleted: boolean }> = [];
+  const setSessionNames = new Set<string>();
+  let sawUnchunkedSession = false;
+  let sawChunkedSession = false;
+
+  for (const raw of setCookies) {
+    const segments = raw.split(';');
+    const pair = segments[0] ?? '';
+    const eq = pair.indexOf('=');
+    if (eq <= 0) continue;
+    const name = sanitizeCookiePart(pair.slice(0, eq)).trim();
+    const value = sanitizeCookiePart(pair.slice(eq + 1)).trim();
+    if (!name || /[=;]/.test(name)) continue;
+
+    const attrs = segments.slice(1);
+    const domain = getSetCookieDomain(attrs);
+    if (domain !== undefined && !isChatGptCookieDomain(domain)) continue;
+
+    const deleted = isSetCookieDeletion(attrs, value, nowMs);
+    parsedEntries.push({ name, value, deleted });
+    if (!deleted && isSessionTokenCookieName(name)) {
+      setSessionNames.add(name);
+      if (name === '__Secure-next-auth.session-token') {
+        sawUnchunkedSession = true;
+      } else {
+        sawChunkedSession = true;
+      }
+    }
+  }
+
+  if (parsedEntries.length === 0) {
+    return { nextHeader: cookieHeader, changed: false };
+  }
+
+  let changed = false;
+  for (const entry of parsedEntries) {
+    if (entry.deleted) {
+      if (isSessionTokenCookieName(entry.name)) {
+        const hasOtherSessionCookie =
+          Array.from(cookies.keys()).some(k => k !== entry.name && isSessionTokenCookieName(k))
+          || Array.from(setSessionNames).some(k => k !== entry.name);
+        if (hasOtherSessionCookie && cookies.delete(entry.name)) {
+          changed = true;
+        }
+      } else if (cookies.delete(entry.name)) {
+        changed = true;
+      }
+      continue;
+    }
+
+    if (cookies.get(entry.name) !== entry.value) {
+      cookies.set(entry.name, entry.value);
+      changed = true;
+    }
+  }
+
+  if (sawUnchunkedSession && !sawChunkedSession) {
+    for (const name of Array.from(cookies.keys())) {
+      if (name.startsWith('__Secure-next-auth.session-token.') && cookies.delete(name)) {
+        changed = true;
+      }
+    }
+  } else if (sawChunkedSession && !sawUnchunkedSession) {
+    if (cookies.delete('__Secure-next-auth.session-token')) {
+      changed = true;
+    }
+  }
+
+  return {
+    nextHeader: changed ? formatCookieHeader(cookies) : cookieHeader,
+    changed,
+  };
+}
+
+/** Resolve the latest rotated cookie header known in-process for `cookieHeader`. */
+export function resolveLiveChatGptWebCookie(cookieHeader: string): string {
+  let current = cookieHeader;
+  const seen = new Set<string>([current]);
+  for (let i = 0; i < 16; i++) {
+    const next = rotatedCookieMap.get(current);
+    if (!next || seen.has(next)) break;
+    seen.add(next);
+    current = next;
+  }
+  return current;
+}
+
+/** Record an in-process cookie rotation and notify persistence without aborting active calls. */
+export function recordRotatedChatGptWebCookie(
+  prevHeader: string,
+  nextHeader: string,
+  onCredentialUpdate?: (next: string) => void,
+): void {
+  if (!nextHeader || prevHeader === nextHeader) return;
+  setBoundedMap(rotatedCookieMap, prevHeader, nextHeader);
+  if (onCredentialUpdate) {
+    try {
+      onCredentialUpdate(nextHeader);
+    } catch {
+      // Persistence failures must never abort an active ChatGPT Web request.
+    }
+  }
+}
+
 /** Normalize whatever the operator pasted into a Cookie header. */
 export function normalizeChatGptWebCookie(rawCredential: string): string {
-  const trimmed = rawCredential
+  const trimmed = sanitizeCookiePart(rawCredential)
     .trim()
     .replace(/^(?:Cookie|Authorization):\s*/i, '')
     .replace(/^Bearer\s+/i, '')
     .trim();
   if (!trimmed) throw new ChatGptWebImageError('ChatGPT Web credential is empty', 401);
 
-  // Full Playwright storage state ({ cookies: [...] }) or cookie-editor JSON array.
+  // Full Playwright storage state ({ cookies: [...] }), cookie-editor JSON array,
+  // flat { name: value } cookie maps, or { sessionToken } / { accessToken } JSON.
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     let parsed: unknown;
     try {
@@ -122,21 +402,52 @@ export function normalizeChatGptWebCookie(rawCredential: string): string {
     } catch {
       throw new ChatGptWebImageError('ChatGPT Web storage state JSON is invalid', 400);
     }
-    const cookies = Array.isArray(parsed)
-      ? parsed
-      : (parsed && typeof parsed === 'object' && Array.isArray((parsed as { cookies?: unknown }).cookies)
-        ? (parsed as { cookies: unknown[] }).cookies
-        : null);
-    if (!cookies) {
+
+    let rawCookies: Array<Record<string, unknown>> | null = null;
+    if (Array.isArray(parsed)) {
+      rawCookies = parsed.filter((c): c is Record<string, unknown> => Boolean(c) && typeof c === 'object' && !Array.isArray(c));
+    } else if (parsed && typeof parsed === 'object') {
+      const obj = parsed as Record<string, unknown>;
+      if (Array.isArray(obj.cookies)) {
+        rawCookies = obj.cookies.filter((c): c is Record<string, unknown> => Boolean(c) && typeof c === 'object' && !Array.isArray(c));
+      } else if (typeof obj.sessionToken === 'string' && obj.sessionToken.trim()) {
+        return `__Secure-next-auth.session-token=${sanitizeCookiePart(obj.sessionToken.trim())}`;
+      } else {
+        const kvEntries = Object.entries(obj).filter(([, val]) => typeof val === 'string');
+        const hasSessionCookieKey = Object.keys(obj).some(k => isSessionTokenCookieName(k));
+        if (!hasSessionCookieKey && typeof obj.accessToken === 'string' && obj.accessToken.trim() && kvEntries.length === 1) {
+          return `__Secure-next-auth.session-token=${sanitizeCookiePart(obj.accessToken.trim())}`;
+        }
+        if (kvEntries.length > 0 && kvEntries.length === Object.keys(obj).length) {
+          rawCookies = kvEntries.map(([name, value]) => ({ name, value }));
+        } else if (typeof obj.accessToken === 'string' && obj.accessToken.trim()) {
+          return `__Secure-next-auth.session-token=${sanitizeCookiePart(obj.accessToken.trim())}`;
+        }
+      }
+    }
+
+    if (!rawCookies) {
       throw new ChatGptWebImageError('ChatGPT Web storage state JSON contains no cookies', 400);
     }
-    const header = cookies
-      .filter((cookie): cookie is { name: string; value: string } =>
-        Boolean(cookie) && typeof cookie === 'object'
-        && typeof (cookie as { name?: unknown }).name === 'string'
-        && typeof (cookie as { value?: unknown }).value === 'string')
-      .map(cookie => `${cookie.name}=${cookie.value}`)
-      .join('; ');
+
+    const nowMs = Date.now();
+    const deduped = new Map<string, { value: string; specificity: number }>();
+    for (const cookie of rawCookies) {
+      if (typeof cookie.name !== 'string' || typeof cookie.value !== 'string') continue;
+      const name = sanitizeCookiePart(cookie.name).trim();
+      const value = sanitizeCookiePart(cookie.value).trim();
+      if (!name || /[=;]/.test(name)) continue;
+      if (!isChatGptCookieDomain(cookie.domain)) continue;
+      if (!isSessionTokenCookieName(name) && isExpiredCookie(cookie, nowMs)) continue;
+
+      const specificity = cookieSpecificity(cookie);
+      const existing = deduped.get(name);
+      if (!existing || specificity >= existing.specificity) {
+        deduped.set(name, { value, specificity });
+      }
+    }
+
+    const header = Array.from(deduped.entries(), ([name, entry]) => `${name}=${entry.value}`).join('; ');
     if (!header) throw new ChatGptWebImageError('ChatGPT Web credential contains no cookies', 401);
     return header;
   }
@@ -148,7 +459,10 @@ export function normalizeChatGptWebCookie(rawCredential: string): string {
   }
 
   // Full Cookie header, including chunked (`...session-token.0=`, `.1=`).
-  return trimmed;
+  const parsedJar = parseCookieHeader(trimmed);
+  const header = formatCookieHeader(parsedJar);
+  if (!header) throw new ChatGptWebImageError('ChatGPT Web credential contains no cookies', 401);
+  return header;
 }
 
 /** Exchange the web cookie for the access token /backend-api expects. */
@@ -158,7 +472,9 @@ export async function fetchChatGptWebAccessToken(
   baseUrl: string,
   platform: Platform,
   signal?: AbortSignal,
+  onCredentialUpdate?: (next: string) => void,
 ): Promise<string> {
+  const liveCookie = resolveLiveChatGptWebCookie(cookie);
   let res: Response;
   try {
     res = await webFetch(
@@ -168,7 +484,7 @@ export async function fetchChatGptWebAccessToken(
           'User-Agent': userAgent,
           Accept: 'application/json',
           Referer: `${baseUrl}/`,
-          ...(cookie ? { Cookie: cookie } : {}),
+          ...(liveCookie ? { Cookie: liveCookie } : {}),
         },
       },
       30_000,
@@ -193,6 +509,10 @@ export async function fetchChatGptWebAccessToken(
   const body = await res.json().catch(() => null) as { accessToken?: unknown } | null;
   if (typeof body?.accessToken !== 'string' || !body.accessToken) {
     throw new ChatGptWebImageError('ChatGPT session is not signed in', 401);
+  }
+  const merged = mergeChatGptWebResponseCookies(liveCookie, res);
+  if (merged.changed) {
+    recordRotatedChatGptWebCookie(liveCookie, merged.nextHeader, onCredentialUpdate);
   }
   return body.accessToken;
 }
@@ -237,10 +557,25 @@ export async function fetchUsableChatGptWebAccessToken(
   baseUrl: string,
   platform: Platform,
   signal?: AbortSignal,
+  onCredentialUpdate?: (next: string) => void,
 ): Promise<string> {
-  const first = await fetchChatGptWebAccessToken(cookie, userAgent, baseUrl, platform, signal);
+  const first = await fetchChatGptWebAccessToken(
+    resolveLiveChatGptWebCookie(cookie),
+    userAgent,
+    baseUrl,
+    platform,
+    signal,
+    onCredentialUpdate,
+  );
   if (!isChatGptWebAccessTokenExpiringSoon(first)) return first;
-  const second = await fetchChatGptWebAccessToken(cookie, userAgent, baseUrl, platform, signal);
+  const second = await fetchChatGptWebAccessToken(
+    resolveLiveChatGptWebCookie(cookie),
+    userAgent,
+    baseUrl,
+    platform,
+    signal,
+    onCredentialUpdate,
+  );
   if (!isChatGptWebAccessTokenExpiringSoon(second)) return second;
   throw new ChatGptWebImageError(SESSION_EXPIRED_MESSAGE, 401);
 }
@@ -380,6 +715,7 @@ async function runSentinelPrepare({
   userAgent,
   platform,
   signal,
+  onCredentialUpdate,
 }: {
   baseUrl: string;
   accessToken: string;
@@ -387,23 +723,29 @@ async function runSentinelPrepare({
   userAgent: string;
   platform: Platform;
   signal?: AbortSignal;
+  onCredentialUpdate?: (next: string) => void;
 }): Promise<string> {
-  const prepared = await readSentinelJson(
-    await sentinelRequest(
-      `${baseUrl}/backend-api/sentinel/chat-requirements/prepare`,
-      {
-        Authorization: `Bearer ${accessToken}`,
-        'User-Agent': userAgent,
-        Origin: baseUrl,
-        Referer: `${baseUrl}/`,
-        ...(cookie ? { Cookie: cookie } : {}),
-        [SENTINEL_HEADERS.prepare]: buildPrepareToken(userAgent),
-      },
-      platform,
-      signal,
-    ),
-    '/backend-api/sentinel/chat-requirements/prepare',
+  const activeCookie = cookie ? resolveLiveChatGptWebCookie(cookie) : undefined;
+  const res = await sentinelRequest(
+    `${baseUrl}/backend-api/sentinel/chat-requirements/prepare`,
+    {
+      Authorization: `Bearer ${accessToken}`,
+      'User-Agent': userAgent,
+      Origin: baseUrl,
+      Referer: `${baseUrl}/`,
+      ...(activeCookie ? { Cookie: activeCookie } : {}),
+      [SENTINEL_HEADERS.prepare]: buildPrepareToken(userAgent),
+    },
+    platform,
+    signal,
   );
+  const prepared = await readSentinelJson(res, '/backend-api/sentinel/chat-requirements/prepare');
+  if (activeCookie) {
+    const merged = mergeChatGptWebResponseCookies(activeCookie, res);
+    if (merged.changed) {
+      recordRotatedChatGptWebCookie(activeCookie, merged.nextHeader, onCredentialUpdate);
+    }
+  }
   if (typeof prepared.prepare_token !== 'string' || !prepared.prepare_token) {
     throw new ChatGptWebImageError('ChatGPT sentinel prepare returned no prepare_token', 502);
   }
@@ -412,9 +754,9 @@ async function runSentinelPrepare({
 
 /**
  * Lightweight Sentinel probe for health checks: only the prepare step, no
- * conversation and no proof-of-work. Throws a 401 when the token is expired
- * (mapped to the actionable session message) so `validateKey` can mark the
- * account unhealthy instead of reporting it healthy while every chat fails.
+ * conversation and no proof-of-work. On a 401 `token_expired`, re-exchanges
+ * `/api/auth/session` once and retries Sentinel prepare before reporting the
+ * session expired so `validateKey` stays consistent with `fetchSentinelHeaders`.
  */
 export async function probeChatGptWebSentinelPrepare({
   baseUrl,
@@ -423,6 +765,8 @@ export async function probeChatGptWebSentinelPrepare({
   userAgent,
   platform,
   signal,
+  onCredentialUpdate,
+  onAccessTokenUpdate,
 }: {
   baseUrl: string;
   accessToken: string;
@@ -430,14 +774,39 @@ export async function probeChatGptWebSentinelPrepare({
   userAgent: string;
   platform: Platform;
   signal?: AbortSignal;
+  onCredentialUpdate?: (next: string) => void;
+  onAccessTokenUpdate?: (token: string) => void;
 }): Promise<void> {
   try {
-    await runSentinelPrepare({ baseUrl, accessToken, cookie, userAgent, platform, signal });
+    await runSentinelPrepare({ baseUrl, accessToken, cookie, userAgent, platform, signal, onCredentialUpdate });
   } catch (err) {
-    if (isTokenExpiredError(err)) {
-      throw new ChatGptWebImageError(SESSION_EXPIRED_MESSAGE, 401);
+    if (!isTokenExpiredError(err)) throw err;
+    if (!cookie) throw new ChatGptWebImageError(SESSION_EXPIRED_MESSAGE, 401);
+    const freshAccessToken = await fetchUsableChatGptWebAccessToken(
+      resolveLiveChatGptWebCookie(cookie),
+      userAgent,
+      baseUrl,
+      platform,
+      signal,
+      onCredentialUpdate,
+    );
+    onAccessTokenUpdate?.(freshAccessToken);
+    try {
+      await runSentinelPrepare({
+        baseUrl,
+        accessToken: freshAccessToken,
+        cookie: resolveLiveChatGptWebCookie(cookie),
+        userAgent,
+        platform,
+        signal,
+        onCredentialUpdate,
+      });
+    } catch (retryErr) {
+      if (isTokenExpiredError(retryErr)) {
+        throw new ChatGptWebImageError(SESSION_EXPIRED_MESSAGE, 401);
+      }
+      throw retryErr;
     }
-    throw err;
   }
 }
 
@@ -460,6 +829,8 @@ export async function fetchSentinelHeaders({
   userAgent,
   platform,
   signal,
+  onCredentialUpdate,
+  onAccessTokenUpdate,
 }: {
   baseUrl: string;
   accessToken: string;
@@ -467,26 +838,41 @@ export async function fetchSentinelHeaders({
   userAgent: string;
   platform: Platform;
   signal?: AbortSignal;
+  onCredentialUpdate?: (next: string) => void;
+  onAccessTokenUpdate?: (token: string) => void;
 }): Promise<Record<string, string>> {
   const attempt = async (token: string): Promise<Record<string, string>> => {
-    const base: Record<string, string> = {
-      Authorization: `Bearer ${token}`,
-      'User-Agent': userAgent,
-      Origin: baseUrl,
-      Referer: `${baseUrl}/`,
-      ...(cookie ? { Cookie: cookie } : {}),
-    };
-    const prepareToken = await runSentinelPrepare({ baseUrl, accessToken: token, cookie, userAgent, platform, signal });
+    const prepareToken = await runSentinelPrepare({
+      baseUrl,
+      accessToken: token,
+      cookie,
+      userAgent,
+      platform,
+      signal,
+      onCredentialUpdate,
+    });
 
-    const requirements = await readSentinelJson(
-      await sentinelRequest(
-        `${baseUrl}/backend-api/sentinel/chat-requirements`,
-        { ...base, [SENTINEL_HEADERS.prepare]: prepareToken },
-        platform,
-        signal,
-      ),
-      '/backend-api/sentinel/chat-requirements',
+    const activeCookie = cookie ? resolveLiveChatGptWebCookie(cookie) : undefined;
+    const reqRes = await sentinelRequest(
+      `${baseUrl}/backend-api/sentinel/chat-requirements`,
+      {
+        Authorization: `Bearer ${token}`,
+        'User-Agent': userAgent,
+        Origin: baseUrl,
+        Referer: `${baseUrl}/`,
+        ...(activeCookie ? { Cookie: activeCookie } : {}),
+        [SENTINEL_HEADERS.prepare]: prepareToken,
+      },
+      platform,
+      signal,
     );
+    const requirements = await readSentinelJson(reqRes, '/backend-api/sentinel/chat-requirements');
+    if (activeCookie) {
+      const merged = mergeChatGptWebResponseCookies(activeCookie, reqRes);
+      if (merged.changed) {
+        recordRotatedChatGptWebCookie(activeCookie, merged.nextHeader, onCredentialUpdate);
+      }
+    }
 
     const tokens: Record<string, string> = {};
     if (typeof requirements.token === 'string') tokens[SENTINEL_HEADERS.requirements] = requirements.token;
@@ -505,7 +891,15 @@ export async function fetchSentinelHeaders({
   } catch (err) {
     if (!isTokenExpiredError(err)) throw err;
     if (!cookie) throw new ChatGptWebImageError(SESSION_EXPIRED_MESSAGE, 401);
-    const freshAccessToken = await fetchUsableChatGptWebAccessToken(cookie, userAgent, baseUrl, platform, signal);
+    const freshAccessToken = await fetchUsableChatGptWebAccessToken(
+      resolveLiveChatGptWebCookie(cookie),
+      userAgent,
+      baseUrl,
+      platform,
+      signal,
+      onCredentialUpdate,
+    );
+    onAccessTokenUpdate?.(freshAccessToken);
     try {
       return await attempt(freshAccessToken);
     } catch (retryErr) {
@@ -910,6 +1304,70 @@ async function pollAndDownloadConversationImages(
   throw new ChatGptWebImageError('ChatGPT image generation timed out', 504);
 }
 
+/**
+ * Exchange and validate a ChatGPT Web session cookie, persisting any rotated
+ * `Set-Cookie` headers and fresh access token. Single-flighted per cookie.
+ */
+export async function rotateChatGptWebSession(
+  rawCredential: string,
+  opts?: {
+    baseUrl?: string;
+    userAgent?: string;
+    platform?: Platform;
+    signal?: AbortSignal;
+    onCredentialUpdate?: (next: string) => void;
+  },
+): Promise<RotateChatGptWebSessionResult> {
+  if (opts?.signal?.aborted) {
+    throw new ChatGptWebImageError('Request aborted', 499);
+  }
+  const baseUrl = (opts?.baseUrl?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, '');
+  const userAgent = opts?.userAgent?.trim() || DEFAULT_USER_AGENT;
+  const platform: Platform = (opts?.platform && opts.platform !== 'custom') ? opts.platform : ('chatgpt-web' as Platform);
+  const initialCookie = resolveLiveChatGptWebCookie(normalizeChatGptWebCookie(rawCredential));
+  const flightKey = `${baseUrl}::${initialCookie}`;
+
+  let inflight = rotateInFlight.get(flightKey);
+  if (!inflight) {
+    const task = (async (): Promise<RotateChatGptWebSessionResult> => {
+      let accessToken = await fetchUsableChatGptWebAccessToken(
+        initialCookie,
+        userAgent,
+        baseUrl,
+        platform,
+        opts?.signal,
+        opts?.onCredentialUpdate,
+      );
+      await probeChatGptWebSentinelPrepare({
+        baseUrl,
+        accessToken,
+        cookie: resolveLiveChatGptWebCookie(initialCookie),
+        userAgent,
+        platform,
+        signal: opts?.signal,
+        onCredentialUpdate: opts?.onCredentialUpdate,
+        onAccessTokenUpdate: (nextToken) => {
+          accessToken = nextToken;
+        },
+      });
+      const finalCookie = resolveLiveChatGptWebCookie(initialCookie);
+      return {
+        cookieHeader: finalCookie,
+        accessToken,
+        rotated: finalCookie !== initialCookie,
+      };
+    })().finally(() => {
+      if (rotateInFlight.get(flightKey) === task) {
+        rotateInFlight.delete(flightKey);
+      }
+    });
+    rotateInFlight.set(flightKey, task);
+    inflight = task;
+  }
+
+  return inflight;
+}
+
 /** Generate one image through the picture_v2 pipeline. Plain HTTP, no browser. */
 export async function generateChatGptWebImage(opts: ChatGptWebImageOptions): Promise<{ b64: string; mime: string }> {
   if (!opts.prompt?.trim()) throw new ChatGptWebImageError('prompt is required for image generation', 400);
@@ -917,12 +1375,32 @@ export async function generateChatGptWebImage(opts: ChatGptWebImageOptions): Pro
   const baseUrl = (opts.baseUrl?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, '');
   const userAgent = opts.userAgent?.trim() || DEFAULT_USER_AGENT;
   const platform: Platform = (opts.platform && opts.platform !== 'custom') ? opts.platform : ('chatgpt-web' as Platform);
-  const cookie = normalizeChatGptWebCookie(opts.credential);
+  let cookie = resolveLiveChatGptWebCookie(normalizeChatGptWebCookie(opts.credential));
 
-  const accessToken = await fetchUsableChatGptWebAccessToken(cookie, userAgent, baseUrl, platform, opts.signal);
+  let accessToken = await fetchUsableChatGptWebAccessToken(
+    cookie,
+    userAgent,
+    baseUrl,
+    platform,
+    opts.signal,
+    opts.onCredentialUpdate,
+  );
   if (opts.signal?.aborted) throw new Error('Request aborted');
+  cookie = resolveLiveChatGptWebCookie(cookie);
 
-  const sentinel = await fetchSentinelHeaders({ baseUrl, accessToken, cookie, userAgent, platform, signal: opts.signal });
+  const sentinel = await fetchSentinelHeaders({
+    baseUrl,
+    accessToken,
+    cookie,
+    userAgent,
+    platform,
+    signal: opts.signal,
+    onCredentialUpdate: opts.onCredentialUpdate,
+    onAccessTokenUpdate: (next) => {
+      accessToken = next;
+    },
+  });
+  cookie = resolveLiveChatGptWebCookie(cookie);
   const ctx: ImageContext = { baseUrl, accessToken, cookie, userAgent, platform, sentinel };
 
   const initial = await runImageConversation(ctx, opts.prompt, opts.size, opts.signal);
