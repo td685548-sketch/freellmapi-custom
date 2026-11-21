@@ -22,6 +22,7 @@ import { ErrorBoundary } from '@/components/error-boundary'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { UpdatesDialog } from '@/components/updates-dialog'
 import { OPEN_UPDATES_EVENT } from '@/lib/updates'
+import { OPEN_SETTINGS_EVENT } from '@/lib/settings-dialog-event'
 import { Toaster } from '@/components/toaster'
 import { ConfirmHost } from '@/custom/x-gateway/shell/confirm'
 import { UpdateReminder } from '@/components/update-reminder'
@@ -306,6 +307,11 @@ export function Navbar() {
     const open = () => setUpdatesOpen(true)
     window.addEventListener(OPEN_UPDATES_EVENT, open)
     return () => window.removeEventListener(OPEN_UPDATES_EVENT, open)
+  }, [])
+  useEffect(() => {
+    const open = () => setSettingsOpen(true)
+    window.addEventListener(OPEN_SETTINGS_EVENT, open)
+    return () => window.removeEventListener(OPEN_SETTINGS_EVENT, open)
   }, [])
   const [credentialsMode, setCredentialsMode] = useState<'password' | 'email' | null>(null)
   const { data: premium, licensed, isLoading: premiumLoading, isError: premiumError } = usePremium()

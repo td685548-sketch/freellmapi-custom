@@ -32,6 +32,9 @@ import {
 import { useI18n } from '@/i18n';
 import { copyText } from '@/lib/clipboard';
 import { toast } from '@/lib/toast';
+import { openUpdates } from '@/lib/updates';
+import { openSettingsDialog } from '@/lib/settings-dialog-event';
+import { destinationsForSettings } from './system-settings-destinations';
 import { useUserSession } from '../use-session';
 import type {
   CopilotActionProposal,
@@ -2033,16 +2036,27 @@ export function SupportSetupCopilot() {
                           <ArrowUpRight size={12} />
                         </button>
                       )}
-                      {turn.applyResult.proposal.targetMode === 'system_settings' && (
-                        <button
-                          type="button"
-                          className="ssc-btn ssc-btn--primary"
-                          onClick={() => navigate('/settings')}
-                        >
-                          <span>{s.openSettings}</span>
-                          <ArrowUpRight size={12} />
-                        </button>
-                      )}
+                      {turn.applyResult.proposal.targetMode === 'system_settings' &&
+                        destinationsForSettings(
+                          (turn.applyResult.systemResults ?? []).filter((r) => r.status === 'applied').map((r) => r.settingId),
+                        )
+                          .slice(0, 3)
+                          .map((d) => (
+                            <button
+                              key={d.kind === 'route' ? d.path : d.kind}
+                              type="button"
+                              className="ssc-btn ssc-btn--primary"
+                              data-testid="support-setup-open-setting"
+                              onClick={() => {
+                                if (d.kind === 'route') navigate(d.path)
+                                else if (d.kind === 'settings-dialog') openSettingsDialog()
+                                else openUpdates()
+                              }}
+                            >
+                              <span>{uiLocale === 'vi' ? d.labelVi : d.labelEn}</span>
+                              <ArrowUpRight size={12} />
+                            </button>
+                          ))}
                     </div>
                   </div>
                 )}
