@@ -30,7 +30,26 @@ function fold(input: string): string {
 const WHY_RE =
   /\b(?:tai\s+sao|vi\s+sao|giai\s+thich|co\s+nen|nen\s+khong|why|explain|should\s+i|is\s+it\s+worth|dang\s+de\s+bat)\b/;
 const ADVICE_RE =
-  /\b(?:goi\s+y|de\s+xuat\s+(?:cho\s+)?(?:minh|toi)|nen\s+(?:bat|tat|chinh|doi|cau\s+hinh)\s+(?:gi|nhung\s+gi|nhung\s+cai\s+nao)|toi\s+uu(?:\s+he\s+thong)?|tinh\s+trang\s+he\s+thong|kiem\s+tra\s+(?:he\s+thong|cau\s+hinh)|recommend|suggest|what\s+should\s+i\s+(?:change|turn|enable|do)|optimi[sz]e|health\s+check|review\s+my\s+(?:system|settings))\b/;
+  /\b(?:(?:ban\s+)?co\s+(?:de\s+xuat|goi\s+y|khuyen\s+nghi)|goi\s+y|de\s+xuat\s+(?:cho\s+)?(?:minh|toi|gi|sua|chinh|cai\s+thien)|khuyen\s+nghi|nen\s+(?:sua|bat|tat|chinh|doi|cau\s+hinh|cai\s+thien)\s*(?:gi|nhung\s+gi|nhung\s+cai\s+nao)?|can\s+(?:sua|chinh|cai\s+thien|bo\s+sung)\s+(?:gi|nhung\s+gi)|(?:con\s+)?thieu\s+gi|cai\s+thien|toi\s+uu(?:\s+he\s+thong)?|tinh\s+trang\s+he\s+thong|kiem\s+tra\s+(?:he\s+thong|cau\s+hinh)|recommend(?:ations?)?|suggest(?:ions?)?|any\s+(?:suggestions?|improvements?)|what\s+should\s+i\s+(?:change|turn|enable|do|fix)|what\s+(?:is|else\s+is)\s+missing|optimi[sz]e|health\s+check|review\s+my\s+(?:system|settings|setup))\b/;
+const AUTO_DO_IT_RE = /\b(?:setup\s+giup|lam\s+giup|tao\s+giup|set\s+it\s+up|do\s+it\s+for\s+me)\b/;
+
+/**
+ * True for a SHORT message asking the Copilot what it would change ("bạn có đề xuất sửa gì
+ * không", "what should I fix"). Long business descriptions never count, so an intake answer
+ * that happens to contain "nên" is not hijacked.
+ */
+export function isAdviceRequest(rawMessage: string): boolean {
+  const folded = fold(rawMessage);
+  if (!folded || folded.length > 140 || AUTO_DO_IT_RE.test(folded)) return false;
+  return ADVICE_RE.test(folded);
+}
+
+/** One-click command per recommendation, understood by the deterministic intent parser. */
+export function adviceQuickReplies(items: readonly SystemAdviceItem[], locale: 'vi' | 'en'): string[] {
+  return items
+    .filter((i) => i.kind === 'recommend' && ENABLE_COMMANDS[i.id])
+    .map((i) => ENABLE_COMMANDS[i.id]![locale]);
+}
 
 /** Command-style quick replies that the deterministic intent parser already understands. */
 const ENABLE_COMMANDS: Readonly<Record<string, { vi: string; en: string }>> = {
@@ -39,7 +58,7 @@ const ENABLE_COMMANDS: Readonly<Record<string, { vi: string; en: string }>> = {
   enable_prompt_compression: { vi: 'Bật nén prompt lossless', en: 'Turn on prompt compression lossless' },
 };
 
-function renderItem(item: SystemAdviceItem, locale: 'vi' | 'en'): string {
+export function renderAdviceItem(item: SystemAdviceItem, locale: 'vi' | 'en'): string {
   const title = locale === 'vi' ? item.titleVi : item.titleEn;
   const reason = locale === 'vi' ? item.reasonVi : item.reasonEn;
   const evLabel = locale === 'vi' ? 'Căn cứ đo được' : 'Measured evidence';
@@ -86,7 +105,7 @@ export function tryBuildSystemAdviceReply(params: {
   if (!folded) return null;
 
   const isWhy = WHY_RE.test(folded);
-  const isAdvice = ADVICE_RE.test(folded);
+  const isAdvice = isAdviceRequest(latest);
   if (!isWhy && !isAdvice) return null;
 
   const advice = buildSystemAdvice(user);
@@ -108,7 +127,7 @@ export function tryBuildSystemAdviceReply(params: {
       const parts: string[] = [`**${title}**`, body];
       if (mine.length > 0) {
         parts.push(locale === 'vi' ? '**Với hệ thống của bạn lúc này:**' : '**On your system right now:**');
-        parts.push(...mine.map((i) => renderItem(i, locale)));
+        parts.push(...mine.map((i) => renderAdviceItem(i, locale)));
       } else {
         parts.push(
           locale === 'vi'
@@ -138,7 +157,7 @@ export function tryBuildSystemAdviceReply(params: {
         ? 'Mình vừa đo trạng thái hệ thống của bạn và có các gợi ý sau (mình chưa đổi gì — bạn duyệt thì mới áp dụng):'
         : 'I just measured your system and have these suggestions (nothing has changed — it only applies after you approve):',
     );
-    advice.items.forEach((item, i) => lines.push(`${i + 1}. ${renderItem(item, locale)}`));
+    advice.items.forEach((item, i) => lines.push(`${i + 1}. ${renderAdviceItem(item, locale)}`));
   }
   if (advice.hiddenAreas.length > 0) {
     lines.push(
