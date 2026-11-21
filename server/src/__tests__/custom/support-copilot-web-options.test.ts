@@ -21,7 +21,6 @@ import {
 } from '../../custom/support-setup-copilot/kb/sources/web-options.js';
 import { createSupportTenant } from '../../custom/x-gateway/support-store.js';
 import { getDb, initDb } from '../../db/index.js';
-import { buildKbQueryFromMessages, formatKbForPrompt } from '../../custom/support-setup-copilot/kb/prompt.js';
 import { createSession, createUser } from '../../services/auth.js';
 import { checkUserRateLimit } from '../../services/user-quotas.js';
 
