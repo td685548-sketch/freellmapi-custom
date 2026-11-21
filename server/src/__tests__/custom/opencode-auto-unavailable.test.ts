@@ -9,7 +9,7 @@ import { createApiKeyAccount, deleteAccount, invalidateXGatewayKeyCache } from '
 import { setEnabled } from '../../custom/x-gateway/config.js';
 import { clearAccountCooldown, getAccountCooldown } from '../../custom/provider-accounts/auto-ping.js';
 import { classifyRouteError, filterCandidatesByCooldown, recordCandidateFailure } from '../../custom/x-gateway/route-cooldown.js';
-import { listUnavailableOpenCodeModels } from '../../custom/x-gateway/opencode-unavailable.js';
+import { clearUnavailableOpenCodeModels, listUnavailableOpenCodeModels } from '../../custom/x-gateway/opencode-unavailable.js';
 
 describe('OpenCode unavailable model fallback', () => {
   beforeAll(() => {
@@ -162,5 +162,54 @@ describe('a 400 that says the model is dead cools the route down (any provider)'
     expect(classifyRouteError(kiro)).toMatchObject({ requestScoped: true, reason: 'request_scoped' });
     recordCandidateFailure(143, 'bad-model', kiro);
     expect(getAccountCooldown(143, 'bad-model').inCooldown).toBe(false);
+  });
+});
+
+describe('a 410 that says the model is deprecated cools the route down (any provider)', () => {
+  beforeAll(() => {
+    process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'c'.repeat(64);
+    initDb(':memory:');
+  });
+
+  it('classifies 410 Gone and "has been deprecated" as model_unavailable, not request-scoped', () => {
+    for (const [message, status] of [
+      ['OpenCode Free API error 410: Model kimi-k2.6 has been deprecated.', 410],
+      ['Upstream API error 410: Gone', 410],
+      ['OpenCode Free API error 400: Model kimi-k2.6 has been deprecated.', 400],
+    ] as const) {
+      const err = Object.assign(new Error(message), { status });
+      expect(classifyRouteError(err)).toMatchObject({
+        shouldFallback: true,
+        requestScoped: false,
+        cooldownMs: 30_000,
+        reason: 'model_unavailable',
+      });
+    }
+  });
+
+  it('records the cooldown, skips the route next time, and remembers a deprecated OpenCode model persistently', () => {
+    const err = Object.assign(
+      new Error('OpenCode Free API error 410: Model kimi-k2.6 has been deprecated.'),
+      { status: 410 },
+    );
+    expect(recordCandidateFailure(151, 'kimi-k2.6', err)).toMatchObject({ reason: 'model_unavailable' });
+    expect(getAccountCooldown(151, 'kimi-k2.6').inCooldown).toBe(true);
+    expect(listUnavailableOpenCodeModels()).toContainEqual({ accountId: 151, modelId: 'kimi-k2.6' });
+    const candidates = [
+      { account: { id: 151 }, modelId: 'kimi-k2.6' },
+      { account: { id: 151 }, modelId: 'claude-haiku-4-5' },
+    ];
+    expect(filterCandidatesByCooldown(candidates).available).toEqual(candidates.slice(1));
+    clearAccountCooldown(151, 'kimi-k2.6');
+    clearUnavailableOpenCodeModels(151, 'kimi-k2.6', true);
+    expect(listUnavailableOpenCodeModels()).toEqual([]);
+  });
+
+  it('does not write a non-OpenCode 410 into the OpenCode list', () => {
+    const err = Object.assign(new Error('Upstream API error 410: Gone'), { status: 410 });
+    expect(recordCandidateFailure(152, 'some-model', err)).toMatchObject({ reason: 'model_unavailable' });
+    expect(getAccountCooldown(152, 'some-model').inCooldown).toBe(true);
+    expect(listUnavailableOpenCodeModels()).toEqual([]);
+    clearAccountCooldown(152, 'some-model');
   });
 });

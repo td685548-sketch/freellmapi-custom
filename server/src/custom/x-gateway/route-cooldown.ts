@@ -50,6 +50,15 @@ const NOT_ALLOWED_RE = /\brequest not allowed\b/i;
 const MODEL_NOT_FOUND_RE =
   /\b(model_not_found|unknown model|unsupported model|no such model|model not found)\b/i;
 const MODEL_DOES_NOT_EXIST_RE = /\bmodel\b[\s\S]{0,80}?\b(does not|doesn't) exist\b/i;
+/**
+ * A model the upstream removed for good: HTTP 410 Gone, or the exact phrase
+ * "has been deprecated" in the message. Like the dead-model 400s above this
+ * is a route problem, not a request problem — retrying the same model on the
+ * next turn fails the same way. The wording is deliberately the exact phrase,
+ * not a bare "deprecated", so a model *name* containing "deprecated" cannot
+ * cool a route by accident.
+ */
+const MODEL_DEPRECATED_RE = /\bhas been deprecated\b/i;
 const STATUS_IN_MSG_RE = /\b(400|401|402|403|404|408|409|413|422|429|500|502|503|504|520|524|529)\b/;
 
 const backoffLevels = new Map<string, number>();
@@ -94,6 +103,7 @@ export function extractErrorStatus(err: unknown): number | undefined {
  * rate-limit/capacity -> exponential backoff; 401-404/auth -> 2m cooldown;
  * a 400 that says the model itself is unknown/dead -> 30s cooldown (the route is
  * retried after the cooldown, not on every turn);
+ * a 410 (or "has been deprecated") -> same 30s cooldown: the model is gone for good;
  * other 4xx -> request-scoped (no cooldown, skip same-provider rotation);
  * 5xx/network/empty stream -> 30s transient cooldown.
  */
@@ -116,6 +126,15 @@ export function classifyRouteError(err: unknown): RouteErrorClassification {
   // A 400 that names a dead model ("The model `gpt-6-sol` does not exist") is a route
   // problem too: retrying the same model on the next turn would fail the same way.
   if (status === 400 && (MODEL_NOT_FOUND_RE.test(message) || MODEL_DOES_NOT_EXIST_RE.test(message))) {
+    return { shouldFallback: true, requestScoped: false, cooldownMs: TRANSIENT_COOLDOWN_MS, useBackoff: false, status, reason: 'model_unavailable' };
+  }
+
+  // A 410 Gone — or an explicit "Model X has been deprecated" — means the model
+  // was permanently removed upstream (e.g. OpenCode Free: "Model kimi-k2.6 has
+  // been deprecated"). Same treatment as a dead-model 400: cool the route for
+  // 30s and fail over to the next model, instead of dying on the raw error and
+  // offering the same dead model again on the next turn.
+  if (status === 410 || MODEL_DEPRECATED_RE.test(message)) {
     return { shouldFallback: true, requestScoped: false, cooldownMs: TRANSIENT_COOLDOWN_MS, useBackoff: false, status, reason: 'model_unavailable' };
   }
 
@@ -166,7 +185,13 @@ export function recordCandidateFailure(
   // the OpenCode list.
   if (classification.reason === 'model_unavailable') {
     const message = err instanceof Error ? err.message : String(err ?? '');
-    if (/^OpenCode Free API error 400:/i.test(message) && /\bmodel is unavailable\b/i.test(message)) {
+    const isOpenCodeUnavailable =
+      /^OpenCode Free API error 400:/i.test(message) && /\bmodel is unavailable\b/i.test(message);
+    // A deprecated OpenCode model is gone for good, so it is remembered the
+    // same way: the router stops offering it until the operator clears it.
+    const isOpenCodeDeprecated =
+      /^OpenCode (Free|Zen|Go) API error 410:/i.test(message) && MODEL_DEPRECATED_RE.test(message);
+    if (isOpenCodeUnavailable || isOpenCodeDeprecated) {
       try { rememberUnavailableOpenCodeModel(accountId, modelId); } catch { /* Keep the in-memory cooldown on storage failure. */ }
     }
   }
