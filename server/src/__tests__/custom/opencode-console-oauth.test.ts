@@ -12,8 +12,8 @@ import {
 } from '../../custom/provider-accounts/store.js';
 import { clearOAuthRefreshState, resolveAccountCredential } from '../../custom/provider-accounts/oauth-lifecycle.js';
 import { oauthCredentialForAccount } from '../../custom/provider-accounts/oauth-lifecycle.js';
-import { serializeOAuthCredential, type OAuthCredential } from '../../custom/provider-accounts/oauth-credentials.js';
-import { oauthDescriptor, refreshOAuthCredential } from '../../custom/provider-accounts/oauth-providers.js';
+import { parseOAuthCredential, serializeOAuthCredential, type OAuthCredential } from '../../custom/provider-accounts/oauth-credentials.js';
+import { normalizeImportedCredential, oauthDescriptor, refreshOAuthCredential } from '../../custom/provider-accounts/oauth-providers.js';
 import {
   OPENCODE_DEVICE_CODE_URL,
   OPENCODE_DEVICE_TOKEN_URL,
@@ -190,23 +190,34 @@ describe('OpenCode Console OAuth device login', () => {
     deleteAccount(accountId);
   });
 
-  it('reports not logged in for accounts holding a plain key or a pasted CLI auth blob', () => {
+  it('reports not logged in for an account holding a plain key', () => {
     // Regression: the Console login dialog opens by reading this status. An
     // OpenCode Free account created before Console login existed stores a
-    // plain personal key — or a pasted CLI auth.json blob — not an OAuth
-    // credential. Status must answer { connected: false } for those instead
-    // of failing, so the dialog can offer the device flow.
+    // plain personal key, not an OAuth credential. Status must answer
+    // { connected: false } for it instead of failing, so the dialog can
+    // offer the device flow.
     const keyAccountId = createApiKeyAccount({ provider: 'opencode', key: 'opencode_sk_live_4f2a9c1e7b3d5a6f8e0c2b4a6d8f0a2c4e6', label: 'Luu Manh OpenCode', userId: testUserId });
+    invalidateXGatewayKeyCache();
+    expect(openCodeConsoleLoginStatus(keyAccountId)).toMatchObject({ connected: false });
+    deleteAccount(keyAccountId);
+  });
+
+  it('reports logged in for an account holding a pasted CLI auth.json blob', () => {
+    // A pasted CLI auth.json is normalized to the same OAuth blob the
+    // device flow stores, so the account is logged in and the free lane
+    // sends its access token.
+    const expires = Date.now() + 3600_000;
     const blobAccountId = createApiKeyAccount({
       provider: 'opencode',
-      key: JSON.stringify({ opencode: { type: 'oauth', access: 'ya29.fake-access-token', refresh: '1//fake-refresh-token', expires: Date.now() + 3600_000 } }),
+      key: JSON.stringify({ opencode: { type: 'oauth', access: 'ya29.fake-access-token', refresh: '1//fake-refresh-token', expires } }),
       label: 'CLI auth.json',
       userId: testUserId,
     });
     invalidateXGatewayKeyCache();
-    expect(openCodeConsoleLoginStatus(keyAccountId)).toMatchObject({ connected: false });
-    expect(openCodeConsoleLoginStatus(blobAccountId)).toMatchObject({ connected: false });
-    deleteAccount(keyAccountId);
+    expect(openCodeConsoleLoginStatus(blobAccountId)).toMatchObject({ connected: true, identity: null, expiresAt: expires });
+    expect(oauthCredentialForAccount(accountRow(blobAccountId))).toMatchObject({
+      kind: 'opencode', accessToken: 'ya29.fake-access-token', refreshToken: '1//fake-refresh-token',
+    });
     deleteAccount(blobAccountId);
   });
 
@@ -252,6 +263,143 @@ describe('OpenCode Console OAuth device login', () => {
       expiresIn: 3600,
       orgId: 'org_test123',
     });
+  });
+});
+
+describe('OpenCode CLI auth.json normalization', () => {
+  let testUserId = 0;
+
+  beforeAll(() => {
+    process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'c'.repeat(64);
+    initDb(':memory:');
+    testUserId = createUser('opencode-cli-normalize@example.test', 'AdminPass#1234').userId;
+  });
+
+  beforeEach(() => {
+    mockProxyFetch.mockReset();
+    _resetOpenCodeConsoleLoginStateForTests();
+    _resetOpenCodeStateForTests();
+    clearOAuthRefreshState();
+  });
+
+  const cliBlob = (expires: number) => JSON.stringify({
+    opencode: { type: 'oauth', access: 'cli-access-token', refresh: 'cli-refresh-token', expires },
+  });
+
+  function sseResponse(): Response {
+    const chunk = {
+      id: 'test', object: 'chat.completion.chunk', created: 1, model: 'some-model',
+      choices: [{ index: 0, delta: { content: 'hello' }, finish_reason: null }],
+    };
+    return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, {
+      headers: { 'Content-Type': 'text/event-stream' },
+    });
+  }
+
+  async function freeLaneHeaders(apiKey: string): Promise<Record<string, string>> {
+    mockProxyFetch.mockResolvedValue(sseResponse());
+    const provider = new OpenCodeProvider({ providerId: 'opencode' });
+    for await (const _chunk of provider.streamChatCompletion(apiKey, [{ role: 'user', content: 'hi' }], 'some-model')) {
+      // Drain the stream; the headers are captured from the fetch call.
+    }
+    const [, init] = mockProxyFetch.mock.calls[0] as [string, RequestInit];
+    return init.headers as Record<string, string>;
+  }
+
+  it('normalizes the CLI auth.json map form to the device-flow OAuth blob', () => {
+    const expires = Date.now() + 3600_000;
+    const normalized = normalizeImportedCredential('opencode', cliBlob(expires));
+    expect(normalized).not.toBeNull();
+    expect(JSON.parse(normalized!)).toMatchObject({
+      v: 1, kind: 'opencode', accessToken: 'cli-access-token', refreshToken: 'cli-refresh-token', expiresAt: expires,
+    });
+    // The normalized blob parses back as an OAuth credential.
+    expect(parseOAuthCredential(normalized!)).toMatchObject({ kind: 'opencode', accessToken: 'cli-access-token' });
+  });
+
+  it('accepts a bare OAuth object and a flat token response', () => {
+    const expires = Date.now() + 3600_000;
+    const bare = normalizeImportedCredential('opencode', JSON.stringify({ type: 'oauth', access: 'bare-access', refresh: 'bare-refresh', expires }));
+    expect(JSON.parse(bare!)).toMatchObject({ kind: 'opencode', accessToken: 'bare-access', refreshToken: 'bare-refresh', expiresAt: expires });
+    const flat = normalizeImportedCredential('opencode', JSON.stringify({ access_token: 'flat-access', refresh_token: 'flat-refresh', expires_in: 1800, org_id: 'org_flat' }));
+    const flatParsed = JSON.parse(flat!);
+    expect(flatParsed).toMatchObject({ kind: 'opencode', accessToken: 'flat-access', refreshToken: 'flat-refresh', orgId: 'org_flat', subject: 'org_flat' });
+    expect(flatParsed.expiresAt).toBeGreaterThan(Date.now());
+  });
+
+  it('passes an already-normalized OAuth blob through unchanged', () => {
+    const blob = serializeOAuthCredential(fakeCredential({ orgId: 'org_test123' }));
+    expect(JSON.parse(normalizeImportedCredential('opencode', blob)!)).toEqual(JSON.parse(blob));
+  });
+
+  it('leaves non-OAuth pastes untouched', () => {
+    expect(normalizeImportedCredential('opencode', 'opencode_sk_live_plain')).toBeNull();
+    expect(normalizeImportedCredential('opencode', 'no-auth')).toBeNull();
+    expect(normalizeImportedCredential('opencode', '{not json')).toBeNull();
+    expect(normalizeImportedCredential('opencode', JSON.stringify({ opencode: { type: 'api', key: 'sk-ant-x' } }))).toBeNull();
+    expect(normalizeImportedCredential('opencode', JSON.stringify({ anthropic: { type: 'oauth', access: 'a', refresh: 'r', expires: Date.now() + 1000 } }))).toBeNull();
+    expect(normalizeImportedCredential('opencode', JSON.stringify({ opencode: { type: 'oauth', access: 'only-access' } }))).toBeNull();
+  });
+
+  it('stores a pasted CLI auth.json as the OAuth blob on create', () => {
+    const expires = Date.now() + 3600_000;
+    const accountId = createApiKeyAccount({ provider: 'opencode', key: cliBlob(expires), label: 'CLI paste', userId: testUserId });
+    invalidateXGatewayKeyCache();
+    const row = accountRow(accountId);
+    expect(oauthCredentialForAccount(row)).toMatchObject({ kind: 'opencode', accessToken: 'cli-access-token', refreshToken: 'cli-refresh-token', expiresAt: expires });
+    // The stored string itself is the canonical blob, not the pasted map.
+    expect(decrypt(row.encrypted_key, row.iv, row.auth_tag)).toContain('"kind":"opencode"');
+    expect(openCodeConsoleLoginStatus(accountId)).toMatchObject({ connected: true, expiresAt: expires });
+    deleteAccount(accountId);
+  });
+
+  it('keeps plain keys stored as-is on create', () => {
+    const accountId = createApiKeyAccount({ provider: 'opencode', key: 'opencode_sk_live_plain', label: 'Plain', userId: testUserId });
+    invalidateXGatewayKeyCache();
+    const row = accountRow(accountId);
+    expect(decrypt(row.encrypted_key, row.iv, row.auth_tag)).toBe('opencode_sk_live_plain');
+    expect(oauthCredentialForAccount(row)).toBeNull();
+    expect(openCodeConsoleLoginStatus(accountId)).toMatchObject({ connected: false });
+    deleteAccount(accountId);
+  });
+
+  it('accepts a CLI blob stored before normalization existed, and the free lane sends its token', async () => {
+    // Simulate an account created before this change: the raw CLI map is
+    // stored as-is via updateAccountCredential, bypassing create-time
+    // normalization.
+    const expires = Date.now() + 3600_000;
+    const accountId = createApiKeyAccount({ provider: 'opencode', key: 'no-auth', label: 'Legacy paste', userId: testUserId });
+    invalidateXGatewayKeyCache();
+    updateAccountCredential(accountId, cliBlob(expires));
+    invalidateXGatewayKeyCache();
+    const row = accountRow(accountId);
+    expect(decrypt(row.encrypted_key, row.iv, row.auth_tag)).toContain('"opencode":{"type":"oauth"');
+    expect(oauthCredentialForAccount(row)).toMatchObject({ kind: 'opencode', accessToken: 'cli-access-token' });
+    expect(openCodeConsoleLoginStatus(accountId)).toMatchObject({ connected: true, expiresAt: expires });
+    const resolved = await resolveAccountCredential(row);
+    const headers = await freeLaneHeaders(resolved);
+    expect(headers.Authorization).toBe('Bearer cli-access-token');
+    expect(headers['x-org-id']).toBeUndefined();
+    deleteAccount(accountId);
+  });
+
+  it('refreshes an expired pasted CLI blob through the lifecycle and persists the canonical blob', async () => {
+    const accountId = createApiKeyAccount({ provider: 'opencode', key: 'no-auth', label: 'Legacy expired', userId: testUserId });
+    invalidateXGatewayKeyCache();
+    updateAccountCredential(accountId, cliBlob(Date.now() - 1000));
+    invalidateXGatewayKeyCache();
+    mockProxyFetch.mockImplementation(async (url: unknown, init?: RequestInit) => {
+      expect(String(url)).toBe(OPENCODE_DEVICE_TOKEN_URL);
+      const body = JSON.parse(String(init?.body));
+      expect(body).toMatchObject({ grant_type: 'refresh_token', refresh_token: 'cli-refresh-token', client_id: 'opencode-cli' });
+      return Response.json({ access_token: 'refreshed-access', refresh_token: 'refreshed-refresh', expires_in: 3600 });
+    });
+    const resolved = await resolveAccountCredential(accountRow(accountId));
+    const credential = JSON.parse(resolved) as OAuthCredential;
+    expect(credential).toMatchObject({ kind: 'opencode', accessToken: 'refreshed-access', refreshToken: 'refreshed-refresh' });
+    // Persisted as the canonical blob, not the pasted map.
+    expect(oauthCredentialForAccount(accountRow(accountId))?.accessToken).toBe('refreshed-access');
+    deleteAccount(accountId);
   });
 });
 

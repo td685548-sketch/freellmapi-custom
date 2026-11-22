@@ -372,8 +372,9 @@ export async function resolveCredentialMetadata(
 
 /**
  * Normalise credentials exported by the CLI tools (`~/.codex/auth.json`,
- * `~/.claude/.credentials.json`, `~/.gemini/oauth_creds.json`) so a pasted
- * file keeps its refresh token instead of degrading to a one-hour token.
+ * `~/.claude/.credentials.json`, `~/.gemini/oauth_creds.json`,
+ * `~/.local/share/opencode/auth.json`) so a pasted file keeps its refresh
+ * token instead of degrading to a one-hour token.
  */
 export function normalizeImportedCredential(providerId: string, raw: string): string | null {
   const descriptor = oauthDescriptor(providerId);
@@ -404,6 +405,50 @@ export function normalizeImportedCredential(providerId: string, raw: string): st
   if (descriptor.kind === 'codex') tokenSource = nested('tokens') ?? nested('auth') ?? parsed;
   if (descriptor.kind === 'claude') tokenSource = nested('claudeAiOauth') ?? parsed;
   if (!tokenSource) return null;
+
+  if (descriptor.kind === 'opencode') {
+    // OpenCode CLI `~/.local/share/opencode/auth.json` is a map from
+    // provider id to credential object: `{ opencode: { type: 'oauth',
+    // access, refresh, expires } }` with `expires` an epoch-ms timestamp
+    // (see `packages/opencode/src/auth/index.ts` in the OpenCode source).
+    // A bare OAuth object is accepted too, as is a flat token response
+    // (`access_token` / `refresh_token` / `expires_in` / `org_id`). The
+    // CLI file carries no org id, so the free lane sends the access token
+    // without `x-org-id` in that case.
+    const cliSource = nested('opencode') ?? tokenSource;
+    if (cliSource.type !== undefined && cliSource.type !== 'oauth') return null;
+    const cliAccess = pick(cliSource, 'access', 'accessToken', 'access_token');
+    if (!cliAccess || !/^[\x21-\x7e]+$/.test(cliAccess)) return null;
+    const cliRefresh = pick(cliSource, 'refresh', 'refreshToken', 'refresh_token');
+    if (!cliRefresh || !/^[\x21-\x7e]+$/.test(cliRefresh)) return null;
+    const cliExpiry = cliSource.expires ?? cliSource.expiresAt ?? cliSource.expiry_date ?? parsed.expires ?? parsed.expiresAt;
+    const cliNumericExpiry = typeof cliExpiry === 'number'
+      ? (cliExpiry < 1e12 ? cliExpiry * 1000 : cliExpiry)
+      : typeof cliExpiry === 'string'
+        ? (/^\d+$/.test(cliExpiry) ? Number(cliExpiry) * (Number(cliExpiry) < 1e12 ? 1000 : 1) : Date.parse(cliExpiry))
+        : NaN;
+    const cliRelativeExpiry = typeof cliSource.expires_in === 'number' && cliSource.expires_in > 0
+      ? Date.now() + cliSource.expires_in * 1000
+      : NaN;
+    const cliJwt = decodeJwtPayload(cliAccess);
+    const cliExpiresAt = Number.isFinite(cliNumericExpiry) && cliNumericExpiry > 0
+      ? cliNumericExpiry
+      : Number.isFinite(cliRelativeExpiry)
+        ? cliRelativeExpiry
+        : typeof cliJwt?.exp === 'number' ? cliJwt.exp * 1000 : Date.now();
+    const cliOrgId = pick(cliSource, 'org_id', 'orgId') ?? pick(parsed, 'org_id', 'orgId');
+    // No lastRefreshAt: the tokens came from a file of unknown age, so a
+    // refresh must not be throttled as "just completed" when the pasted
+    // access token is already expired.
+    return JSON.stringify({
+      v: 1 as const,
+      kind: 'opencode' as const,
+      accessToken: cliAccess,
+      refreshToken: cliRefresh,
+      expiresAt: cliExpiresAt,
+      ...(cliOrgId ? { orgId: cliOrgId, subject: cliOrgId } : {}),
+    });
+  }
 
   const accessToken = pick(tokenSource, 'accessToken', 'access_token');
   if (!accessToken || !/^[\x21-\x7e]+$/.test(accessToken)) return null;

@@ -18,6 +18,7 @@ import {
   type OAuthCredential,
 } from './oauth-credentials.js';
 import {
+  normalizeImportedCredential,
   oauthDescriptor,
   refreshOAuthCredential,
   type OAuthRefreshError,
@@ -89,14 +90,26 @@ export function clearOAuthRefreshStateForAccount(id: number): void {
  * the most recent refresh.
  */
 export function oauthCredentialForAccount(
-  row: Pick<AccountRow, 'id' | 'encrypted_key' | 'iv' | 'auth_tag'>,
+  row: Pick<AccountRow, 'id' | 'encrypted_key' | 'iv' | 'auth_tag' | 'provider'>,
 ): OAuthCredential | null {
   syncDatabase();
   const entry = entries.get(row.id);
   if (entry && entry.cipher !== row.encrypted_key) entries.delete(row.id);
   else if (entry?.latest) return entry.latest;
   try {
-    return parseOAuthCredential(decrypt(row.encrypted_key, row.iv, row.auth_tag));
+    const decrypted = decrypt(row.encrypted_key, row.iv, row.auth_tag);
+    const parsed = parseOAuthCredential(decrypted);
+    if (parsed) return parsed;
+    // A pasted OpenCode CLI auth.json stored before save-time normalization
+    // existed: accept it in memory so the free lane, the refresh lifecycle
+    // and the login status all see the Console login. The stored blob is
+    // replaced by the canonical OAuth blob on the next refresh
+    // (performRefresh persists it), so this is self-healing.
+    if (row.provider === 'opencode') {
+      const normalized = normalizeImportedCredential('opencode', decrypted);
+      return normalized ? parseOAuthCredential(normalized) : null;
+    }
+    return null;
   } catch {
     return null;
   }
