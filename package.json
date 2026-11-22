@@ -33,8 +33,11 @@
     "db:sync": "node scripts/sync-turso-db.mjs"
   },
   "devDependencies": {
+    "ast-v8-to-istanbul": "^1.0.8",
     "concurrently": "^9.1.2",
-    "jsdom": "^27.4.0"
+    "jsdom": "^27.4.0",
+    "magicast": "^0.5.5",
+    "tinyrainbow": "^3.2.0"
   },
   "engines": {
     "node": ">=20.18.0 <25.0.0",

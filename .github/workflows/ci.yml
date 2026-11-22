@@ -41,6 +41,123 @@ jobs:
       - name: Lint AI Platform and Support client extensions
         run: npm run lint:support-ai -w client
 
+  # Type errors used to surface only indirectly, as a failure of the build
+  # job. This job runs every workspace's `tsc --noEmit` (root `typecheck`)
+  # on its own so a type error fails fast with a clear name.
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The desktop app is not an npm workspace (own lockfile); its
+      # typecheck is part of the root `typecheck` script, so install it too.
+      - name: Install desktop dependencies
+        run: npm --prefix desktop ci
+
+      - name: Typecheck all workspaces + desktop
+        run: npm run typecheck
+
+  test-desktop:
+    name: Test desktop
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # Desktop tests import server sources (desktop/src/server-host.ts), so
+      # the workspace install is needed as well as the desktop one. Electron
+      # itself is never launched: tests that touch it mock the module, so the
+      # suite runs on a plain ubuntu runner.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install desktop dependencies
+        run: npm --prefix desktop ci
+
+      - name: Run desktop tests
+        run: npm --prefix desktop test
+
+  # Coverage is collected exactly once, over the full suites, and gated by
+  # the thresholds in server/vitest.config.ts and client/vitest.config.ts.
+  # It deliberately does NOT ride along with the sharded test-server job:
+  # each shard only runs a quarter of the files, so a threshold applied to a
+  # shard's slice would be meaningless (and would fail the build on every
+  # run). The price is one extra full server run; the gain is a threshold
+  # that actually measures the whole suite.
+  coverage:
+    name: Coverage (thresholds)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # COVERAGE=1 also selects the relaxed wall-clock slack in
+      # services/compression.test.ts: the v8-instrumented run measures 2-3x
+      # slower, and the tight CI caps would otherwise flake here.
+      #
+      # The eight excluded files fail deterministically on main (their
+      # requests get 403 missing_permission from the AI Platform / support
+      # copilot permission gates — a product/test mismatch, not a coverage
+      # problem), so including them would keep this job red until they are
+      # fixed. The exclusion is scoped to THIS job only: the sharded
+      # test-server job still runs them, so a fix is noticed there. Drop a
+      # file from this list as soon as it passes on main again.
+      - name: Server coverage (full suite)
+        env:
+          COVERAGE: '1'
+          FREEAPI_AI_ACTIVATION_TOKEN: ${{ secrets.FREEAPI_AI_ACTIVATION_TOKEN }}
+        run: >-
+          npm run test:coverage -w server --
+          --exclude 'src/__tests__/custom/ai-platform/eval-canary-and-scrub.test.ts'
+          --exclude 'src/__tests__/custom/ai-platform/semantic-cache.test.ts'
+          --exclude 'src/__tests__/custom/ai-platform/tracing-oauth-scheduler.test.ts'
+          --exclude 'src/__tests__/custom/assistant-workspace.test.ts'
+          --exclude 'src/__tests__/custom/copilot-actions-doctor.test.ts'
+          --exclude 'src/__tests__/custom/support-copilot-llm-coach.test.ts'
+          --exclude 'src/__tests__/custom/support-copilot-platform-guide.test.ts'
+          --exclude 'src/__tests__/custom/support-setup-copilot.test.ts'
+
+      - name: Client coverage
+        run: npm run test:coverage -w client
+
+      # Artifacts, not Codecov: uploading here needs no new token or secret.
+      - name: Upload server coverage
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-server
+          path: server/coverage/
+          if-no-files-found: error
+
+      - name: Upload client coverage
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-client
+          path: client/coverage/
+          if-no-files-found: error
+
   build:
     name: Build (Node ${{ matrix.node-version }})
     runs-on: ubuntu-24.04
@@ -106,14 +223,11 @@ jobs:
         if: matrix.shard == 1
         run: npm run test:migrations
 
-      # COVERAGE makes the server suite collect coverage inside this run rather
-      # than running the whole suite a second time. Only the Node 22 leg sets
-      # it. Each shard reports the coverage of its own slice of the suite.
-      # Reporting only, there are no thresholds and coverage never fails the
-      # build.
+      # Coverage is collected by the dedicated `coverage` job over the full
+      # suite (see above); a shard only runs a quarter of the files, so
+      # collecting it here would measure a meaningless slice.
       - name: Run server tests (shard ${{ matrix.shard }}/4)
         env:
-          COVERAGE: ${{ matrix.node-version == '22' && '1' || '' }}
           FREEAPI_AI_ACTIVATION_TOKEN: ${{ secrets.FREEAPI_AI_ACTIVATION_TOKEN }}
         run: npm run test -w server -- --shard=${{ matrix.shard }}/4
 
