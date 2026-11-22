@@ -111,6 +111,7 @@ export function SubscriptionConnectDialog({ provider, account, onClose }: { prov
       <label>{p.accountPool}<select id="x-account-pool" name="proxyPoolId" value={poolChoice} onChange={event => setPoolChoice(event.target.value)} disabled={busy}><option value="">{p.accountPoolAuto}</option><option value="none">{p.accountPoolNone}</option>{poolEntries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}{entry.enabled ? '' : ` (${p.disabled})`}</option>)}</select><span className="x-caption">{p.accountPoolHint}</span></label>
       <button type="button" className="x-button x-primary" disabled={busy || !label.trim()} onClick={() => void start()}>Sign in with browser</button>
       {provider.id === 'gemini-cli' && <p className="x-caption">Browser login requires a configured Google OAuth client and public callback. Import is available for an existing CLI session.</p>}
+      {provider.id === 'qwen' && <p className="x-caption">Qwen Code sign-in needs a paid Plus/Pro plan. Free accounts should use a DashScope Standard API key (pay-as-you-go) instead — paste it below, or paste ~/.qwen/oauth_creds.json.</p>}
       <label>Import credential JSON from your computer<input type="file" accept=".json,application/json" disabled={busy} onChange={e => {
         const file = e.target.files?.[0]
         if (!file) return
@@ -122,12 +123,15 @@ export function SubscriptionConnectDialog({ provider, account, onClose }: { prov
       <p className="x-caption">Use the complete credentials export, including refresh token and expiry. No files on the hosted server are read. After saving, run an account test with an eligible model.</p>
       <button className="x-button" disabled={busy || !credential.trim() || !label.trim()}>Save encrypted credential</button>
     </form> : <div className="x-form">
-      <p>{attempt.instruction ?? 'Open the verification page and enter this device code.'}</p>
+      {/* Qwen has no device code and no OAuth redirect: its browser flow just
+          opens chat.qwen.ai (token_paste), so the generic device-code fallback
+          below would tell the user to enter a code that never exists. */}
+      <p>{attempt.instruction ?? (provider.id === 'qwen' ? 'Sign in at chat.qwen.ai, then paste your Qwen token or ~/.qwen/oauth_creds.json below.' : 'Open the verification page and enter this device code.')}</p>
       {attempt.userCode && <code>{attempt.userCode}</code>}
       <a className="x-button x-primary" href={attempt.authorizationUrl ?? attempt.verificationUri} target="_blank" rel="noopener noreferrer">Open provider login</a>
       <p className="x-caption">Expires {new Date(attempt.expiresAt).toLocaleTimeString()}</p>
       {attempt.flow === 'oauth_pkce' && <form className="x-form" onSubmit={e => { e.preventDefault(); void run(async () => { await subscriptionApi.complete(attempt.attemptId, code); if (mounted.current) done() }) }}>
-        <label>Full callback URL or code#state<input value={code} onChange={e => setCode(e.target.value)} autoComplete="off" disabled={busy} required /></label>
+        <label>{provider.id === 'qwen' ? 'Qwen token or ~/.qwen/oauth_creds.json' : 'Full callback URL or code#state'}<input value={code} onChange={e => setCode(e.target.value)} autoComplete="off" disabled={busy} required /></label>
         <button className="x-button" disabled={busy || !code.trim()}>Complete login</button>
       </form>}
     </div>}
