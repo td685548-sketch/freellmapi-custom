@@ -220,6 +220,8 @@ export async function streamAssistantChat(
     headers,
     body: JSON.stringify(body),
     signal,
+    // Phase 1 of the httpOnly-cookie move: send the session cookie.
+    credentials: 'same-origin',
   });
 
   if (!res.ok) {

@@ -118,6 +118,8 @@ export const mediaApi = {
       method: 'POST',
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: form,
+      // Phase 1 of the httpOnly-cookie move: send the session cookie.
+      credentials: 'same-origin',
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));

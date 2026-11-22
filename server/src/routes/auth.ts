@@ -16,7 +16,10 @@ import {
   desktopSessionToken,
   recordReauthFailure,
   clearReauthFailures,
+  SESSION_TTL_MS,
+  DESKTOP_SESSION_TTL_MS,
 } from '../services/auth.js';
+import { setSessionCookie, clearSessionCookie } from '../services/session-cookie.js';
 import { setupCodeMatches, clearSetupCode } from '../lib/setup-code.js';
 import { isLoopbackRequest } from '../lib/loopback.js';
 import { generateResetCode, resetCodeMatches, clearResetCode } from '../lib/reset-code.js';
@@ -186,7 +189,9 @@ authRouter.post('/desktop-session', (req: Request, res: Response) => {
     res.status(403).json({ error: { message: 'Desktop sign-in is only available on this computer.', type: 'desktop_signin_forbidden' } });
     return;
   }
-  res.json({ token: desktopSessionToken() });
+  const token = desktopSessionToken();
+  setSessionCookie(res, req, token, DESKTOP_SESSION_TTL_MS);
+  res.json({ token });
 });
 
 // First-run account creation. Only allowed while there are zero users, so it
@@ -221,6 +226,7 @@ authRouter.post('/setup', (req: Request, res: Response) => {
   const user = createUser(parsed.data.email, parsed.data.password);
   clearSetupCode(); // one-time: the dashboard is now claimed
   const token = createSession(user.userId);
+  setSessionCookie(res, req, token, SESSION_TTL_MS);
   res.status(201).json({ token, email: user.email });
 });
 
@@ -251,11 +257,20 @@ authRouter.post('/login', (req: Request, res: Response) => {
 
   clearFailures(email);
   const token = createSession(user.userId);
+  setSessionCookie(res, req, token, SESSION_TTL_MS);
   res.json({ token, email: user.email });
 });
 
 authRouter.post('/logout', (req: Request, res: Response) => {
-  deleteSession(bearer(req));
+  const token = bearer(req);
+  // Clear the cookie only when a session was actually presented: an
+  // unauthenticated cross-site POST must not be able to wipe the operator's
+  // cookie (and the server session is only deleted for a presented token
+  // anyway). A stale cookie from a session that already ended server-side
+  // simply fails validation on the next request and is overwritten at the
+  // next login.
+  if (validateSession(token)) clearSessionCookie(res, req);
+  deleteSession(token);
   res.json({ success: true });
 });
 
@@ -382,5 +397,6 @@ authRouter.post('/reset-password', (req: Request, res: Response) => {
   // install, and sending them back to a login form that needs an email they
   // may not remember left them locked out after a successful reset (#1477).
   const token = createSession(user.userId);
+  setSessionCookie(res, req, token, SESSION_TTL_MS);
   res.json({ success: true, token, email: user.email });
 });

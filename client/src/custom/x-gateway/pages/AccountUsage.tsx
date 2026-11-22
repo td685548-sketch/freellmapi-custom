@@ -139,6 +139,8 @@ export default function AccountUsage() {
         const response = await fetch(streamUrl, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
           signal: abort.signal,
+          // Phase 1 of the httpOnly-cookie move: send the session cookie.
+          credentials: 'same-origin',
         })
         refused = response.status === 401 || response.status === 403
         if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)

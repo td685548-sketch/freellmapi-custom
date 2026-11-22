@@ -131,6 +131,9 @@ async function semanticCacheFetch<T>(path: string, options?: RequestInit): Promi
   const res = await fetch(`${BASE}${path}`, {
     ...options,
     headers,
+    // Phase 1 of the httpOnly-cookie move: send the session cookie on
+    // same-origin dashboard calls (forced after the spread, like apiFetch).
+    credentials: 'same-origin',
   });
   assertCurrentSession();
 

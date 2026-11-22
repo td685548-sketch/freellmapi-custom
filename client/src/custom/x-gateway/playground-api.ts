@@ -70,6 +70,8 @@ export async function streamPlayground(
       headers,
       body: JSON.stringify(body),
       signal: streamController.signal,
+      // Phase 1 of the httpOnly-cookie move: send the session cookie.
+      credentials: 'same-origin',
     });
     assertSession();
     if (!response.ok) {

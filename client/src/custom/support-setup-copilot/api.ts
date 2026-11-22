@@ -121,6 +121,8 @@ export async function postSupportSetupChatStream(
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(body),
+    // Phase 1 of the httpOnly-cookie move: send the session cookie.
+    credentials: 'same-origin',
   });
   const isStream = (res.headers.get('content-type') ?? '').includes('text/event-stream');
   if (!isStream) {

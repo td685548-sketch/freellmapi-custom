@@ -41,6 +41,8 @@ async function downloadBackupFile(id: number, filename: string): Promise<void> {
   const base = import.meta.env.BASE_URL.replace(/\/$/, '')
   const res = await fetch(`${base}/api/backups/${id}/download`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
+    // Phase 1 of the httpOnly-cookie move: send the session cookie.
+    credentials: 'same-origin',
   })
   if (!res.ok) {
     const body = await res.json().catch(() => null)
