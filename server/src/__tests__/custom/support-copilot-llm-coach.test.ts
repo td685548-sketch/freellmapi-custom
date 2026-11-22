@@ -631,6 +631,200 @@ describe('Support Setup Copilot — Human-Like LLM Coach & Resilient Gateway Bri
       delete process.env.FREEAPI_AI_ACTIVATION_TOKEN;
     }
   });
+
+  // Shared by the format-failure failover tests below: installs the same mock
+  // cloud lease as the timeout test so the coach runs without a real token.
+  const installMockLease = (): (() => void) => {
+    process.env.FREEAPI_AI_ACTIVATION_TOKEN = ['test', 'fake', 'token'].join('-');
+    const mockLease: CloudSignedLease = {
+      licenseId: 'test-lic-coach-format', label: 'Test License', instanceId: 'test-inst-coach-format',
+      scopes: ['ai_platform', 'customer_ai', 'support_copilot', 'support_suite', 'tenant_portal'],
+      packVersion: 4, packHash: 'hash-coach-format',
+      issuedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+    };
+    const mockPack: CloudAiRuntimePack = {
+      version: 4,
+      supportCoachPack: { personaVi: 'Persona Vi', personaEn: 'Persona En', playbookReference: 'Playbook', outputContract: 'Contract' },
+      supportAgentCopilotInstruction: 'x', customerAiDirective: 'ACTIVE', supportGatewayDirective: 'ACTIVE', aiPlatformCapabilityGrant: 'ACTIVE',
+    };
+    configureCloudEntitlementForTesting({
+      activeLeaseRecord: { lease: mockLease, tokenHash: 'dummy-hash', signature: 'dummy-sig', runtimePack: mockPack, verifiedAtMs: Date.now() },
+    });
+    return () => {
+      configureCloudEntitlementForTesting(null);
+      delete process.env.FREEAPI_AI_ACTIVATION_TOKEN;
+    };
+  };
+
+  const mockCompletionResponse = (content: string, model: string): Response =>
+    new Response(
+      JSON.stringify({
+        id: `chatcmpl_mock_format_${model}`,
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model,
+        choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 120, completion_tokens: 60, total_tokens: 180 },
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+
+  const mockCoachAnswer = JSON.stringify({
+    intent: 'guide',
+    reply:
+      'Chào bạn! Mình hiểu rồi, để mình hướng dẫn bạn tạo tenant AI Support mới nhé. Trước tiên bạn cho mình biết tên shop và ngành hàng của bạn được không?',
+  });
+
+  const trackModels = (seenModels: Array<string | undefined>, init?: { body?: unknown }): string | undefined => {
+    let model: string | undefined;
+    try {
+      model = (JSON.parse(String((init?.body as string) ?? '{}')) as { model?: string }).model;
+    } catch {
+      model = undefined;
+    }
+    seenModels.push(model);
+    return model;
+  };
+
+  it('fails over from model="auto" to model="auto:balanced" when "auto" answers HTTP 200 with a malformed body', async () => {
+    // Regression test for the format-failure gap recorded after PR #193: a
+    // 200 with bad JSON used to end the whole turn because the Tier 2 loop
+    // returned null instead of trying the next model.
+    const restore = installMockLease();
+    try {
+      const seenModels: Array<string | undefined> = [];
+      let calls = 0;
+      const fetchImpl = (async (_input: unknown, init?: { body?: unknown }) => {
+        calls += 1;
+        trackModels(seenModels, init);
+        if (calls <= 2) {
+          // 'auto': the stream attempt (call 1) and the plain retry (call 2)
+          // both get the same unparseable body.
+          return new Response('this is not json {{{', {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return mockCompletionResponse(mockCoachAnswer, 'mock-balanced-coach');
+      }) as unknown as typeof fetch;
+
+      const coachRes = await runHumanLikeLlmCoach({
+        messages: [{ role: 'user', content: 'tôi đang có web boardgame, và muốn setup' }],
+        locale: 'vi',
+        targetMode: 'create_tenant',
+        diagnostic: null,
+        extracted: {},
+        gatewayLoopback: { host: '127.0.0.1', port: gatewayPort },
+        fetchImpl,
+        timeoutMs: 5_000,
+      });
+
+      // 2 calls for 'auto' (stream + plain), then 1 for 'auto:balanced'.
+      expect(calls).toBe(3);
+      expect(seenModels).toEqual(['auto', 'auto', 'auto:balanced']);
+      expect(coachRes).not.toBeNull();
+      expect(coachRes?.routeSource).toBe('main_gateway_loopback');
+      expect(coachRes?.modelUsed).toBe('mock-balanced-coach');
+      expect(coachRes?.output.intent).toBe('guide');
+    } finally {
+      restore();
+    }
+  });
+
+  it('fails over from model="auto" to model="auto:balanced" when "auto" answers HTTP 200 with an empty reply instead of coach JSON', async () => {
+    // Valid envelope, unusable content: a JSON object whose reply is empty
+    // fails validation with needsRetry=false, so the turn used to die here.
+    // (Plain prose is NOT a format failure — parseLlmCoachResponse accepts
+    // it as a natural-prose fallback and retries in-locale instead.)
+    const restore = installMockLease();
+    try {
+      const seenModels: Array<string | undefined> = [];
+      let calls = 0;
+      const fetchImpl = (async (_input: unknown, init?: { body?: unknown }) => {
+        calls += 1;
+        trackModels(seenModels, init);
+        if (calls === 1) {
+          return mockCompletionResponse(
+            JSON.stringify({ intent: 'guide', reply: '' }),
+            'mock-auto-coach',
+          );
+        }
+        return mockCompletionResponse(mockCoachAnswer, 'mock-balanced-coach');
+      }) as unknown as typeof fetch;
+
+      const coachRes = await runHumanLikeLlmCoach({
+        messages: [{ role: 'user', content: 'tôi đang có web boardgame, và muốn setup' }],
+        locale: 'vi',
+        targetMode: 'create_tenant',
+        diagnostic: null,
+        extracted: {},
+        gatewayLoopback: { host: '127.0.0.1', port: gatewayPort },
+        fetchImpl,
+        timeoutMs: 5_000,
+      });
+
+      expect(calls).toBe(2);
+      expect(seenModels).toEqual(['auto', 'auto:balanced']);
+      expect(coachRes).not.toBeNull();
+      expect(coachRes?.routeSource).toBe('main_gateway_loopback');
+      expect(coachRes?.modelUsed).toBe('mock-balanced-coach');
+      expect(coachRes?.output.intent).toBe('guide');
+    } finally {
+      restore();
+    }
+  });
+
+  it('fails over from model="auto" to model="auto:balanced" when "auto" keeps answering with a repetitive reply even after a rewrite', async () => {
+    // Same failover, but through the needsRetry path: the first reply and its
+    // corrective rewrite are both duplicates of a prior assistant message.
+    const priorAssistant =
+      'Mình đang chuẩn bị cấu hình cho tenant EXE. Để bản kế hoạch hoàn chỉnh hơn, bạn bổ sung giúp mình thêm lĩnh vực kinh doanh và chính sách chính nhé!';
+    const restore = installMockLease();
+    try {
+      const seenModels: Array<string | undefined> = [];
+      let calls = 0;
+      const repetitiveJson = JSON.stringify({ intent: 'gather_requirements', reply: priorAssistant });
+      const freshJson = JSON.stringify({
+        intent: 'guide',
+        reply:
+          'Dạ với web boardgame của bạn, mình có thể tự thiết kế nhân cách AI am hiểu boardgame, tạo sẵn bộ FAQ luật chơi/đổi trả, bật che SĐT khách hàng và làm nút chat đẹp mắt trên web — tất cả đều trình bạn xem và bấm Đồng ý rồi mới chạy nhé!',
+      });
+      const fetchImpl = (async (_input: unknown, init?: { body?: unknown }) => {
+        calls += 1;
+        trackModels(seenModels, init);
+        if (calls <= 2) {
+          return mockCompletionResponse(repetitiveJson, 'mock-auto-coach');
+        }
+        return mockCompletionResponse(freshJson, 'mock-balanced-coach');
+      }) as unknown as typeof fetch;
+
+      const coachRes = await runHumanLikeLlmCoach({
+        messages: [
+          { role: 'user', content: 'tôi đang có web boardgame, và muốn setup' },
+          { role: 'assistant', content: priorAssistant },
+          { role: 'user', content: 'bạn có thể làm gì mà' },
+        ],
+        locale: 'vi',
+        targetMode: 'update_tenant',
+        diagnostic: null,
+        extracted: { industry: 'Boardgame' },
+        gatewayLoopback: { host: '127.0.0.1', port: gatewayPort },
+        fetchImpl,
+        timeoutMs: 5_000,
+      });
+
+      // 2 calls for 'auto' (first attempt + corrective rewrite), then 1 for 'auto:balanced'.
+      expect(calls).toBe(3);
+      expect(seenModels).toEqual(['auto', 'auto', 'auto:balanced']);
+      expect(coachRes).not.toBeNull();
+      expect(coachRes?.routeSource).toBe('main_gateway_loopback');
+      expect(coachRes?.modelUsed).toBe('mock-balanced-coach');
+      expect(coachRes?.output.intent).toBe('guide');
+      expect(coachRes?.output.reply).not.toBe(priorAssistant);
+    } finally {
+      restore();
+    }
+  });
 });
 
 describe('live reasoning preview while the model streams (extractPartialCoachReply / extractLiveReasoning)', () => {

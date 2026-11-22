@@ -1646,13 +1646,22 @@ async function runHumanLikeLlmCoachCore(
               routeSource: 'main_gateway_loopback',
             };
           }
+        } else {
+          // The rewrite itself errored: this model has now failed twice
+          // (bad format, then an HTTP error), so record it and move on.
+          failAttempt(`FreeLLMAPI ${modelCandidate}`, statusReason(retryUpstream.status));
         }
       }
 
       if (!check.needsRetry) {
         failAttempt(`FreeLLMAPI ${modelCandidate}`, { vi: 'trả lời sai định dạng', en: 'answered in an unusable format' });
       }
-      return null;
+      // A format failure (HTTP 200 with a malformed body, or content that
+      // fails validation even after a rewrite) is a per-model failure, not a
+      // dead turn: try the next model the same way a timeout already does.
+      // Only the last candidate gives up (the loop's final `return null`).
+      // No cooldown is applied — a bad answer says nothing about the route.
+      continue;
     } catch (err) {
       failAttempt(`FreeLLMAPI ${modelCandidate}`, errorReason(err, timeoutMs));
       // A timeout / dropped connection on 'auto' must not end the turn: a slow
