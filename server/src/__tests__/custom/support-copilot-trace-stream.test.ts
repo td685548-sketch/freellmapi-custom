@@ -377,12 +377,13 @@ describe('live reasoning while the model streams its answer', () => {
     });
     const elapsedMs = Date.now() - startedAt;
 
-    // The turn fails (a stalled stream is unusable), but it fails fast: the
+    // The turn fails (a stalled stream is unusable), but it fails fast: each
     // attempt aborts ~200ms after its only chunk, not at the 5s total cap.
-    // (A format failure stops after one model — the known "unusable answer
-    // ends the turn" behaviour — so 'auto:balanced' is never tried here.)
+    // Since the format-failure failover, the empty partial answer no longer
+    // ends the turn after one model — 'auto:balanced' is tried too, and it
+    // stalls the same way.
     expect(result).toBeNull();
-    expect(calls).toBe(1); // only 'auto': the empty partial answer ends the turn
+    expect(calls).toBe(2); // 'auto' and 'auto:balanced' both stall out
     expect(elapsedMs).toBeLessThan(2000);
     setCopilotModelSource('both');
   });
