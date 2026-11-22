@@ -11,6 +11,7 @@ import {
 } from '@freellmapi/shared/support-setup-copilot.js';
 import { getDb, getInternalLoopbackToken } from '../../db/index.js';
 import { decrypt } from '../../lib/crypto.js';
+import type { BaseProvider } from '../../providers/base.js';
 import type { SessionUser } from '../../services/auth.js';
 import { getRecordedServerAddress } from '../ai-platform/orchestrator/engine.js';
 import { PLAYGROUND_SESSION_HEADER } from '../playground-attribution.js';
@@ -109,10 +110,11 @@ export interface LlmCoachTurnInput {
   /** Optional per-request timeout in ms (defaults to 30_000). */
   timeoutMs?: number;
   /**
-   * Optional streaming budgets for the FreeLLMAPI loopback attempt (tests only;
-   * production uses the defaults in `runHumanLikeLlmCoachCore`). `idleMs` is the
-   * silence allowed between streamed chunks once the first token arrived;
-   * `totalMs` is the absolute cap for one streaming attempt.
+   * Optional streaming budgets for the streamed attempts (FreeLLMAPI loopback
+   * and Thruline; tests only — production uses the defaults in
+   * `runHumanLikeLlmCoachCore`). `idleMs` is the silence allowed between
+   * streamed chunks once the first token arrived; `totalMs` is the absolute
+   * cap for one streaming attempt.
    */
   streamTimeouts?: { idleMs?: number; totalMs?: number };
 }
@@ -1104,7 +1106,8 @@ async function runHumanLikeLlmCoachCore(
   // 30s, not 15s: the gateway's own fallback budget is 45s (lib/fallback-loop.ts)
   // and a web-cookie provider's first-content window is 25s, so a 15s abort
   // killed healthy multi-hop 'auto' resolutions before the gateway could
-  // answer. Tier 1 Thruline attempts stay capped at 12s each (see below).
+  // answer. Both tiers stream with the same watchdog (below): the first token
+  // still has to arrive within this budget, then every chunk extends it.
   const timeoutMs = params.timeoutMs ?? 30_000;
 
   // Every attempt that fails is remembered with its reason and shown live on the "ask the model" step.
@@ -1120,6 +1123,132 @@ async function runHumanLikeLlmCoachCore(
   // -------------------------------------------------------------------------
   // Tier 1: Thruline provider accounts (`x_gateway_keys`)
   // -------------------------------------------------------------------------
+  /** A stream that was aborted (timeout) must fail the attempt, not be retried plain. Shared by both tiers. */
+  const isAbortError = (err: unknown): boolean => {
+    const name = err instanceof Error ? err.name : '';
+    const message = err instanceof Error ? err.message : '';
+    return name === 'TimeoutError' || name === 'AbortError' || /timed?\s*out|aborted/i.test(message);
+  };
+
+  /**
+   * One Thruline attempt: stream the provider's completion so the panel shows the model's
+   * reasoning live, then return the full answer in the same shape the non-streaming path
+   * produced. If the stream yields nothing usable (or the provider cannot stream), the same
+   * request is made once as a plain completion; a timeout is never retried plain — it fails
+   * the attempt, and the loop tries the next candidate. Counts one model call per attempt.
+   *
+   * Same watchdog as the loopback stream: the first token still has to arrive within
+   * `timeoutMs`, but every chunk that arrives extends the deadline — the attempt only
+   * aborts after `idleMs` of silence, or at the `totalMs` absolute cap. A slow reasoning
+   * model that trickles tokens therefore finishes its answer instead of being cut off
+   * mid-sentence; a stalled stream still fails fast and the loop tries the next candidate.
+   */
+  const fetchThrulineCompletion = async (
+    account: CandidateRoute['account'],
+    provider: BaseProvider,
+    credential: string,
+    proxy: string | undefined,
+    modelId: string,
+    turnMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+    temperature: number,
+    plainCapMs: number,
+  ): Promise<{ text: string; model?: string }> => {
+    traceCountModelCall();
+    let lastPreview = '';
+    const onProgress = (preview: string): void => {
+      if (!preview || preview === lastPreview) return;
+      lastPreview = preview;
+      traceReasoning(modelStep.id, preview);
+    };
+    // 15s of silence mid-answer, 120s absolute cap per streaming attempt.
+    // (Overridable via params.streamTimeouts in tests.)
+    const streamIdleMs = params.streamTimeouts?.idleMs ?? 15_000;
+    const streamTotalMs = params.streamTimeouts?.totalMs ?? 120_000;
+    const streamController = new AbortController();
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    const armIdle = (ms: number): void => {
+      if (idleTimer !== undefined) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => streamController.abort(), ms);
+    };
+    const totalTimer = setTimeout(() => streamController.abort(), streamTotalMs);
+    armIdle(timeoutMs); // first token within the per-attempt budget, as before
+    let lastEmitAt = 0;
+    let text = '';
+    let reasoning = '';
+    let model: string | undefined;
+    let sawChunk = false;
+    try {
+      const gen = withQuotaTracking(account, modelId, proxy, () =>
+        provider.streamChatCompletion(
+          credential,
+          turnMessages,
+          modelId,
+          { temperature, max_tokens: 1000, signal: streamController.signal },
+          { platform: account.platform, keyId: account.id, modelId },
+        ),
+      );
+      for await (const chunk of gen) {
+        // Signal from the model: a chunk arrived, so the stream is alive.
+        armIdle(streamIdleMs);
+        const delta = chunk.choices?.[0]?.delta;
+        if (typeof chunk.model === 'string' && chunk.model) model = chunk.model;
+        if (delta && typeof delta.content === 'string' && delta.content) {
+          text += delta.content;
+          sawChunk = true;
+        }
+        const deltaReasoning =
+          delta && typeof delta.reasoning_content === 'string'
+            ? delta.reasoning_content
+            : delta && typeof (delta as { reasoning?: unknown }).reasoning === 'string'
+              ? (delta as { reasoning: string }).reasoning
+              : '';
+        if (deltaReasoning) {
+          reasoning += deltaReasoning;
+          sawChunk = true;
+        }
+        const now = Date.now();
+        if (now - lastEmitAt >= 200) {
+          lastEmitAt = now;
+          onProgress(extractLiveReasoning(text, reasoning));
+        }
+      }
+      onProgress(extractLiveReasoning(text, reasoning));
+    } catch (err) {
+      // A stream that died after yielding chunks hands its partial text to
+      // validation (same as the loopback reader); a stream that died before
+      // any chunk aborts the attempt when it was a timeout, and falls through
+      // to the plain call for any other failure.
+      if (sawChunk) {
+        onProgress(extractLiveReasoning(text, reasoning));
+        return { text, ...(model ? { model } : {}) };
+      }
+      if (isAbortError(err)) throw err;
+      // Any other streaming failure falls through to the plain call below.
+    } finally {
+      // The watchdog belongs to the stream attempt only: the plain call below
+      // has its own per-attempt deadline.
+      clearTimeout(totalTimer);
+      if (idleTimer !== undefined) clearTimeout(idleTimer);
+    }
+    if (sawChunk || text || reasoning) {
+      return { text, ...(model ? { model } : {}) };
+    }
+    // Stream ended with nothing usable: one plain completion attempt.
+    const res = await withQuotaTracking(account, modelId, proxy, () =>
+      provider.chatCompletion(
+        credential,
+        turnMessages,
+        modelId,
+        { temperature, max_tokens: 1000, signal: AbortSignal.timeout(plainCapMs) },
+        { platform: account.platform, keyId: account.id, modelId },
+      ),
+    );
+    return {
+      text: extractCompletionText(res.choices?.[0]?.message?.content),
+      ...(typeof res.model === 'string' && res.model ? { model: res.model } : {}),
+    };
+  };
+
   const modelSource = getCopilotModelSource();
   const candidates =
     modelSource === 'freellmapi' ? [] : collectThrulineCandidates(params.diagnostic?.tenant.defaultModel);
@@ -1144,27 +1273,25 @@ async function runHumanLikeLlmCoachCore(
       const startedAt = Date.now();
 
       try {
-        const signal = AbortSignal.timeout(Math.min(timeoutMs, 12_000));
-        traceCountModelCall();
-        const res = await withQuotaTracking(account, modelId, proxy, () =>
-          provider.chatCompletion(
-            credential,
-            baseTurnMessages,
-            modelId,
-            { temperature: 0.45, max_tokens: 1000, signal },
-            { platform: account.platform, keyId: account.id, modelId },
-          ),
+        const completion = await fetchThrulineCompletion(
+          account,
+          provider,
+          credential,
+          proxy,
+          modelId,
+          baseTurnMessages,
+          0.45,
+          Math.min(timeoutMs, 12_000),
         );
 
         recordCandidateSuccess(account.id, modelId);
         recordRouteOutcome(`${account.id}:${modelId}`, { latencyMs: Date.now() - startedAt });
 
-        const text = extractCompletionText(res.choices?.[0]?.message?.content);
-        const check = validateParsedCoachOutput(text, params);
+        const check = validateParsedCoachOutput(completion.text, params);
         if (check.valid) {
           return {
             output: check.valid,
-            modelUsed: res.model || `${account.provider}/${modelId}`,
+            modelUsed: completion.model || `${account.provider}/${modelId}`,
             routeSource: 'thruline_account',
           };
         }
@@ -1173,34 +1300,32 @@ async function runHumanLikeLlmCoachCore(
         }
 
         if (check.needsRetry) {
-          const retrySignal = AbortSignal.timeout(Math.min(timeoutMs, 10_000));
           const retryMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
             ...baseTurnMessages,
             { role: 'system', content: buildCorrectiveRetryNotice(params.locale) },
           ];
-          traceCountModelCall();
-          const retryRes = await withQuotaTracking(account, modelId, proxy, () =>
-            provider.chatCompletion(
-              credential,
-              retryMessages,
-              modelId,
-              { temperature: 0.65, max_tokens: 1000, signal: retrySignal },
-              { platform: account.platform, keyId: account.id, modelId },
-            ),
+          const retryCompletion = await fetchThrulineCompletion(
+            account,
+            provider,
+            credential,
+            proxy,
+            modelId,
+            retryMessages,
+            0.65,
+            Math.min(timeoutMs, 10_000),
           );
-          const retryText = extractCompletionText(retryRes.choices?.[0]?.message?.content);
-          const retryCheck = validateParsedCoachOutput(retryText, params);
+          const retryCheck = validateParsedCoachOutput(retryCompletion.text, params);
           if (retryCheck.valid) {
             return {
               output: retryCheck.valid,
-              modelUsed: retryRes.model || `${account.provider}/${modelId}`,
+              modelUsed: retryCompletion.model || `${account.provider}/${modelId}`,
               routeSource: 'thruline_account',
             };
           }
           failAttempt(`${account.provider}/${modelId}`, { vi: 'vẫn trả lời sai sau khi yêu cầu viết lại', en: 'still unusable after asking it to rewrite' });
         }
       } catch (err) {
-        failAttempt(`${account.provider}/${modelId}`, errorReason(err, Math.min(timeoutMs, 12_000)));
+        failAttempt(`${account.provider}/${modelId}`, errorReason(err, timeoutMs));
         try {
           recordCandidateFailure(account.id, modelId, err);
           recordRouteOutcome(`${account.id}:${modelId}`, { error: true });
@@ -1281,13 +1406,6 @@ async function runHumanLikeLlmCoachCore(
     status: number;
     body: LoopbackCompletionBody | null;
     routedHeader?: string;
-  };
-
-  /** A stream that was aborted (timeout) must fail the attempt, not be retried plain. */
-  const isAbortError = (err: unknown): boolean => {
-    const name = err instanceof Error ? err.name : '';
-    const message = err instanceof Error ? err.message : '';
-    return name === 'TimeoutError' || name === 'AbortError' || /timed?\s*out|aborted/i.test(message);
   };
 
   /**

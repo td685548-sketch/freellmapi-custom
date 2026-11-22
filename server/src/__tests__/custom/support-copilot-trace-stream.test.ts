@@ -1,10 +1,11 @@
-import type { Server } from 'node:http';
+import http, { type Server } from 'node:http';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { CloudAiRuntimePack, CloudSignedLease } from '@freellmapi/shared/cloud-entitlement.js';
 import type { SupportSetupTraceStep } from '@freellmapi/shared/support-setup-copilot.js';
 import { createApp } from '../../app.js';
 import { recordServerLocalAddress } from '../../custom/ai-platform/orchestrator/engine.js';
 import { configureCloudEntitlementForTesting } from '../../custom/cloud-entitlement/service.js';
+import { invalidateXGatewayKeyCache } from '../../custom/provider-accounts/store.js';
 import type { CopilotLlmCall } from '../../custom/support-setup-copilot/agent-loop.js';
 import {
   buildSystemTargetFallbackReply,
@@ -15,6 +16,7 @@ import { runHumanLikeLlmCoach } from '../../custom/support-setup-copilot/llm-coa
 import { setCopilotModelSource } from '../../custom/support-setup-copilot/model-source.js';
 import { runWithTrace, traceDone, traceFinish, traceStart, traceStep, traceUsage } from '../../custom/support-setup-copilot/trace.js';
 import { getDb, initDb } from '../../db/index.js';
+import { encrypt } from '../../lib/crypto.js';
 import { createSession, createUser, type SessionUser } from '../../services/auth.js';
 import { setUserPermissions } from '../../services/users.js';
 
@@ -383,6 +385,207 @@ describe('live reasoning while the model streams its answer', () => {
     expect(calls).toBe(1); // only 'auto': the empty partial answer ends the turn
     expect(elapsedMs).toBeLessThan(2000);
     setCopilotModelSource('both');
+  });
+});
+
+describe('Tier 1 Thruline streams its answer live', () => {
+  let admin: SessionUser;
+  let mockServer: Server;
+  let mockPort: number;
+
+  const upstreamCalls: Array<{ stream?: boolean; model?: string }> = [];
+  type SseChunk = { delayMs: number; sse: string; hangAfter?: boolean };
+  let nextSseScripts: SseChunk[][] = [];
+
+  const validAnswer = JSON.stringify({
+    intent: 'guide',
+    reply: 'Response cache giúp giảm số lần gọi nhà cung cấp.',
+  });
+  const sse = (payload: string): string => `data: ${payload}\n\n`;
+  const defaultScript = (): SseChunk[] => [
+    { delayMs: 0, sse: sse(JSON.stringify({ model: 'thruline/stream', choices: [{ delta: { reasoning_content: 'Người dùng hỏi về cache; cần trả lời ngắn gọn.' } }] })) },
+    { delayMs: 0, sse: sse(JSON.stringify({ choices: [{ delta: { content: '{"intent":"guide","reply":"Response cache' } }] })) },
+    { delayMs: 0, sse: sse(JSON.stringify({ choices: [{ delta: { content: ' giúp giảm số lần gọi nhà cung cấp."}' } }] })) },
+    { delayMs: 0, sse: 'data: [DONE]\n\n' },
+  ];
+
+  beforeAll(async () => {
+    process.env.ENCRYPTION_KEY = 'a'.repeat(64);
+    initDb(':memory:');
+    installMockCloudLease();
+    admin = createUser('trace-tier1-admin@example.com', 'AdminPass123!');
+
+    // Mock OpenAI-compatible upstream: serves scripted SSE when the request
+    // asks for a stream, plain JSON otherwise (the plain-fallback path).
+    mockServer = http.createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk: Buffer) => chunks.push(chunk));
+      req.on('end', () => {
+        let body: { stream?: boolean; model?: string } = {};
+        try {
+          body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as typeof body;
+        } catch {
+          body = {};
+        }
+        upstreamCalls.push({ stream: body.stream, model: body.model });
+        if (body.stream === true) {
+          const script = nextSseScripts.shift() ?? defaultScript();
+          res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+          void (async () => {
+            for (const { delayMs, sse: line, hangAfter } of script) {
+              if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+              // NOTE: `req.destroyed` is NOT a liveness signal — the request
+              // stream auto-destroys once its body is read. The response (and
+              // its socket) is what tells us the client went away.
+              if (res.destroyed || res.writableEnded) return;
+              res.write(line);
+              if (hangAfter) {
+                // Stall forever (until the client aborts): never write again.
+                await new Promise<void>((resolve) => res.on('close', () => resolve()));
+                return;
+              }
+            }
+            if (!res.destroyed) res.end();
+          })();
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            id: 'chatcmpl_mock_tier1',
+            object: 'chat.completion',
+            created: Math.floor(Date.now() / 1000),
+            model: body.model ?? 'thruline-stream-coach',
+            choices: [
+              {
+                index: 0,
+                message: { role: 'assistant', content: validAnswer },
+                finish_reason: 'stop',
+              },
+            ],
+          }),
+        );
+      });
+    });
+    mockServer.listen(0, '127.0.0.1');
+    await new Promise<void>((resolve) => mockServer.once('listening', () => resolve()));
+    mockPort = (mockServer.address() as { port: number }).port;
+  });
+  afterAll(async () => {
+    configureCloudEntitlementForTesting(null);
+    delete process.env.FREEAPI_AI_ACTIVATION_TOKEN;
+    setCopilotModelSource('both');
+    mockServer.closeAllConnections?.();
+    await new Promise<void>((r) => mockServer.close(() => r()));
+  });
+
+  beforeEach(() => {
+    upstreamCalls.length = 0;
+    nextSseScripts = [];
+    // A fresh account per test: a stalled stream cools its route for 30s, so
+    // reusing the same row would hide the account from later tests.
+    const db = getDb();
+    db.prepare('DELETE FROM x_gateway_keys').run();
+    const enc = encrypt('sk-tier1-test');
+    db.prepare(
+      `INSERT INTO x_gateway_keys (
+         provider, label, auth_method, encrypted_key, iv, auth_tag,
+         base_url, models_json, status, enabled, monthly_request_cap, monthly_token_cap
+       ) VALUES (?, ?, 'api_key', ?, ?, ?, ?, ?, 'healthy', 1, 0, 0)`,
+    ).run(
+      'openrouter',
+      'Thruline Stream Account',
+      enc.encrypted,
+      enc.iv,
+      enc.authTag,
+      `http://127.0.0.1:${mockPort}/v1`,
+      JSON.stringify([{ id: 'thruline-stream-coach', name: 'Thruline Stream Coach' }]),
+    );
+    invalidateXGatewayKeyCache();
+    setCopilotModelSource('thruline');
+  });
+
+  const run = async (opts?: { timeoutMs?: number; streamTimeouts?: { idleMs?: number; totalMs?: number } }) => {
+    const seen: SupportSetupTraceStep[] = [];
+    const result = await runWithTrace((st) => seen.push(st), () =>
+      runHumanLikeLlmCoach({
+        user: admin,
+        messages: [{ role: 'user' as const, content: 'cho mình hỏi về cài đặt cache' }],
+        locale: 'vi' as const,
+        targetMode: 'update_tenant' as const,
+        diagnostic: null,
+        extracted: {},
+        ...(opts?.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+        ...(opts?.streamTimeouts ? { streamTimeouts: opts.streamTimeouts } : {}),
+      }),
+    );
+    const model = [...seen].reverse().find((st) => st.kind === 'model');
+    return { result, model, seen };
+  };
+
+  it('streams the model thinking, then the reply as it forms — in a single streamed request', async () => {
+    const { result, seen } = await run();
+
+    expect(upstreamCalls).toHaveLength(1);
+    expect(upstreamCalls[0]?.stream).toBe(true);
+    expect(result?.output.reply).toContain('Response cache');
+    expect(result?.routeSource).toBe('thruline_account');
+    const modelSteps = seen.filter((st) => st.kind === 'model');
+    const withReasoning = modelSteps.filter((st) => st.reasoning);
+    expect(withReasoning.length).toBeGreaterThanOrEqual(2);
+    expect(withReasoning[0]?.reasoning).toContain('Người dùng hỏi về cache');
+    expect(withReasoning[withReasoning.length - 1]?.reasoning).toContain('Response cache');
+    // The finished step keeps the last reasoning, so the panel can be reviewed afterwards.
+    expect(modelSteps[modelSteps.length - 1]?.status).toBe('done');
+    expect(modelSteps[modelSteps.length - 1]?.reasoning).toContain('Response cache');
+  });
+
+  it('a slow-but-alive Tier 1 stream is not cut off by the per-attempt deadline while tokens keep arriving', async () => {
+    // Chunks arrive ~350ms apart, so the whole answer takes ~700ms — well past
+    // the 300ms per-attempt budget. The old fixed 12s cap (and a plain
+    // 300ms deadline) would kill it after the first chunk; with the
+    // inactivity watchdog every chunk extends the deadline and it completes.
+    nextSseScripts.push([
+      { delayMs: 0, sse: sse(JSON.stringify({ model: 'thruline/stream', choices: [{ delta: { reasoning_content: 'Người dùng hỏi về cache; cần trả lời ngắn gọn.' } }] })) },
+      { delayMs: 350, sse: sse(JSON.stringify({ choices: [{ delta: { content: '{"intent":"guide","reply":"Response cache' } }] })) },
+      { delayMs: 350, sse: sse(JSON.stringify({ choices: [{ delta: { content: ' giúp giảm số lần gọi nhà cung cấp."}' } }] })) },
+      { delayMs: 0, sse: 'data: [DONE]\n\n' },
+    ]);
+    const { result, seen } = await run({ timeoutMs: 300, streamTimeouts: { idleMs: 600, totalMs: 3000 } });
+
+    expect(upstreamCalls).toHaveLength(1); // one streamed request; no plain retry, no corrective retry
+    expect(result?.output.reply).toContain('Response cache');
+    expect(result?.routeSource).toBe('thruline_account');
+    const modelSteps = seen.filter((st) => st.kind === 'model');
+    expect(modelSteps[modelSteps.length - 1]?.status).toBe('done');
+    expect(modelSteps[modelSteps.length - 1]?.reasoning).toContain('Người dùng hỏi về cache');
+  });
+
+  it('an empty stream falls back to one plain completion for the same model', async () => {
+    nextSseScripts.push([{ delayMs: 0, sse: 'data: [DONE]\n\n' }]);
+    const { result } = await run();
+
+    expect(upstreamCalls).toHaveLength(2);
+    expect(upstreamCalls[0]?.stream).toBe(true);
+    expect(upstreamCalls[1]?.stream).toBeFalsy();
+    expect(result?.output.reply).toContain('Response cache');
+    expect(result?.routeSource).toBe('thruline_account');
+  });
+
+  it('a stalled Tier 1 stream still aborts on silence instead of holding the turn until the total cap', async () => {
+    nextSseScripts.push([
+      { delayMs: 0, sse: sse(JSON.stringify({ choices: [{ delta: { reasoning_content: 'Đang suy nghĩ…' } }] })), hangAfter: true },
+    ]);
+    const startedAt = Date.now();
+    const { result } = await run({ timeoutMs: 300, streamTimeouts: { idleMs: 200, totalMs: 5000 } });
+    const elapsedMs = Date.now() - startedAt;
+
+    // The turn fails (a stalled stream is unusable), but it fails fast: the
+    // attempt aborts ~200ms after its only chunk, not at the 5s total cap —
+    // and a timeout is never retried plain, so the upstream saw one request.
+    expect(result).toBeNull();
+    expect(upstreamCalls).toHaveLength(1);
+    expect(elapsedMs).toBeLessThan(2000);
   });
 });
 
