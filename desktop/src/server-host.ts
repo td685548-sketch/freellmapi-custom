@@ -30,7 +30,7 @@ import { desktopSessionToken } from '../../server/src/services/auth.js';
 import { NodeScheduler } from '../../server/src/lib/scheduler.js';
 import { startWorkerLifecycle } from '../../server/src/custom/x-gateway/support-runtime-router.js';
 import { rotateGeminiWebAccountsOnce, startGeminiWebKeepAlive } from '../../server/src/custom/provider-accounts/gemini-web-keepalive.js';
-import { startChatGptWebKeepAlive } from '../../server/src/custom/provider-accounts/chatgpt-web-keepalive.js';
+import { rotateChatGptWebAccountsOnce, startChatGptWebKeepAlive } from '../../server/src/custom/provider-accounts/chatgpt-web-keepalive.js';
 
 export { getDb, regenerateUnifiedKey, isAutoUpdateCheckEnabled };
 
@@ -176,6 +176,7 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
       console.log(`[wake] resumed after ~${idle}s (${event.reason}${event.signal ? `:${event.signal}` : ''}) — flushing stale sockets, re-probing keys`);
       flushProxyCache();
       void rotateGeminiWebAccountsOnce();
+      void rotateChatGptWebAccountsOnce();
       try {
         await checkAllKeys({ force: true });
       } catch (err: any) {

@@ -1,7 +1,10 @@
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest';
 import { EventEmitter } from 'node:events';
+import { startWakeDetect } from '../../../server/src/lib/wake-detect.js';
+import { rotateGeminiWebAccountsOnce } from '../../../server/src/custom/provider-accounts/gemini-web-keepalive.js';
+import { rotateChatGptWebAccountsOnce } from '../../../server/src/custom/provider-accounts/chatgpt-web-keepalive.js';
 
 // #949: the desktop embedder boots the server without server/src/index.ts, so
 // every startup step index.ts performs has to be repeated here by hand. The
@@ -166,6 +169,7 @@ vi.mock('../../../server/src/custom/provider-accounts/chatgpt-web-keepalive.js',
     calls.push('startChatGptWebKeepAlive');
     return () => {};
   }),
+  rotateChatGptWebAccountsOnce: vi.fn(async () => 0),
 }));
 
 async function boot(opts: { host?: string; preferredPort?: number } = {}): Promise<{ port: number }> {
@@ -261,6 +265,42 @@ describe('desktop server boot sequence (#949)', () => {
         calls,
         `server/src/index.ts calls ${step}() but the desktop embedder never does — add it to startServer() in server-host.ts`,
       ).toContain(step);
+    }
+  });
+
+  // Same drift one step removed from the boot sequence: index.ts's onWake
+  // rotates both Gemini and ChatGPT Web accounts, but the embedder's onWake
+  // only rotated Gemini — and the boot-parity regex above cannot see it,
+  // because `rotate*` never runs at boot (only when a wake fires). So derive
+  // the required rotations from the index.ts source and fire the captured
+  // onWake to prove the embedder performs them.
+  it('rotates the same provider accounts on wake as server/src/index.ts', async () => {
+    const indexSrc = fs.readFileSync(
+      fileURLToPath(new URL('../../../server/src/index.ts', import.meta.url)),
+      'utf8',
+    );
+    const withoutComments = indexSrc
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/[^\n]*/g, '');
+    const expected = [...withoutComments.matchAll(/\bvoid (rotate\w+)\(\)/g)].map((m) => m[1]);
+    // Regex sanity floor — a restructure of the wake handler must not blank this test.
+    expect(expected.length).toBeGreaterThanOrEqual(2);
+
+    await boot();
+    const wakeCalls = vi.mocked(startWakeDetect).mock.calls;
+    expect(wakeCalls.length).toBeGreaterThan(0);
+    const onWake = wakeCalls[wakeCalls.length - 1][0].onWake;
+    await onWake({ reason: 'drift', idleMs: 120_000 });
+
+    const rotated: Record<string, Mock> = {
+      rotateGeminiWebAccountsOnce: vi.mocked(rotateGeminiWebAccountsOnce),
+      rotateChatGptWebAccountsOnce: vi.mocked(rotateChatGptWebAccountsOnce),
+    };
+    for (const name of expected) {
+      expect(
+        rotated[name],
+        `server/src/index.ts rotates ${name}() on wake but the desktop embedder never does — add it to onWake() in server-host.ts`,
+      ).toHaveBeenCalled();
     }
   });
 });
