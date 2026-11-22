@@ -161,6 +161,13 @@ vi.mock('../../../server/src/custom/provider-accounts/gemini-web-keepalive.js', 
   rotateGeminiWebAccountsOnce: vi.fn(async () => 0),
 }));
 
+vi.mock('../../../server/src/custom/provider-accounts/chatgpt-web-keepalive.js', () => ({
+  startChatGptWebKeepAlive: vi.fn(() => {
+    calls.push('startChatGptWebKeepAlive');
+    return () => {};
+  }),
+}));
+
 async function boot(opts: { host?: string; preferredPort?: number } = {}): Promise<{ port: number }> {
   const { startServer } = await import('../server-host.js');
   return startServer({
@@ -215,6 +222,7 @@ describe('desktop server boot sequence (#949)', () => {
       'startCustomModelSync',
       'startBuiltinModelDiscovery',
       'startGeminiWebKeepAlive',
+      'startChatGptWebKeepAlive',
       'startWakeDetect',
     ]);
   });
