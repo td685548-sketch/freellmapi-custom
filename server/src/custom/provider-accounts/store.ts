@@ -804,6 +804,14 @@ export function createApiKeyAccount(input: {
     if (input.baseUrl && input.baseUrl.replace(/\/+$/, '') !== catalogEntry.baseUrl?.replace(/\/+$/, '')) throw new AccountError(400, 'Subscription credentials require the official provider endpoint.');
     trimmedKey = normalized;
   }
+  if (normalizedProvider === 'opencode') {
+    // A pasted OpenCode CLI auth.json is stored as the same OAuth blob the
+    // device flow stores, so the free lane sends the Console token. Plain
+    // keys and keyless accounts are untouched: normalization returns null
+    // for those, so they are stored exactly as before.
+    const normalized = normalizeImportedCredential('opencode', trimmedKey);
+    if (normalized) trimmedKey = normalized;
+  }
   if (!trimmedKey) {
     throw new AccountError(400, 'API key or credential is required.');
   }
