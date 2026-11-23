@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { getSetting, initDb } from '../../db/index.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 import { applyFetchRelayToken, applyProxyMode, applyProxyUrl } from '../../lib/proxy.js';
 
 // #838 falls back to the OS-wide proxy (scutil/reg/gsettings) when nothing is
@@ -20,7 +20,7 @@ async function request(app: Express, method: string, path: string, body: any, to
   const addr = server.address() as any;
   const res = await fetch(`http://127.0.0.1:${addr.port}${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: { 'Content-Type': 'application/json', ...dashboardSessionHeaders(token) },
     body: JSON.stringify(body),
   });
   const raw = await res.text();

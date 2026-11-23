@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 import {
   RING_CAPACITY,
   clearLogs,
@@ -29,12 +29,15 @@ async function request(
   const server = app.listen(0, '127.0.0.1');
   if (!server.listening) await new Promise<void>(resolve => server.once('listening', () => resolve()));
   const addr = server.address() as any;
-  const token = opts.key ?? opts.token;
   const res = await fetch(`http://127.0.0.1:${addr.port}${path}`, {
     method,
     headers: {
       ...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      // Phase 3: a session token rides the cookie, never the header. A
+      // unified key stays a Bearer header — it is not a session, so the
+      // route still answers 401 for it.
+      ...(opts.key ? { Authorization: `Bearer ${opts.key}` } : {}),
+      ...(opts.token ? dashboardSessionHeaders(opts.token) : {}),
     },
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
   });

@@ -14,6 +14,7 @@ import {
 } from '../../services/usage-quotas.js';
 import { setUserPermissions } from '../../services/users.js';
 
+import { dashboardSessionHeaders } from '../helpers/auth.js';
 let server: Server;
 let base: string;
 let adminId: number;
@@ -36,7 +37,7 @@ async function hit(
     method,
     headers: {
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(token ? { ...dashboardSessionHeaders(token) } : {}),
       ...(cookie ? { Cookie: cookie } : {}),
       ...(csrf ? { 'X-CSRF-Token': csrf } : {}),
     },

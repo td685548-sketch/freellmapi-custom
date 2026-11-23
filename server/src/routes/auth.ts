@@ -101,9 +101,9 @@ function clearFailures(email: string): void {
   attempts.delete(throttleKey(email));
 }
 
-// The caller's session token: the Authorization header when a non-browser
-// caller presents one, else the httpOnly cookie (Phase 2 of the cookie move
-// — the browser dashboard no longer sends the header at all).
+// The caller's session token: the httpOnly cookie only (Phase 3 of the
+// cookie move dropped the Authorization header fallback — the browser
+// dashboard no longer sends the header at all).
 function sessionToken(req: Request): string | undefined {
   return sessionTokenFromRequest(req);
 }
@@ -284,8 +284,8 @@ authRouter.post('/logout', (req: Request, res: Response) => {
   const token = sessionToken(req);
   // A cookie-only logout needs the CSRF token, like any other mutation:
   // without it a cross-site POST could sign the operator out (and wipe
-  // their cookies) as a nuisance. Header-authed and unauthenticated calls
-  // pass the assert unchanged.
+  // their cookies) as a nuisance. Unauthenticated calls pass the assert
+  // unchanged (Phase 3: there is no header auth anymore).
   if (!assertCsrfForCookieMutation(req, res)) return;
   // Clear the cookies only when a session was actually presented: an
   // unauthenticated cross-site POST must not be able to wipe the operator's

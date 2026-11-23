@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { gatewayRootUrl } from './url.js';
 
 export interface KeyCommandOptions {
@@ -86,10 +87,20 @@ export async function runKeys(
 
   async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
     let response: Response;
+    // Phase 3: dashboard session auth is cookie-only (no Bearer header).
+    // The CLI carries the session token as the flm_session cookie, plus a
+    // fresh double-submit CSRF value — the check is stateless, so any value
+    // works when sent as both the flm_csrf cookie and the X-CSRF-Token
+    // header on the same request.
+    const csrfToken = crypto.randomBytes(32).toString('hex');
     try {
       response = await fetch(`${root}${path}`, {
         method,
-        headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+        headers: {
+          Cookie: `flm_session=${token}; flm_csrf=${csrfToken}`,
+          'X-CSRF-Token': csrfToken,
+          ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: AbortSignal.timeout(timeout),
         redirect: 'error',

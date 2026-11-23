@@ -15,7 +15,7 @@ vi.mock('../../services/search.js', async (importOriginal) => {
 import { createApp } from '../../app.js';
 import { initDb, getDb, regenerateUnifiedKey, setSetting } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 import { encodeHitContent, filterHitsByDomain } from '../../lib/web-search-tool.js';
 import { seedSearchEngines } from '../helpers/search-engines.js';
 
@@ -112,7 +112,7 @@ describe('agent web search served from the search pool', () => {
     db.prepare('DELETE FROM rate_limit_usage').run();
     db.prepare(`INSERT INTO settings (key, value) VALUES ('expose_cc_discovery_aliases', '0')
       ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run();
-    const { status } = await post('/api/keys', { platform: 'groq', key: 'gsk_web_search_test', label: 'g' }, { Authorization: `Bearer ${dashToken}` });
+    const { status } = await post('/api/keys', { platform: 'groq', key: 'gsk_web_search_test', label: 'g' }, { ...dashboardSessionHeaders(dashToken) });
     expect(status).toBe(201);
     runSearchMock.mockReset();
     runSearchMock.mockResolvedValue({ query: 'q', results: HITS, provider: 'tavily', engine: 'tavily-search', modelId: 'search' });

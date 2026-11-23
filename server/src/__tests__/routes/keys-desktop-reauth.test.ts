@@ -3,7 +3,7 @@ import express, { type Express } from 'express';
 import { keysRouter } from '../../routes/keys.js';
 import { requireAuth } from '../../middleware/requireAuth.js';
 import { initDb, getDb } from '../../db/index.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 
 // #786: the desktop build has no user-set password, so reveal/export skip the
 // re-verification there — but only for a caller on the machine itself. The
@@ -32,7 +32,7 @@ async function call(app: Express, path: string, method: 'GET' | 'POST') {
   const addr = server.address() as { port: number };
   const res = await fetch(`http://127.0.0.1:${addr.port}${path}`, {
     method,
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { ...dashboardSessionHeaders(token) },
   });
   const body = await res.json().catch(() => null);
   server.close();
@@ -46,7 +46,7 @@ async function addKey(): Promise<number> {
   const addr = server.address() as { port: number };
   const res = await fetch(`http://127.0.0.1:${addr.port}/api/keys`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: { 'Content-Type': 'application/json', ...dashboardSessionHeaders(token) },
     body: JSON.stringify({ platform: 'groq', key: 'gsk_the_real_secret' }),
   });
   const body = await res.json() as { id: number };
@@ -139,7 +139,7 @@ describe('Desktop re-auth bypass is loopback-only (#786)', () => {
     const addr = server.address() as { port: number };
     const res = await fetch(`http://127.0.0.1:${addr.port}/api/keys/${id}/reveal`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'X-Forwarded-For': '127.0.0.1' },
+      headers: { ...dashboardSessionHeaders(token), 'X-Forwarded-For': '127.0.0.1' },
     });
     server.close();
     expect(res.status).toBe(403);
@@ -158,7 +158,7 @@ describe('Desktop re-auth bypass is loopback-only (#786)', () => {
     const addr = server.address() as { port: number };
     const res = await fetch(`http://127.0.0.1:${addr.port}/api/keys/${id}/reveal`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'X-Forwarded-For': forwarded },
+      headers: { ...dashboardSessionHeaders(token), 'X-Forwarded-For': forwarded },
     });
     server.close();
     expect(res.status).toBe(403);

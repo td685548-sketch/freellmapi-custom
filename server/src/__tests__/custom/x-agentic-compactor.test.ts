@@ -4,7 +4,7 @@ import http from 'node:http';
 import type { ChatMessage } from '@freellmapi/shared/types.js';
 import { createApp } from '../../app.js';
 import { getDb, initDb } from '../../db/index.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 import {
   AGENTIC_COMPACTOR_CONFIG_KEY,
   compactGatewayConversation,
@@ -360,7 +360,7 @@ describe('Spec 029 — Agentic & Code-Safe Input Compactor', () => {
       const res = await fetch(`${baseUrl}${path}`, {
         method,
         headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(token ? { ...dashboardSessionHeaders(token) } : {}),
           ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
         },
         body: body !== undefined ? JSON.stringify(body) : undefined,

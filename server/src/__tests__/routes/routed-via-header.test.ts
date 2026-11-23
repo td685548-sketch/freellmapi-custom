@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vite
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 
 // #619: relays hand out model ids that are not header-safe — Chinese names,
 // bracketed variant suffixes, spaces. Splicing one straight into X-Routed-Via
@@ -108,7 +108,7 @@ describe('X-Routed-Via with a header-hostile model id (#619)', () => {
       baseUrl: BASE_URL,
       model: HOSTILE_MODEL,
       apiKey: 'relay-token',
-    }, { Authorization: `Bearer ${dashToken}` });
+    }, { ...dashboardSessionHeaders(dashToken) });
     expect(reg.status).toBe(201);
     mockRelay();
   });

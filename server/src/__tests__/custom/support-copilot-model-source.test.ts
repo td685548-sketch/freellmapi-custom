@@ -11,6 +11,7 @@ import { getDb, initDb } from '../../db/index.js';
 import { createSession, createUser, type SessionUser } from '../../services/auth.js';
 import { setUserPermissions } from '../../services/users.js';
 
+import { dashboardSessionHeaders } from '../helpers/auth.js';
 function installMockCloudLease(): void {
   process.env.FREEAPI_AI_ACTIVATION_TOKEN = 'dummy-test-token-never-sent';
   const lease: CloudSignedLease = {
@@ -113,7 +114,7 @@ describe('GET/PUT /api/support-setup-copilot/model-source', () => {
   const call = async (token: string, method: 'GET' | 'PUT', body?: unknown) => {
     const res = await fetch(`${base}/api/support-setup-copilot/model-source`, {
       method,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      headers: { 'Content-Type': 'application/json', ...dashboardSessionHeaders(token) },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     return { status: res.status, body: (await res.json().catch(() => null)) as Record<string, any> | null };

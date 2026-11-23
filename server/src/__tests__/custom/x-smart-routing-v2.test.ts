@@ -55,7 +55,7 @@ import {
   resetPricingOverrides,
   updatePricingOverrides,
 } from '../../custom/x-gateway/pricing.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 
 const realFetch = globalThis.fetch;
 
@@ -522,14 +522,14 @@ describe('Spec 032 — Smart Routing v2, Persistent Learned Caps & models.dev Sy
 
         // Read-only user can GET policy and POST classify-preview, but gets 403 on PUT policy
         const getPolRes = await realFetch(`${srv.baseUrl}/api/thruline/smart-routing/policy`, {
-          headers: { Authorization: `Bearer ${readerToken}` },
+          headers: { ...dashboardSessionHeaders(readerToken) },
         });
         expect(getPolRes.status).toBe(200);
 
         const previewRes = await realFetch(`${srv.baseUrl}/api/thruline/smart-routing/classify-preview`, {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${readerToken}`,
+            ...dashboardSessionHeaders(readerToken),
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ prompt: 'Tạo tiêu đề ngắn cho cuộc trò chuyện này' }),
@@ -541,7 +541,7 @@ describe('Spec 032 — Smart Routing v2, Persistent Learned Caps & models.dev Sy
         const forbiddenPut = await realFetch(`${srv.baseUrl}/api/thruline/smart-routing/policy`, {
           method: 'PUT',
           headers: {
-            Authorization: `Bearer ${readerToken}`,
+            ...dashboardSessionHeaders(readerToken),
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ enabled: true }),
@@ -572,7 +572,7 @@ describe('Spec 032 — Smart Routing v2, Persistent Learned Caps & models.dev Sy
         const putPolRes = await realFetch(`${srv.baseUrl}/api/thruline/smart-routing/policy`, {
           method: 'PUT',
           headers: {
-            Authorization: `Bearer ${adminToken}`,
+            ...dashboardSessionHeaders(adminToken),
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
@@ -696,7 +696,7 @@ describe('Spec 032 — Smart Routing v2, Persistent Learned Caps & models.dev Sy
 
         // 4. Admin GET & DELETE /learned-caps
         const capsGetRes = await realFetch(`${srv.baseUrl}/api/thruline/smart-routing/learned-caps`, {
-          headers: { Authorization: `Bearer ${adminToken}` },
+          headers: { ...dashboardSessionHeaders(adminToken) },
         });
         expect(capsGetRes.status).toBe(200);
         const capsPayload = (await capsGetRes.json()) as { caps: Array<{ modelId: string; maxOutputTokens: number }> };
@@ -706,7 +706,7 @@ describe('Spec 032 — Smart Routing v2, Persistent Learned Caps & models.dev Sy
 
         const capsDelRes = await realFetch(`${srv.baseUrl}/api/thruline/smart-routing/learned-caps`, {
           method: 'DELETE',
-          headers: { Authorization: `Bearer ${adminToken}` },
+          headers: { ...dashboardSessionHeaders(adminToken) },
         });
         expect(capsDelRes.status).toBe(200);
         const delPayload = (await capsDelRes.json()) as { cleared: number; caps: unknown[] };

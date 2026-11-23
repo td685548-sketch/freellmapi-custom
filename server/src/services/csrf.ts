@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type { Request, Response } from 'express';
-import { getSessionCookie, headerSessionToken, isHttpsRequest } from './session-cookie.js';
+import { getSessionCookie, isHttpsRequest } from './session-cookie.js';
 
 // CSRF protection for cookie-authed dashboard mutations — Phase 2 of the
 // session-cookie move (services/session-cookie.ts).
@@ -29,10 +29,14 @@ import { getSessionCookie, headerSessionToken, isHttpsRequest } from './session-
 //    presented without it, and the AuthGate calls /status before any
 //    mutation-capable UI renders, so the cookie is always there by then.
 //
-// Header-authed requests need no CSRF token: an attacker who does not know
-// the session token cannot put it in an Authorization header cross-site.
-// The token never leaves the server except inside the httpOnly cookie —
-// the CSRF value is NOT a session credential (knowing it alone
+// Phase 3: dashboard session auth is cookie-only, so EVERY authenticated
+// mutation needs a valid CSRF token — there is no header-authed request
+// left to exempt. An attacker who does not know the CSRF value cannot put
+// it in an X-CSRF-Token header cross-site (same-origin policy keeps the
+// flm_csrf cookie unreadable to them, and a custom header on a
+// cross-origin fetch would need a CORS preflight the allowlist denies
+// anyway). The token never leaves the server except inside the httpOnly
+// cookie — the CSRF value is NOT a session credential (knowing it alone
 // authenticates nothing), which is why it may live in a readable cookie.
 //
 // Cookie attributes mirror the session cookie (SameSite=Lax, Secure only on
@@ -105,14 +109,15 @@ export function csrfCheck(req: Request): CsrfStatus {
  * change-email, change-password).
  *
  * Returns true when the request may proceed; sends 403 and returns false
- * when a cookie-only mutation carries no (or a wrong) CSRF token. Requests
- * that are safe methods, header-authed, or carry no cookie session at all
- * always pass — the last case is left to the route's own session validation,
- * which answers 401.
+ * when a cookie mutation carries no (or a wrong) CSRF token. Requests
+ * that are safe methods or carry no cookie session at all always pass —
+ * the last case is left to the route's own session validation, which
+ * answers 401. (Phase 3: session auth is cookie-only, so there is no
+ * header-authed bypass anymore — every authenticated mutation needs the
+ * double-submit token.)
  */
 export function assertCsrfForCookieMutation(req: Request, res: Response): boolean {
   if (isSafeMethod(req.method)) return true;
-  if (headerSessionToken(req)) return true;
   if (!getSessionCookie(req)) return true;
   const status = csrfCheck(req);
   if (status === 'ok') return true;

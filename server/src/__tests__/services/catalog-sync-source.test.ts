@@ -4,7 +4,7 @@ import { createApp } from '../../app.js';
 import { initDb, getDb } from '../../db/index.js';
 import { applyCatalog } from '../../services/catalog-sync.js';
 import { applyDeclarativeConfig } from '../../services/declarative-config.js';
-import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
+import { mintDashboardToken, isGatedApiPath, dashboardSessionHeaders } from '../helpers/auth.js';
 
 // models.source is the provenance column that lets catalog-sync tell its own
 // rows apart from rows the user created. These tests pin the whole contract:
@@ -102,7 +102,7 @@ describe('models.source provenance', () => {
       method,
       headers: {
         'Content-Type': 'application/json',
-        ...(isGatedApiPath(path) ? { Authorization: `Bearer ${dashToken}` } : {}),
+        ...(isGatedApiPath(path) ? { ...dashboardSessionHeaders(dashToken) } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });

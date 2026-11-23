@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { Server } from 'node:http';
 import { createApp } from '../../app.js';
 import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 
 let server: Server;
 let origin: string;
@@ -21,7 +21,7 @@ it('requires dashboard authentication, not the unified inference key', async () 
     const response=await httpFetch(origin+'/api/fallback/quota-forecast',{headers:credential?{Authorization:'Bearer '+credential}:{}});
     expect(response.status).toBe(401);
   }
-  const response=await httpFetch(origin+'/api/fallback/quota-forecast',{headers:{Authorization:'Bearer '+token}});
+  const response=await httpFetch(origin+'/api/fallback/quota-forecast',{headers:{...dashboardSessionHeaders(token)}});
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({pools:[]});
 });
@@ -30,7 +30,7 @@ it('returns only outlook data without database changes or provider requests', as
     VALUES ('groq',1,'groq::account','requests',250,0,'2026-01-01T00:00:00Z','synthetic-private-note',datetime('now'),datetime('now'))`).run();
   const before=getDb().prepare('SELECT total_changes() AS n').get();
   const upstream=vi.spyOn(globalThis,'fetch').mockRejectedValue(new Error('Unexpected upstream request'));
-  const response=await httpFetch(origin+'/api/fallback/quota-forecast',{headers:{Authorization:'Bearer '+token}});
+  const response=await httpFetch(origin+'/api/fallback/quota-forecast',{headers:{...dashboardSessionHeaders(token)}});
   expect(response.status).toBe(200);
   const body=await response.json();
   expect(body.pools[0]).toMatchObject({platform:'groq',status:'stale',warning:null,remaining:0});

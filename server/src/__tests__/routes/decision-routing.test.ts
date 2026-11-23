@@ -6,7 +6,7 @@ import { encrypt } from '../../lib/crypto.js';
 import { clearAllCooldowns } from '../../services/ratelimit.js';
 import { resetDecisionRoutingCache } from '../../services/routing-decision.js';
 import { refreshStatsCache } from '../../services/router.js';
-import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
+import { mintDashboardToken, isGatedApiPath, dashboardSessionHeaders } from '../helpers/auth.js';
 import { seedDecisionModels } from '../helpers/decision-models.js';
 
 // End to end through the real chat surfaces (#1354): switch the strategy to
@@ -24,7 +24,7 @@ async function request(method: string, path: string, body?: any, headers: Record
     method,
     headers: {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
-      ...(isGatedApiPath(path) && !('Authorization' in headers) ? { Authorization: `Bearer ${dashToken}` } : {}),
+      ...(isGatedApiPath(path) && !('Authorization' in headers) && !('Cookie' in headers) ? { ...dashboardSessionHeaders(dashToken) } : {}),
       ...headers,
     },
     body: body ? JSON.stringify(body) : undefined,

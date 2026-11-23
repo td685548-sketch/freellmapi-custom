@@ -2,7 +2,7 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { getDb, initDb } from '../../db/index.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 
 // Read surface for per-attempt routing traces: the requests list carries a
 // cheap attemptCount per row, and GET /api/analytics/requests/:id returns the
@@ -17,7 +17,7 @@ async function request(app: Express, path: string) {
   const url = `http://127.0.0.1:${addr.port}${path}`;
 
   const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${dashToken}` },
+    headers: { ...dashboardSessionHeaders(dashToken) },
   });
   const data = await res.json().catch(() => null);
   server.close();

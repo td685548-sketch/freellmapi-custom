@@ -3,7 +3,7 @@ import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb } from '../../db/index.js';
 import { proxyFetch } from '../../lib/proxy.js';
-import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
+import { mintDashboardToken, isGatedApiPath, dashboardSessionHeaders } from '../helpers/auth.js';
 
 // SSRF guard (#440): the custom-provider base_url is the only user-supplied
 // outbound target. Metadata/link-local addresses must be rejected at save
@@ -19,7 +19,7 @@ async function post(app: Express, path: string, body: unknown) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(isGatedApiPath(path) ? { Authorization: `Bearer ${dashToken}` } : {}),
+      ...(isGatedApiPath(path) ? { ...dashboardSessionHeaders(dashToken) } : {}),
     },
     body: JSON.stringify(body),
   });

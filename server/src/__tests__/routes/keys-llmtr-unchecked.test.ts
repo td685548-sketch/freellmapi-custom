@@ -3,7 +3,7 @@ import type { Express } from 'express';
 import Database from 'better-sqlite3';
 import { createApp } from '../../app.js';
 import { initDb, getDb } from '../../db/index.js';
-import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
+import { mintDashboardToken, isGatedApiPath, dashboardSessionHeaders } from '../helpers/auth.js';
 import { up as reenableLlmtrKeys, down as undoReenableLlmtrKeys } from '../../db/migrations/20261017_000001_llmtr_reenable_keys.js';
 
 // #1459 follow-up: an LLMTR key the pre-v0.13.3 probe auto-disabled stayed
@@ -20,7 +20,7 @@ async function request(app: Express, method: string, path: string, body?: any) {
     method,
     headers: {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
-      ...(isGatedApiPath(path) ? { Authorization: `Bearer ${dashToken}` } : {}),
+      ...(isGatedApiPath(path) ? { ...dashboardSessionHeaders(dashToken) } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
   });

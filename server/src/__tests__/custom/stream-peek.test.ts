@@ -24,6 +24,7 @@ import {
   setAccountStatus,
 } from '../../custom/provider-accounts/store.js';
 import { invalidateConfigCache, setEnabled } from '../../custom/x-gateway/config.js';
+import { dashboardSessionHeaders } from '../helpers/auth.js';
 import {
   resetRouteHealth,
   resetSessionPins,
@@ -310,7 +311,7 @@ describe('stream-peek & webCookie/sticky routing safeguards', () => {
         fetch(`http://127.0.0.1:${port}/api/thruline/playground/chat`, {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${adminToken}`,
+            ...dashboardSessionHeaders(adminToken),
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ model: 'deepseek-web/auto', messages }),

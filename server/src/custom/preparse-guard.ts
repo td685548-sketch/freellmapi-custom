@@ -41,15 +41,14 @@ function bodyBytes(req: Request): number | null {
 }
 
 function sessionToken(req: Request): string | undefined {
-  // Phase 2: the dashboard sends the session as the httpOnly cookie now, so
-  // a large dashboard upload (e.g. an STT audio file) must pass this guard
-  // on the cookie. SameSite=Lax already means a cross-site POST does not
-  // carry the cookie, so accepting it here cannot let a remote caller force
-  // the server to parse a large body — the real auth + CSRF check still runs
-  // after parsing.
-  return req.headers.authorization?.replace(/^Bearer\s+/i, '')
-    ?? (req.headers['x-dashboard-token'] as string | undefined)
-    ?? getSessionCookie(req);
+  // Phase 3: the dashboard session arrives only as the httpOnly cookie
+  // now (the header fallback is gone). A large dashboard upload (e.g. an
+  // STT audio file) still passes this guard on the cookie. SameSite=Lax
+  // already means a cross-site POST does not carry the cookie, so
+  // accepting it here cannot let a remote caller force the server to
+  // parse a large body — the real auth + CSRF check still runs after
+  // parsing.
+  return getSessionCookie(req);
 }
 
 /** Read-only check of a `/v1/t/<token>/...` URL token (no last_used_at write). */

@@ -4,7 +4,7 @@ import { createApp } from '../../app.js';
 import { initDb, getDb } from '../../db/index.js';
 import { setCooldown, isOnCooldown } from '../../services/ratelimit.js';
 import { PROBE_MAX_TOKENS, REASONING_PROBE_MAX_TOKENS } from '../../services/model-discovery.js';
-import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
+import { mintDashboardToken, isGatedApiPath, dashboardSessionHeaders } from '../helpers/auth.js';
 
 // #488: a relay's model list changes weekly, so the endpoint's own /models
 // route is the source of truth for what the USER's key can reach. This is
@@ -25,7 +25,7 @@ async function request(app: Express, method: string, path: string, body?: unknow
     method,
     headers: {
       'Content-Type': 'application/json',
-      ...(auth && isGatedApiPath(path) ? { Authorization: `Bearer ${dashToken}` } : {}),
+      ...(auth && isGatedApiPath(path) ? { ...dashboardSessionHeaders(dashToken) } : {}),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });

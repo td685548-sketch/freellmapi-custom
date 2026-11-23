@@ -4,6 +4,7 @@ import { authRouter } from '../../routes/auth.js';
 import { initDb } from '../../db/index.js';
 import { getResetCode, clearResetCode } from '../../lib/reset-code.js';
 
+import { dashboardSessionHeaders } from '../helpers/auth.js';
 // Password reset without an active session (#560). Proof of identity is being
 // able to read the server logs, the same trust model first-run setup already
 // uses: POST /forgot-password mints a code and prints it, and the operator
@@ -57,7 +58,7 @@ async function get(app: Express, path: string, token: string) {
   const server = app.listen(0, '127.0.0.1');
   if (!server.listening) await new Promise<void>(resolve => server.once('listening', () => resolve()));
   const addr = server.address() as { port: number };
-  const res = await fetch(`http://127.0.0.1:${addr.port}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+  const res = await fetch(`http://127.0.0.1:${addr.port}${path}`, { headers: { ...dashboardSessionHeaders(token) } });
   const data = await res.json().catch(() => null);
   server.close();
   return { status: res.status, body: data };

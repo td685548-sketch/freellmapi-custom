@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb } from '../../db/index.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 
 // FIX 3: CSV export must neutralize formula-injection in free-text labels. A
 // label like `=HYPERLINK(...)` would run as a formula when the file is opened
@@ -16,7 +16,7 @@ async function post(app: Express, path: string, body: unknown) {
   const addr = server.address() as { port: number };
   const res = await fetch(`http://127.0.0.1:${addr.port}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${dashToken}` },
+    headers: { 'Content-Type': 'application/json', ...dashboardSessionHeaders(dashToken) },
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => null);
@@ -29,7 +29,7 @@ async function exportCsvText(app: Express): Promise<{ status: number; text: stri
   if (!server.listening) await new Promise<void>(resolve => server.once('listening', () => resolve()));
   const addr = server.address() as { port: number };
   const res = await fetch(`http://127.0.0.1:${addr.port}/api/keys/export?format=csv`, {
-    headers: { Authorization: `Bearer ${dashToken}`, 'x-reauth-password': 'password123' },
+    headers: { ...dashboardSessionHeaders(dashToken), 'x-reauth-password': 'password123' },
   });
   const text = await res.text();
   server.close();

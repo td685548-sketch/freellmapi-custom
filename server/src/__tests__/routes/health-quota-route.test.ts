@@ -7,7 +7,7 @@ import { encrypt } from '../../lib/crypto.js';
 import { requireAuth } from '../../middleware/requireAuth.js';
 import { resolveProvider } from '../../providers/index.js';
 import { healthRouter } from '../../routes/health.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 
 // POST /api/health/quota/:keyId — the manual override of the #1403 15-minute
 // health-poll throttle (#1404). Only the provider probe is replaced; the route,
@@ -44,7 +44,7 @@ describe('POST /api/health/quota/:keyId (#1403)', () => {
   };
 
   const post = (path: string) =>
-    fetch(`${url}/api/health${path}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+    fetch(`${url}/api/health${path}`, { method: 'POST', headers: { ...dashboardSessionHeaders(token) } });
 
   beforeEach(() => {
     getDb().prepare('DELETE FROM api_keys').run();

@@ -3,7 +3,7 @@ import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb } from '../../db/index.js';
 import { decrypt } from '../../lib/crypto.js';
-import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
+import { mintDashboardToken, isGatedApiPath, dashboardSessionHeaders } from '../helpers/auth.js';
 
 const realFetch = globalThis.fetch;
 
@@ -17,7 +17,7 @@ async function post(app: Express, path: string, body: unknown) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(isGatedApiPath(path) ? { Authorization: `Bearer ${dashToken}` } : {}),
+      ...(isGatedApiPath(path) ? { ...dashboardSessionHeaders(dashToken) } : {}),
     },
     body: JSON.stringify(body),
   });
@@ -31,7 +31,7 @@ async function get(app: Express, path: string) {
   if (!server.listening) await new Promise<void>(resolve => server.once('listening', () => resolve()));
   const addr = server.address() as any;
   const res = await realFetch(`http://127.0.0.1:${addr.port}${path}`, {
-    headers: isGatedApiPath(path) ? { Authorization: `Bearer ${dashToken}` } : {},
+    headers: isGatedApiPath(path) ? { ...dashboardSessionHeaders(dashToken) } : {},
   });
   const data = await res.json().catch(() => null);
   server.close();
@@ -44,7 +44,7 @@ async function del(app: Express, path: string) {
   const addr = server.address() as any;
   const res = await realFetch(`http://127.0.0.1:${addr.port}${path}`, {
     method: 'DELETE',
-    headers: isGatedApiPath(path) ? { Authorization: `Bearer ${dashToken}` } : {},
+    headers: isGatedApiPath(path) ? { ...dashboardSessionHeaders(dashToken) } : {},
   });
   const data = await res.json().catch(() => null);
   server.close();

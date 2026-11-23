@@ -17,7 +17,7 @@ import {
 } from '../../db/index.js';
 import { up, down } from '../../db/migrations/20261118_210000_custom_unified_key_hash.js';
 import { isWideBindHost, warnOnWideBind } from '../../middleware/allowed-hosts.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 
 const LEGACY_KEY = 'freellmapi-legacy-plaintext-key-0123456789abcdef';
 
@@ -151,7 +151,7 @@ describe('unified key hash storage (initDb)', () => {
     try {
       const addr = server.address() as { port: number };
       const res = await fetch(`http://127.0.0.1:${addr.port}/api/settings/api-key`, {
-        headers: { Authorization: `Bearer ${dashToken}` },
+        headers: { ...dashboardSessionHeaders(dashToken) },
       });
       const body = (await res.json()) as { apiKey: string | null; apiKeyPrefix: string | null; hasKey: boolean };
       expect(res.status).toBe(200);
@@ -170,7 +170,7 @@ describe('unified key hash storage (initDb)', () => {
       const addr = server.address() as { port: number };
       const res = await fetch(`http://127.0.0.1:${addr.port}/api/settings/api-key/regenerate`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${dashToken}` },
+        headers: { ...dashboardSessionHeaders(dashToken) },
       });
       const body = (await res.json()) as { apiKey: string; apiKeyPrefix: string };
       expect(res.status).toBe(200);
@@ -179,7 +179,7 @@ describe('unified key hash storage (initDb)', () => {
       expect(body.apiKeyPrefix).toBe(unifiedKeyPrefix(body.apiKey));
       // A follow-up GET still does not reveal it.
       const get = await fetch(`http://127.0.0.1:${addr.port}/api/settings/api-key`, {
-        headers: { Authorization: `Bearer ${dashToken}` },
+        headers: { ...dashboardSessionHeaders(dashToken) },
       });
       const getBody = (await get.json()) as { apiKey: string | null };
       expect(getBody.apiKey).toBeNull();

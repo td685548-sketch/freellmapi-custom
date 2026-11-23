@@ -4,7 +4,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { createApp } from '../../app.js';
 import { getDb, initDb } from '../../db/index.js';
 import { createUser, createSession } from '../../services/auth.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 import { GoogleProvider } from '../../providers/google.js';
 import { createApiKeyAccount, invalidateXGatewayKeyCache } from '../../custom/provider-accounts/store.js';
 import { mintXGatewayClientKey } from '../../custom/x-gateway/client-keys.js';
@@ -1033,12 +1033,12 @@ describe('Spec 031: Cross-Turn Reasoning & Thought-Signature Continuity Store', 
     const viewerToken = createSession(limitedMember.userId);
 
     const viewerGet = await jsonRequest(port, 'GET', '/api/thruline/thinking-continuity', {
-      headers: { Authorization: `Bearer ${viewerToken}` },
+      headers: { ...dashboardSessionHeaders(viewerToken) },
     });
     expect(viewerGet.status).toBe(200);
 
     const viewerPut = await jsonRequest(port, 'PUT', '/api/thruline/thinking-continuity', {
-      headers: { Authorization: `Bearer ${viewerToken}` },
+      headers: { ...dashboardSessionHeaders(viewerToken) },
       body: { mode: 'bypass' },
     });
     expect(viewerPut.status).toBe(403);
@@ -1062,7 +1062,7 @@ describe('Spec 031: Cross-Turn Reasoning & Thought-Signature Continuity Store', 
       connectionId: '1',
     });
 
-    const adminHeaders = { Authorization: `Bearer ${adminSessionToken}` };
+    const adminHeaders = { ...dashboardSessionHeaders(adminSessionToken) };
     const statusRes = await jsonRequest(port, 'GET', '/api/thruline/thinking-continuity', {
       headers: adminHeaders,
     });

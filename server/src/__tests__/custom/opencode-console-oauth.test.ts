@@ -30,6 +30,7 @@ import {
 import { generateOpenCodeSessionId, OPENCODE_SESSION_RE, OpenCodeProvider, _resetOpenCodeStateForTests } from '../../custom/provider-accounts/opencode.js';
 import { AccountError } from '../../custom/provider-accounts/http.js';
 
+import { dashboardSessionHeaders } from '../helpers/auth.js';
 const mockProxyFetch = vi.hoisted(() => vi.fn());
 vi.mock('../../lib/proxy.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../lib/proxy.js')>()),
@@ -554,7 +555,7 @@ describe('OpenCode Console OAuth routes', () => {
     const realFetch = globalThis.fetch.bind(globalThis);
     try {
       const call = (path: string, method: string) => realFetch(`http://127.0.0.1:${port}${path}`, {
-        method, headers: { Authorization: `Bearer ${session}`, 'Content-Type': 'application/json' },
+        method, headers: { ...dashboardSessionHeaders(session), 'Content-Type': 'application/json' },
       });
       const startRes = await call(`/api/thruline-accounts/opencode-oauth/${accountId}/start`, 'POST');
       expect(startRes.status).toBe(201);

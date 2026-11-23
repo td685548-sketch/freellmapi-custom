@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb } from '../../db/index.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 
 // A key label is free text, but the .env export writes it as a `# label`
 // comment line and the CSV export writes it as one cell. A label containing a
@@ -20,7 +20,7 @@ async function post(app: Express, path: string, body: unknown) {
   const addr = server.address() as { port: number };
   const res = await fetch(`http://127.0.0.1:${addr.port}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${dashToken}` },
+    headers: { 'Content-Type': 'application/json', ...dashboardSessionHeaders(dashToken) },
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => null);
@@ -33,7 +33,7 @@ async function exportEnvText(app: Express): Promise<{ status: number; text: stri
   if (!server.listening) await new Promise<void>(resolve => server.once('listening', () => resolve()));
   const addr = server.address() as { port: number };
   const res = await fetch(`http://127.0.0.1:${addr.port}/api/keys/export?format=env`, {
-    headers: { Authorization: `Bearer ${dashToken}`, 'x-reauth-password': 'password123' },
+    headers: { ...dashboardSessionHeaders(dashToken), 'x-reauth-password': 'password123' },
   });
   const text = await res.text();
   server.close();
@@ -45,7 +45,7 @@ async function exportCsvText(app: Express): Promise<{ status: number; text: stri
   if (!server.listening) await new Promise<void>(resolve => server.once('listening', () => resolve()));
   const addr = server.address() as { port: number };
   const res = await fetch(`http://127.0.0.1:${addr.port}/api/keys/export?format=csv`, {
-    headers: { Authorization: `Bearer ${dashToken}`, 'x-reauth-password': 'password123' },
+    headers: { ...dashboardSessionHeaders(dashToken), 'x-reauth-password': 'password123' },
   });
   const text = await res.text();
   server.close();
@@ -113,7 +113,7 @@ describe('Key label — no newline injection into exports', () => {
     const addr = server.address() as { port: number };
     const upd = await fetch(`http://127.0.0.1:${addr.port}/api/keys/${id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${dashToken}` },
+      headers: { 'Content-Type': 'application/json', ...dashboardSessionHeaders(dashToken) },
       body: JSON.stringify({ label: 'a\r\nBROKEN=1' }),
     });
     server.close();

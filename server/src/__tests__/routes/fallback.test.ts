@@ -5,7 +5,7 @@ import { getDb, initDb } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
 import { recordRateLimitHit } from '../../services/router.js';
 import { setCooldown } from '../../services/ratelimit.js';
-import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
+import { mintDashboardToken, isGatedApiPath, dashboardSessionHeaders } from '../helpers/auth.js';
 
 let dashToken = '';
 
@@ -19,7 +19,7 @@ async function request(app: Express, method: string, path: string, body?: any) {
     method,
     headers: {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
-      ...(isGatedApiPath(path) ? { Authorization: `Bearer ${dashToken}` } : {}),
+      ...(isGatedApiPath(path) ? { ...dashboardSessionHeaders(dashToken) } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
   });

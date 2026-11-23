@@ -3,7 +3,7 @@ import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { getStickyModel, setStickyModel } from '../../routes/proxy.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 
 // Stream turn-integrity (#231 audit): the proxy must deliver agent-usable
 // TURNS, not transport bytes. These tests feed crafted upstream SSE bodies
@@ -90,7 +90,7 @@ describe('proxy stream turn-integrity', () => {
     // failover hops between groq models while staying on this mock.
     const { status } = await request(app, '/api/keys',
       { platform: 'groq', key: 'gsk_stream_integrity', label: 't' },
-      { Authorization: `Bearer ${dashToken}` });
+      { ...dashboardSessionHeaders(dashToken) });
     expect(status).toBe(201);
   });
 

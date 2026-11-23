@@ -15,6 +15,7 @@ import { resetQuotaCaches } from '../../services/usage-quotas.js';
 import { mintUserApiKey } from '../../services/user-keys.js';
 import { addToActiveChain } from '../helpers/chain.js';
 
+import { dashboardSessionHeaders } from '../helpers/auth.js';
 interface CapturedUpstreamCall {
   model: string;
   stream: boolean;
@@ -46,7 +47,7 @@ async function apiJson(
     method,
     headers: {
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(token ? { ...dashboardSessionHeaders(token) } : {}),
       ...(extraHeaders ?? {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -533,7 +534,7 @@ describe('Spec 038: Personal AI Agent Workspace, Custom Assistants, Threads & Ar
       headers: {
         'Content-Type': 'application/json',
         Accept: 'text/event-stream',
-        Authorization: `Bearer ${userAToken}`,
+        ...dashboardSessionHeaders(userAToken),
       },
       body: JSON.stringify({
         assistantRef: 'code-reviewer',
@@ -578,7 +579,7 @@ describe('Spec 038: Personal AI Agent Workspace, Custom Assistants, Threads & Ar
       headers: {
         'Content-Type': 'application/json',
         Accept: 'text/event-stream',
-        Authorization: `Bearer ${userAToken}`,
+        ...dashboardSessionHeaders(userAToken),
       },
       body: JSON.stringify({
         message: 'Now check rate limiting headers.',

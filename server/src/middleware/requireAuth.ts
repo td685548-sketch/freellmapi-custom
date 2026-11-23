@@ -4,20 +4,19 @@ import { sessionTokenFromRequest } from '../services/session-cookie.js';
 import { assertCsrfForCookieMutation } from '../services/csrf.js';
 
 // Gate the /api/* admin surface behind a dashboard session (#35, item #2).
-// The token is the opaque session token issued by /api/auth/login|setup, sent
-// as `Authorization: Bearer <token>` — or, since the httpOnly-cookie move,
-// as the `flm_session` cookie the browser sends automatically. The /v1 proxy
-// is NOT gated by this — it keeps its own unified-API-key auth for app
-// clients.
+// The token is the opaque session token issued by /api/auth/login|setup,
+// carried ONLY as the `flm_session` httpOnly cookie the browser sends
+// automatically (Phase 3 dropped the Authorization / x-dashboard-token
+// header fallback). The /v1 proxy is NOT gated by this — it keeps its own
+// unified-API-key auth for app clients.
 //
 // Cookie auth and CSRF (Phase 2, services/csrf.ts): a cookie is sent
 // automatically by the browser, so a cross-site request would carry it
-// where the header could never be known. A cookie-only mutation is
-// therefore accepted only with a valid double-submit CSRF token
-// (X-CSRF-Token header == flm_csrf cookie); without one it is refused with
-// 403 csrf_required / csrf_invalid. The header always wins when both are
-// present, so a stale cookie can never override a good header, and
-// header-authed requests need no CSRF token at all.
+// where the header could never be known. A cookie mutation is therefore
+// accepted only with a valid double-submit CSRF token (X-CSRF-Token header
+// == flm_csrf cookie); without one it is refused with 403 csrf_required /
+// csrf_invalid. Phase 3 removed the header-authed exemption, so every
+// authenticated mutation needs the token.
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
   const token = sessionTokenFromRequest(req);
   // The boundary runs before the fast path below: the gate is entered twice

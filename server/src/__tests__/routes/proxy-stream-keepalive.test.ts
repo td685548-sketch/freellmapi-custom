@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vite
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 
 // #1642: SSE keep-alive pings through the real proxy route. Upstreams here
 // stream a reasoning token first (the hop proves itself alive), then go
@@ -161,7 +161,7 @@ describe('proxy SSE keep-alive (#1642)', () => {
     const addr = server.address() as any;
     const res = await fetch(`http://127.0.0.1:${addr.port}/api/keys`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + dashToken },
+      headers: { 'Content-Type': 'application/json', ...dashboardSessionHeaders(dashToken) },
       body: JSON.stringify({ platform: 'groq', key: 'gsk_keepalive', label: 't' }),
     });
     const status = res.status;

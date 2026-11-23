@@ -5,7 +5,7 @@ import http from 'node:http';
 import { createApp } from '../../app.js';
 import { initDb, getSetting, setSetting } from '../../db/index.js';
 import { createUpdateRouter, UPDATE_CHECK_SETTING } from '../../routes/update.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 
 const NOW = Date.parse('2026-08-09T14:00:00.000Z');
 const RELEASE_URL = 'https://api.github.com/repos/td685548-sketch/freellmapi-custom/releases/latest';
@@ -199,7 +199,7 @@ describe('/api/settings/update-check', () => {
     const address = server.address() as { port: number };
     const res = await fetch(`http://127.0.0.1:${address.port}/api/settings/update-check`, {
       method,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      headers: { 'Content-Type': 'application/json', ...dashboardSessionHeaders(token) },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const json = await res.json().catch(() => null) as any;

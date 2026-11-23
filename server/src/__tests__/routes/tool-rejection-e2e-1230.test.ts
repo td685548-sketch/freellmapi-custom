@@ -7,7 +7,7 @@ import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { setRoutingStrategy, setExploreEnabled } from '../../services/router.js';
 import { resetToolCapability } from '../../lib/tool-capability.js';
 import { clearCooldownsForKey } from '../../services/ratelimit.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 import { addToActiveChain } from '../helpers/chain.js';
 
 // #1230 end to end, against two REAL local relays. `bad` answers every request
@@ -60,7 +60,14 @@ describe('a relay that rejects tool calls stops costing every tool request a hop
     const { port } = server.address() as AddressInfo;
     const res = await fetch(`http://127.0.0.1:${port}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      headers: {
+        'Content-Type': 'application/json',
+        // Phase 3: dashboard routes take the session cookie; /v1 takes the
+        // unified API key as Bearer.
+        ...(path.startsWith('/v1')
+          ? { Authorization: `Bearer ${token}` }
+          : { ...dashboardSessionHeaders(token) }),
+      },
       body: JSON.stringify(body),
     });
     const data = await res.json().catch(() => null) as any;

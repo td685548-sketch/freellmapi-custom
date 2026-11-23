@@ -3,7 +3,7 @@ import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb } from '../../db/index.js';
 import { encrypt, decrypt } from '../../lib/crypto.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 
 // #687: exporting every key and importing the file back has to return the
 // custom OpenAI-compatible endpoints too. They were dropped three ways at once:
@@ -17,7 +17,7 @@ async function exportText(app: Express, format: string): Promise<string> {
   if (!server.listening) await new Promise<void>(resolve => server.once('listening', () => resolve()));
   const addr = server.address() as { port: number };
   const res = await fetch(`http://127.0.0.1:${addr.port}/api/keys/export?format=${format}`, {
-    headers: { Authorization: `Bearer ${dashToken}`, 'x-reauth-password': 'password123' },
+    headers: { ...dashboardSessionHeaders(dashToken), 'x-reauth-password': 'password123' },
   });
   const text = await res.text();
   server.close();
@@ -32,7 +32,7 @@ async function importFile(app: Express, filename: string, content: string) {
   form.append('file', new Blob([content], { type: 'text/plain' }), filename);
   const res = await fetch(`http://127.0.0.1:${addr.port}/api/keys/import`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${dashToken}` },
+    headers: { ...dashboardSessionHeaders(dashToken) },
     body: form,
   });
   const body = await res.json();
@@ -45,7 +45,7 @@ async function listKeys(app: Express) {
   if (!server.listening) await new Promise<void>(resolve => server.once('listening', () => resolve()));
   const addr = server.address() as { port: number };
   const res = await fetch(`http://127.0.0.1:${addr.port}/api/keys`, {
-    headers: { Authorization: `Bearer ${dashToken}` },
+    headers: { ...dashboardSessionHeaders(dashToken) },
   });
   const body = await res.json();
   server.close();

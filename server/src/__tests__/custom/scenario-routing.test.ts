@@ -11,6 +11,7 @@ import { clearVerifyPingsForTests } from '../../custom/scenario-routing/store.js
 import { getDb, initDb, setSetting } from '../../db/index.js';
 import { logRequest } from '../../lib/request-log.js';
 import { createSession, createUser } from '../../services/auth.js';
+import { dashboardSessionHeaders } from '../helpers/auth.js';
 import { clearReasoningMemory } from '../../routes/proxy.js';
 import { mintUserApiKey } from '../../services/user-keys.js';
 import { IDE_PACKAGER_TOOLS } from '@freellmapi/shared/scenario-routing.js';
@@ -46,7 +47,14 @@ async function apiRequest(
     method: options?.method ?? 'GET',
     headers: {
       ...(options?.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-      ...(options?.token ? { Authorization: `Bearer ${options.token}` } : {}),
+      // Phase 3: session tokens (64 hex chars) go as the flm_session cookie;
+      // personal API keys (sk-flm-…) and the fake key stay Bearer — including
+      // on /api routes such as verify-ping, which authenticates by key.
+      ...(options?.token
+        ? (/^[0-9a-f]{64}$/.test(options.token)
+          ? { ...dashboardSessionHeaders(options.token) }
+          : { Authorization: `Bearer ${options.token}` })
+        : {}),
       ...(options?.headers ?? {}),
     },
     body: options?.body !== undefined ? JSON.stringify(options.body) : undefined,

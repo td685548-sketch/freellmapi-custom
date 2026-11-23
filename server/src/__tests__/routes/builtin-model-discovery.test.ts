@@ -3,7 +3,7 @@ import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb } from '../../db/index.js';
 import { resetBuiltinDiscoveryThrottle } from '../../services/builtin-model-discovery.js';
-import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
+import { mintDashboardToken, isGatedApiPath, dashboardSessionHeaders } from '../helpers/auth.js';
 
 // #1348: the dashboard's Fetch models action, extended from custom endpoints
 // to built-in providers the signed catalog carries no models for.
@@ -21,7 +21,7 @@ async function request(app: Express, method: string, path: string, body?: unknow
     method,
     headers: {
       'Content-Type': 'application/json',
-      ...(auth && isGatedApiPath(path) ? { Authorization: `Bearer ${dashToken}` } : {}),
+      ...(auth && isGatedApiPath(path) ? { ...dashboardSessionHeaders(dashToken) } : {}),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });

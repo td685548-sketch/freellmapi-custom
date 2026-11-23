@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vite
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
-import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
+import { mintDashboardToken, isGatedApiPath, dashboardSessionHeaders } from '../helpers/auth.js';
 
 let dashToken = '';
 
@@ -16,7 +16,7 @@ async function request(app: Express, method: string, path: string, body?: any, h
     method,
     headers: {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
-      ...(isGatedApiPath(path) && !('Authorization' in headers) ? { Authorization: `Bearer ${dashToken}` } : {}),
+      ...(isGatedApiPath(path) && !('Authorization' in headers) && !('Cookie' in headers) ? { ...dashboardSessionHeaders(dashToken) } : {}),
       ...headers,
     },
     body: body ? JSON.stringify(body) : undefined,

@@ -3,7 +3,7 @@ import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { getDb, regenerateUnifiedKey, initDb, setSetting } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 import { isLoopback } from '../../routes/ollama.js';
 
 async function request(
@@ -131,7 +131,7 @@ describe('Ollama emulation', () => {
   it('returns 401 for a stale dashboard session on the shared embeddings path', async () => {
     setSetting('ollama_emulation', 'off');
     const response = await request(app, 'POST', '/api/embeddings', {}, {
-      Authorization: 'Bearer stale-session-token',
+      Cookie: 'flm_session=stale-dashboard-token',
     });
     expect(response.status).toBe(401);
   });
@@ -265,7 +265,7 @@ describe('Ollama emulation', () => {
     expect(ollama.body.error).toContain('invalid request');
 
     const dashboard = await request(app, 'POST', '/api/embeddings', {}, {
-      Authorization: `Bearer ${dashboardToken}`,
+      ...dashboardSessionHeaders(dashboardToken),
     });
     expect(dashboard.status).toBe(404);
     expect(dashboard.text).not.toContain('invalid request');

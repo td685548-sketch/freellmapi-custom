@@ -3,7 +3,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vite
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb } from '../../db/index.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 
 // #382, remaining gap: an imported custom endpoint can carry the models it
 // serves. Chat ids go through the same registration POST /custom runs;
@@ -20,7 +20,7 @@ async function post(app: Express, path: string, body: unknown) {
   const addr = server.address() as { port: number };
   const res = await realFetch(`http://127.0.0.1:${addr.port}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${dashToken}` },
+    headers: { 'Content-Type': 'application/json', ...dashboardSessionHeaders(dashToken) },
     body: JSON.stringify(body),
   });
   const json = await res.json().catch(() => null);
@@ -36,7 +36,7 @@ async function previewFile(app: Express, filename: string, content: string) {
   form.append('files', new Blob([content], { type: 'text/plain' }), filename);
   const res = await realFetch(`http://127.0.0.1:${addr.port}/api/keys/preview`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${dashToken}` },
+    headers: { ...dashboardSessionHeaders(dashToken) },
     body: form,
   });
   const json = await res.json().catch(() => null);

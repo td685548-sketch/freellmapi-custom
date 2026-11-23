@@ -51,6 +51,7 @@ import { mintXGatewayClientKey } from '../../custom/x-gateway/client-keys.js';
 import { resetRouteHealth, resetSessionPins, isAutoPickedModel, resolveCandidateRoutes, shouldSkipProviderAfterFailure } from '../../custom/x-gateway/router.js';
 import { classifyRouteError } from '../../custom/x-gateway/route-cooldown.js';
 
+import { dashboardSessionHeaders } from '../helpers/auth.js';
 const REAL_FETCH = globalThis.fetch.bind(globalThis);
 
 describe('Spec 033 — Hierarchical Account Semaphore, Weighted Credentials & Persisted OAuth Refresh Circuit', () => {
@@ -450,7 +451,7 @@ describe('Spec 033 — Hierarchical Account Semaphore, Weighted Credentials & Pe
       const putRes1 = await REAL_FETCH(`${baseUrl}/api/thruline-accounts/${acc1}/resilience`, {
         method: 'PUT',
         headers: {
-          Authorization: `Bearer ${adminToken}`,
+          ...dashboardSessionHeaders(adminToken),
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ weight: 5, maxConcurrency: 1, maxQueueSize: 4, failFast: true }),
@@ -467,7 +468,7 @@ describe('Spec 033 — Hierarchical Account Semaphore, Weighted Credentials & Pe
       const badPut = await REAL_FETCH(`${baseUrl}/api/thruline-accounts/${acc1}/resilience`, {
         method: 'PUT',
         headers: {
-          Authorization: `Bearer ${adminToken}`,
+          ...dashboardSessionHeaders(adminToken),
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ weight: 1_000_001 }),
@@ -477,7 +478,7 @@ describe('Spec 033 — Hierarchical Account Semaphore, Weighted Credentials & Pe
       // Seed a refresh failure on acc2, inspect via GET /resilience, then clear via POST /reset-circuit
       recordRefreshCircuitFailure(acc2, new Error('Temporary OAuth 503 with token=secret_abc_123456'));
       const listRes = await REAL_FETCH(`${baseUrl}/api/thruline-accounts/resilience`, {
-        headers: { Authorization: `Bearer ${adminToken}` },
+        headers: { ...dashboardSessionHeaders(adminToken) },
       });
       expect(listRes.status).toBe(200);
       const listJson = (await listRes.json()) as {
@@ -491,7 +492,7 @@ describe('Spec 033 — Hierarchical Account Semaphore, Weighted Credentials & Pe
       const resetRes = await REAL_FETCH(`${baseUrl}/api/thruline-accounts/${acc2}/resilience/reset-circuit`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${adminToken}`,
+          ...dashboardSessionHeaders(adminToken),
           'Content-Type': 'application/json',
         },
         body: '{}',
@@ -503,7 +504,7 @@ describe('Spec 033 — Hierarchical Account Semaphore, Weighted Credentials & Pe
       await REAL_FETCH(`${baseUrl}/api/thruline-accounts/${acc2}/resilience`, {
         method: 'PUT',
         headers: {
-          Authorization: `Bearer ${adminToken}`,
+          ...dashboardSessionHeaders(adminToken),
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ weight: 1, maxConcurrency: 1, failFast: true }),
@@ -615,7 +616,7 @@ describe('Spec 033 — Hierarchical Account Semaphore, Weighted Credentials & Pe
       const forbiddenRes = await REAL_FETCH(`${baseUrl}/api/thruline-accounts/${streamAcc}/resilience`, {
         method: 'PUT',
         headers: {
-          Authorization: `Bearer ${memberToken}`,
+          ...dashboardSessionHeaders(memberToken),
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ weight: 5 }),

@@ -32,7 +32,7 @@ import {
   stopSupportEventWorker,
 } from '../../custom/x-gateway/support-event-outbox.js';
 import { createSupportTenant } from '../../custom/x-gateway/support-store.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 
 function rawHttpGet(
   port: number,
@@ -275,7 +275,7 @@ describe('render resource saver', () => {
 
       // Large authenticated /api/models GET response must be gzipped when RENDER=true.
       const modelsRes = await rawHttpGet(port, '/api/models', {
-        Authorization: `Bearer ${dashboardToken}`,
+        ...dashboardSessionHeaders(dashboardToken),
         'Accept-Encoding': 'gzip',
       });
       expect(modelsRes.status).toBe(200);

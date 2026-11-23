@@ -11,7 +11,7 @@ import {
   setKeySelectionStrategy,
 } from '../../services/router.js';
 import { recordQuotaObservation } from '../../services/provider-quota.js';
-import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
+import { mintDashboardToken, isGatedApiPath, dashboardSessionHeaders } from '../helpers/auth.js';
 
 let app: Express;
 let dashToken = '';
@@ -24,7 +24,7 @@ async function request(method: string, path: string, body?: any) {
     method,
     headers: {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
-      ...(isGatedApiPath(path) ? { Authorization: `Bearer ${dashToken}` } : {}),
+      ...(isGatedApiPath(path) ? { ...dashboardSessionHeaders(dashToken) } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
   });

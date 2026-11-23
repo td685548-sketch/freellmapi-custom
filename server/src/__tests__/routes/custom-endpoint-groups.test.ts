@@ -5,7 +5,7 @@ import { createApp } from '../../app.js';
 import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { getModelGroups, resolveRequestedIdToMembers } from '../../services/model-groups.js';
 import { groupHandle } from '../../lib/endpoint-scope.js';
-import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
+import { mintDashboardToken, isGatedApiPath, dashboardSessionHeaders } from '../helpers/auth.js';
 
 // Endpoint groups (#1176). A custom endpoint can be filed under an operator-set
 // group label. The label belongs to the endpoint (every key in its pool), sorts
@@ -24,7 +24,7 @@ async function request(app: Express, method: string, path: string, body?: unknow
     method,
     headers: {
       'Content-Type': 'application/json',
-      ...(auth ? { Authorization: `Bearer ${auth}` } : isGatedApiPath(path) ? { Authorization: `Bearer ${dashToken}` } : {}),
+      ...(auth ? { Authorization: `Bearer ${auth}` } : isGatedApiPath(path) ? { ...dashboardSessionHeaders(dashToken) } : {}),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });

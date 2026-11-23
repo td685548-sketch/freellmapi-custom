@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, beforeAll } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb } from '../../db/index.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 import { getAppVersion, resetAppVersionCache } from '../../lib/app-version.js';
 
 // #703: the dashboard had no way to show which release it is. The number users
@@ -84,7 +84,7 @@ describe('GET /api/settings/version', () => {
   }
 
   it('serves the version to a signed-in dashboard', async () => {
-    const { status, body } = await get({ Authorization: `Bearer ${token}` });
+    const { status, body } = await get({ ...dashboardSessionHeaders(token) });
     expect(status).toBe(200);
     expect(body.version).toMatch(/^\d+\.\d+\.\d+/);
   });

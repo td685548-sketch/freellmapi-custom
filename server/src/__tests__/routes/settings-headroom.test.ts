@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getSetting } from '../../db/index.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 import { HEADROOM_RAMP_START_KEY, HEADROOM_FLOOR_KEY } from '../../services/router.js';
 
 async function request(app: Express, method: string, path: string, body: any, token: string) {
@@ -11,7 +11,7 @@ async function request(app: Express, method: string, path: string, body: any, to
   const addr = server.address() as any;
   const res = await fetch(`http://127.0.0.1:${addr.port}${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: { 'Content-Type': 'application/json', ...dashboardSessionHeaders(token) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const raw = await res.text();

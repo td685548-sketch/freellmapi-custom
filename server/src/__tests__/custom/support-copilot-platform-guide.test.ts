@@ -21,6 +21,7 @@ import { createSession, createUser } from '../../services/auth.js';
 import { invalidateKeyCache } from '../../services/key-cache.js';
 import { setUserPermissions } from '../../services/users.js';
 
+import { dashboardSessionHeaders } from '../helpers/auth.js';
 function assertFluentHumanReply(reply: string) {
   expect(reply.trim().length).toBeGreaterThan(60);
   // Never dump stiff numbered intake questionnaires
@@ -49,7 +50,7 @@ describe('AI Support Setup Copilot — Platform & Current-Page Expertise', () =>
       method,
       headers: {
         ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(token ? { ...dashboardSessionHeaders(token) } : {}),
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });

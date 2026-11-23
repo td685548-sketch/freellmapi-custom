@@ -104,15 +104,11 @@ function selfTarget(req: Request): { host: string; port: number } {
 }
 
 function callerSessionToken(req: Request): string | undefined {
-  // Phase 2: the dashboard sends the session as the httpOnly cookie now.
-  // The token is forwarded as X-FreeLLM-Session on the server-side loopback
-  // call, never back to browser JS.
-  const bearer = req.headers.authorization?.replace(/^Bearer\s+/i, '').trim();
-  if (bearer) return bearer;
-  const dash = req.headers['x-dashboard-token'];
-  return (Array.isArray(dash) ? dash[0] : dash)?.trim()
-    || getSessionCookie(req)
-    || undefined;
+  // Phase 3: the dashboard session arrives only as the httpOnly cookie
+  // now (the header fallback is gone). The token is forwarded as
+  // X-FreeLLM-Session on the server-side loopback call, never back to
+  // browser JS.
+  return getSessionCookie(req) || undefined;
 }
 
 function effectiveUserRpmLimit(userId: number): number {

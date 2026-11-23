@@ -11,7 +11,7 @@ vi.mock('../../services/router.js', async (importOriginal) => {
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, regenerateUnifiedKey } from '../../db/index.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 
 let dashToken = '';
 
@@ -28,7 +28,13 @@ async function request(
     method,
     headers: {
       ...(opts.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : {}),
+      // Phase 3: dashboard routes take the session cookie; /v1 and /v1beta
+      // take API keys (client-profile / unified) as Bearer.
+      ...(opts.token
+        ? (path.startsWith('/v1')
+          ? { Authorization: `Bearer ${opts.token}` }
+          : { ...dashboardSessionHeaders(opts.token) })
+        : {}),
     },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });

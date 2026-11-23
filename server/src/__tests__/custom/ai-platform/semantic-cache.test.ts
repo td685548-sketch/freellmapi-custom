@@ -36,7 +36,7 @@ import {
 import { hashClientProfileKey, mintClientProfileKey } from '../../../lib/system-prompt.js';
 import { createSupportTenant } from '../../../custom/x-gateway/support-store.js';
 import { createUser, createSession } from '../../../services/auth.js';
-import { mintDashboardToken } from '../../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../../helpers/auth.js';
 
 function seedClientProfile(name: string): { id: number; rawKey: string } {
   const rawKey = mintClientProfileKey();
@@ -589,14 +589,14 @@ describe('Spec 030 — Multi-Scope Semantic Response Cache', () => {
       // 1. Unauthorized member gets 403
       const forbiddenRes = await fetch(
         `${base}/api/ai-platform/semantic-cache/profile/${profileOneId}/settings`,
-        { headers: { Authorization: `Bearer ${noPermToken}` } },
+        { headers: { ...dashboardSessionHeaders(noPermToken) } },
       );
       expect(forbiddenRes.status).toBe(403);
 
       // 2. Viewer can GET settings, cannot PUT settings (403)
       const viewerGet = await fetch(
         `${base}/api/ai-platform/semantic-cache/profile/${profileOneId}/settings`,
-        { headers: { Authorization: `Bearer ${viewerToken}` } },
+        { headers: { ...dashboardSessionHeaders(viewerToken) } },
       );
       expect(viewerGet.status).toBe(200);
 
@@ -605,7 +605,7 @@ describe('Spec 030 — Multi-Scope Semantic Response Cache', () => {
         {
           method: 'PUT',
           headers: {
-            Authorization: `Bearer ${viewerToken}`,
+            ...dashboardSessionHeaders(viewerToken),
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ enabled: true }),
@@ -619,7 +619,7 @@ describe('Spec 030 — Multi-Scope Semantic Response Cache', () => {
         {
           method: 'PUT',
           headers: {
-            Authorization: `Bearer ${adminToken}`,
+            ...dashboardSessionHeaders(adminToken),
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
@@ -667,7 +667,7 @@ describe('Spec 030 — Multi-Scope Semantic Response Cache', () => {
         {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${viewerToken}`,
+            ...dashboardSessionHeaders(viewerToken),
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
@@ -691,14 +691,14 @@ describe('Spec 030 — Multi-Scope Semantic Response Cache', () => {
       // Verify support-tenant URL slug works too
       const tenantStats = await fetch(
         `${base}/api/ai-platform/semantic-cache/support-tenant/${tenant.id}/stats`,
-        { headers: { Authorization: `Bearer ${adminToken}` } },
+        { headers: { ...dashboardSessionHeaders(adminToken) } },
       );
       expect(tenantStats.status).toBe(200);
 
       // 5. Stats check before flush (metrics untouched by lookup-preview)
       const statsRes = await fetch(
         `${base}/api/ai-platform/semantic-cache/profile/${profileOneId}/stats`,
-        { headers: { Authorization: `Bearer ${adminToken}` } },
+        { headers: { ...dashboardSessionHeaders(adminToken) } },
       );
       expect(statsRes.status).toBe(200);
       const statsJson = (await statsRes.json()) as {
@@ -713,7 +713,7 @@ describe('Spec 030 — Multi-Scope Semantic Response Cache', () => {
         {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${adminToken}`,
+            ...dashboardSessionHeaders(adminToken),
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ resetMetrics: true }),
