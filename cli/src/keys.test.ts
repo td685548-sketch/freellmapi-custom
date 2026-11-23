@@ -45,7 +45,15 @@ describe('provider key commands', () => {
     await main(['--url', 'http://localhost:3100/v1/', 'keys', 'add', 'groq', '--token', 'override', `--key=${secret}`]);
     expect(calls.map(c => c.path)).toEqual(['/api/keys/providers', '/api/keys', '/api/health/check/7', '/api/keys']);
     expect(calls[1].init.body).toBe(JSON.stringify({ platform: 'groq', key: secret }));
-    for (const call of calls) expect(new Headers(call.init.headers).get('Authorization')).toBe('Bearer override');
+    for (const call of calls) {
+      const headers = new Headers(call.init.headers);
+      expect(headers.get('Authorization')).toBeNull();
+      const cookie = headers.get('Cookie') ?? '';
+      expect(cookie).toContain('flm_session=override');
+      const csrf = cookie.split(';').map(part => part.trim()).find(part => part.startsWith('flm_csrf='))?.slice('flm_csrf='.length);
+      expect(csrf).toBeTruthy();
+      expect(headers.get('X-CSRF-Token')).toBe(csrf);
+    }
     expect(output).toContain('Saved groq key 7');
     expect(output).not.toContain(secret);
     expect(output).not.toContain(token);
