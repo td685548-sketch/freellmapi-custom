@@ -99,11 +99,24 @@ describe('Dashboard session as an httpOnly cookie — Phase 1', () => {
     expect(legacyClear).toHaveLength(1);
     expect(legacyClear[0]).toMatch(/Expires=Thu, 01 Jan 1970/);
     // The CSRF cookie rides along: readable by JS, same SameSite/Path.
+    // Path MUST be / (same as the session cookie): a Path=/api cookie is
+    // invisible to document.cookie on dashboard pages, so getCsrfToken()
+    // returned null and every cookie-authed mutation failed with 403
+    // csrf_required (live bug since the Phase 2 deploy).
     const csrfCookie = cookies.find(c => c.startsWith('flm_csrf='));
     expect(csrfCookie).toBeDefined();
     expect(csrfCookie!).not.toContain('HttpOnly');
     expect(csrfCookie!).toContain('SameSite=Lax');
-    expect(csrfCookie!).toContain('Path=/api');
+    expect(csrfCookie!).toContain('Path=/;');
+    // The mint also clears the legacy Path=/api CSRF cookie: a browser
+    // upgrading from the /api-scoped cookie may still hold one, which
+    // would otherwise shadow the new cookie (browsers send the longer
+    // path first and the server takes the first match, while dashboard JS
+    // can only see the Path=/ one). The set is emitted before the clear,
+    // so the first flm_csrf= match above is the live token.
+    const csrfLegacyClear = cookies.filter(c => c.startsWith('flm_csrf=') && c.includes('Path=/api'));
+    expect(csrfLegacyClear).toHaveLength(1);
+    expect(csrfLegacyClear[0]).toMatch(/Expires=Thu, 01 Jan 1970/);
     csrf = cookieValue(cookies, 'flm_csrf')!;
     cookie = `flm_session=${cookieValue(cookies, 'flm_session')}; flm_csrf=${csrf}`;
   });
@@ -165,9 +178,12 @@ describe('Dashboard session as an httpOnly cookie — Phase 1', () => {
     expect(cleared).toBeDefined();
     // Express clearCookie expires the cookie in the past.
     expect(cleared!).toMatch(/Expires=Thu, 01 Jan 1970/);
-    const csrfCleared = cookies.find(c => c.startsWith('flm_csrf='));
-    expect(csrfCleared).toBeDefined();
-    expect(csrfCleared!).toMatch(/Expires=Thu, 01 Jan 1970/);
+    // Logout clears the CSRF cookie on both paths: the current Path=/
+    // cookie and the legacy Path=/api one a browser may still hold.
+    const csrfCleared = cookies.filter(c => c.startsWith('flm_csrf='));
+    expect(csrfCleared.filter(c => c.includes('Path=/;'))).toHaveLength(1);
+    expect(csrfCleared.filter(c => c.includes('Path=/api'))).toHaveLength(1);
+    expect(csrfCleared.every(c => /Expires=Thu, 01 Jan 1970/.test(c))).toBe(true);
   });
 
   it('logout without a session does not touch the cookie', async () => {
@@ -188,5 +204,32 @@ describe('Dashboard session as an httpOnly cookie — Phase 1', () => {
     expect(setCookie!).not.toContain('Secure');
     expect(cookies.find(c => c.startsWith('flm_csrf='))).toBeDefined();
     delete process.env.FREEAPI_DESKTOP;
+  });
+
+  it('/status re-issues a legacy Path=/api CSRF cookie at Path=/ so dashboard JS can read it', async () => {
+    // A session created before the Path=/ widening holds only the legacy
+    // cookie: the browser sends it on /api requests, so the server sees
+    // a CSRF cookie — but dashboard JS cannot read it on dashboard pages,
+    // so every mutation 403s with csrf_required until the next login.
+    // /status must heal it by re-issuing the SAME value at Path=/ (no
+    // rotation, so in-flight mutations keep matching) and clearing the
+    // legacy /api cookie.
+    const { cookies: loginCookies } = await call(app, 'POST', '/api/auth/login', {
+      body: { email: 'admin@example.com', password: 'supersecret' },
+    });
+    const liveToken = cookieValue(loginCookies, 'flm_session')!;
+    const legacyValue = 'legacy-csrf-from-before-the-fix';
+    const { status, cookies } = await call(app, 'GET', '/api/auth/status', {
+      cookie: `flm_session=${liveToken}; flm_csrf=${legacyValue}`,
+    });
+    expect(status).toBe(200);
+    // The re-issued cookie carries the same value, at Path=/, emitted
+    // before the legacy clear so a first-match parser sees the live one.
+    expect(cookieValue(cookies, 'flm_csrf')).toBe(legacyValue);
+    const reissued = cookies.find(c => c.startsWith('flm_csrf='));
+    expect(reissued!).toContain('Path=/;');
+    const legacyClear = cookies.filter(c => c.startsWith('flm_csrf=') && c.includes('Path=/api'));
+    expect(legacyClear).toHaveLength(1);
+    expect(legacyClear[0]).toMatch(/Expires=Thu, 01 Jan 1970/);
   });
 });

@@ -40,8 +40,23 @@ import { getSessionCookie, isHttpsRequest } from './session-cookie.js';
 // authenticates nothing), which is why it may live in a readable cookie.
 //
 // Cookie attributes mirror the session cookie (SameSite=Lax, Secure only on
-// real HTTPS, Path=/api, maxAge = session TTL) so the two cookies are set
-// and cleared together.
+// real HTTPS, Path=/, maxAge = session TTL) so the two cookies are set
+// and cleared together. Path MUST be / — not /api: the client reads this
+// cookie via document.cookie on dashboard pages (/, /thruline, /settings,
+// none of which are under /api), and a Path=/api cookie is invisible to
+// document.cookie there, so getCsrfToken() returned null and every
+// cookie-authed mutation failed with 403 csrf_required (live bug since
+// the Phase 2 deploy). The session cookie went through the same widening
+// in PR #208, with the same migration hazard handled the same way:
+//  - Legacy Path=/api cookie: after this change a browser can hold BOTH
+//    cookies (the old /api one and the new / one). Browsers send the
+//    longer-path cookie first and getCsrfCookie takes the first match,
+//    while dashboard JS can only see the Path=/ one — so a stale /api
+//    cookie would make the server compare the header against the wrong
+//    value and answer csrf_invalid. Every mint therefore also clears the
+//    legacy /api cookie, and logout clears both paths. The set is emitted
+//    BEFORE the legacy clear so a naive first-match Set-Cookie parser
+//    still sees the live token.
 
 export const CSRF_COOKIE_NAME = 'flm_csrf';
 export const CSRF_HEADER_NAME = 'x-csrf-token';
@@ -56,27 +71,45 @@ export function mintCsrfToken(): string {
   return crypto.randomBytes(32).toString('hex');
 }
 
-/** Set (or rotate) the CSRF cookie. maxAgeMs is the session TTL, matching
- *  the session cookie it is minted alongside. */
-export function setCsrfCookie(res: Response, req: Request, token: string, maxAgeMs: number): void {
-  res.cookie(CSRF_COOKIE_NAME, token, {
-    httpOnly: false,
-    sameSite: 'lax',
-    secure: isHttpsRequest(req),
-    path: '/api',
-    maxAge: maxAgeMs,
-  });
-}
-
-/** Clear the CSRF cookie. The attributes must match the set call or the
- *  browser will not remove it. */
-export function clearCsrfCookie(res: Response, req: Request): void {
+/** Clear the legacy Path=/api CSRF cookie (see the Path note above).
+ *  Emitted at every mint so a stale /api cookie can never shadow the new
+ *  Path=/ one. The attributes must match the old set call or the browser
+ *  will not remove it. */
+function clearLegacyCsrfCookie(res: Response, req: Request): void {
   res.clearCookie(CSRF_COOKIE_NAME, {
     httpOnly: false,
     sameSite: 'lax',
     secure: isHttpsRequest(req),
     path: '/api',
   });
+}
+
+/** Set (or rotate) the CSRF cookie. maxAgeMs is the session TTL, matching
+ *  the session cookie it is minted alongside. */
+export function setCsrfCookie(res: Response, req: Request, token: string, maxAgeMs: number): void {
+  // Set first, then clear the legacy cookie: a naive first-match
+  // Set-Cookie parser must see the live token, not the expired clear.
+  res.cookie(CSRF_COOKIE_NAME, token, {
+    httpOnly: false,
+    sameSite: 'lax',
+    secure: isHttpsRequest(req),
+    path: '/',
+    maxAge: maxAgeMs,
+  });
+  clearLegacyCsrfCookie(res, req);
+}
+
+/** Clear the CSRF cookie. Both paths are cleared: the current Path=/
+ *  cookie and the legacy Path=/api one a browser may still hold. The
+ *  attributes must match the set call or the browser will not remove it. */
+export function clearCsrfCookie(res: Response, req: Request): void {
+  res.clearCookie(CSRF_COOKIE_NAME, {
+    httpOnly: false,
+    sameSite: 'lax',
+    secure: isHttpsRequest(req),
+    path: '/',
+  });
+  clearLegacyCsrfCookie(res, req);
 }
 
 /** Read the CSRF value from the cookie, if present. */

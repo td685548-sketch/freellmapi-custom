@@ -228,6 +228,13 @@ describe('Dashboard session without a JS-readable token — Phase 2', () => {
     expect(clearedSessions.filter(c => c.includes('Path=/;'))).toHaveLength(1);
     expect(clearedSessions.filter(c => c.includes('Path=/api'))).toHaveLength(1);
     expect(clearedSessions.every(c => /Expires=Thu, 01 Jan 1970/.test(c))).toBe(true);
+    // Same for the CSRF cookie: the current Path=/ cookie and the legacy
+    // Path=/api one (a stale /api cookie would otherwise shadow the new
+    // one — the server takes the first match, JS only sees Path=/).
+    const clearedCsrfCookies = cookies.filter(c => c.startsWith('flm_csrf='));
+    expect(clearedCsrfCookies.filter(c => c.includes('Path=/;'))).toHaveLength(1);
+    expect(clearedCsrfCookies.filter(c => c.includes('Path=/api'))).toHaveLength(1);
+    expect(clearedCsrfCookies.every(c => /Expires=Thu, 01 Jan 1970/.test(c))).toBe(true);
     const { status: getStatus, body } = await call(app, 'GET', '/api/keys', { cookie: sessionCookie });
     expect(getStatus).toBe(401);
     expect(body.error.type).toBe('authentication_error');
