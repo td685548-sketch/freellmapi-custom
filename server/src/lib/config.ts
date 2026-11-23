@@ -69,6 +69,27 @@ function parseRateLimitRpm(): number {
   return Math.floor(n);
 }
 
+// Parse MAX_CONCURRENT_REQUESTS: the global cap on concurrent in-flight /v1
+// inference requests (middleware/globalConcurrency.ts). unset/blank → null
+// (no cap — the default); 0 → null (disabled, same convention as
+// PROXY_RATE_LIMIT_RPM=0); invalid (non-numeric, negative) → warn once and
+// null, so a typo never 429s the operator's own traffic. A fractional value
+// floors, like the RPM parse above.
+function parseMaxConcurrentRequests(): number | null {
+  const raw = process.env.MAX_CONCURRENT_REQUESTS;
+  if (raw === undefined || raw.trim() === '') return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) {
+    warnOnce(
+      'MAX_CONCURRENT_REQUESTS',
+      `[config] Invalid MAX_CONCURRENT_REQUESTS=${JSON.stringify(raw)}: must be a non-negative integer — the global /v1 concurrency cap is disabled.`,
+    );
+    return null;
+  }
+  const floored = Math.floor(n);
+  return floored === 0 ? null : floored;
+}
+
 function parseRequestBodyLimitBytes(): number {
   const raw = process.env.REQUEST_BODY_LIMIT_MB;
   if (raw === undefined || raw.trim() === '') return DEFAULT_REQUEST_BODY_LIMIT_MB * 1024 * 1024;
@@ -90,6 +111,13 @@ export interface Config {
   dashboardOrigins: string[];
   clientDist: string | null;
   proxyRateLimitRpm: number;
+  /**
+   * Global cap on concurrent in-flight /v1 inference requests, parsed from
+   * MAX_CONCURRENT_REQUESTS — see parseMaxConcurrentRequests. null = no cap
+   * (the default): a single-user install must never 429 its own traffic
+   * because of a magic number it never asked for.
+   */
+  maxConcurrentRequests: number | null;
   /** JSON body limit (bytes) for the LLM wire surfaces — see
    *  parseRequestBodyLimitBytes. REQUEST_BODY_LIMIT_MB overrides. */
   requestBodyLimitBytes: number;
@@ -143,6 +171,7 @@ export function loadConfig(): Config {
       .filter(Boolean),
     clientDist: process.env.CLIENT_DIST ?? null,
     proxyRateLimitRpm: parseRateLimitRpm(),
+    maxConcurrentRequests: parseMaxConcurrentRequests(),
     requestBodyLimitBytes: parseRequestBodyLimitBytes(),
     nodeEnv: process.env.NODE_ENV ?? 'development',
     serveStaticAssets: true,
