@@ -8,7 +8,7 @@ import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
 import { FieldError } from '@/components/ui/field-error'
 import { useI18n } from '@/i18n'
-import { apiFetch, getToken } from '@/lib/api'
+import { apiFetch } from '@/lib/api'
 import { toast } from '@/lib/toast'
 import type { ApiKey } from '../../../../shared/types'
 
@@ -33,15 +33,14 @@ const isDesktopApp = typeof window !== 'undefined'
   && (window as Window & { __FREEAPI_DESKTOP__?: boolean }).__FREEAPI_DESKTOP__ === true
 
 async function downloadExport(format: ExportFormat, healthyOnly: boolean, password: string) {
-  const token = getToken()
   const params = new URLSearchParams({ format })
   if (healthyOnly) params.set('healthy', 'true')
   const headers: Record<string, string> = {}
-  if (token) headers.Authorization = `Bearer ${token}`
   if (password) headers['x-reauth-password'] = password
+  // Phase 2 of the httpOnly-cookie move: the session rides the httpOnly
+  // cookie; no token is read or sent by JS any more.
   const res = await fetch(`${BASE}/api/keys/export?${params}`, {
     headers,
-    // Phase 1 of the httpOnly-cookie move: send the session cookie.
     credentials: 'same-origin',
   })
   if (!res.ok) {

@@ -1,4 +1,5 @@
-import { apiFetch, clearToken, getToken, UNAUTHORIZED_EVENT, type ApiError } from '@/lib/api';
+import { apiFetch, csrfHeaders, UNAUTHORIZED_EVENT, type ApiError } from '@/lib/api';
+import { notifySessionChanged } from '../session-state';
 import type {
   CopilotDiagnosticsResponse,
   CopilotModelSource,
@@ -112,16 +113,15 @@ export async function postSupportSetupChatStream(
   onStep: (step: SupportSetupTraceStep) => void,
 ): Promise<SupportSetupChatResponse> {
   const base = import.meta.env.BASE_URL.replace(/\/$/, '');
-  const token = getToken();
+  // Phase 2: cookie auth for the mutation needs the CSRF token.
   const res = await fetch(`${base}/api/support-setup-copilot/chat`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'text/event-stream, application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...csrfHeaders(),
     },
     body: JSON.stringify(body),
-    // Phase 1 of the httpOnly-cookie move: send the session cookie.
     credentials: 'same-origin',
   });
   const isStream = (res.headers.get('content-type') ?? '').includes('text/event-stream');
@@ -130,7 +130,7 @@ export async function postSupportSetupChatStream(
     if (!res.ok) {
       const err = apiErrorFrom(res.status, json, res.statusText || `HTTP ${res.status}`);
       if (res.status === 401 && err.code === 'authentication_error') {
-        clearToken();
+        notifySessionChanged();
         window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
       }
       throw err;

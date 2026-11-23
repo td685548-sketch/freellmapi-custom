@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getDb } from '../../db/index.js';
 import { createSession, createUser, normalizeEmail, userCount, SESSION_TTL_MS, type SessionUser } from '../../services/auth.js';
 import { setSessionCookie } from '../../services/session-cookie.js';
+import { setCsrfCookie, mintCsrfToken } from '../../services/csrf.js';
 import { allowAuthRequest, digest, purgeExpiredAuth, randomSecret, safeEqual, seal, unseal } from '../../services/auth-security.js';
 import { consumeGoogleHandoff } from '../../services/google-auth.js';
 import { claimInviteCode } from '../../services/invites.js';
@@ -368,7 +369,11 @@ ssoPublicRouter.post('/complete', (req: Request, res: Response) => {
     return;
   }
   setSessionCookie(res, req, result.token, SESSION_TTL_MS);
-  res.json(result);
+  setCsrfCookie(res, req, mintCsrfToken(), SESSION_TTL_MS);
+  // Phase 2: the token is NOT returned in JSON — the httpOnly cookie set
+  // above is the only carrier the browser gets.
+  const { token: _token, ...publicResult } = result;
+  res.json(publicResult);
 });
 
 const updateSsoSchema = z.object({

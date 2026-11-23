@@ -37,7 +37,7 @@ import {
   type SupportLiveTestTurnDiagnostic,
   type SupportLiveTestViewMode,
 } from '@freellmapi/shared/support-service-desk-live-test.js'
-import { apiFetch, getToken } from '@/lib/api'
+import { apiFetch, csrfHeaders } from '@/lib/api'
 import { useI18n } from '@/i18n'
 import { useSupportServiceDeskLiveTestStrings } from '../support-service-desk-live-test-strings'
 import SupportWidgetPreview from './SupportWidgetPreview'
@@ -88,16 +88,10 @@ function getWidgetGlobal(): FreeLLMAPISupportGlobal | undefined {
   return (window as unknown as { FreeLLMAPISupport?: FreeLLMAPISupportGlobal }).FreeLLMAPISupport
 }
 
-// The dashboard token lives in sessionStorage now (see client/src/lib/api.ts);
-// read it through getToken() so this widget never resurrects a token from
-// localStorage.
-function readDashboardToken(): string | null {
-  try {
-    return getToken()
-  } catch {
-    return null
-  }
-}
+// The dashboard session lives in the httpOnly cookie now (Phase 2 of the
+// cookie move) — there is no token for JS to read any more, so this helper
+// is gone. Cookie auth rides `credentials: 'same-origin'` below; mutations
+// additionally carry the CSRF token via csrfHeaders().
 
 function normalizeBridgeSubpath(rawUrl: string): string {
   let pathAndQuery = rawUrl.trim()
@@ -513,9 +507,12 @@ export function SupportWidgetLiveTest({
           const subpath = normalizeBridgeSubpath(rawUrl)
           const bridgeUrl = `${API_BASE}/api/thruline/support/tenants/${tenant.id}/service-desk/live-test${subpath}`
           const headers = new Headers(init?.headers ?? {})
-          const token = readDashboardToken()
-          if (token) {
-            headers.set('Authorization', `Bearer ${token}`)
+          // Phase 2: cookie auth for a mutation needs the CSRF token.
+          // (GETs need nothing — the cookie rides along below.)
+          const method = (init?.method ?? 'GET').toUpperCase()
+          if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+            const csrf = csrfHeaders()
+            for (const [k, v] of Object.entries(csrf)) headers.set(k, v)
           }
           if (enforceOriginRef.current && simulatedOriginRef.current.trim()) {
             headers.set('X-Support-Simulated-Origin', simulatedOriginRef.current.trim())
@@ -524,7 +521,6 @@ export function SupportWidgetLiveTest({
           const response = await fetch(bridgeUrl, {
             ...init,
             headers,
-            // Phase 1 of the httpOnly-cookie move: send the session cookie.
             credentials: 'same-origin',
           })
 

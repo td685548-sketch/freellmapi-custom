@@ -1,4 +1,4 @@
-import { apiFetch, getToken } from '@/lib/api';
+import { apiFetch, csrfHeaders } from '@/lib/api';
 
 const base = '/api/thruline/media';
 
@@ -113,12 +113,11 @@ export const mediaApi = {
     }),
 
   testStt: async (form: FormData): Promise<SttTestResult> => {
-    const token = getToken();
+    // Phase 2: cookie auth for the mutation needs the CSRF token.
     const res = await fetch(`${base}/test/stt`, {
       method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      headers: csrfHeaders(),
       body: form,
-      // Phase 1 of the httpOnly-cookie move: send the session cookie.
       credentials: 'same-origin',
     });
     if (!res.ok) {

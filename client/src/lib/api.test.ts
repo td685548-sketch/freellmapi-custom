@@ -5,8 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // intact ("the endpoint rejected the key"); treating any 401 as session-expired
 // signed the operator out every time they tested a bad provider key.
 
-const TOKEN_KEY = 'freellmapi_dashboard_token'
-
 function makeStorage(): Storage {
   const store = new Map<string, string>()
   return {
@@ -42,7 +40,6 @@ describe('apiFetch 401 handling', () => {
   beforeEach(() => {
     events = []
     stubStorages()
-    sessionStorage.setItem(TOKEN_KEY, 'session-token')
   })
 
   afterEach(() => {
@@ -50,14 +47,16 @@ describe('apiFetch 401 handling', () => {
     vi.restoreAllMocks()
   })
 
-  it('clears the token and fires the unauthorized event on a session 401', async () => {
+  it('fires the unauthorized event and bumps the session revision on a session 401', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(401, {
       error: { message: 'Authentication required', type: 'authentication_error' },
     })))
     const { apiFetch } = await import('./api')
+    const { getSessionRevision } = await import('../custom/session-state')
+    const before = getSessionRevision()
 
     await expect(apiFetch('/api/keys')).rejects.toMatchObject({ status: 401, code: 'authentication_error' })
-    expect(sessionStorage.getItem(TOKEN_KEY)).toBeNull()
+    expect(getSessionRevision()).toBeGreaterThan(before)
     expect(events).toContain('freellmapi:unauthorized')
   })
 
@@ -66,19 +65,23 @@ describe('apiFetch 401 handling', () => {
       error: { message: 'The endpoint rejected the key (HTTP 401)', type: 'upstream_error' },
     })))
     const { apiFetch } = await import('./api')
+    const { getSessionRevision } = await import('../custom/session-state')
+    const before = getSessionRevision()
 
     await expect(apiFetch('/api/keys/custom/discover-models', { method: 'POST', body: '{}' }))
       .rejects.toMatchObject({ status: 401, code: 'upstream_error' })
-    expect(sessionStorage.getItem(TOKEN_KEY)).toBe('session-token')
+    expect(getSessionRevision()).toBe(before)
     expect(events).toHaveLength(0)
   })
 
   it('keeps the session on an untyped 401 rather than guessing it expired', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(401, { error: { message: 'nope' } })))
     const { apiFetch } = await import('./api')
+    const { getSessionRevision } = await import('../custom/session-state')
+    const before = getSessionRevision()
 
     await expect(apiFetch('/api/whatever')).rejects.toMatchObject({ status: 401 })
-    expect(sessionStorage.getItem(TOKEN_KEY)).toBe('session-token')
+    expect(getSessionRevision()).toBe(before)
     expect(events).toHaveLength(0)
   })
 })
@@ -118,15 +121,14 @@ describe('apiFetch error messages', () => {
   })
 })
 
-// Phase 1 of the httpOnly-cookie move: the server also sets the session as
-// an httpOnly cookie, and apiFetch must send it on same-origin calls — while
-// still sending the Authorization header, which stays the only way to write
-// until a later phase.
-describe('apiFetch session cookie (Phase 1)', () => {
+// Phase 2 of the httpOnly-cookie move: the session lives only in the
+// httpOnly cookie, so apiFetch sends no Authorization header at all — the
+// cookie rides along via credentials: 'same-origin', and mutations
+// additionally carry the double-submit CSRF token from the readable cookie.
+describe('apiFetch session cookie + CSRF (Phase 2)', () => {
   beforeEach(() => {
     events = []
     stubStorages()
-    sessionStorage.setItem(TOKEN_KEY, 'session-token')
   })
 
   afterEach(() => {
@@ -134,7 +136,7 @@ describe('apiFetch session cookie (Phase 1)', () => {
     vi.restoreAllMocks()
   })
 
-  it('sends credentials: same-origin so the httpOnly session cookie rides along', async () => {
+  it('sends credentials: same-origin and no Authorization header', async () => {
     let capturedInit: RequestInit | undefined;
     const fetchMock = vi.fn(async (...args: [string, RequestInit?]) => {
       capturedInit = args[1];
@@ -146,14 +148,43 @@ describe('apiFetch session cookie (Phase 1)', () => {
     await apiFetch('/api/keys')
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(capturedInit?.credentials).toBe('same-origin')
-    expect(new Headers(capturedInit?.headers).get('Authorization')).toBe('Bearer session-token')
+    expect(new Headers(capturedInit?.headers).get('Authorization')).toBeNull()
+  })
+
+  it('attaches the CSRF token on mutations, not on reads', async () => {
+    vi.stubGlobal('document', { cookie: 'flm_csrf=csrf-value-123; flm_session=opaque' })
+    const seen: Array<{ url: string; headers: Headers }> = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      seen.push({ url, headers: new Headers(init?.headers) })
+      return jsonResponse(200, { ok: true })
+    }))
+    const { apiFetch } = await import('./api')
+
+    await apiFetch('/api/keys')
+    await apiFetch('/api/keys', { method: 'POST', body: '{}' })
+    expect(seen[0].headers.get('X-CSRF-Token')).toBeNull()
+    expect(seen[1].headers.get('X-CSRF-Token')).toBe('csrf-value-123')
+  })
+
+  it('sends no CSRF header when the CSRF cookie is absent', async () => {
+    vi.stubGlobal('document', { cookie: '' })
+    let capturedInit: RequestInit | undefined
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      capturedInit = init
+      return jsonResponse(200, { ok: true })
+    }))
+    const { apiFetch } = await import('./api')
+
+    await apiFetch('/api/keys', { method: 'POST', body: '{}' })
+    expect(new Headers(capturedInit?.headers).get('X-CSRF-Token')).toBeNull()
   })
 })
 
-// Session mitigations: the dashboard token lives in sessionStorage (dies with
-// the tab) instead of localStorage (persists indefinitely). A token left in
-// localStorage by an older build must never be read back — it is purged.
-describe('dashboard token storage', () => {
+// Phase 2: the dashboard token lives ONLY in the httpOnly cookie. A token
+// left in storage by a pre-Phase-2 build must be purged on import, or the
+// stale readable token would linger next to the cookie and defeat the
+// whole point.
+describe('no dashboard token in JS storage (Phase 2)', () => {
   beforeEach(() => {
     events = []
     stubStorages()
@@ -164,25 +195,21 @@ describe('dashboard token storage', () => {
     vi.restoreAllMocks()
   })
 
-  it('stores the token in sessionStorage, never in localStorage', async () => {
-    const { setToken } = await import('./api')
-    setToken('session-token')
-    expect(sessionStorage.getItem(TOKEN_KEY)).toBe('session-token')
-    expect(localStorage.getItem(TOKEN_KEY)).toBeNull()
+  it('purges a legacy token from sessionStorage and localStorage on import', async () => {
+    sessionStorage.setItem('freellmapi_dashboard_token', 'stale-session-token')
+    localStorage.setItem('freellmapi_dashboard_token', 'stale-persistent-token')
+    vi.resetModules()
+    await import('./api')
+    expect(sessionStorage.getItem('freellmapi_dashboard_token')).toBeNull()
+    expect(localStorage.getItem('freellmapi_dashboard_token')).toBeNull()
   })
 
-  it('ignores and purges a legacy token left in localStorage', async () => {
-    localStorage.setItem(TOKEN_KEY, 'legacy-persistent-token')
-    const { getToken } = await import('./api')
-    expect(getToken()).toBeNull()
-    expect(localStorage.getItem(TOKEN_KEY)).toBeNull()
-  })
-
-  it('clearToken removes the token from sessionStorage', async () => {
-    const { setToken, clearToken, getToken } = await import('./api')
-    setToken('session-token')
-    clearToken()
-    expect(getToken()).toBeNull()
-    expect(sessionStorage.getItem(TOKEN_KEY)).toBeNull()
+  it('never writes a token to storage on any apiFetch call', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, { ok: true })))
+    const { apiFetch } = await import('./api')
+    await apiFetch('/api/keys')
+    await apiFetch('/api/keys', { method: 'POST', body: '{}' })
+    expect(sessionStorage.getItem('freellmapi_dashboard_token')).toBeNull()
+    expect(localStorage.getItem('freellmapi_dashboard_token')).toBeNull()
   })
 })

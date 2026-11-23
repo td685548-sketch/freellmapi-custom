@@ -1,5 +1,5 @@
-import { apiFetch, clearToken, getToken, UNAUTHORIZED_EVENT } from '@/lib/api';
-import { getSessionRevision } from '../session-state';
+import { apiFetch, csrfHeaders, UNAUTHORIZED_EVENT } from '@/lib/api';
+import { getSessionRevision, notifySessionChanged } from '../session-state';
 import { readChatStream, StreamTimeoutError } from '@/lib/playground-stream';
 import type { PlaygroundCatalog, PlaygroundRequest, PlaygroundContent } from '../../../../shared/x-playground';
 
@@ -26,10 +26,9 @@ export async function streamPlayground(
   onReasoning?: (text: string) => void,
   options: StreamPlaygroundOptions = {},
 ) {
-  const token = getToken();
   const revision = getSessionRevision();
   const assertSession = () => {
-    if (revision !== getSessionRevision() || token !== getToken()) throw new DOMException('Session changed', 'AbortError');
+    if (revision !== getSessionRevision()) throw new DOMException('Session changed', 'AbortError');
   };
   if (signal.aborted) {
     throw signal.reason instanceof Error ? signal.reason : new DOMException('Aborted', 'AbortError');
@@ -60,9 +59,10 @@ export async function streamPlayground(
   }
 
   try {
+    // Phase 2: cookie auth for the mutation needs the CSRF token.
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...csrfHeaders(),
       ...(options.sessionId ? { 'X-Session-Id': options.sessionId } : {}),
     };
     const response = await fetch(`${import.meta.env.BASE_URL.replace(/\/$/, '')}/api/thruline/playground/chat`, {
@@ -70,7 +70,6 @@ export async function streamPlayground(
       headers,
       body: JSON.stringify(body),
       signal: streamController.signal,
-      // Phase 1 of the httpOnly-cookie move: send the session cookie.
       credentials: 'same-origin',
     });
     assertSession();
@@ -79,7 +78,7 @@ export async function streamPlayground(
       const result = await response.json().catch(() => null);
       assertSession();
       if (response.status === 401 && result?.error?.type === 'authentication_error') {
-        clearToken(); window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
+        notifySessionChanged(); window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
       }
       throw new Error(result?.error?.message ?? `HTTP ${response.status}`);
     }

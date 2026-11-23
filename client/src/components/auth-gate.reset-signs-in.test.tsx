@@ -3,14 +3,14 @@
 // A password reset used to end on "Please sign in", but the login form needs
 // the account email, which an operator who forgot the password may not
 // remember either (#1477). The server now signs them in after a valid reset
-// code; the form must store that session and open the dashboard.
+// code; the form must open the dashboard — with the session arriving as the
+// httpOnly cookie, never as a token in JS (Phase 2 of the cookie move).
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '@/i18n'
 import { AuthGate } from './auth-gate'
-import { getToken } from '@/lib/api'
 
 let root: Root
 let container: HTMLDivElement
@@ -78,7 +78,7 @@ beforeEach(() => {
   root = createRoot(container)
   authenticated = false
   posts = []
-  resetResponse = { status: 200, body: { success: true, token: 'session-after-reset', email: 'owner@example.test' } }
+  resetResponse = { status: 200, body: { success: true, email: 'owner@example.test' } }
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (url.endsWith('/api/auth/status')) {
@@ -105,12 +105,15 @@ afterEach(() => {
 })
 
 describe('AuthGate password reset', () => {
-  it('signs in with the session the reset returns instead of asking for the email', async () => {
+  it('signs in with the session the reset sets instead of asking for the email', async () => {
     await resetWithCode()
 
     expect(posts.map(p => p.url.replace(/^.*\/api/, '/api'))).toEqual(['/api/auth/forgot-password', '/api/auth/reset-password'])
     expect(posts[1].body).toEqual({ resetCode: 'ABCDEFGHIJ', newPassword: 'brand-new-password' })
-    expect(getToken()).toBe('session-after-reset')
+    // Phase 2: no token ever reaches JS storage — the session is the
+    // httpOnly cookie the server set on the reset response.
+    expect(sessionStorage.getItem('freellmapi_dashboard_token')).toBeNull()
+    expect(localStorage.getItem('freellmapi_dashboard_token')).toBeNull()
     expect(container.querySelector('[data-testid="app"]')).not.toBeNull()
   })
 
@@ -118,7 +121,7 @@ describe('AuthGate password reset', () => {
     resetResponse = { status: 403, body: { error: { message: 'Invalid or expired reset code' } } }
     await resetWithCode()
 
-    expect(getToken()).toBeNull()
+    expect(sessionStorage.getItem('freellmapi_dashboard_token')).toBeNull()
     expect(container.querySelector('[data-testid="app"]')).toBeNull()
     expect(container.textContent).toContain('Invalid or expired reset code')
   })

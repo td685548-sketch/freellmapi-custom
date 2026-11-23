@@ -1,47 +1,65 @@
 import { getSessionRevision, notifySessionChanged } from '@/custom/session-state';
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '');
-const TOKEN_KEY = 'freellmapi_dashboard_token';
 
-// Dashboard session token (#35). Stored in sessionStorage, not localStorage:
-// a token in localStorage survives the browser (and the machine) indefinitely
-// and is readable by any script running on the dashboard origin, so a single
-// XSS — or a shared / unattended machine — keeps the session forever. A
-// sessionStorage token dies when the tab closes, and each tab holds its own
-// session, so a stolen token's window is one tab's lifetime.
+// Dashboard session token — Phase 2 of the httpOnly-cookie move
+// (server/src/services/session-cookie.ts, services/csrf.ts).
 //
-// Phase 1 of the httpOnly-cookie move (server/src/services/session-cookie.ts)
-// is live: the server ALSO sets the token as an httpOnly `flm_session`
-// cookie on login, and apiFetch sends `credentials: 'same-origin'` so the
-// cookie rides along. The token is STILL stored here and sent as the
-// Authorization header — that only stops in Phase 2, once the cookie path
-// has proven itself. Until then the cookie is a second, JS-invisible copy
-// of the same session, accepted by the server for reads only.
+// The session token lives ONLY in the httpOnly `flm_session` cookie now. It
+// is never stored in sessionStorage or localStorage, never returned to JS in
+// a login JSON body, and never sent as an Authorization header by this
+// client. A successful XSS in the dashboard therefore cannot steal the
+// session: there is nothing readable to steal — the cookie is invisible to
+// document.cookie, and no token value ever passes through JS memory.
 //
-// A token left in localStorage by an older build is purged on every read:
-// without the purge the old persistent token would linger next to the new
-// session-scoped one. sessionStorage fires no cross-tab 'storage' events, so
-// there is no cross-tab listener any more — in-tab changes go through
-// notifySessionChanged() in setToken/clearToken, and a new tab simply signs
-// in again (the desktop shell re-seeds it via preload; the browser tab uses
-// POST /api/auth/desktop-session or the login form).
-function purgeLegacyToken(): void {
-  try { localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
+// What replaced the header:
+//  - authentication rides the cookie (apiFetch and every direct fetch send
+//    `credentials: 'same-origin'`, forced after the options spread so no
+//    caller can downgrade it);
+//  - mutations additionally send the double-submit CSRF token
+//    (csrfHeaders() below): the readable `flm_csrf` cookie value, echoed
+//    back as the X-CSRF-Token header. A cross-site page cannot read that
+//    cookie, so it cannot forge the header.
+//  - a token left in storage by a pre-Phase-2 build is purged on first
+//    import: without the purge the stale readable token would linger next
+//    to the cookie and defeat the whole point.
+//
+// The server still accepts the Authorization header from non-browser
+// callers (curl scripts, server tests, server-side loopback forwards) —
+// that fallback is Phase 3's to remove, and it does not weaken the XSS
+// guarantee: page JS cannot obtain a token to put in a header.
+const LEGACY_TOKEN_KEY = 'freellmapi_dashboard_token';
+try { sessionStorage.removeItem(LEGACY_TOKEN_KEY); } catch { /* ignore */ }
+try { localStorage.removeItem(LEGACY_TOKEN_KEY); } catch { /* ignore */ }
+
+export const CSRF_COOKIE_NAME = 'flm_csrf';
+export const CSRF_HEADER_NAME = 'X-CSRF-Token';
+
+/** Read the double-submit CSRF value from the readable cookie the server
+ *  sets at login (and refreshes on /api/auth/status when missing). */
+export function getCsrfToken(): string | null {
+  try {
+    const item = document.cookie
+      .split(';')
+      .map(part => part.trim())
+      .find(part => part.startsWith(`${CSRF_COOKIE_NAME}=`));
+    return item ? decodeURIComponent(item.slice(CSRF_COOKIE_NAME.length + 1)) : null;
+  } catch {
+    return null;
+  }
 }
 
-export function getToken(): string | null {
-  purgeLegacyToken();
-  try { return sessionStorage.getItem(TOKEN_KEY); } catch { return null; }
+/** Headers a mutation must carry so the server accepts cookie auth for it.
+ *  Empty when the CSRF cookie is absent — the server then answers
+ *  403 csrf_required, and the next /api/auth/status call mints a fresh one. */
+export function csrfHeaders(): Record<string, string> {
+  const token = getCsrfToken();
+  return token ? { [CSRF_HEADER_NAME]: token } : {};
 }
-export function setToken(token: string): void {
-  const previous = getToken();
-  try { sessionStorage.setItem(TOKEN_KEY, token); } catch { /* ignore */ }
-  if (previous !== getToken()) notifySessionChanged();
-}
-export function clearToken(): void {
-  const previous = getToken();
-  try { sessionStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
-  if (previous !== getToken()) notifySessionChanged();
+
+function isSafeMethod(method: string | undefined): boolean {
+  const m = (method ?? 'GET').toUpperCase();
+  return m === 'GET' || m === 'HEAD' || m === 'OPTIONS';
 }
 
 export const UNAUTHORIZED_EVENT = 'freellmapi:unauthorized';
@@ -54,10 +72,9 @@ export interface ApiError extends Error {
 }
 
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const token = getToken();
   const revision = getSessionRevision();
   const assertCurrentSession = () => {
-    if (revision !== getSessionRevision() || token !== getToken()) {
+    if (revision !== getSessionRevision()) {
       throw new DOMException('The dashboard session changed', 'AbortError');
     }
   };
@@ -66,16 +83,18 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
   if (!isFormData && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
+  // Cookie-only mutations need the CSRF token (services/csrf.ts); safe
+  // methods and header-authed calls do not. The cookie itself rides along
+  // via `credentials: 'same-origin'`, forced after the spread so no caller
+  // can downgrade it.
+  if (!isSafeMethod(options?.method) && !headers.has(CSRF_HEADER_NAME)) {
+    const csrf = getCsrfToken();
+    if (csrf) headers.set(CSRF_HEADER_NAME, csrf);
   }
   const res = await fetch(`${BASE}${path}`, {
     // `...options` first so an explicit method/body/signal applies, but headers
     // are merged last — otherwise an options.headers would clobber the
-    // Content-Type and Authorization we set here. `credentials: 'same-origin'`
-    // sends the httpOnly session cookie (Phase 1 of the cookie move) on
-    // same-origin dashboard calls — the Vite dev proxy keeps dev same-origin
-    // too. It is forced after the spread so no caller can downgrade it.
+    // Content-Type and CSRF token we set here.
     ...options,
     headers,
     credentials: 'same-origin',
@@ -91,7 +110,7 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
     // provider key. The auth middleware and every session 401 carry
     // type 'authentication_error'; upstream relays never do.
     if (res.status === 401 && body.error?.type === 'authentication_error') {
-      clearToken();
+      notifySessionChanged();
       window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
     }
     // Surface the HTTP status and the machine-readable error type on the thrown
@@ -127,7 +146,7 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
 
 export async function logout(): Promise<void> {
   const request = apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => { /* ignore */ });
-  clearToken();
+  notifySessionChanged();
   window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
   await request;
 }

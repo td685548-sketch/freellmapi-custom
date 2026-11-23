@@ -20,7 +20,6 @@ let tray: Tray | null = null;
 // separately (refreshTrayLocale).
 export function buildTray(
   port: number,
-  token: string,
   getLocale: () => NativeLocale,
   getLanAccess: () => boolean,
   onToggleLanAccess: () => void,
@@ -41,7 +40,7 @@ export function buildTray(
   tray.setToolTip(dt(getLocale(), 'tooltip'));
 
   if (platform.leftClick === 'dashboard') {
-    tray.on('click', () => openDashboard(port, token));
+    tray.on('click', () => openDashboard(port));
   } else {
     tray.on('click', () => togglePopover(tray!));
   }
@@ -50,7 +49,7 @@ export function buildTray(
     const lanOn = getLanAccess();
     tray!.popUpContextMenu(Menu.buildFromTemplate([
       { label: dt(locale, 'runningOn', { addr: `${lanOn ? '0.0.0.0' : '127.0.0.1'}:${port}` }), enabled: false },
-      { label: dt(locale, 'openDashboard'), click: () => openDashboard(port, token) },
+      { label: dt(locale, 'openDashboard'), click: () => openDashboard(port) },
       // #1412: on Windows left-click deliberately opens the dashboard instead of
       // the popover (#1353), which used to leave the compact panel with no entry
       // point at all. Only offer it where the click does not already toggle it.

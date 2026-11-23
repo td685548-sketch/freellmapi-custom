@@ -3,9 +3,13 @@
 // The desktop shell signs the dashboard in as a hidden machine account whose
 // password is random and never shown (desktop/src/server-host.ts). If that
 // session is ever rejected — expired after 24h, cleared by a
-// 401 — the gate must ask the shell for a fresh one, never show a login form
-// nobody can fill in. This mounts the real AuthGate against a stubbed
-// /api/auth/status and checks exactly that.
+// 401 — the gate must ask the server for a fresh one through POST
+// /api/auth/desktop-session, never show a login form nobody can fill in.
+// Phase 2 of the httpOnly-cookie move: the session arrives as the httpOnly
+// cookie the server sets on that response — no token ever reaches JS, no
+// preload IPC bridge hands one over, and nothing is stored in sessionStorage.
+// This mounts the real AuthGate against a stubbed /api/auth/status and
+// checks exactly that.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -13,18 +17,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '@/i18n'
 import { AuthGate } from './auth-gate'
 
-type DesktopWindow = Window & {
-  __FREEAPI_DESKTOP__?: boolean
-  __FREEAPI_SESSION__?: () => Promise<string>
-}
-
-const FRESH = 'fresh-session-token'
 const TOKEN_KEY = 'freellmapi_dashboard_token'
 
 let root: Root
 let container: HTMLDivElement
-let accepted: Set<string>
-let statusCalls: string[]
+let authenticated: boolean
+let desktopSessionFails: boolean
+let calls: { url: string; method: string; authorization: string | null }[]
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -57,16 +56,25 @@ beforeEach(() => {
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
-  accepted = new Set()
-  statusCalls = []
-  sessionStorage.setItem(TOKEN_KEY, 'stale-token')
+  authenticated = false
+  desktopSessionFails = false
+  calls = []
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (!url.endsWith('/api/auth/status')) return json({ error: { message: `unexpected ${url}` } }, 404)
-    const auth = new Headers(init?.headers).get('Authorization') ?? ''
-    statusCalls.push(auth)
-    const ok = accepted.has(auth.replace(/^Bearer /, ''))
-    return json({ needsSetup: false, authenticated: ok, email: ok ? 'desktop@localhost' : null })
+    const method = init?.method ?? 'GET'
+    calls.push({ url, method, authorization: new Headers(init?.headers).get('Authorization') })
+    if (url.endsWith('/api/auth/desktop-session') && method === 'POST') {
+      if (desktopSessionFails) return json({ error: { message: 'Desktop sign-in is only available on this computer.' } }, 403)
+      // The real server sets the httpOnly session cookie here; the stub
+      // simulates that by flipping the status answer.
+      authenticated = true
+      return json({ success: true })
+    }
+    if (url.endsWith('/api/auth/status')) {
+      const isDesktop = (window as Window & { __FREEAPI_DESKTOP__?: boolean }).__FREEAPI_DESKTOP__ === true
+      return json({ needsSetup: false, authenticated, email: authenticated ? 'desktop@localhost' : null, desktop: isDesktop })
+    }
+    return json({ error: { message: `unexpected ${url}` } }, 404)
   }))
 })
 
@@ -75,43 +83,36 @@ afterEach(() => {
   container.remove()
   sessionStorage.clear()
   vi.unstubAllGlobals()
-  const w = window as DesktopWindow
-  delete w.__FREEAPI_DESKTOP__
-  delete w.__FREEAPI_SESSION__
+  delete (window as Window & { __FREEAPI_DESKTOP__?: boolean }).__FREEAPI_DESKTOP__
 })
 
 const passwordField = () => container.querySelector('input[type="password"]')
 
 describe('AuthGate inside the desktop shell', () => {
-  it('replaces a rejected session through the shell and never shows the login form', async () => {
-    const w = window as DesktopWindow
-    w.__FREEAPI_DESKTOP__ = true
-    const bridge = vi.fn(async () => {
-      accepted.add(FRESH)
-      return FRESH
-    })
-    w.__FREEAPI_SESSION__ = bridge
+  it('repairs a rejected session through POST /api/auth/desktop-session and never shows the login form', async () => {
+    ;(window as Window & { __FREEAPI_DESKTOP__?: boolean }).__FREEAPI_DESKTOP__ = true
 
     mount()
     await flush()
 
-    expect(bridge).toHaveBeenCalledTimes(1)
-    expect(sessionStorage.getItem(TOKEN_KEY)).toBe(FRESH)
-    expect(statusCalls.at(-1)).toBe(`Bearer ${FRESH}`)
+    expect(calls.filter(c => c.url.endsWith('/api/auth/desktop-session'))).toHaveLength(1)
+    // Phase 2: the repair stores no token anywhere — the fresh session
+    // arrives only as the httpOnly cookie (the legacy-storage purge itself
+    // is covered in client/src/lib/api.test.ts).
+    expect(sessionStorage.getItem(TOKEN_KEY)).toBeNull()
+    expect(calls.every(c => c.authorization === null)).toBe(true)
     expect(container.querySelector('[data-testid="app"]')?.textContent).toBe('dashboard')
     expect(passwordField()).toBeNull()
   })
 
   it('shows the recovery message, not a password prompt, when the fresh session is rejected too', async () => {
-    const w = window as DesktopWindow
-    w.__FREEAPI_DESKTOP__ = true
-    const bridge = vi.fn(async () => 'still-rejected')
-    w.__FREEAPI_SESSION__ = bridge
+    ;(window as Window & { __FREEAPI_DESKTOP__?: boolean }).__FREEAPI_DESKTOP__ = true
+    desktopSessionFails = true
 
     mount()
     await flush()
 
-    expect(bridge).toHaveBeenCalledTimes(1)
+    expect(calls.filter(c => c.url.endsWith('/api/auth/desktop-session'))).toHaveLength(1)
     expect(passwordField()).toBeNull()
     expect(container.querySelector('[data-testid="app"]')).toBeNull()
     expect(container.textContent).toContain('Quit FreeLLMAPI and open it again')
@@ -120,9 +121,8 @@ describe('AuthGate inside the desktop shell', () => {
   // The recovery message is the whole screen: a screen reader that has already
   // announced "loading" must be told the wait ended in a failure.
   it('announces the recovery message as an alert', async () => {
-    const w = window as DesktopWindow
-    w.__FREEAPI_DESKTOP__ = true
-    w.__FREEAPI_SESSION__ = vi.fn(async () => 'still-rejected')
+    ;(window as Window & { __FREEAPI_DESKTOP__?: boolean }).__FREEAPI_DESKTOP__ = true
+    desktopSessionFails = true
 
     mount()
     await flush()

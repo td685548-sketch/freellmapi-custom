@@ -7,7 +7,7 @@
  */
 
 import * as libApi from '@/lib/api';
-import { getSessionRevision } from '@/custom/session-state';
+import { getSessionRevision, notifySessionChanged } from '@/custom/session-state';
 import type { Scope, ScopeKind } from '../../../../shared/ai-platform';
 import {
   PROMPT_LIMITS,
@@ -181,29 +181,16 @@ export function getPromptErrorInfo(err: unknown): PromptErrorInfo {
 }
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '');
-const TOKEN_KEY = 'freellmapi_dashboard_token';
 const UNAUTHORIZED_EVENT = 'freellmapi:unauthorized';
-
-function readToken(): string | null {
-  if (typeof libApi.getToken === 'function') {
-    return libApi.getToken();
-  }
-  try {
-    return sessionStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
-}
 
 function readSessionRevision(): number {
   return typeof getSessionRevision === 'function' ? getSessionRevision() : 0;
 }
 
 async function promptsFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const token = readToken();
   const revision = readSessionRevision();
   const assertCurrentSession = () => {
-    if (revision !== readSessionRevision() || token !== readToken()) {
+    if (revision !== readSessionRevision()) {
       throw new DOMException('The dashboard session changed', 'AbortError');
     }
   };
@@ -213,15 +200,18 @@ async function promptsFetch<T>(path: string, options?: RequestInit): Promise<T> 
   if (!isFormData && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
+  // Phase 2 of the httpOnly-cookie move: the session rides the httpOnly
+  // cookie; mutations additionally send the CSRF token (services/csrf.ts).
+  // No token is read or sent by JS any more.
+  const method = (options?.method ?? 'GET').toUpperCase();
+  if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+    const csrf = libApi.getCsrfToken();
+    if (csrf) headers.set(libApi.CSRF_HEADER_NAME, csrf);
   }
 
   const res = await fetch(`${BASE}${path}`, {
     ...options,
     headers,
-    // Phase 1 of the httpOnly-cookie move: send the session cookie on
-    // same-origin dashboard calls (forced after the spread, like apiFetch).
     credentials: 'same-origin',
   });
   assertCurrentSession();
@@ -248,9 +238,7 @@ async function promptsFetch<T>(path: string, options?: RequestInit): Promise<T> 
       : undefined;
 
     if (res.status === 401 && errorObj?.type === 'authentication_error') {
-      if (typeof libApi.clearToken === 'function') {
-        libApi.clearToken();
-      }
+      notifySessionChanged();
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent(libApi.UNAUTHORIZED_EVENT ?? UNAUTHORIZED_EVENT));
       }

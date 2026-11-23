@@ -26,7 +26,6 @@ import { loadCacheFromDb } from '../../server/src/services/cache.js';
 import { startWakeDetect } from '../../server/src/lib/wake-detect.js';
 import { installProcessSafetyNet } from '../../server/src/lib/process-safety-net.js';
 import { installLogRedaction } from '../../server/src/lib/log-redaction.js';
-import { desktopSessionToken } from '../../server/src/services/auth.js';
 import { NodeScheduler } from '../../server/src/lib/scheduler.js';
 import { startWorkerLifecycle } from '../../server/src/custom/x-gateway/support-runtime-router.js';
 import { rotateGeminiWebAccountsOnce, startGeminiWebKeepAlive } from '../../server/src/custom/provider-accounts/gemini-web-keepalive.js';
@@ -185,12 +184,6 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
     },
   });
   return { server, port };
-}
-
-// The dashboard window authenticates as a hidden machine user. The password
-// is random and never shown — sessions are minted directly against the DB.
-export function ensureSessionToken(): string {
-  return desktopSessionToken();
 }
 
 async function listenWithScan(

@@ -22,7 +22,7 @@ Unlike provider keys, user keys are **hashed, not AES-256-GCM encrypted**: they 
 
 ## Endpoints
 
-All of these are dashboard-session routes (`Authorization: Bearer <session token>` from `/api/auth/login`), scoped to the caller — a key is never valid on `/api/*` ([`requireAuth`](../../../server/src/middleware/requireAuth.ts) only accepts session tokens). Mounted at `/api/user` with `requireAuth` and **no permission gate** ([server/src/custom/register.ts:99](../../../server/src/custom/register.ts#L99)), so members manage their own keys and read their own usage without holding any grant.
+All of these are dashboard-session routes, scoped to the caller — a key is never valid on `/api/*` ([`requireAuth`](../../../server/src/middleware/requireAuth.ts) only accepts session tokens). Since Phase 2 of the httpOnly-cookie move the browser dashboard authenticates with the `flm_session` httpOnly cookie (set by `/api/auth/login` and the other mint endpoints) plus the `X-CSRF-Token` double-submit header on mutations; non-browser clients can still send `Authorization: Bearer <session token>` (a token minted before Phase 2, or one read from the `Set-Cookie` header of a mint response with `curl -c`/`-b`) and skip the CSRF header. Mounted at `/api/user` with `requireAuth` and **no permission gate** ([server/src/custom/register.ts:99](../../../server/src/custom/register.ts#L99)), so members manage their own keys and read their own usage without holding any grant.
 
 | Method | Path | Effect |
 |---|---|---|

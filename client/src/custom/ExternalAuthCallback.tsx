@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ExternalAuthResult } from '../../../shared/external-auth'
-import { apiFetch, setToken } from '@/lib/api'
+import { apiFetch } from '@/lib/api'
 import { getSessionRevision } from './session-state'
 import { Button } from '@/components/ui/button'
 import { useI18n } from '@/i18n'
@@ -30,7 +30,9 @@ export function ExternalAuthCallback({
         if (!active || getSessionRevision() !== initialRevision) return
         if (value.apiKey) setResult(value)
         else {
-          setToken(value.token)
+          // The session arrives as the httpOnly cookie the server set when
+          // redeeming the handoff; the token is never returned in JSON
+          // (Phase 2 of the cookie move).
           onComplete()
         }
       })
@@ -47,7 +49,6 @@ export function ExternalAuthCallback({
         apiKey={result.apiKey}
         onContinue={() => {
           if (getSessionRevision() !== initialRevision) return
-          setToken(result.token)
           onComplete()
         }}
       />

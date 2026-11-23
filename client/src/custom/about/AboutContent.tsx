@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Box, Check, Cloud, Copy, ExternalLink, GitBranch, Globe, Laptop, Tag } from 'lucide-react'
 import { useCustomT } from '@/custom/i18n/use-custom-t'
-import { getToken } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { toast } from '@/lib/toast'
 import { RELEASES_URL } from '@/lib/updates'
@@ -39,13 +38,12 @@ export function AboutContent({ compact = false, currentOrigin, version }: AboutC
 
   useEffect(() => {
     if (version !== undefined || typeof fetch !== 'function') return
-    const token = getToken()
-    if (!token) return
-
     let cancelled = false
     const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+    // Phase 2 of the httpOnly-cookie move: the session rides the httpOnly
+    // cookie (credentials: 'same-origin'); no token is read or sent by JS.
     fetch(`${base}/api/settings/version`, {
-      headers: { Authorization: `Bearer ${token}` },
+      credentials: 'same-origin',
     })
       .then(async res => {
         if (!res.ok) return null

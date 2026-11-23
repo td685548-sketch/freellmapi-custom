@@ -3,12 +3,14 @@ import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb } from '../../db/index.js';
 
-// Phase 1 of the httpOnly-cookie session move (services/session-cookie.ts):
-// the login/setup/reset/desktop-session/register/SSO-complete endpoints ALSO
-// set the session token as an httpOnly `flm_session` cookie, requireAuth
-// ALSO accepts it — but only for safe methods. A cookie-only mutation is
-// rejected with 403 cookie_auth_read_only, and the header keeps working
-// exactly as before.
+// Phase 2 of the httpOnly-cookie session move (services/session-cookie.ts,
+// services/csrf.ts): the login/setup/reset/desktop-session/register/SSO-complete
+// endpoints set the session as an httpOnly `flm_session` cookie AND a readable
+// `flm_csrf` double-submit cookie, and NO token ever reaches the response body.
+// requireAuth accepts the cookie for mutations ONLY with a valid CSRF token
+// (403 csrf_required / csrf_invalid); the header keeps working exactly as
+// before, with no CSRF needed. (Phase 1's read-only boundary,
+// cookie_auth_read_only, is gone — replaced by the CSRF gate.)
 
 async function call(
   app: Express,
@@ -62,8 +64,10 @@ describe('Dashboard session as an httpOnly cookie — Phase 1', () => {
       body: { email: 'admin@example.com', password: 'supersecret' },
     });
     expect(status).toBe(201);
-    expect(typeof body.token).toBe('string');
-    token = body.token;
+    // Phase 2: no token in the body — the session rides the httpOnly cookie.
+    expect(body.token).toBeUndefined();
+    token = cookieValue(cookies, 'flm_session')!;
+    expect(typeof token).toBe('string');
     const value = cookieValue(cookies, 'flm_session');
     expect(value).toBe(token);
     cookie = `flm_session=${value}`;
@@ -74,8 +78,9 @@ describe('Dashboard session as an httpOnly cookie — Phase 1', () => {
       body: { email: 'admin@example.com', password: 'supersecret' },
     });
     expect(status).toBe(200);
-    expect(typeof body.token).toBe('string');
-    token = body.token;
+    expect(body.token).toBeUndefined();
+    token = cookieValue(cookies, 'flm_session')!;
+    expect(typeof token).toBe('string');
     const setCookie = cookies.find(c => c.startsWith('flm_session='));
     expect(setCookie).toBeDefined();
     expect(cookieValue(cookies, 'flm_session')).toBe(token);
@@ -84,6 +89,12 @@ describe('Dashboard session as an httpOnly cookie — Phase 1', () => {
     expect(setCookie!).toContain('Path=/api');
     expect(setCookie!).toContain('Max-Age=2592000');
     expect(setCookie!).not.toContain('Secure');
+    // The CSRF cookie rides along: readable by JS, same SameSite/Path.
+    const csrfCookie = cookies.find(c => c.startsWith('flm_csrf='));
+    expect(csrfCookie).toBeDefined();
+    expect(csrfCookie!).not.toContain('HttpOnly');
+    expect(csrfCookie!).toContain('SameSite=Lax');
+    expect(csrfCookie!).toContain('Path=/api');
     cookie = `flm_session=${cookieValue(cookies, 'flm_session')}`;
   });
 
@@ -102,10 +113,10 @@ describe('Dashboard session as an httpOnly cookie — Phase 1', () => {
     expect(status).toBe(200);
   });
 
-  it('a cookie-only mutation is rejected with 403 cookie_auth_read_only', async () => {
+  it('a cookie-only mutation without a CSRF token is rejected with 403 csrf_required', async () => {
     const { status, body } = await call(app, 'POST', '/api/keys', { body: {}, cookie });
     expect(status).toBe(403);
-    expect(body.error.type).toBe('cookie_auth_read_only');
+    expect(body.error.type).toBe('csrf_required');
   });
 
   it('header auth still works for mutations, and the header wins over a stale cookie', async () => {
@@ -127,13 +138,16 @@ describe('Dashboard session as an httpOnly cookie — Phase 1', () => {
     expect(body.error.type).toBe('authentication_error');
   });
 
-  it('logout clears the cookie for a presented session', async () => {
+  it('logout clears both cookies for a presented session', async () => {
     const { status, cookies } = await call(app, 'POST', '/api/auth/logout', { token });
     expect(status).toBe(200);
     const cleared = cookies.find(c => c.startsWith('flm_session='));
     expect(cleared).toBeDefined();
     // Express clearCookie expires the cookie in the past.
     expect(cleared!).toMatch(/Expires=Thu, 01 Jan 1970/);
+    const csrfCleared = cookies.find(c => c.startsWith('flm_csrf='));
+    expect(csrfCleared).toBeDefined();
+    expect(csrfCleared!).toMatch(/Expires=Thu, 01 Jan 1970/);
   });
 
   it('logout without a session does not touch the cookie', async () => {
@@ -144,13 +158,15 @@ describe('Dashboard session as an httpOnly cookie — Phase 1', () => {
 
   it('desktop-session sets a 24h cookie', async () => {
     process.env.FREEAPI_DESKTOP = '1';
-    const { status, cookies } = await call(app, 'POST', '/api/auth/desktop-session', {});
+    const { status, body, cookies } = await call(app, 'POST', '/api/auth/desktop-session', {});
     expect(status).toBe(200);
+    expect(body.token).toBeUndefined();
     const setCookie = cookies.find(c => c.startsWith('flm_session='));
     expect(setCookie).toBeDefined();
     expect(setCookie!).toContain('Max-Age=86400');
     expect(setCookie!).toContain('HttpOnly');
     expect(setCookie!).not.toContain('Secure');
+    expect(cookies.find(c => c.startsWith('flm_csrf='))).toBeDefined();
     delete process.env.FREEAPI_DESKTOP;
   });
 });

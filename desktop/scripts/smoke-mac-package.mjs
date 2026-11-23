@@ -44,8 +44,27 @@ try {
   db.exec('CREATE TABLE package_smoke (value TEXT NOT NULL)');
   db.prepare('INSERT INTO package_smoke VALUES (?)').run(expectedArch);
   assert.equal(db.prepare('SELECT value FROM package_smoke').get().value, expectedArch);
-  assert.ok(backend.ensureSessionToken());
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  // Phase 2: the session token never reaches JS — there is no
+  // ensureSessionToken() anymore. The desktop window signs in by POSTing
+  // /api/auth/desktop-session and authenticating with the httpOnly cookie
+  // the server sets; assert the cookie is set and that it authenticates.
+  const desktopSession = await fetch(`${baseUrl}/api/auth/desktop-session`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(10_000),
+  });
+  assert.equal(desktopSession.status, 200);
+  const sessionCookie = desktopSession.headers
+    .getSetCookie()
+    .find((c) => c.startsWith('flm_session='))
+    ?.split(';')[0];
+  assert.ok(sessionCookie, 'desktop-session must set the flm_session cookie');
+  const status = await fetch(`${baseUrl}/api/auth/status`, {
+    headers: { Cookie: sessionCookie },
+    signal: AbortSignal.timeout(10_000),
+  });
+  assert.equal(status.status, 200);
+  assert.equal((await status.json()).authenticated, true);
   const dashboard = await fetch(baseUrl, { signal: AbortSignal.timeout(10_000) });
   assert.equal(dashboard.status, 200);
   assert.match(await dashboard.text(), /<html/i);

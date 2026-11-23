@@ -17,7 +17,12 @@ async function call(app: Express, method: string, path: string, body?: any, toke
   });
   const data = await res.json().catch(() => null);
   server.close();
-  return { status: res.status, body: data };
+  return { status: res.status, body: data, cookies: res.headers.getSetCookie() };
+}
+
+function cookieValue(cookies: string[], name: string): string | undefined {
+  const found = cookies.find(c => c.startsWith(`${name}=`));
+  return found?.split(';')[0]!.slice(name.length + 1);
 }
 
 // Tests run in definition order against one shared in-memory DB, mirroring the
@@ -57,10 +62,13 @@ describe('Dashboard auth (#35)', () => {
 
   let token = '';
   it('creates the first account on setup and returns a working token', async () => {
-    const { status, body } = await call(app, 'POST', '/api/auth/setup', { email: 'admin@example.com', password: 'supersecret' });
+    const { status, body, cookies } = await call(app, 'POST', '/api/auth/setup', { email: 'admin@example.com', password: 'supersecret' });
     expect(status).toBe(201);
-    expect(typeof body.token).toBe('string');
-    token = body.token;
+    // Phase 2: the token never reaches the response body — it rides the
+    // httpOnly cookie, and tests read it back from Set-Cookie.
+    expect(body.token).toBeUndefined();
+    token = cookieValue(cookies, 'flm_session')!;
+    expect(typeof token).toBe('string');
     expect((await call(app, 'GET', '/api/keys', undefined, token)).status).toBe(200);
   });
 
@@ -72,7 +80,8 @@ describe('Dashboard auth (#35)', () => {
   it('logs in with correct credentials and rejects wrong ones', async () => {
     const ok = await call(app, 'POST', '/api/auth/login', { email: 'admin@example.com', password: 'supersecret' });
     expect(ok.status).toBe(200);
-    expect(typeof ok.body.token).toBe('string');
+    expect(ok.body.token).toBeUndefined();
+    expect(cookieValue(ok.cookies, 'flm_session')).toBeTruthy();
 
     const bad = await call(app, 'POST', '/api/auth/login', { email: 'admin@example.com', password: 'wrongpassword' });
     expect(bad.status).toBe(401);
@@ -86,7 +95,7 @@ describe('Dashboard auth (#35)', () => {
 
   it('invalidates the token on logout', async () => {
     const login = await call(app, 'POST', '/api/auth/login', { email: 'admin@example.com', password: 'supersecret' });
-    const t = login.body.token;
+    const t = cookieValue(login.cookies, 'flm_session')!;
     expect((await call(app, 'GET', '/api/keys', undefined, t)).status).toBe(200);
     await call(app, 'POST', '/api/auth/logout', {}, t);
     expect((await call(app, 'GET', '/api/keys', undefined, t)).status).toBe(401);

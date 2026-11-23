@@ -22,19 +22,32 @@ let adminId: number;
 let adminToken: string;
 let memberToken: string;
 
-async function hit(path: string, method = 'GET', body?: unknown, token?: string) {
+async function hit(
+  path: string,
+  method = 'GET',
+  body?: unknown,
+  token?: string,
+  cookie?: string,
+) {
   const res = await fetch(`${base}${path}`, {
     method,
     headers: {
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(cookie ? { Cookie: cookie } : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   return {
     status: res.status,
     body: (await res.json().catch(() => null)) as Record<string, any> | null,
+    cookies: res.headers.getSetCookie(),
   };
+}
+
+function cookieValue(cookies: string[], name: string): string | undefined {
+  const found = cookies.find((c) => c.startsWith(`${name}=`));
+  return found?.split(';')[0]!.slice(name.length + 1);
 }
 
 describe('Starter Quota & Member Usage Settings', () => {
@@ -118,10 +131,16 @@ describe('Starter Quota & Member Usage Settings', () => {
       inviteCode: invite.code,
     });
     expect(reg.status).toBe(201);
-    const newToken = reg.body?.token as string;
-    expect(typeof newToken).toBe('string');
+    // Phase 2: register no longer returns a token in the body — the session
+    // is the httpOnly flm_session cookie. Assert it is set and authenticates.
+    const sessionValue = cookieValue(reg.cookies, 'flm_session');
+    expect(typeof sessionValue).toBe('string');
+    const memberCookie = `flm_session=${sessionValue}`;
+    const statusRes = await hit('/api/auth/status', 'GET', undefined, undefined, memberCookie);
+    expect(statusRes.status).toBe(200);
+    expect(statusRes.body?.authenticated).toBe(true);
 
-    const sessionRes = await hit('/api/user/session', 'GET', undefined, newToken);
+    const sessionRes = await hit('/api/user/session', 'GET', undefined, undefined, memberCookie);
     const newUserId = sessionRes.body?.userId as number;
 
     const state = getQuotaState('user', newUserId);
@@ -144,7 +163,7 @@ describe('Starter Quota & Member Usage Settings', () => {
     expect(a3.ok).toBe(false);
 
     // /api/user/usage surfaces the real RPM limit (42 instead of hardcoded 60)
-    const usageRes = await hit('/api/user/usage', 'GET', undefined, newToken);
+    const usageRes = await hit('/api/user/usage', 'GET', undefined, undefined, memberCookie);
     expect(usageRes.status).toBe(200);
     expect(usageRes.body?.usage?.rpmLimit).toBe(42);
   });
