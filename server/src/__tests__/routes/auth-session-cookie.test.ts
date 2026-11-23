@@ -76,7 +76,7 @@ describe('Dashboard session as an httpOnly cookie — Phase 1', () => {
     cookie = `flm_session=${value}; flm_csrf=${csrf}`;
   });
 
-  it('login sets the cookie with httpOnly, SameSite=Lax, Path=/api, 30-day Max-Age, no Secure on plain HTTP', async () => {
+  it('login sets the cookie with httpOnly, SameSite=Lax, Path=/, 30-day Max-Age, no Secure on plain HTTP', async () => {
     const { status, body, cookies } = await call(app, 'POST', '/api/auth/login', {
       body: { email: 'admin@example.com', password: 'supersecret' },
     });
@@ -89,9 +89,15 @@ describe('Dashboard session as an httpOnly cookie — Phase 1', () => {
     expect(cookieValue(cookies, 'flm_session')).toBe(token);
     expect(setCookie!).toContain('HttpOnly');
     expect(setCookie!).toContain('SameSite=Lax');
-    expect(setCookie!).toContain('Path=/api');
+    expect(setCookie!).toContain('Path=/;');
     expect(setCookie!).toContain('Max-Age=2592000');
     expect(setCookie!).not.toContain('Secure');
+    // The mint also clears the legacy Path=/api cookie: a browser upgrading
+    // from the /api-scoped cookie may still hold a revoked one, which would
+    // otherwise shadow the new cookie (browsers send the longer path first).
+    const legacyClear = cookies.filter(c => c.startsWith('flm_session=') && c.includes('Path=/api'));
+    expect(legacyClear).toHaveLength(1);
+    expect(legacyClear[0]).toMatch(/Expires=Thu, 01 Jan 1970/);
     // The CSRF cookie rides along: readable by JS, same SameSite/Path.
     const csrfCookie = cookies.find(c => c.startsWith('flm_csrf='));
     expect(csrfCookie).toBeDefined();

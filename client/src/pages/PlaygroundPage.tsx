@@ -859,12 +859,10 @@ export default function PlaygroundPage() {
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' }
       if (keyData?.apiKey) headers['Authorization'] = `Bearer ${keyData.apiKey}`
-      // Phase 2 of the cookie move: the dashboard session is no longer sent
-      // as X-FreeLLM-Session — the token lives only in the httpOnly cookie,
-      // which is Path=/api and never rides a /v1 call. Playground chats lose
-      // per-account attribution (server/src/custom/playground-attribution.ts
-      // treats a missing header as unattributed); the unified key still
-      // authenticates the call itself.
+      // The dashboard session rides along as the httpOnly cookie
+      // (flm_session is Path=/, and fetch defaults to credentials:
+      // 'same-origin'), so the server attributes the chat to this
+      // account; the unified key still authenticates the call itself.
       const base = import.meta.env.BASE_URL.replace(/\/$/, '')
 
       // Web search first, when it is on and there is a question to look up. A
