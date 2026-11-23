@@ -21,21 +21,37 @@ let adminToken: string;
 let memberAId: number;
 let memberAToken: string;
 let memberBId: number;
-let memberBToken: string;
+let memberBCookie: string;
+let memberBCsrf: string;
 
-async function hit(path: string, method = 'GET', body?: unknown, token?: string) {
+async function hit(
+  path: string,
+  method = 'GET',
+  body?: unknown,
+  token?: string,
+  cookie?: string,
+  csrf?: string,
+) {
   const res = await fetch(`${base}${path}`, {
     method,
     headers: {
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(cookie ? { Cookie: cookie } : {}),
+      ...(csrf ? { 'X-CSRF-Token': csrf } : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   return {
     status: res.status,
     body: (await res.json().catch(() => null)) as Record<string, any> | null,
+    cookies: res.headers.getSetCookie(),
   };
+}
+
+function cookieValue(cookies: string[], name: string): string | undefined {
+  const found = cookies.find((c) => c.startsWith(`${name}=`));
+  return found?.split(';')[0]!.slice(name.length + 1);
 }
 
 describe('Self-Service Quota Redeem Vouchers & 1-Click Top-Up Requests (Spec 040)', () => {
@@ -75,8 +91,15 @@ describe('Self-Service Quota Redeem Vouchers & 1-Click Top-Up Requests (Spec 040
       inviteCode: invite.code,
     });
     expect(reg.status).toBe(201);
-    memberBToken = reg.body?.token as string;
-    const sessionRes = await hit('/api/user/session', 'GET', undefined, memberBToken);
+    // Phase 2: register no longer returns a token in the body — the session
+    // arrives as the httpOnly flm_session cookie (plus flm_csrf for mutations).
+    const sessionValue = cookieValue(reg.cookies, 'flm_session');
+    const csrfValue = cookieValue(reg.cookies, 'flm_csrf');
+    expect(sessionValue).toBeTruthy();
+    expect(csrfValue).toBeTruthy();
+    memberBCookie = `flm_session=${sessionValue}; flm_csrf=${csrfValue}`;
+    memberBCsrf = csrfValue!;
+    const sessionRes = await hit('/api/user/session', 'GET', undefined, undefined, memberBCookie);
     memberBId = sessionRes.body?.userId as number;
   });
 
@@ -197,7 +220,7 @@ describe('Self-Service Quota Redeem Vouchers & 1-Click Top-Up Requests (Spec 040
       '/api/quota-vouchers/redeem',
       'POST',
       { code: '  sprint-boost-2026 ' },
-      memberBToken,
+      undefined, memberBCookie, memberBCsrf,
     );
     expect(redeemedB.status).toBe(200);
     expect(redeemedB.body?.voucher?.redeemedCount).toBe(1);
@@ -219,7 +242,7 @@ describe('Self-Service Quota Redeem Vouchers & 1-Click Top-Up Requests (Spec 040
       '/api/quota-vouchers/redeem',
       'POST',
       { code: 'SPRINT-BOOST-2026' },
-      memberBToken,
+      undefined, memberBCookie, memberBCsrf,
     );
     expect(doubleRedeem.status).toBe(409);
     expect(doubleRedeem.body?.error?.code).toBe('voucher_already_redeemed');
@@ -385,7 +408,7 @@ describe('Self-Service Quota Redeem Vouchers & 1-Click Top-Up Requests (Spec 040
       '/api/quota-vouchers/topup-requests',
       'POST',
       { requestedRequestsDaily: 0, requestedTokensDaily: 0 },
-      memberBToken,
+      undefined, memberBCookie, memberBCsrf,
     );
     expect(zeroReq.status).toBe(400);
 
@@ -398,7 +421,7 @@ describe('Self-Service Quota Redeem Vouchers & 1-Click Top-Up Requests (Spec 040
         requestedTokensDaily: 300_000,
         reason: 'Running end-to-end coding agent evaluation',
       },
-      memberBToken,
+      undefined, memberBCookie, memberBCsrf,
     );
     expect(submitted.status).toBe(201);
     const requestId = submitted.body?.request?.id as number;
@@ -409,13 +432,13 @@ describe('Self-Service Quota Redeem Vouchers & 1-Click Top-Up Requests (Spec 040
       '/api/quota-vouchers/topup-requests',
       'POST',
       { requestedRequestsDaily: 100, requestedTokensDaily: 500_000 },
-      memberBToken,
+      undefined, memberBCookie, memberBCsrf,
     );
     expect(spamAttempt.status).toBe(409);
     expect(spamAttempt.body?.error?.code).toBe('pending_topup_exists');
 
     // Member B sees own pending request; Member A sees none (strict user isolation)
-    const mineB = await hit('/api/quota-vouchers/topup-requests/mine', 'GET', undefined, memberBToken);
+    const mineB = await hit('/api/quota-vouchers/topup-requests/mine', 'GET', undefined, undefined, memberBCookie, memberBCsrf);
     expect(mineB.status).toBe(200);
     expect(mineB.body?.pendingRequest?.id).toBe(requestId);
     expect(mineB.body?.requests).toHaveLength(1);
@@ -467,7 +490,7 @@ describe('Self-Service Quota Redeem Vouchers & 1-Click Top-Up Requests (Spec 040
     expect(getQuotaState('user', memberBId).quota.dailyRequests).toBe(80);
 
     // Member B received an in-app notification in custom_notifications
-    const bell = await hit('/api/user/notifications', 'GET', undefined, memberBToken);
+    const bell = await hit('/api/user/notifications', 'GET', undefined, undefined, memberBCookie, memberBCsrf);
     expect(bell.status).toBe(200);
     const approvalNotif = (bell.body?.notifications as Array<Record<string, any>>).find(
       (n) => n.category === 'quota' && String(n.title).includes('approved'),
@@ -481,7 +504,7 @@ describe('Self-Service Quota Redeem Vouchers & 1-Click Top-Up Requests (Spec 040
       '/api/quota-vouchers/topup-requests',
       'POST',
       { requestedRequestsDaily: 20, requestedTokensDaily: 100_000, reason: 'Follow-up run' },
-      memberBToken,
+      undefined, memberBCookie, memberBCsrf,
     );
     expect(secondReq.status).toBe(201);
     const secondId = secondReq.body?.request?.id as number;
