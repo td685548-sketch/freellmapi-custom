@@ -183,7 +183,19 @@ authRouter.get('/status', (req: Request, res: Response) => {
   // cookie. Mint one here: the AuthGate calls /status before any
   // mutation-capable UI renders, so the CSRF cookie is always in place
   // by the time a mutation needs it (services/csrf.ts).
-  if (session && !getCsrfCookie(req)) setCsrfCookie(res, req, mintCsrfToken(), SESSION_TTL_MS);
+  //
+  // A session created before the Path=/ widening holds ONLY the legacy
+  // Path=/api CSRF cookie, which dashboard JS cannot read — so it would
+  // stay broken (403 csrf_required on every mutation) until the next
+  // login, because the old "mint only when missing" check saw the legacy
+  // cookie as present. The Cookie header carries no path, so the server
+  // cannot tell a legacy cookie from a current one: /status therefore
+  // re-issues the CURRENT value at Path=/ on every call for a valid
+  // session (minting fresh when there is none). Same value, no rotation,
+  // so in-flight mutations keep matching; setCsrfCookie also clears the
+  // legacy /api cookie, so after the first post-fix /status the browser
+  // holds only the readable one.
+  if (session) setCsrfCookie(res, req, getCsrfCookie(req) ?? mintCsrfToken(), SESSION_TTL_MS);
   res.json({
     needsSetup: userCount() === 0,
     authenticated: !!session,
