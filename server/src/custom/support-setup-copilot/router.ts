@@ -116,14 +116,11 @@ function extractGatewayLoopback(req: Request): {
       : rawAddr.includes(':')
         ? `[${rawAddr}]`
         : rawAddr;
-  const bearer = req.headers.authorization?.replace(/^Bearer\s+/i, '').trim();
-  const dash = req.headers['x-dashboard-token'];
   const sessionToken =
-    bearer || (Array.isArray(dash) ? dash[0] : dash)?.trim()
-    // Phase 2: the dashboard sends the session as the httpOnly cookie now;
-    // forward its value on the server-side loopback call, never to the browser.
-    || getSessionCookie(req)
-    || undefined;
+    // Phase 3: the dashboard session arrives only as the httpOnly cookie
+    // now (the header fallback is gone); forward its value on the
+    // server-side loopback call, never to the browser.
+    getSessionCookie(req) || undefined;
   return { host, port, sessionToken };
 }
 

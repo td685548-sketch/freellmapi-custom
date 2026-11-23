@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb } from '../../db/index.js';
-import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
+import { mintDashboardToken, isGatedApiPath, dashboardSessionHeaders } from '../helpers/auth.js';
 import { resolveCustomEndpointKey } from '../../services/custom-endpoint.js';
 import { registerCustomMediaModel } from '../../services/custom-media-register.js';
 import { runImageGeneration } from '../../services/media.js';
@@ -20,7 +20,7 @@ async function get(app: Express, path: string) {
   if (!server.listening) await new Promise<void>(resolve => server.once('listening', () => resolve()));
   const addr = server.address() as any;
   const res = await fetch(`http://127.0.0.1:${addr.port}${path}`, {
-    headers: isGatedApiPath(path) ? { Authorization: `Bearer ${dashToken}` } : {},
+    headers: isGatedApiPath(path) ? { ...dashboardSessionHeaders(dashToken) } : {},
   });
   const data = await res.json().catch(() => null);
   server.close();

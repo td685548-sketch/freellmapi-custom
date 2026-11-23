@@ -3,6 +3,8 @@ import { getSetting, setSetting } from '../db/index.js';
 import { GUEST_PERMISSIONS, type GuestPermission } from '@freellmapi/shared/guest-access.js';
 import type { SessionUser } from './auth.js';
 import { getSessionCookie } from './session-cookie.js';
+import { resolveAuth } from '../lib/system-prompt.js';
+import { extractApiToken } from '../routes/proxy.js';
 
 // Visitors who are not signed in ("guests") may read what an administrator allows, nothing more:
 //  - only GET requests without any credential,
@@ -63,9 +65,16 @@ const cache = new Map<string, { at: number; status: number; type: string | undef
 export function resetGuestCache(): void { cache.clear(); }
 
 function hasCredential(req: Request): boolean {
-  // Phase 2: the dashboard presents its session as the httpOnly cookie now;
-  // a cookie-only GET to a guest route is a signed-in caller, not a guest.
-  return Boolean(req.headers.authorization || req.headers['x-dashboard-token'] || getSessionCookie(req));
+  // Phase 3: the dashboard session arrives only as the httpOnly cookie
+  // now (the header fallback is gone). A caller presenting only a unified
+  // API key (Bearer flm_...) on a guest GET route was previously passed
+  // through here — then 401'd by requireAuth, since a key is not a
+  // session. Preserve that: a valid unified/user/profile key still counts
+  // as a credential, so the request is not served guest content. A random
+  // Bearer value resolves to nothing and is treated as no credential.
+  if (getSessionCookie(req)) return true;
+  const apiToken = extractApiToken(req);
+  return Boolean(apiToken && resolveAuth(apiToken));
 }
 
 /** Mounted on /api before the permission gates. */

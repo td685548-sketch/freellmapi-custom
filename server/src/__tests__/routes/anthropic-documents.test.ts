@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vite
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 
 // `document` content blocks on POST /v1/messages.
 //
@@ -87,7 +87,7 @@ describe('Anthropic document blocks', () => {
     db.prepare('DELETE FROM rate_limit_usage').run();
     const { status } = await request(app, '/api/keys',
       { platform: 'groq', key: 'gsk_document_test', label: 't' },
-      { Authorization: `Bearer ${dashToken}` });
+      { ...dashboardSessionHeaders(dashToken) });
     expect(status).toBe(201);
   });
 

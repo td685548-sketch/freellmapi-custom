@@ -10,6 +10,7 @@ import { getDb, initDb } from '../../db/index.js';
 import { createSession, createUser } from '../../services/auth.js';
 import { setUserPermissions } from '../../services/users.js';
 
+import { dashboardSessionHeaders } from '../helpers/auth.js';
 /** Mock verified cloud lease (project test hook) so nothing touches a live activation token. */
 function installMockCloudLease(): void {
   process.env.FREEAPI_AI_ACTIVATION_TOKEN = 'dummy-test-token-never-sent';
@@ -66,7 +67,7 @@ describe('Copilot routing — advice for a selected tenant, and the System targe
   const call = async (path: string, token: string, body?: unknown) => {
     const res = await fetch(`${base}${path}`, {
       method: body === undefined ? 'GET' : 'POST',
-      headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), Authorization: `Bearer ${token}` },
+      headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...dashboardSessionHeaders(token) },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     return { status: res.status, body: (await res.json().catch(() => null)) as Record<string, any> | null };

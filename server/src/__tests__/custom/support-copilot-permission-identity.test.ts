@@ -17,6 +17,7 @@ import { getDb, initDb } from '../../db/index.js';
 import { createSession, createUser, type SessionUser } from '../../services/auth.js';
 import { setUserPermissions } from '../../services/users.js';
 
+import { dashboardSessionHeaders } from '../helpers/auth.js';
 let server: Server;
 let base: string;
 
@@ -35,7 +36,7 @@ async function hit(path: string, method = 'GET', body?: unknown, token?: string)
     method,
     headers: {
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(token ? { ...dashboardSessionHeaders(token) } : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });

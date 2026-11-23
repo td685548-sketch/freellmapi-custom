@@ -3,14 +3,14 @@ import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { createAdminRateLimiter } from '../../middleware/rateLimit.js';
 import { initDb } from '../../db/index.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 
 async function request(app: Express, path: string, token?: string) {
   const server = app.listen(0, '127.0.0.1');
   if (!server.listening) await new Promise<void>(resolve => server.once('listening', () => resolve()));
   const addr = server.address() as any;
   const res = await fetch(`http://127.0.0.1:${addr.port}${path}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    headers: token ? { ...dashboardSessionHeaders(token) } : {},
   });
   const text = await res.text();
   server.close();
@@ -88,7 +88,7 @@ describe('Admin API rate limiter', () => {
     for (let i = 0; i < 61; i++) {
       const res = await fetch(`http://127.0.0.1:${addr.port}/api/keys/1/reveal`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { ...dashboardSessionHeaders(token) },
       });
       if (i === 0) limitHeader = res.headers.get('x-ratelimit-limit');
       statuses.push(res.status);

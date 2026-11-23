@@ -3,7 +3,7 @@ import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { clearCooldownsForKey } from '../../services/ratelimit.js';
-import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
+import { mintDashboardToken, isGatedApiPath, dashboardSessionHeaders } from '../helpers/auth.js';
 
 // End-to-end cover for a user-registered speech-to-text endpoint: POST
 // /api/media/custom writes the media_models row AND the api_keys row that
@@ -32,7 +32,7 @@ async function post(app: Express, path: string, body: unknown) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(isGatedApiPath(path) ? { Authorization: `Bearer ${dashToken}` } : {}),
+      ...(isGatedApiPath(path) ? { ...dashboardSessionHeaders(dashToken) } : {}),
     },
     body: JSON.stringify(body),
   });
@@ -44,7 +44,7 @@ async function post(app: Express, path: string, body: unknown) {
 async function get(app: Express, path: string) {
   const { server, port } = await listen(app);
   const res = await realFetch(`http://127.0.0.1:${port}${path}`, {
-    headers: isGatedApiPath(path) ? { Authorization: `Bearer ${dashToken}` } : {},
+    headers: isGatedApiPath(path) ? { ...dashboardSessionHeaders(dashToken) } : {},
   });
   const data = await res.json().catch(() => null);
   server.close();

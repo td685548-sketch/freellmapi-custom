@@ -3,6 +3,7 @@ import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb } from '../../db/index.js';
 
+import { dashboardSessionHeaders } from '../helpers/auth.js';
 async function call(app: Express, method: string, path: string, body?: any, token?: string) {
   const server = app.listen(0, '127.0.0.1');
   if (!server.listening) await new Promise<void>(resolve => server.once('listening', () => resolve()));
@@ -11,7 +12,7 @@ async function call(app: Express, method: string, path: string, body?: any, toke
     method,
     headers: {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(token ? { ...dashboardSessionHeaders(token) } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
   });

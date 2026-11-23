@@ -4,7 +4,7 @@ import { createApp } from '../../app.js';
 import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
 import { clearAllCooldowns } from '../../services/ratelimit.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 import { seedDecisionModels } from '../helpers/decision-models.js';
 
 // HTTP surface of decision models: POST /v1/decisions (and the /v1/systemone
@@ -29,7 +29,7 @@ async function call(app: Express, method: string, path: string, opts: { body?: u
   const addr = server.address() as any;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const auth = opts.auth === undefined ? (path.startsWith('/api') ? 'dash' : 'api') : opts.auth;
-  if (auth === 'dash') headers.Authorization = `Bearer ${dashToken}`;
+  if (auth === 'dash') Object.assign(headers, dashboardSessionHeaders(dashToken));
   if (auth === 'api') headers.Authorization = `Bearer ${regenerateUnifiedKey()}`;
   const res = await realFetch(`http://127.0.0.1:${addr.port}${path}`, {
     method,

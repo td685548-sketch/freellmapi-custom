@@ -3,7 +3,7 @@ import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb, getSetting, setSetting, regenerateUnifiedKey } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
-import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
+import { mintDashboardToken, isGatedApiPath, dashboardSessionHeaders } from '../helpers/auth.js';
 import { applyAllModelOverrides } from '../../services/model-state.js';
 
 let dashToken = '';
@@ -47,7 +47,7 @@ async function request(app: Express, method: string, path: string, body?: any) {
     method,
     headers: {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
-      ...(isGatedApiPath(path) ? { Authorization: `Bearer ${dashToken}` } : {}),
+      ...(isGatedApiPath(path) ? { ...dashboardSessionHeaders(dashToken) } : {}),
       ...(isV1 ? { Authorization: `Bearer ${regenerateUnifiedKey()}` } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,

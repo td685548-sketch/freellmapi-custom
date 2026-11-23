@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vite
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 import { effortFromAnthropicThinking } from '../../routes/anthropic.js';
 
 // Request-side reasoning control (reasoning_effort / reasoning:{effort} /
@@ -123,7 +123,7 @@ describe('request-side reasoning control (end-to-end)', () => {
     db.prepare('DELETE FROM rate_limit_usage').run();
     const { status } = await request(app, '/api/keys',
       { platform: 'groq', key: 'gsk_reasoning_control_test', label: 't' },
-      { Authorization: `Bearer ${dashToken}` });
+      { ...dashboardSessionHeaders(dashToken) });
     expect(status).toBe(201);
   });
 
@@ -233,7 +233,7 @@ describe('Anthropic surface: thinking knob + thinking blocks', () => {
     db.prepare('DELETE FROM rate_limit_usage').run();
     const { status } = await request(app, '/api/keys',
       { platform: 'groq', key: 'gsk_reasoning_anthropic_test', label: 't' },
-      { Authorization: `Bearer ${dashToken}` });
+      { ...dashboardSessionHeaders(dashToken) });
     expect(status).toBe(201);
   });
 

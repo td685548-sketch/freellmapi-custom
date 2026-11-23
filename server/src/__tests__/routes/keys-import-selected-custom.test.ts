@@ -3,7 +3,7 @@ import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 
 // #687, second half. #717 taught POST /api/keys/import about custom endpoints,
 // but the dashboard never calls that route — the Add-key dialog does
@@ -19,7 +19,7 @@ async function post(app: Express, path: string, body: unknown) {
   const addr = server.address() as { port: number };
   const res = await fetch(`http://127.0.0.1:${addr.port}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${dashToken}` },
+    headers: { 'Content-Type': 'application/json', ...dashboardSessionHeaders(dashToken) },
     body: JSON.stringify(body),
   });
   const json = await res.json().catch(() => null);
@@ -35,7 +35,7 @@ async function previewFile(app: Express, filename: string, content: string) {
   form.append('files', new Blob([content], { type: 'text/plain' }), filename);
   const res = await fetch(`http://127.0.0.1:${addr.port}/api/keys/preview`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${dashToken}` },
+    headers: { ...dashboardSessionHeaders(dashToken) },
     body: form,
   });
   const json = await res.json().catch(() => null);

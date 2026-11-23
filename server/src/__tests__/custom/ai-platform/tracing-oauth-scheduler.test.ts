@@ -22,6 +22,7 @@ import { pruneExpiredTraces } from '../../../custom/ai-platform/tracing/store.js
 import { purgeScope } from '../../../custom/ai-platform/scope.js';
 import { getDb, initDb } from '../../../db/index.js';
 import { createSession, createUser } from '../../../services/auth.js';
+import { dashboardSessionHeaders } from '../../helpers/auth.js';
 import { setKeyCacheTestOverride } from '../../../services/key-cache.js';
 import { addDoc, resetKnowledgeIndexes } from '../../../services/profile-knowledge.js';
 import { resetQuotaCaches } from '../../../services/usage-quotas.js';
@@ -114,7 +115,7 @@ async function apiCall(
   const res = await fetch(`${baseUrl}${path}`, {
     method: opts.method ?? 'GET',
     headers: {
-      authorization: `Bearer ${opts.token ?? primaryToken}`,
+      ...(opts.token ?? primaryToken ? dashboardSessionHeaders(opts.token ?? primaryToken) : {}),
       ...(opts.body !== undefined ? { 'content-type': 'application/json' } : {}),
       ...(opts.headers ?? {}),
     },

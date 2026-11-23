@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Express, AddressInfo } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb } from '../../db/index.js';
-import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
+import { mintDashboardToken, isGatedApiPath, dashboardSessionHeaders } from '../helpers/auth.js';
 
 const realFetch = globalThis.fetch;
 let dashToken = '';
@@ -15,7 +15,7 @@ async function post(app: Express, path: string, body: unknown) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(isGatedApiPath(path) ? { Authorization: `Bearer ${dashToken}` } : {}),
+      ...(isGatedApiPath(path) ? { ...dashboardSessionHeaders(dashToken) } : {}),
     },
     body: JSON.stringify(body),
   });

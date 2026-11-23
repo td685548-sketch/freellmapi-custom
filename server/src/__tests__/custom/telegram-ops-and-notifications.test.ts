@@ -19,6 +19,7 @@ import { createRegistrationRequest } from '../../services/registration-requests.
 import { resetAlertState } from '../../services/usage-alerts.js';
 import { admitQuota, getQuotaState, resetQuotaCaches, setQuota } from '../../services/usage-quotas.js';
 
+import { dashboardSessionHeaders } from '../helpers/auth.js';
 interface RecordedTelegramCall {
   method: string;
   body: Record<string, any>;
@@ -40,7 +41,7 @@ async function hit(path: string, method = 'GET', body?: unknown, token?: string)
     method,
     headers: {
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(token ? { ...dashboardSessionHeaders(token) } : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });

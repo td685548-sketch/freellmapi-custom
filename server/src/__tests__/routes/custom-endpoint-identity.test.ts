@@ -9,7 +9,7 @@ import { noteModelRetirementSignal, resetModelRetirementObservations } from '../
 import { endpointHandle, qualifiedModelMemberId } from '../../lib/endpoint-scope.js';
 import { logRequest } from '../../lib/request-log.js';
 import { buildModelListing } from '../../services/model-listing.js';
-import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
+import { mintDashboardToken, isGatedApiPath, dashboardSessionHeaders } from '../helpers/auth.js';
 
 // Per-endpoint model identity (#651). Two relays that both offer
 // `deepseek-v3.1` used to collapse into ONE models row: one enabled flag, one
@@ -32,7 +32,7 @@ async function request(app: Express, method: string, path: string, body?: unknow
     method,
     headers: {
       'Content-Type': 'application/json',
-      ...(isGatedApiPath(path) ? { Authorization: `Bearer ${dashToken}` } : {}),
+      ...(isGatedApiPath(path) ? { ...dashboardSessionHeaders(dashToken) } : {}),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });

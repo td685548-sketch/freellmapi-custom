@@ -22,6 +22,7 @@ import {
 import { listSupportAuditLogs } from '../../custom/x-gateway/support-enterprise-router.js';
 import { createSupportTenant } from '../../custom/x-gateway/support-store.js';
 import { getDb, initDb } from '../../db/index.js';
+import { dashboardSessionHeaders } from '../helpers/auth.js';
 import {
   createSession,
   createUser,
@@ -62,7 +63,7 @@ async function hit(path: string, method = 'GET', body?: unknown, token?: string)
     method,
     headers: {
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(token ? { ...dashboardSessionHeaders(token) } : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });

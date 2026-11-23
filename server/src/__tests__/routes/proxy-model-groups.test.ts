@@ -7,7 +7,7 @@ import { setUnifyEnabled, setUnifyOverrides } from '../../services/model-groups.
 import { setRoutingStrategy } from '../../services/router.js';
 import { setCompressionConfig } from '../../services/compression/config.js';
 import { _clearStoreForTesting } from '../../services/context-handoff.js';
-import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
+import { mintDashboardToken, isGatedApiPath, dashboardSessionHeaders } from '../helpers/auth.js';
 
 let dashToken = '';
 
@@ -18,7 +18,7 @@ async function request(app: Express, method: string, path: string, body?: any, h
   const url = `http://127.0.0.1:${addr.port}${path}`;
   const res = await fetch(url, {
     method,
-    headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(isGatedApiPath(path) && !('Authorization' in headers) ? { Authorization: `Bearer ${dashToken}` } : {}), ...headers },
+    headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(isGatedApiPath(path) && !('Authorization' in headers) && !('Cookie' in headers) ? { ...dashboardSessionHeaders(dashToken) } : {}), ...headers },
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.text();

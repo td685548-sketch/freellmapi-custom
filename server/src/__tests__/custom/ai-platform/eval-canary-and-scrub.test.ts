@@ -60,7 +60,7 @@ import {
 } from '../../../custom/ai-platform/prompts/store.js';
 import { installInterceptor } from '../../../custom/ai-platform/wire/interceptor.js';
 import { DEFAULT_GUARD_DETECTORS } from '@freellmapi/shared/ai-platform-output-guard.js';
-import { mintDashboardToken } from '../../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../../helpers/auth.js';
 
 function insertTestProfile(name: string, systemPrompt: string | null = null): { id: number; key: string } {
   const key = mintClientProfileKey();
@@ -90,7 +90,7 @@ function httpJson(
         path,
         method,
         headers: {
-          authorization: `Bearer ${token}`,
+          ...(token ? dashboardSessionHeaders(token) : {}),
           'content-type': 'application/json',
           ...(body !== undefined ? { 'content-length': Buffer.byteLength(payload) } : {}),
         },

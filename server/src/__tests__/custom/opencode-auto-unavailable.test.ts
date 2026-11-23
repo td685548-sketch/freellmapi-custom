@@ -11,6 +11,7 @@ import { clearAccountCooldown, getAccountCooldown } from '../../custom/provider-
 import { classifyRouteError, filterCandidatesByCooldown, recordCandidateFailure } from '../../custom/x-gateway/route-cooldown.js';
 import { clearUnavailableOpenCodeModels, listUnavailableOpenCodeModels } from '../../custom/x-gateway/opencode-unavailable.js';
 
+import { dashboardSessionHeaders } from '../helpers/auth.js';
 describe('OpenCode unavailable model fallback', () => {
   beforeAll(() => {
     process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'c'.repeat(64);
@@ -61,7 +62,7 @@ describe('OpenCode unavailable model fallback', () => {
     });
     try {
       const send = () => realFetch(`http://127.0.0.1:${port}/api/thruline/playground/chat`, {
-        method: 'POST', headers: { Authorization: `Bearer ${session}`, 'Content-Type': 'application/json' },
+        method: 'POST', headers: { ...dashboardSessionHeaders(session), 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: 'oc/auto', messages: [{ role: 'user', content: 'hello' }] }),
       });
       const first = await send();

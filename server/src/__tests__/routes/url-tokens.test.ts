@@ -3,7 +3,7 @@ import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { getDb, regenerateUnifiedKey, initDb } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 
 async function request(
   app: Express,
@@ -55,7 +55,7 @@ describe('revocable URL-token aliases', () => {
 
   it('mints once, authenticates a headerless alias, and revokes immediately', async () => {
     const minted = await request(app, 'POST', '/api/settings/url-tokens', { label: 'VS Code' }, {
-      Authorization: `Bearer ${dashboardToken}`,
+      ...dashboardSessionHeaders(dashboardToken),
     });
     expect(minted.status).toBe(201);
     expect(minted.body.token).toMatch(/^flmurl_/);
@@ -106,7 +106,7 @@ describe('revocable URL-token aliases', () => {
     expect(ollamaTags.body.models.length).toBeGreaterThan(0);
 
     const revoked = await request(app, 'DELETE', `/api/settings/url-tokens/${minted.body.id}`, undefined, {
-      Authorization: `Bearer ${dashboardToken}`,
+      ...dashboardSessionHeaders(dashboardToken),
     });
     expect(revoked.status).toBe(204);
     expect((await request(app, 'GET', `/v1/t/${minted.body.token}/models`)).status).toBe(401);
@@ -119,7 +119,7 @@ describe('revocable URL-token aliases', () => {
 
   it('mints chat-scoped tokens with a 90-day default expiry', async () => {
     const minted = await request(app, 'POST', '/api/settings/url-tokens', { label: 'expiry-default' }, {
-      Authorization: `Bearer ${dashboardToken}`,
+      ...dashboardSessionHeaders(dashboardToken),
     });
     expect(minted.status).toBe(201);
     expect(minted.body.scope).toBe('chat');
@@ -129,7 +129,7 @@ describe('revocable URL-token aliases', () => {
     expect(days).toBeLessThan(91);
 
     const listed = await request(app, 'GET', '/api/settings/url-tokens', undefined, {
-      Authorization: `Bearer ${dashboardToken}`,
+      ...dashboardSessionHeaders(dashboardToken),
     });
     expect(listed.status).toBe(200);
     expect(listed.body.tokens[0]).toMatchObject({ scope: 'chat', expiresAt: minted.body.expiresAt });
@@ -137,7 +137,7 @@ describe('revocable URL-token aliases', () => {
 
   it('honours a per-token expiresInDays and rejects out-of-range values', async () => {
     const minted = await request(app, 'POST', '/api/settings/url-tokens', { label: 'short', expiresInDays: 30 }, {
-      Authorization: `Bearer ${dashboardToken}`,
+      ...dashboardSessionHeaders(dashboardToken),
     });
     expect(minted.status).toBe(201);
     const days = (new Date(minted.body.expiresAt).getTime() - Date.now()) / 86_400_000;
@@ -146,7 +146,7 @@ describe('revocable URL-token aliases', () => {
 
     for (const bad of [0, -1, 3651, 'soon']) {
       const rejected = await request(app, 'POST', '/api/settings/url-tokens', { label: 'bad', expiresInDays: bad }, {
-        Authorization: `Bearer ${dashboardToken}`,
+        ...dashboardSessionHeaders(dashboardToken),
       });
       expect(rejected.status).toBe(400);
     }
@@ -154,7 +154,7 @@ describe('revocable URL-token aliases', () => {
 
   it('rejects an expired token without any manual revoke', async () => {
     const minted = await request(app, 'POST', '/api/settings/url-tokens', { label: 'will-expire' }, {
-      Authorization: `Bearer ${dashboardToken}`,
+      ...dashboardSessionHeaders(dashboardToken),
     });
     expect(minted.status).toBe(201);
     expect((await request(app, 'GET', `/v1/t/${minted.body.token}/models`)).status).toBe(200);
@@ -168,7 +168,7 @@ describe('revocable URL-token aliases', () => {
 
   it('grandfathers pre-expiry tokens (expires_at NULL) until revoked', async () => {
     const minted = await request(app, 'POST', '/api/settings/url-tokens', { label: 'legacy' }, {
-      Authorization: `Bearer ${dashboardToken}`,
+      ...dashboardSessionHeaders(dashboardToken),
     });
     expect(minted.status).toBe(201);
     getDb().prepare('UPDATE url_tokens SET expires_at = NULL WHERE id = ?').run(minted.body.id);
@@ -179,7 +179,7 @@ describe('revocable URL-token aliases', () => {
 
   it('does not let a URL token read the unified-only /v1/usage ledger', async () => {
     const minted = await request(app, 'POST', '/api/settings/url-tokens', { label: 'widget' }, {
-      Authorization: `Bearer ${dashboardToken}`,
+      ...dashboardSessionHeaders(dashboardToken),
     });
     expect(minted.status).toBe(201);
 

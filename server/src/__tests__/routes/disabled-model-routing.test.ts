@@ -4,7 +4,7 @@ import { createApp } from '../../app.js';
 import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
 import { resolveRoutingChain, setRoutingStrategy, getOrderedFusionChain } from '../../services/router.js';
-import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
+import { mintDashboardToken, isGatedApiPath, dashboardSessionHeaders } from '../helpers/auth.js';
 
 let app: Express;
 let dashToken = '';
@@ -17,7 +17,7 @@ async function request(method: string, path: string, body?: any, headers: Record
     method,
     headers: {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
-      ...(isGatedApiPath(path) && !('Authorization' in headers) ? { Authorization: `Bearer ${dashToken}` } : {}),
+      ...(isGatedApiPath(path) && !('Authorization' in headers) && !('Cookie' in headers) ? { ...dashboardSessionHeaders(dashToken) } : {}),
       ...headers,
     },
     body: body ? JSON.stringify(body) : undefined,

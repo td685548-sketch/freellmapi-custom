@@ -5,19 +5,20 @@ import { initDb, getDb } from '../../db/index.js';
 import { preparseGuard } from '../../custom/preparse-guard.js';
 import { finishGoogleLogin } from '../../services/google-auth.js';
 
-// Phase 2 of the httpOnly-cookie session move (services/session-cookie.ts,
+// Phase 3 of the httpOnly-cookie session move (services/session-cookie.ts,
 // services/csrf.ts): the session token never reaches browser JS — no token in
 // any mint response body, nothing in sessionStorage/localStorage — and the
 // httpOnly cookie authenticates mutations ONLY with the double-submit CSRF
 // token (readable `flm_csrf` cookie + `X-CSRF-Token` header, compared with
-// timingSafeEqual). The Bearer header keeps working without CSRF, for
-// non-browser clients; dropping that fallback is a later Phase 3.
+// timingSafeEqual). Phase 3 dropped the Bearer header fallback entirely: a
+// header is ignored for session auth, so every authenticated request needs
+// the cookie (and every mutation needs the CSRF pair).
 
 async function call(
   app: Express,
   method: string,
   path: string,
-  opts: { body?: any; token?: string; cookie?: string; csrf?: string; headers?: Record<string, string> } = {},
+  opts: { body?: any; cookie?: string; csrf?: string; headers?: Record<string, string> } = {},
 ) {
   const server = app.listen(0, '127.0.0.1');
   if (!server.listening) await new Promise<void>(resolve => server.once('listening', () => resolve()));
@@ -27,7 +28,6 @@ async function call(
       method,
       headers: {
         ...(opts.body ? { 'Content-Type': 'application/json' } : {}),
-        ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : {}),
         ...(opts.cookie ? { Cookie: opts.cookie } : {}),
         ...(opts.csrf ? { 'X-CSRF-Token': opts.csrf } : {}),
         ...opts.headers,
@@ -150,9 +150,13 @@ describe('Dashboard session without a JS-readable token — Phase 2', () => {
     expect(body.error.type).toBe('csrf_required');
   });
 
-  it('a header-only mutation still works with no CSRF at all', async () => {
-    const { status } = await call(app, 'POST', '/api/keys', { body: {}, token });
-    expect(status).toBe(400);
+  it('a header-only mutation is ignored now (401) — the cookie is the only carrier', async () => {
+    const { status, body } = await call(app, 'POST', '/api/keys', {
+      body: {},
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(status).toBe(401);
+    expect(body.error.type).toBe('authentication_error');
   });
 
   it('change-password with cookie+CSRF and a wrong password reaches the handler (403 invalid_password)', async () => {
@@ -274,10 +278,11 @@ describe('preparse guard with the cookie (Phase 2)', () => {
     expect(status).toBe(0);
   });
 
-  it('admits a large body carrying a Bearer header', () => {
-    const { next, status } = runGuard({ token });
-    expect(next).toHaveBeenCalledTimes(1);
-    expect(status).toBe(0);
+  it('refuses a large body carrying only a Bearer header (401) — the header is ignored now', () => {
+    const { next, status, body } = runGuard({ token });
+    expect(next).not.toHaveBeenCalled();
+    expect(status).toBe(401);
+    expect(body.error.type).toBe('authentication_error');
   });
 
   it('refuses a large anonymous body with 401, without calling next', () => {

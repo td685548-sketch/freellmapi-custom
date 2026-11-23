@@ -24,6 +24,7 @@ import { getDb, initDb } from '../../db/index.js';
 import { createSession, createUser } from '../../services/auth.js';
 import { checkUserRateLimit } from '../../services/user-quotas.js';
 
+import { dashboardSessionHeaders } from '../helpers/auth.js';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const admin = { role: 'admin', isPrimary: true } as const;
 
@@ -145,7 +146,7 @@ describe('Setup Copilot chat — 429 answered from the web options', () => {
   const chat = async (content: string) => {
     const res = await fetch(`${base}/api/support-setup-copilot/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      headers: { 'Content-Type': 'application/json', ...dashboardSessionHeaders(adminToken) },
       body: JSON.stringify({
         tenantId, locale: 'vi', currentPath: '/thruline/support',
         messages: [{ role: 'user', content }],

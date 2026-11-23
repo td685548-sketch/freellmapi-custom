@@ -3,7 +3,7 @@ import type { Server } from 'node:http';
 import { createApp } from '../../app.js';
 import { initDb, getDb } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 import { getProvider } from '../../providers/index.js';
 import { checkMonthlyBudget, getMonthlyUsage } from '../../services/key-budget.js';
 
@@ -15,7 +15,7 @@ let sequence = 20000;
 const answer = {id:'mock',object:'chat.completion',created:0,model:'mock',choices:[{index:0,message:{role:'assistant' as const,content:'pong'},finish_reason:'stop'}],usage:{prompt_tokens:3,completion_tokens:2,total_tokens:5}};
 const post = async (path: string, body?: object) => {
   const res = await fetch('http://127.0.0.1:'+(server.address() as {port:number}).port+path, {
-    method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:body && JSON.stringify(body),
+    method:'POST',headers:{...dashboardSessionHeaders(token),'Content-Type':'application/json'},body:body && JSON.stringify(body),
   });
   return {status:res.status,body:await res.json()};
 };

@@ -4,7 +4,7 @@ import { createApp } from '../../app.js';
 import { initDb, getDb } from '../../db/index.js';
 import { decrypt } from '../../lib/crypto.js';
 import { routePinnedModel } from '../../services/router.js';
-import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
+import { mintDashboardToken, isGatedApiPath, dashboardSessionHeaders } from '../helpers/auth.js';
 
 // #619(b): a custom endpoint can hold SEVERAL credentials. Adding a second key
 // for a base_url that already has one used to UPDATE the existing row — the
@@ -22,7 +22,7 @@ async function request(app: Express, method: string, path: string, body?: unknow
     method,
     headers: {
       'Content-Type': 'application/json',
-      ...(isGatedApiPath(path) ? { Authorization: `Bearer ${dashToken}` } : {}),
+      ...(isGatedApiPath(path) ? { ...dashboardSessionHeaders(dashToken) } : {}),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });

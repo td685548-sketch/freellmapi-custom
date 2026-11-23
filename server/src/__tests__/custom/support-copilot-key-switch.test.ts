@@ -16,6 +16,7 @@ import { getDb, initDb } from '../../db/index.js';
 import { createSession, createUser, type SessionUser } from '../../services/auth.js';
 import { listUserApiKeys, mintUserApiKey } from '../../services/user-keys.js';
 
+import { dashboardSessionHeaders } from '../helpers/auth.js';
 function installMockCloudLease(): void {
   process.env.FREEAPI_AI_ACTIVATION_TOKEN = 'dummy-test-token-never-sent';
   const lease: CloudSignedLease = {
@@ -151,7 +152,7 @@ describe('the screenshot: a tenant is selected and the user asks to switch a key
   const chat = async (content: string) => {
     const res = await fetch(`${base}/api/support-setup-copilot/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      headers: { 'Content-Type': 'application/json', ...dashboardSessionHeaders(adminToken) },
       body: JSON.stringify({ tenantId, targetMode: 'update_tenant', locale: 'vi', currentPath: '/thruline/support', messages: [{ role: 'user', content }] }),
     });
     return { status: res.status, body: (await res.json()) as Record<string, any> };

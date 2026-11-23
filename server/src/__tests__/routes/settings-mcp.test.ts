@@ -4,7 +4,7 @@ import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getSetting, regenerateUnifiedKey } from '../../db/index.js';
 import { up as seedMcpDefault } from '../../db/migrations/20260903_000001_mcp_enabled_default.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 
 async function request(app: Express, method: string, path: string, body: any, token: string) {
   const server = app.listen(0, '127.0.0.1');
@@ -12,7 +12,14 @@ async function request(app: Express, method: string, path: string, body: any, to
   const addr = server.address() as any;
   const res = await fetch(`http://127.0.0.1:${addr.port}${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: {
+      'Content-Type': 'application/json',
+      // Phase 3: dashboard routes take the session cookie; /mcp takes the
+      // unified API key as Bearer.
+      ...(path.startsWith('/mcp')
+        ? { Authorization: `Bearer ${token}` }
+        : { ...dashboardSessionHeaders(token) }),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const raw = await res.text();

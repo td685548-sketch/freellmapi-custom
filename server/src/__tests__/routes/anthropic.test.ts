@@ -6,7 +6,7 @@ import { addToActiveChain } from '../helpers/chain.js';
 import { encrypt } from '../../lib/crypto.js';
 import { setUnifyEnabled, setUnifyOverrides } from '../../services/model-groups.js';
 import { getRoutingStrategy, setRoutingStrategy, type RoutingStrategy } from '../../services/router.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 
 // Anthropic-compatible Messages API (`POST /v1/messages`). These tests drive
 // the route end-to-end through a mocked Groq upstream and assert the Anthropic
@@ -156,7 +156,7 @@ describe('Anthropic-compatible /v1/messages', () => {
     `).run();
     const { status } = await request(app, '/api/keys',
       { platform: 'groq', key: 'gsk_anthropic_test', label: 't' },
-      { Authorization: `Bearer ${dashToken}` });
+      { ...dashboardSessionHeaders(dashToken) });
     expect(status).toBe(201);
   });
 
@@ -273,7 +273,7 @@ describe('Anthropic-compatible /v1/messages', () => {
     db.prepare('DELETE FROM api_keys').run();
     const addGoogle = await request(app, '/api/keys',
       { platform: 'google', key: 'google_anthropic_thought_signature_test', label: 'g' },
-      { Authorization: `Bearer ${dashToken}` });
+      { ...dashboardSessionHeaders(dashToken) });
     expect(addGoogle.status).toBe(201);
 
     const capturedBodies = mockGoogleJsonSequence([
@@ -547,7 +547,7 @@ describe('Anthropic-compatible /v1/messages', () => {
       'PUT',
       '/api/settings/agent-compatibility',
       { exposeClaudeDiscoveryAliases: true },
-      { Authorization: `Bearer ${dashToken}` },
+      { ...dashboardSessionHeaders(dashToken) },
     );
     expect(enabled.status).toBe(200);
 
@@ -578,7 +578,7 @@ describe('Anthropic-compatible /v1/messages', () => {
     // Pick a real enabled groq model to pin "sonnet" to.
     const groqModel = (getDb().prepare("SELECT model_id FROM models WHERE platform = 'groq' AND enabled = 1 ORDER BY intelligence_rank LIMIT 1").get() as { model_id: string }).model_id;
 
-    const put = await send(app, 'PUT', '/api/settings/anthropic-map', { sonnet: groqModel }, { Authorization: `Bearer ${dashToken}` });
+    const put = await send(app, 'PUT', '/api/settings/anthropic-map', { sonnet: groqModel }, { ...dashboardSessionHeaders(dashToken) });
     expect(put.status).toBe(200);
     expect(put.body.map.sonnet).toBe(groqModel);
     expect(put.body.map.opus).toBe('auto'); // untouched families stay auto
@@ -595,7 +595,7 @@ describe('Anthropic-compatible /v1/messages', () => {
   });
 
   it('GET /api/settings/anthropic-map returns defaults (all auto) when unset', async () => {
-    const { status, body } = await send(app, 'GET', '/api/settings/anthropic-map', undefined, { Authorization: `Bearer ${dashToken}` });
+    const { status, body } = await send(app, 'GET', '/api/settings/anthropic-map', undefined, { ...dashboardSessionHeaders(dashToken) });
     expect(status).toBe(200);
     expect(body.map).toEqual({ default: 'auto', opus: 'auto', sonnet: 'auto', haiku: 'auto' });
   });

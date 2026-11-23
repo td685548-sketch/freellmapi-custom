@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb } from '../../db/index.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 
 let app: Express;
 let token: string;
@@ -11,7 +11,7 @@ async function exportJson(app: Express, password?: string) {
   const server = app.listen(0, '127.0.0.1');
   if (!server.listening) await new Promise<void>(resolve => server.once('listening', () => resolve()));
   const addr = server.address() as { port: number };
-  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+  const headers: Record<string, string> = { ...dashboardSessionHeaders(token) };
   if (password) headers['x-reauth-password'] = password;
   const res = await fetch(`http://127.0.0.1:${addr.port}/api/keys/export?format=json`, { headers });
   const data = await res.json().catch(() => null);
@@ -25,7 +25,7 @@ async function addKey(app: Express) {
   const addr = server.address() as { port: number };
   await fetch(`http://127.0.0.1:${addr.port}/api/keys`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: { 'Content-Type': 'application/json', ...dashboardSessionHeaders(token) },
     body: JSON.stringify({ platform: 'groq', key: 'gsk_testkey123' }),
   });
   server.close();

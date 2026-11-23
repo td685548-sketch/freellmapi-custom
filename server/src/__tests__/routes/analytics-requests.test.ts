@@ -3,7 +3,7 @@ import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { getDb, initDb } from '../../db/index.js';
 import { logRequest } from '../../lib/request-log.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 
 let dashToken = '';
 
@@ -14,7 +14,7 @@ async function request(app: Express, path: string) {
   const url = `http://127.0.0.1:${addr.port}${path}`;
 
   const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${dashToken}` },
+    headers: { ...dashboardSessionHeaders(dashToken) },
   });
   const data = await res.json().catch(() => null);
   server.close();

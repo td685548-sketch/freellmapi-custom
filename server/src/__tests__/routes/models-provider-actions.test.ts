@@ -3,7 +3,7 @@ import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
-import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
+import { mintDashboardToken, isGatedApiPath, dashboardSessionHeaders } from '../helpers/auth.js';
 import { getProvider } from '../../providers/index.js';
 import { getCatalogModelTombstone } from '../../services/model-state.js';
 
@@ -17,7 +17,7 @@ async function post(app: Express, path: string, body?: any) {
     method: 'POST',
     headers: {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
-      ...(isGatedApiPath(path) ? { Authorization: `Bearer ${dashToken}` } : {}),
+      ...(isGatedApiPath(path) ? { ...dashboardSessionHeaders(dashToken) } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -32,7 +32,7 @@ async function del(app: Express, path: string) {
   const addr = server.address() as any;
   const res = await fetch(`http://127.0.0.1:${addr.port}${path}`, {
     method: 'DELETE',
-    headers: isGatedApiPath(path) ? { Authorization: `Bearer ${dashToken}` } : {},
+    headers: isGatedApiPath(path) ? { ...dashboardSessionHeaders(dashToken) } : {},
   });
   const data = await res.json().catch(() => null);
   server.close();

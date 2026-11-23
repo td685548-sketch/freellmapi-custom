@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb } from '../../db/index.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 import { createSession, validateSession, resetReauthFailures } from '../../services/auth.js';
 
 // #705: the dashboard only ever renders a masked key, and reading one back meant
@@ -16,7 +16,7 @@ async function request(path: string, password?: string) {
   const server = app.listen(0, '127.0.0.1');
   if (!server.listening) await new Promise<void>(resolve => server.once('listening', () => resolve()));
   const addr = server.address() as { port: number };
-  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+  const headers: Record<string, string> = { ...dashboardSessionHeaders(token) };
   if (password !== undefined) headers['x-reauth-password'] = password;
   const res = await fetch(`http://127.0.0.1:${addr.port}${path}`, { method: 'POST', headers });
   const body = await res.json().catch(() => null);
@@ -30,7 +30,7 @@ async function addKey(key = 'gsk_testkey123') {
   const addr = server.address() as { port: number };
   const res = await fetch(`http://127.0.0.1:${addr.port}/api/keys`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: { 'Content-Type': 'application/json', ...dashboardSessionHeaders(token) },
     body: JSON.stringify({ platform: 'groq', key }),
   });
   const body = await res.json() as { id: number };
@@ -145,7 +145,7 @@ describe('Reveal one key — wrong-password strikes (#1885)', () => {
     if (!server.listening) await new Promise<void>(resolve => server.once('listening', () => resolve()));
     const addr = server.address() as { port: number };
     const res = await fetch(`http://127.0.0.1:${addr.port}/api/keys/export?format=json`, {
-      headers: { Authorization: `Bearer ${token}`, 'x-reauth-password': 'guess-3' },
+      headers: { ...dashboardSessionHeaders(token), 'x-reauth-password': 'guess-3' },
     });
     server.close();
     expect(res.status).toBe(401);

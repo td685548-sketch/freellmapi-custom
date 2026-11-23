@@ -5,7 +5,7 @@ import path from 'node:path';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb } from '../../db/index.js';
-import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
+import { mintDashboardToken, isGatedApiPath, dashboardSessionHeaders } from '../helpers/auth.js';
 import { createBackup, restoreBackup } from '../../services/backups.js';
 
 let dashToken = '';
@@ -19,7 +19,7 @@ async function request(app: Express, method: string, path: string, body?: unknow
     method,
     headers: {
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-      ...(isGatedApiPath(path) ? { Authorization: `Bearer ${dashToken}` } : {}),
+      ...(isGatedApiPath(path) ? { ...dashboardSessionHeaders(dashToken) } : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });

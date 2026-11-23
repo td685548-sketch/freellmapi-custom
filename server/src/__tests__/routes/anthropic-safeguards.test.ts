@@ -3,7 +3,7 @@ import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
 import { extractAnthropicCompat } from '../../routes/anthropic.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 
 // Upstream safeguard response metadata compatibility (related to #1589).
 //
@@ -123,7 +123,7 @@ describe('Anthropic safeguards passthrough (#1589)', () => {
     db.prepare("DELETE FROM settings WHERE key = 'anthropic_model_map'").run();
     const { status } = await request(app, '/api/keys',
       { platform: 'groq', key: 'gsk_anthropic_test', label: 't' },
-      { Authorization: `Bearer ${dashToken}` });
+      { ...dashboardSessionHeaders(dashToken) });
     expect(status).toBe(201);
   });
 

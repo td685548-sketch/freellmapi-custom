@@ -20,6 +20,7 @@ import { encrypt } from '../../lib/crypto.js';
 import { createSession, createUser, type SessionUser } from '../../services/auth.js';
 import { setUserPermissions } from '../../services/users.js';
 
+import { dashboardSessionHeaders } from '../helpers/auth.js';
 function installMockCloudLease(): void {
   process.env.FREEAPI_AI_ACTIVATION_TOKEN = 'dummy-test-token-never-sent';
   const lease: CloudSignedLease = {
@@ -658,7 +659,7 @@ describe('POST /chat as an event stream', () => {
   const stream = async (token: string, content: string, extra: Record<string, unknown> = {}) => {
     const res = await fetch(`${base}/api/support-setup-copilot/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', Authorization: `Bearer ${token}` },
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...dashboardSessionHeaders(token) },
       body: JSON.stringify({ locale: 'vi', currentPath: '/thruline/support', messages: [{ role: 'user', content }], ...extra }),
     });
     const text = await res.text();
@@ -720,7 +721,7 @@ describe('POST /chat as an event stream', () => {
   it('a request that does not ask for a stream still gets plain JSON, with no steps', async () => {
     const res = await fetch(`${base}/api/support-setup-copilot/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      headers: { 'Content-Type': 'application/json', ...dashboardSessionHeaders(adminToken) },
       body: JSON.stringify({ locale: 'vi', currentPath: '/thruline/support', targetMode: 'system', messages: [{ role: 'user', content: 'Bật response cache' }] }),
     });
     expect(res.headers.get('content-type')).toContain('application/json');

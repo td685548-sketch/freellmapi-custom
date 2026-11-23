@@ -2,7 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { getDb, regenerateUnifiedKey, initDb, setSetting } from '../../db/index.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 import { clearCompressionStats } from '../../services/compression/stats.js';
 
 let app: Express;
@@ -23,7 +23,7 @@ async function request(
     method,
     headers: {
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-      ...(path.startsWith('/api/') ? { Authorization: `Bearer ${dashboardToken}` } : {}),
+      ...(path.startsWith('/api/') ? { ...dashboardSessionHeaders(dashboardToken) } : {}),
       ...headers,
     },
     body: body === undefined ? undefined : JSON.stringify(body),

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb, regenerateUnifiedKey } from '../../db/index.js';
-import { mintDashboardToken } from '../helpers/auth.js';
+import { mintDashboardToken, dashboardSessionHeaders } from '../helpers/auth.js';
 import { MAX_MESSAGES_BYTES } from '../../routes/conversations.js';
 
 // Playground conversation storage: the sidebar's list/load/save/delete surface.
@@ -21,7 +21,7 @@ async function request(
     method,
     headers: {
       ...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-      ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : {}),
+      ...(opts.token ? { ...dashboardSessionHeaders(opts.token) } : {}),
     },
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
   });
