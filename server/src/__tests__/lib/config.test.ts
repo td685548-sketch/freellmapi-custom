@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { loadConfig, parsePort, resetConfigParseWarningsForTests } from '../../lib/config.js';
 
-const ENV_KEYS = ['PORT', 'HOST', 'FREEAPI_DB_PATH', 'DASHBOARD_ORIGINS', 'CLIENT_DIST', 'PROXY_RATE_LIMIT_RPM', 'REQUEST_BODY_LIMIT_MB', 'NODE_ENV', 'TRUST_PROXY'];
+const ENV_KEYS = ['PORT', 'HOST', 'FREEAPI_DB_PATH', 'DASHBOARD_ORIGINS', 'CLIENT_DIST', 'PROXY_RATE_LIMIT_RPM', 'MAX_CONCURRENT_REQUESTS', 'REQUEST_BODY_LIMIT_MB', 'NODE_ENV', 'TRUST_PROXY'];
 
 afterEach(() => {
   ENV_KEYS.forEach(k => delete process.env[k]);
@@ -69,6 +69,29 @@ describe('loadConfig', () => {
   it('accepts 0 to disable rate limiting', () => {
     process.env.PROXY_RATE_LIMIT_RPM = '0';
     expect(loadConfig().proxyRateLimitRpm).toBe(0);
+  });
+
+  it('defaults the global /v1 concurrency cap to null (no cap)', () => {
+    expect(loadConfig().maxConcurrentRequests).toBeNull();
+  });
+
+  it('parses MAX_CONCURRENT_REQUESTS as an integer', () => {
+    process.env.MAX_CONCURRENT_REQUESTS = '100';
+    expect(loadConfig().maxConcurrentRequests).toBe(100);
+    process.env.MAX_CONCURRENT_REQUESTS = '2.7';
+    expect(loadConfig().maxConcurrentRequests).toBe(2);
+  });
+
+  it('treats MAX_CONCURRENT_REQUESTS=0 as disabled (null)', () => {
+    process.env.MAX_CONCURRENT_REQUESTS = '0';
+    expect(loadConfig().maxConcurrentRequests).toBeNull();
+  });
+
+  it('falls back to no cap for invalid MAX_CONCURRENT_REQUESTS', () => {
+    process.env.MAX_CONCURRENT_REQUESTS = 'not-a-number';
+    expect(loadConfig().maxConcurrentRequests).toBeNull();
+    process.env.MAX_CONCURRENT_REQUESTS = '-5';
+    expect(loadConfig().maxConcurrentRequests).toBeNull();
   });
 
   it('reads NODE_ENV from env', () => {

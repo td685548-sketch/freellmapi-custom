@@ -40,6 +40,7 @@ import { opencodeConsoleOAuthRouter } from './routes/opencode-console-oauth.js';
 import { requireAuth } from './middleware/requireAuth.js';
 import { createHostGuard, warnOnWideBind } from './middleware/allowed-hosts.js';
 import { createProxyRateLimiter, createAdminRateLimiter } from './middleware/rateLimit.js';
+import { createGlobalConcurrencyLimiter } from './middleware/globalConcurrency.js';
 import { registerCustomRoutes } from './custom/register.js';
 import { supportOutputBodyLimit } from './custom/x-gateway/support-output-body-limit.js';
 import { preparseGuard } from './custom/preparse-guard.js';
@@ -362,6 +363,16 @@ export function createApp(config?: Config) {
   // it throttles unauthenticated brute-force / flood attempts before any
   // routing work. Tune via PROXY_RATE_LIMIT_RPM; 0 disables it.
   app.use('/v1', proxyRateLimiter);
+  // Global concurrency cap for /v1 inference (MAX_CONCURRENT_REQUESTS, off by
+  // default): the RPM limiter above counts requests, so a slow 600 s stream
+  // counts as one — this counts in-flight requests instead, so one key cannot
+  // hold unbounded slow streams. Runs after the RPM limiter so flood traffic
+  // is throttled first, and before the inference routers so it covers
+  // chat/completions, completions, embeddings, messages, responses and
+  // moderations. GET/HEAD/OPTIONS never take a slot (model discovery stays
+  // reachable while inference is saturated); /v1beta, /thruline/v1, /mcp and
+  // /api are not covered.
+  app.use('/v1', createGlobalConcurrencyLimiter(cfg.maxConcurrentRequests));
   // Anthropic-compatible Messages API (`POST /v1/messages`, `/count_tokens`) for
   // Claude Code and anything else speaking the Anthropic SDK. Mounted BEFORE the
   // OpenAI router so it can content-negotiate `GET /v1/models` (Anthropic shape
