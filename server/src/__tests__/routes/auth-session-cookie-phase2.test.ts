@@ -222,6 +222,12 @@ describe('Dashboard session without a JS-readable token — Phase 2', () => {
     const clearedCsrf = cookies.find(c => c.startsWith('flm_csrf='));
     expect(clearedSession).toMatch(/Expires=Thu, 01 Jan 1970/);
     expect(clearedCsrf).toMatch(/Expires=Thu, 01 Jan 1970/);
+    // Logout clears the session cookie on both paths: the current Path=/
+    // cookie and the legacy Path=/api one a browser may still hold.
+    const clearedSessions = cookies.filter(c => c.startsWith('flm_session='));
+    expect(clearedSessions.filter(c => c.includes('Path=/;'))).toHaveLength(1);
+    expect(clearedSessions.filter(c => c.includes('Path=/api'))).toHaveLength(1);
+    expect(clearedSessions.every(c => /Expires=Thu, 01 Jan 1970/.test(c))).toBe(true);
     const { status: getStatus, body } = await call(app, 'GET', '/api/keys', { cookie: sessionCookie });
     expect(getStatus).toBe(401);
     expect(body.error.type).toBe('authentication_error');
