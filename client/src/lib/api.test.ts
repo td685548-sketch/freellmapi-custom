@@ -118,6 +118,38 @@ describe('apiFetch error messages', () => {
   })
 })
 
+// Phase 1 of the httpOnly-cookie move: the server also sets the session as
+// an httpOnly cookie, and apiFetch must send it on same-origin calls — while
+// still sending the Authorization header, which stays the only way to write
+// until a later phase.
+describe('apiFetch session cookie (Phase 1)', () => {
+  beforeEach(() => {
+    events = []
+    stubStorages()
+    sessionStorage.setItem(TOKEN_KEY, 'session-token')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('sends credentials: same-origin so the httpOnly session cookie rides along', async () => {
+    let capturedInit: RequestInit | undefined;
+    const fetchMock = vi.fn(async (...args: [string, RequestInit?]) => {
+      capturedInit = args[1];
+      return jsonResponse(200, { ok: true });
+    });
+    vi.stubGlobal('fetch', fetchMock)
+    const { apiFetch } = await import('./api')
+
+    await apiFetch('/api/keys')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(capturedInit?.credentials).toBe('same-origin')
+    expect(new Headers(capturedInit?.headers).get('Authorization')).toBe('Bearer session-token')
+  })
+})
+
 // Session mitigations: the dashboard token lives in sessionStorage (dies with
 // the tab) instead of localStorage (persists indefinitely). A token left in
 // localStorage by an older build must never be read back — it is purged.

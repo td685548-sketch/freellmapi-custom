@@ -2,7 +2,8 @@ import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { getDb } from '../db/index.js';
-import { createUser, createSession } from '../services/auth.js';
+import { createUser, createSession, SESSION_TTL_MS } from '../services/auth.js';
+import { setSessionCookie } from '../services/session-cookie.js';
 import { validateInviteCode, claimInviteCode } from '../services/invites.js';
 import { mintUserApiKey } from '../services/user-keys.js';
 import { applyStarterQuotaToNewMember } from '../services/starter-quota.js';
@@ -135,6 +136,7 @@ customAuthRouter.post('/register', (req: Request, res: Response) => {
       const token = createSession(user.userId);
       return { token, email: user.email, role: user.role, apiKey: initialKey.key };
     })();
+    setSessionCookie(res, req, registered.token, SESSION_TTL_MS);
     res.status(201).json(registered);
   } catch (err: any) {
     if (err.code === 'invalid_invite_code') {

@@ -524,6 +524,8 @@ export function SupportWidgetLiveTest({
           const response = await fetch(bridgeUrl, {
             ...init,
             headers,
+            // Phase 1 of the httpOnly-cookie move: send the session cookie.
+            credentials: 'same-origin',
           })
 
           try {

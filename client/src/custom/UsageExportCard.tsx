@@ -16,7 +16,11 @@ type ExportKind = 'accounts' | 'profiles' | 'end-users'
 async function downloadUsageCsv(kind: ExportKind, from: string, to: string): Promise<boolean> {
   const token = getToken()
   const base = import.meta.env.BASE_URL.replace(/\/$/, '')
-  const res = await fetch(`${base}/api/usage/export/${kind}.csv?from=${from}&to=${to}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  const res = await fetch(`${base}/api/usage/export/${kind}.csv?from=${from}&to=${to}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    // Phase 1 of the httpOnly-cookie move: send the session cookie.
+    credentials: 'same-origin',
+  })
   if (!res.ok) {
     const body = await res.json().catch(() => null)
     toast.error(body?.error?.message ?? `HTTP ${res.status}`)

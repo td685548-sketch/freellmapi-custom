@@ -39,7 +39,11 @@ async function downloadExport(format: ExportFormat, healthyOnly: boolean, passwo
   const headers: Record<string, string> = {}
   if (token) headers.Authorization = `Bearer ${token}`
   if (password) headers['x-reauth-password'] = password
-  const res = await fetch(`${BASE}/api/keys/export?${params}`, { headers })
+  const res = await fetch(`${BASE}/api/keys/export?${params}`, {
+    headers,
+    // Phase 1 of the httpOnly-cookie move: send the session cookie.
+    credentials: 'same-origin',
+  })
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: { message: res.statusText } }))
     throw new Error(body.error?.message ?? `HTTP ${res.status}`)

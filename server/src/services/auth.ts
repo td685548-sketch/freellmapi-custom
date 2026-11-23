@@ -7,7 +7,7 @@ import { parseStoredPermissions } from '@freellmapi/shared/permissions.js';
 // tokens. Distinct from the unified API key, which authenticates the /v1 proxy
 // for apps — this gates the /api/* admin surface for the human operator (#35).
 
-const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 // Desktop sessions are minted on demand by the shell (IPC / POST
 // /api/auth/desktop-session) whenever the dashboard needs one, so they do not

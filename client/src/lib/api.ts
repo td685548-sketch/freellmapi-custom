@@ -8,9 +8,15 @@ const TOKEN_KEY = 'freellmapi_dashboard_token';
 // and is readable by any script running on the dashboard origin, so a single
 // XSS — or a shared / unattended machine — keeps the session forever. A
 // sessionStorage token dies when the tab closes, and each tab holds its own
-// session, so a stolen token's window is one tab's lifetime. The full httpOnly
-// cookie migration is still open work (it needs server-side Set-Cookie and
-// CSRF handling); this is the mitigation that fits the current Bearer flow.
+// session, so a stolen token's window is one tab's lifetime.
+//
+// Phase 1 of the httpOnly-cookie move (server/src/services/session-cookie.ts)
+// is live: the server ALSO sets the token as an httpOnly `flm_session`
+// cookie on login, and apiFetch sends `credentials: 'same-origin'` so the
+// cookie rides along. The token is STILL stored here and sent as the
+// Authorization header — that only stops in Phase 2, once the cookie path
+// has proven itself. Until then the cookie is a second, JS-invisible copy
+// of the same session, accepted by the server for reads only.
 //
 // A token left in localStorage by an older build is purged on every read:
 // without the purge the old persistent token would linger next to the new
@@ -66,9 +72,13 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
   const res = await fetch(`${BASE}${path}`, {
     // `...options` first so an explicit method/body/signal applies, but headers
     // are merged last — otherwise an options.headers would clobber the
-    // Content-Type and Authorization we set here.
+    // Content-Type and Authorization we set here. `credentials: 'same-origin'`
+    // sends the httpOnly session cookie (Phase 1 of the cookie move) on
+    // same-origin dashboard calls — the Vite dev proxy keeps dev same-origin
+    // too. It is forced after the spread so no caller can downgrade it.
     ...options,
     headers,
+    credentials: 'same-origin',
   });
   assertCurrentSession();
   if (!res.ok) {

@@ -1,7 +1,8 @@
 import express, { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { getDb } from '../../db/index.js';
-import { createSession, createUser, normalizeEmail, userCount, type SessionUser } from '../../services/auth.js';
+import { createSession, createUser, normalizeEmail, userCount, SESSION_TTL_MS, type SessionUser } from '../../services/auth.js';
+import { setSessionCookie } from '../../services/session-cookie.js';
 import { allowAuthRequest, digest, purgeExpiredAuth, randomSecret, safeEqual, seal, unseal } from '../../services/auth-security.js';
 import { consumeGoogleHandoff } from '../../services/google-auth.js';
 import { claimInviteCode } from '../../services/invites.js';
@@ -366,6 +367,7 @@ ssoPublicRouter.post('/complete', (req: Request, res: Response) => {
     res.status(400).json({ error: { message: 'SSO sign-in expired. Please try again.', type: 'invalid_handoff' } });
     return;
   }
+  setSessionCookie(res, req, result.token, SESSION_TTL_MS);
   res.json(result);
 });
 

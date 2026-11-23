@@ -121,6 +121,8 @@ export default function ConsoleLog() {
         const response = await fetch(CONSOLE_LOGS_URL + '/stream', {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
           signal: abort.signal,
+          // Phase 1 of the httpOnly-cookie move: send the session cookie.
+          credentials: 'same-origin',
         })
         refused = response.status === 401 || response.status === 403
         if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)
@@ -177,7 +179,12 @@ export default function ConsoleLog() {
   const handleClearLogs = async () => {
     try {
       const token = getToken()
-      const res = await fetch(CONSOLE_LOGS_URL, { method: 'DELETE', headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      const res = await fetch(CONSOLE_LOGS_URL, {
+        method: 'DELETE',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        // Phase 1 of the httpOnly-cookie move: send the session cookie.
+        credentials: 'same-origin',
+      })
       if (!res.ok) return
       setTerminalLogs([])
     } catch (err) {
