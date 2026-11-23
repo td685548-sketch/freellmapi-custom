@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Download } from 'lucide-react'
-import { getToken } from '@/lib/api'
+
 import { toast } from '@/lib/toast'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -14,11 +14,10 @@ type ExportKind = 'accounts' | 'profiles' | 'end-users'
 
 // The export is a file, not JSON, so it goes through fetch directly with the dashboard's bearer token.
 async function downloadUsageCsv(kind: ExportKind, from: string, to: string): Promise<boolean> {
-  const token = getToken()
   const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+  // Phase 2 of the httpOnly-cookie move: the session rides the httpOnly
+  // cookie; no token is read or sent by JS any more.
   const res = await fetch(`${base}/api/usage/export/${kind}.csv?from=${from}&to=${to}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    // Phase 1 of the httpOnly-cookie move: send the session cookie.
     credentials: 'same-origin',
   })
   if (!res.ok) {

@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app, dialog, ipcMain, clipboard, nativeTheme, net, screen, shell, type Tray } from 'electron';
-import { startServer, ensureSessionToken, regenerateUnifiedKey, isAutoUpdateCheckEnabled, backupBeforeUpdate, outboundProxyUrl, setCatalogFallbackFetch } from './server.mjs';
+import { startServer, regenerateUnifiedKey, isAutoUpdateCheckEnabled, backupBeforeUpdate, outboundProxyUrl, setCatalogFallbackFetch } from './server.mjs';
 import { loadConfig, saveConfig } from './config.js';
 import { installFileLogger } from './logger.js';
 import { scheduleClipboardClear } from './clipboard-clear.js';
@@ -31,7 +31,6 @@ if (!app.requestSingleInstanceLock()) {
   installFileLogger();
 
   let resolvedPort = DEFAULT_PORT;
-  let sessionToken = '';
   // Cancels the pending clipboard clear for the unified key, if any — a
   // second copy restarts the timer instead of clearing the fresh copy early.
   let cancelApiKeyClipboardClear: (() => void) | undefined;
@@ -65,7 +64,7 @@ if (!app.requestSingleInstanceLock()) {
   );
 
   app.on('second-instance', () => {
-    if (sessionToken) openDashboard(resolvedPort, sessionToken);
+    openDashboard(resolvedPort);
   });
 
   // Reopening a *running* app on macOS — double-clicking it in Finder, clicking
@@ -74,7 +73,7 @@ if (!app.requestSingleInstanceLock()) {
   // never fires for it. Without this handler a user whose tray icon is hidden
   // or clipped by the menu bar has no way back into the UI at all (#807).
   app.on('activate', () => {
-    if (sessionToken) openDashboard(resolvedPort, sessionToken);
+    openDashboard(resolvedPort);
   });
 
   // The app lives in the tray; closing the dashboard window must not quit.
@@ -188,7 +187,7 @@ if (!app.requestSingleInstanceLock()) {
   });
   ipcMain.handle('freeapi:open-dashboard', (event) => {
     assertTrustedDesktopSender(event);
-    return openDashboard(resolvedPort, sessionToken);
+    return openDashboard(resolvedPort);
   });
   ipcMain.handle('freeapi:copy-base-url', (event) => {
     assertTrustedDesktopSender(event);
@@ -238,25 +237,6 @@ if (!app.requestSingleInstanceLock()) {
     assertTrustedDesktopSender(event);
     return installUpdate();
   });
-  // Dashboard → a fresh session for the hidden machine account (preload
-  // __FREEAPI_SESSION__ / preload sync bootstrap). Only the dashboard loopback
-  // origin may request the session token.
-  ipcMain.on('freeapi:session-token-sync', (event) => {
-    if (!isDashboardSender(event.senderFrame?.url)) {
-      event.returnValue = '';
-      return;
-    }
-    sessionToken = ensureSessionToken();
-    event.returnValue = sessionToken;
-  });
-  ipcMain.handle('freeapi:session-token', (event) => {
-    if (!isDashboardSender(event.senderFrame?.url)) {
-      throw new Error('Unauthorized IPC caller origin for session token');
-    }
-    sessionToken = ensureSessionToken();
-    return sessionToken;
-  });
-
   // Flip the LAN-access flag and relaunch so the server rebinds (127.0.0.1 ↔
   // 0.0.0.0). Enabling shows a one-time warning: the API becomes reachable by
   // anything that can route to this machine, guarded only by the unified key.
@@ -321,7 +301,7 @@ if (!app.requestSingleInstanceLock()) {
       defaultId: 0,
       cancelId: 1,
     });
-    if (choice === 0) openDashboard(port, sessionToken);
+    if (choice === 0) openDashboard(port);
   }
 
   // The bundle ships LSUIElement, so the app starts as an accessory with no
@@ -389,14 +369,12 @@ if (!app.requestSingleInstanceLock()) {
       });
       resolvedPort = port;
       saveConfig({ ...cfg, port });
-      sessionToken = ensureSessionToken();
       // The server is already up, so a tray that fails to build must not take
       // the app down with it: fall back to the dashboard window (#1353).
       let tray: Tray | null = null;
       try {
         tray = buildTray(
           port,
-          sessionToken,
           () => locale,
           () => loadConfig().lanAccess ?? false,
           toggleLanAccess,
@@ -421,7 +399,7 @@ if (!app.requestSingleInstanceLock()) {
         !process.env.FREEAPI_SHOT
         && shouldOpenDashboardOnLaunch(process.platform, { trayBuilt: tray !== null, welcomedBefore })
       ) {
-        openDashboard(port, sessionToken);
+        openDashboard(port);
         if (!welcomedBefore) saveConfig({ ...loadConfig(), launchDashboardShown: true });
       }
 
@@ -443,7 +421,7 @@ if (!app.requestSingleInstanceLock()) {
           // FREEAPI_THEME forces a theme for captures — skip the dashboard
           // then, or its theme report would immediately override the override.
           if (!process.env.FREEAPI_THEME) {
-            openDashboard(port, sessionToken);
+            openDashboard(port);
             await sleep(2500);
             const dashWin = getDashboardWindow();
             if (dashWin) {
@@ -458,7 +436,7 @@ if (!app.requestSingleInstanceLock()) {
         await sleep(1500);
         const pop = await getPopoverWindow()?.webContents.capturePage();
         if (pop) fs.writeFileSync('/tmp/freeapi-popover.png', pop.toPNG());
-        openDashboard(port, sessionToken);
+        openDashboard(port);
         await sleep(3000);
         const dash = await getDashboardWindow()?.webContents.capturePage();
         if (dash) fs.writeFileSync('/tmp/freeapi-dashboard.png', dash.toPNG());

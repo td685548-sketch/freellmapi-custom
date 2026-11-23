@@ -12,12 +12,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '@/i18n'
 import { AuthGate } from './auth-gate'
 
-const MINTED = 'minted-desktop-session'
-
 let root: Root
 let container: HTMLDivElement
 let desktopFlag: boolean
 let sessionCalls: number
+let sessionMinted: boolean
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -52,14 +51,19 @@ beforeEach(() => {
   root = createRoot(container)
   desktopFlag = true
   sessionCalls = 0
-  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+  sessionMinted = false
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input)
     if (url.endsWith('/api/auth/desktop-session')) {
       sessionCalls++
-      return desktopFlag ? json({ token: MINTED }) : json({ error: { message: 'forbidden' } }, 403)
+      if (!desktopFlag) return json({ error: { message: 'forbidden' } }, 403)
+      // The real server sets the httpOnly session cookie here; the stub
+      // simulates that by flipping the status answer.
+      sessionMinted = true
+      return json({ success: true })
     }
     if (url.endsWith('/api/auth/status')) {
-      const ok = new Headers(init?.headers).get('Authorization') === `Bearer ${MINTED}`
+      const ok = sessionMinted
       return json({ needsSetup: false, authenticated: ok, email: ok ? 'desktop@localhost' : null, desktop: desktopFlag })
     }
     return json({ error: { message: `unexpected ${url}` } }, 404)

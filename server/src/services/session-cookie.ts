@@ -1,30 +1,25 @@
 import type { Request, Response } from 'express';
 
-// Dashboard session as an httpOnly cookie — Phase 1 of the session-cookie
-// migration (see client/src/lib/api.ts for the sessionStorage side).
+// Dashboard session as an httpOnly cookie — the session-cookie migration
+// (see client/src/lib/api.ts for the client side).
 //
-// Phase 1 only proves the mechanism end to end, with zero breakage risk:
-//  - the login/setup/reset/desktop-session/register/SSO-complete endpoints
-//    ALSO set the session token as a cookie (the JSON body still carries it,
-//    and the client still stores it in sessionStorage and sends the
-//    Authorization header exactly as before);
-//  - requireAuth ALSO accepts the cookie, but ONLY for safe methods
-//    (GET/HEAD/OPTIONS). A cookie-only mutation is rejected with
-//    403 cookie_auth_read_only: accepting cookie auth means a cross-site
-//    request now carries credentials where before it could not (the attacker
-//    never knew the header), and this boundary is what keeps Phase 1 from
-//    opening that hole. The full CSRF-token system for cookie-authed
-//    mutations is a later phase; until then the header stays the only way
-//    to write.
-//  - the client sends `credentials: 'same-origin'` so the cookie rides
-//    along on same-origin dashboard calls (the Vite dev proxy makes dev
-//    calls same-origin too; a separately-hosted dashboard origin simply
-//    never sends the cookie and keeps working on the header).
+// Phase 1 proved the mechanism end to end: the login/setup/reset/
+// desktop-session/register/SSO-complete endpoints ALSO set the session token
+// as a cookie, and requireAuth ALSO accepted it — but only for safe methods,
+// because accepting cookie auth for mutations with no CSRF check would have
+// opened a cross-site hole.
 //
-// The security win lands in Phase 2 (stop storing the token in
-// sessionStorage), not here: today the token is still readable by any script
-// on the dashboard origin. Phase 1 only proves the cookie is set, sent and
-// accepted before anything is taken away.
+// Phase 2 (this file's current state) completes the client move: the browser
+// dashboard no longer stores the token in sessionStorage, no longer sends the
+// Authorization header, and no mint endpoint returns the token in JSON — the
+// httpOnly cookie is the only carrier the browser has. Cookie-authed
+// mutations are now accepted, but only with a valid CSRF token (see
+// services/csrf.ts). The server-side header fallback is deliberately KEPT in
+// this phase: non-browser callers (curl scripts, server tests, the
+// server-side loopback forwards in customer-ai/copilot) still authenticate
+// with the header, and the XSS guarantee does not depend on removing it —
+// page JS cannot read the token anywhere, so there is nothing to steal.
+// Dropping the fallback entirely is Phase 3.
 //
 // Cookie attributes:
 //  - httpOnly: the point of the exercise — JS (and any XSS) cannot read it.
@@ -43,7 +38,7 @@ import type { Request, Response } from 'express';
 export const SESSION_COOKIE_NAME = 'flm_session';
 
 /** TLS terminated here (req.secure), or in front of us and forwarded. */
-function isHttpsRequest(req: Request): boolean {
+export function isHttpsRequest(req: Request): boolean {
   const forwardedProto = req.headers['x-forwarded-proto'];
   // A proxy chain sends a comma-separated list; the client-facing hop is first.
   const first = String(forwardedProto ?? '').split(',')[0]!.trim().toLowerCase();
@@ -81,4 +76,23 @@ export function getSessionCookie(req: Request): string | undefined {
     .map(part => part.trim())
     .find(part => part.startsWith(`${SESSION_COOKIE_NAME}=`));
   return item ? item.slice(SESSION_COOKIE_NAME.length + 1) : undefined;
+}
+
+/** The dashboard session token as presented on the Authorization header
+ *  (Bearer, or the Ollama wire's x-dashboard-token). Header only — the
+ *  cookie is a separate, deliberately JS-invisible carrier. */
+export function headerSessionToken(req: Request): string | undefined {
+  return req.headers.authorization?.replace(/^Bearer\s+/i, '')
+    ?? (req.headers['x-dashboard-token'] as string | undefined);
+}
+
+/** The one place that resolves "the caller's session token": the header when
+ *  a non-browser caller presents one, else the httpOnly cookie. The header
+ *  always wins, so a stale cookie can never override a good header.
+ *  Phase 2 keeps this fallback (non-browser clients, curl scripts, server
+ *  tests and the server-side loopback forwards still use the header); what
+ *  changed is that the browser dashboard no longer sends it — see
+ *  client/src/lib/api.ts. Dropping the fallback entirely is Phase 3. */
+export function sessionTokenFromRequest(req: Request): string | undefined {
+  return headerSessionToken(req) ?? getSessionCookie(req);
 }

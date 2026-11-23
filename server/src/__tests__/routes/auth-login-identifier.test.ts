@@ -29,7 +29,12 @@ async function postLogin(body: unknown) {
   });
   const data = await res.json().catch(() => null);
   server.close();
-  return { status: res.status, body: data as any };
+  return { status: res.status, body: data as any, cookies: res.headers.getSetCookie() };
+}
+
+function cookieValue(cookies: string[], name: string): string | undefined {
+  const found = cookies.find(c => c.startsWith(`${name}=`));
+  return found?.split(';')[0]!.slice(name.length + 1);
 }
 
 describe('login accepts the identifier the desktop app actually seeds', () => {
@@ -46,7 +51,10 @@ describe('login accepts the identifier the desktop app actually seeds', () => {
     createUser('desktop@localhost', 'a-long-random-password');
     const res = await postLogin({ email: 'desktop@localhost', password: 'a-long-random-password' });
     expect(res.status).toBe(200);
-    expect(res.body.token).toBeTruthy();
+    // Phase 2: the token never reaches the response body — it rides the
+    // httpOnly cookie.
+    expect(res.body.token).toBeUndefined();
+    expect(cookieValue(res.cookies, 'flm_session')).toBeTruthy();
   });
 
   it('still rejects the wrong password for that account, with the credential error', async () => {

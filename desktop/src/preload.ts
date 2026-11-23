@@ -1,35 +1,14 @@
 // Built to build/preload.cjs (CommonJS — the reliable preload format).
-// Runs in the renderer before any page script: fetches the dashboard session
-// token via origin-verified synchronous IPC and seeds sessionStorage so AuthGate's
-// first /api/auth/status call is authenticated without exposing tokens in argv.
+// Runs in the renderer before any page script. Phase 2 of the httpOnly-cookie
+// move: the dashboard signs in by calling POST /api/auth/desktop-session,
+// which sets the httpOnly session cookie on the loopback origin — no token is
+// ever handed to this world, so there is nothing to seed into sessionStorage.
 import { contextBridge, ipcRenderer } from 'electron';
-
-const TOKEN_KEY = 'freellmapi_dashboard_token';
-const initialToken = ipcRenderer.sendSync('freeapi:session-token-sync') as unknown;
-if (typeof initialToken === 'string' && initialToken.length > 0) {
-  try {
-    // sessionStorage, matching client/src/lib/api.ts: the token dies with the
-    // window instead of persisting on disk in localStorage.
-    window.sessionStorage.setItem(TOKEN_KEY, initialToken);
-  } catch {
-    // sessionStorage unavailable — the dashboard will show its login screen.
-  }
-}
 
 // Lets the client adapt its chrome (drag region, traffic-light padding,
 // no Sign out) when running inside the desktop shell.
 contextBridge.exposeInMainWorld('__FREEAPI_DESKTOP__', true);
 contextBridge.exposeInMainWorld('__FREEAPI_PLATFORM__', process.platform);
-
-// The dashboard window signs in as the hidden machine account, whose password
-// is random and never shown, so it must never land on the login form. When the
-// seeded session is gone (expired after 24h, or cleared by a 401)
-// AuthGate asks the main process for a fresh one instead. Exposed as a bare
-// function rather than a broader bridge: the renderer loads http://127.0.0.1,
-// and every extra capability handed to that world is one an XSS could use —
-// this one only ever hands back a session for the account the window already
-// runs as.
-contextBridge.exposeInMainWorld('__FREEAPI_SESSION__', () => ipcRenderer.invoke('freeapi:session-token'));
 
 // "Start on system startup" for the dashboard's Settings dialog. Mirrors the
 // popover's login-item toggle, but as a narrow get/set pair the dashboard can
@@ -54,7 +33,7 @@ contextBridge.exposeInMainWorld(
   versionArg ? versionArg.slice('--freeapi-version='.length) : null,
 );
 
-// The in-app updater (the Settings update dialog and the update reminder). Like the session bridge above, deliberately
+// The in-app updater (the Settings update dialog and the update reminder). Deliberately
 // narrow: it can only check for, download and install the release published at
 // td685548-sketch/freellmapi-custom — the feed URL and signature checks live in the main
 // process and nothing here can point them anywhere else.

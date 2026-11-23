@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Coins, Copy, ScrollText, Search, Terminal, Trash2, X } from 'lucide-react'
-import { apiFetch, getToken } from '@/lib/api'
+import { apiFetch, csrfHeaders } from '@/lib/api'
 import { useI18n } from '@/i18n'
 import { useSessionRevision } from '../../session-state'
 import { useUserSession } from '../../use-session'
@@ -117,11 +117,10 @@ export default function ConsoleLog() {
     const connect = async () => {
       let refused = false
       try {
-        const token = getToken()
+        // Phase 2 of the httpOnly-cookie move: the session rides the
+        // httpOnly cookie; no token is read or sent by JS any more.
         const response = await fetch(CONSOLE_LOGS_URL + '/stream', {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
           signal: abort.signal,
-          // Phase 1 of the httpOnly-cookie move: send the session cookie.
           credentials: 'same-origin',
         })
         refused = response.status === 401 || response.status === 403
@@ -178,11 +177,10 @@ export default function ConsoleLog() {
 
   const handleClearLogs = async () => {
     try {
-      const token = getToken()
+      // Phase 2: cookie auth for the mutation needs the CSRF token.
       const res = await fetch(CONSOLE_LOGS_URL, {
         method: 'DELETE',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        // Phase 1 of the httpOnly-cookie move: send the session cookie.
+        headers: csrfHeaders(),
         credentials: 'same-origin',
       })
       if (!res.ok) return

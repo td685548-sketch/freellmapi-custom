@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { getSetting, setSetting } from '../db/index.js';
 import { GUEST_PERMISSIONS, type GuestPermission } from '@freellmapi/shared/guest-access.js';
 import type { SessionUser } from './auth.js';
+import { getSessionCookie } from './session-cookie.js';
 
 // Visitors who are not signed in ("guests") may read what an administrator allows, nothing more:
 //  - only GET requests without any credential,
@@ -62,7 +63,9 @@ const cache = new Map<string, { at: number; status: number; type: string | undef
 export function resetGuestCache(): void { cache.clear(); }
 
 function hasCredential(req: Request): boolean {
-  return Boolean(req.headers.authorization || req.headers['x-dashboard-token']);
+  // Phase 2: the dashboard presents its session as the httpOnly cookie now;
+  // a cookie-only GET to a guest route is a signed-in caller, not a guest.
+  return Boolean(req.headers.authorization || req.headers['x-dashboard-token'] || getSessionCookie(req));
 }
 
 /** Mounted on /api before the permission gates. */

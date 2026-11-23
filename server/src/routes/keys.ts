@@ -11,6 +11,7 @@ import { encrypt, decrypt, maskKey } from '../lib/crypto.js';
 import { parseKeysFromFile, stripJsoncComments, stripTrailingCommas } from '../lib/key-parser.js';
 import { assessProviderUrl } from '../lib/url-guard.js';
 import { verifyCredentials, recordReauthFailure, clearReauthFailures } from '../services/auth.js';
+import { sessionTokenFromRequest } from '../services/session-cookie.js';
 import { getActiveCooldownsForKeys, clearCooldownsForKey, clearApinexCheckinCooldownsForKey } from '../services/ratelimit.js';
 import { nextMonthResetAt } from '../services/key-budget.js';
 import { resolveCustomEndpointKey, customEndpointKeyIds, siblingEndpointKeyId, endpointHasCredential, normalizeGroupLabel, setCustomEndpointGroup } from '../services/custom-endpoint.js';
@@ -643,8 +644,7 @@ function passesReauth(req: Request, res: Response, action: string): boolean {
     return false;
   }
   if (!verifyCredentials(user.email, password)) {
-    const token = req.headers.authorization?.replace(/^Bearer\s+/i, '')
-      ?? (req.headers['x-dashboard-token'] as string | undefined);
+    const token = sessionTokenFromRequest(req);
     if (recordReauthFailure(user.userId, token)) {
       res.status(401).json({ error: { message: 'Too many incorrect attempts. You have been signed out.', type: 'authentication_error' } });
     } else {

@@ -4,6 +4,9 @@ import type { ExternalAuthMethods } from '@freellmapi/shared/external-auth.js';
 import { getExternalAuthConfig } from '../services/external-auth-config.js';
 import { allowAuthRequest } from '../services/auth-security.js';
 import { startGoogleFlow, takeGoogleAttempt, exchangeGoogleCode, finishGoogleLogin, consumeGoogleHandoff } from '../services/google-auth.js';
+import { setSessionCookie } from '../services/session-cookie.js';
+import { setCsrfCookie, mintCsrfToken } from '../services/csrf.js';
+import { SESSION_TTL_MS } from '../services/auth.js';
 import { requestEmailReset, completeEmailReset } from '../services/email-recovery.js';
 
 export const externalAuthRouter = Router();
@@ -64,7 +67,15 @@ externalAuthRouter.post('/google/complete', (req, res) => {
   res.clearCookie(RESULT_COOKIE, cookieOptions());
   const result = consumeGoogleHandoff(cookie(req, RESULT_COOKIE));
   if (!result) { res.status(400).json(error('Google sign-in expired. Please try again.', 'invalid_handoff')); return; }
-  res.json(result);
+  // Phase 1 never set the session cookie here (unlike the SSO complete) —
+  // Google sign-in only worked because the client stored the returned token
+  // in sessionStorage. Phase 2 sets both cookies, and the token is NOT
+  // returned in JSON: the httpOnly cookie is the only carrier the browser
+  // gets (see services/session-cookie.ts).
+  setSessionCookie(res, req, result.token, SESSION_TTL_MS);
+  setCsrfCookie(res, req, mintCsrfToken(), SESSION_TTL_MS);
+  const { token: _token, ...publicResult } = result;
+  res.json(publicResult);
 });
 externalAuthRouter.post('/email/forgot-password', (req, res) => {
   if (!getExternalAuthConfig().gmail) { res.status(503).json(error('Email recovery is not configured.', 'not_configured')); return; }

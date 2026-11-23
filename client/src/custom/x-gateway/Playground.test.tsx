@@ -20,8 +20,9 @@ import Playground from './pages/Playground';
 
 vi.mock('@/lib/api', () => ({
   apiFetch: vi.fn(),
-  clearToken: vi.fn(),
-  getToken: vi.fn(() => 'test-token'),
+  // Phase 2: the api modules read the CSRF token from here, never a
+  // dashboard token (there is no getToken/clearToken any more).
+  csrfHeaders: () => ({}),
   UNAUTHORIZED_EVENT: 'freellmapi:unauthorized',
 }));
 

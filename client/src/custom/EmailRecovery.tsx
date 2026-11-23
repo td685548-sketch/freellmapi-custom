@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react'
-import { apiFetch, clearToken, type ApiError } from '@/lib/api'
+import { apiFetch, type ApiError } from '@/lib/api'
+import { notifySessionChanged } from './session-state'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/password-input'
@@ -110,7 +111,11 @@ export function EmailRecovery({
           ),
         },
       )
-      if (resetting) clearToken()
+      // A password reset invalidates server-side sessions; bump the
+      // revision so in-flight requests abort and the gate re-checks status.
+      // There is no client-side token to clear any more (Phase 2 of the
+      // cookie move — the session lives in the httpOnly cookie).
+      if (resetting) notifySessionChanged()
       setPassword('')
       setConfirmation('')
       setDone(true)

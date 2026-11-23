@@ -11,6 +11,7 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import { z } from 'zod';
 import { allowAuthRequest } from '../../services/auth-security.js';
 import type { SessionUser } from '../../services/auth.js';
+import { getSessionCookie } from '../../services/session-cookie.js';
 import { isGuestRequest } from '../../services/guest-access.js';
 import { TenantRbacError } from '../tenant-portal/store.js';
 import { SupportEvidenceError } from '../x-gateway/support-evidence-store.js';
@@ -118,7 +119,11 @@ function extractGatewayLoopback(req: Request): {
   const bearer = req.headers.authorization?.replace(/^Bearer\s+/i, '').trim();
   const dash = req.headers['x-dashboard-token'];
   const sessionToken =
-    bearer || (Array.isArray(dash) ? dash[0] : dash)?.trim() || undefined;
+    bearer || (Array.isArray(dash) ? dash[0] : dash)?.trim()
+    // Phase 2: the dashboard sends the session as the httpOnly cookie now;
+    // forward its value on the server-side loopback call, never to the browser.
+    || getSessionCookie(req)
+    || undefined;
   return { host, port, sessionToken };
 }
 

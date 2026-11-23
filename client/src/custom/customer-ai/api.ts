@@ -1,4 +1,5 @@
-import { apiFetch, clearToken, getToken, UNAUTHORIZED_EVENT } from '@/lib/api';
+import { apiFetch, csrfHeaders, UNAUTHORIZED_EVENT } from '@/lib/api';
+import { notifySessionChanged } from '../session-state';
 import type {
   AdminAiAssistant,
   AdminAnomalyRadarReport,
@@ -206,21 +207,18 @@ export async function streamAssistantChat(
   callbacks?: StreamAssistantChatCallbacks,
   signal?: AbortSignal,
 ): Promise<AssistantChatResponse> {
-  const token = getToken();
+  // Phase 2: cookie auth for the mutation needs the CSRF token.
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'text/event-stream, application/json',
+    ...csrfHeaders(),
   };
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
 
   const res = await fetch(`${BASE}/api/user/ai-hub/chat/stream`, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
     signal,
-    // Phase 1 of the httpOnly-cookie move: send the session cookie.
     credentials: 'same-origin',
   });
 
@@ -233,7 +231,7 @@ export async function streamAssistantChat(
       typeof errPayload?.error === 'object' &&
       errPayload?.error?.type === 'authentication_error'
     ) {
-      clearToken();
+      notifySessionChanged();
       window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
     }
     const message =

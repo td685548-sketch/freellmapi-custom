@@ -32,7 +32,12 @@ async function postSetup(app: Express, body: unknown, headers: Record<string, st
   });
   const data = await res.json().catch(() => null);
   server.close();
-  return { status: res.status, body: data };
+  return { status: res.status, body: data, cookies: res.headers.getSetCookie() };
+}
+
+function cookieValue(cookies: string[], name: string): string | undefined {
+  const found = cookies.find(c => c.startsWith(`${name}=`));
+  return found?.split(';')[0]!.slice(name.length + 1);
 }
 
 const CREDS = { email: 'admin@example.com', password: 'supersecret' };
@@ -52,9 +57,11 @@ describe('First-run setup code gate (FIX 1)', () => {
   });
 
   it('allows setup from IPv4 loopback without a code', async () => {
-    const { status, body } = await postSetup(appWithRemote('127.0.0.1'), CREDS);
+    const { status, body, cookies } = await postSetup(appWithRemote('127.0.0.1'), CREDS);
     expect(status).toBe(201);
-    expect(typeof body.token).toBe('string');
+    // Phase 2: the token never reaches the response body.
+    expect(body.token).toBeUndefined();
+    expect(cookieValue(cookies, 'flm_session')).toBeTruthy();
   });
 
   it('allows setup from IPv6 loopback without a code', async () => {
@@ -85,9 +92,10 @@ describe('First-run setup code gate (FIX 1)', () => {
   it('allows remote setup with the correct code', async () => {
     const code = getSetupCode();
     expect(code).toBeTruthy();
-    const { status, body } = await postSetup(appWithRemote('203.0.113.7'), { ...CREDS, setupCode: code });
+    const { status, body, cookies } = await postSetup(appWithRemote('203.0.113.7'), { ...CREDS, setupCode: code });
     expect(status).toBe(201);
-    expect(typeof body.token).toBe('string');
+    expect(body.token).toBeUndefined();
+    expect(cookieValue(cookies, 'flm_session')).toBeTruthy();
   });
 
   // The documented reverse-proxy deployment (Caddy/nginx/Traefik on the same

@@ -45,7 +45,12 @@ async function post(app: Express, path: string, body?: unknown) {
   });
   const data = await res.json().catch(() => null);
   server.close();
-  return { status: res.status, body: data };
+  return { status: res.status, body: data, cookies: res.headers.getSetCookie() };
+}
+
+function cookieValue(cookies: string[], name: string): string | undefined {
+  const found = cookies.find(c => c.startsWith(`${name}=`));
+  return found?.split(';')[0]!.slice(name.length + 1);
 }
 
 async function get(app: Express, path: string, token: string) {
@@ -138,8 +143,13 @@ describe('password reset by log code', () => {
 
     expect(reset.status).toBe(200);
     expect(reset.body.email).toBe(EMAIL);
-    expect(typeof reset.body.token).toBe('string');
-    const me = await get(app, '/api/auth/me', reset.body.token);
+    // Phase 2: the token never reaches the response body — it rides the
+    // httpOnly cookie; /me is then reached with the header, which Phase 2
+    // keeps for non-browser clients.
+    expect(reset.body.token).toBeUndefined();
+    const resetToken = cookieValue(reset.cookies, 'flm_session')!;
+    expect(typeof resetToken).toBe('string');
+    const me = await get(app, '/api/auth/me', resetToken);
     expect(me.status).toBe(200);
     expect(me.body.email).toBe(EMAIL);
   });

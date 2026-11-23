@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { getDb } from '../db/index.js';
 import { createUser, createSession, SESSION_TTL_MS } from '../services/auth.js';
 import { setSessionCookie } from '../services/session-cookie.js';
+import { setCsrfCookie, mintCsrfToken } from '../services/csrf.js';
 import { validateInviteCode, claimInviteCode } from '../services/invites.js';
 import { mintUserApiKey } from '../services/user-keys.js';
 import { applyStarterQuotaToNewMember } from '../services/starter-quota.js';
@@ -137,7 +138,12 @@ customAuthRouter.post('/register', (req: Request, res: Response) => {
       return { token, email: user.email, role: user.role, apiKey: initialKey.key };
     })();
     setSessionCookie(res, req, registered.token, SESSION_TTL_MS);
-    res.status(201).json(registered);
+    setCsrfCookie(res, req, mintCsrfToken(), SESSION_TTL_MS);
+    // Phase 2: the token is NOT returned in JSON — the httpOnly cookie set
+    // above is the only carrier the browser gets. The minted API key still
+    // is: the operator must see it once to copy it.
+    const { token: _token, ...publicResult } = registered;
+    res.status(201).json(publicResult);
   } catch (err: any) {
     if (err.code === 'invalid_invite_code') {
       const messages: Record<string, string> = {

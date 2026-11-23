@@ -9,6 +9,7 @@ import { setRequestKeyRoutingPreset } from '../../lib/client-context.js';
 import { resolveAuth } from '../../lib/system-prompt.js';
 import { extractInferenceToken } from '../../middleware/user-rate-limit.js';
 import { validateSession, type SessionUser } from '../../services/auth.js';
+import { getSessionCookie } from '../../services/session-cookie.js';
 import { getMemoizedUserKey, type ValidatedUserKey } from '../../services/user-keys.js';
 import { checkUserRateLimit, recordUserUsage } from '../../services/user-quotas.js';
 import { enforceUsageQuota } from '../quota-gate.js';
@@ -103,10 +104,15 @@ function selfTarget(req: Request): { host: string; port: number } {
 }
 
 function callerSessionToken(req: Request): string | undefined {
+  // Phase 2: the dashboard sends the session as the httpOnly cookie now.
+  // The token is forwarded as X-FreeLLM-Session on the server-side loopback
+  // call, never back to browser JS.
   const bearer = req.headers.authorization?.replace(/^Bearer\s+/i, '').trim();
   if (bearer) return bearer;
   const dash = req.headers['x-dashboard-token'];
-  return (Array.isArray(dash) ? dash[0] : dash)?.trim() || undefined;
+  return (Array.isArray(dash) ? dash[0] : dash)?.trim()
+    || getSessionCookie(req)
+    || undefined;
 }
 
 function effectiveUserRpmLimit(userId: number): number {

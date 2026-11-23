@@ -29,11 +29,11 @@ async function call(a: Express, method: 'GET' | 'POST', path: string, headers: R
   if (!server.listening) await new Promise<void>(resolve => server.once('listening', () => resolve()));
   const { port } = server.address() as { port: number };
   try {
-    return await new Promise<{ status: number; body: any }>((resolve, reject) => {
+    return await new Promise<{ status: number; body: any; cookies: string[] }>((resolve, reject) => {
       const req = http.request({ host: '127.0.0.1', port, method, path, headers: { host: `127.0.0.1:${port}`, ...headers } }, res => {
         let data = '';
         res.on('data', c => { data += c; });
-        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data ? JSON.parse(data) : null }));
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data ? JSON.parse(data) : null, cookies: (res.headers['set-cookie'] as string[] | undefined) ?? [] }));
       });
       req.on('error', reject);
       req.end();
@@ -41,6 +41,11 @@ async function call(a: Express, method: 'GET' | 'POST', path: string, headers: R
   } finally {
     server.close();
   }
+}
+
+function cookieValue(cookies: string[], name: string): string | undefined {
+  const found = cookies.find(c => c.startsWith(`${name}=`));
+  return found?.split(';')[0]!.slice(name.length + 1);
 }
 
 describe('POST /api/auth/desktop-session (#1399)', () => {
@@ -66,7 +71,10 @@ describe('POST /api/auth/desktop-session (#1399)', () => {
 
     const res = await call(app(), 'POST', '/api/auth/desktop-session', { 'sec-fetch-site': 'same-origin', origin: 'http://127.0.0.1:31415' });
     expect(res.status).toBe(200);
-    expect(validateSession(res.body.token)?.email).toBe('desktop@localhost');
+    // Phase 2: the token never reaches the response body — it rides the
+    // httpOnly cookie.
+    expect(res.body.token).toBeUndefined();
+    expect(validateSession(cookieValue(res.cookies, 'flm_session'))?.email).toBe('desktop@localhost');
     expect(userCount()).toBe(1);
   });
 

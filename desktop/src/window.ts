@@ -12,9 +12,11 @@ export function getDashboardWindow(): BrowserWindow | null {
 }
 
 // One window at a time, destroyed on close — the app lives in the tray, the
-// window is an on-demand view. The CJS preload requests the session token over
-// origin-verified Chromium IPC so secrets never appear in OS process arguments.
-export function openDashboard(port: number, _token?: string): void {
+// window is an on-demand view. The renderer signs in by calling POST
+// /api/auth/desktop-session, which sets the httpOnly session cookie on the
+// loopback origin (Phase 2 of the cookie move); no token crosses IPC or
+// appears in OS process arguments.
+export function openDashboard(port: number): void {
   if (dashboardWindow && !dashboardWindow.isDestroyed()) {
     dashboardWindow.show();
     dashboardWindow.focus();

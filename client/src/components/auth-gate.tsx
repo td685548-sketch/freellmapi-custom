@@ -1,7 +1,7 @@
 import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, CheckCircle2 } from 'lucide-react'
-import { apiFetch, setToken, UNAUTHORIZED_EVENT, type ApiError } from '@/lib/api'
+import { apiFetch, UNAUTHORIZED_EVENT, type ApiError } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { FieldError } from '@/components/ui/field-error'
 import { Input } from '@/components/ui/input'
@@ -29,27 +29,17 @@ const PASSWORD_MIN = 8
 // Inside the desktop shell the dashboard runs as a hidden machine account with
 // a random password nobody knows (desktop/src/server-host.ts). There are no
 // credentials to type, so the gate never shows a login form there: when the
-// seeded session is gone (expired after 24h, or cleared by a
-// 401) it asks the shell for a fresh one through the preload bridge.
-type DesktopWindow = Window & {
-  __FREEAPI_DESKTOP__?: boolean
-  __FREEAPI_SESSION__?: () => Promise<string>
-}
-function desktopSessionBridge(): (() => Promise<string>) | null {
-  if (typeof window === 'undefined') return null
-  const w = window as DesktopWindow
-  return w.__FREEAPI_DESKTOP__ === true && typeof w.__FREEAPI_SESSION__ === 'function'
-    ? w.__FREEAPI_SESSION__
-    : null
-}
+// session is gone (expired after 24h, or cleared by a 401) it asks the server
+// for a fresh one through POST /api/auth/desktop-session, which sets the
+// httpOnly cookie — Phase 2 of the cookie move removed the preload IPC bridge
+// that used to hand the token to the renderer, so no token ever reaches JS.
 
 // The same dashboard opened in a normal browser tab on a desktop install has no
 // preload bridge, so the server mints the session instead (#1399). It only
 // does so for a request from this computer, and says so through `desktop` on
 // /api/auth/status; web and Docker installs never set it and keep their login.
-async function browserDesktopSession(): Promise<string> {
-  const res = await apiFetch<{ token: string }>('/api/auth/desktop-session', { method: 'POST' })
-  return res.token
+async function browserDesktopSession(): Promise<void> {
+  await apiFetch('/api/auth/desktop-session', { method: 'POST' })
 }
 
 interface AuthStatus {
@@ -82,7 +72,7 @@ function AuthForm({ mode, onAuthed, start = 'login' }: { mode: 'setup' | 'login'
   const [busy, setBusy] = useState(false)
   const [attempted, setAttempted] = useState(false)
   const [showForgot, setShowForgot] = useState(false)
-  const [registration, setRegistration] = useState<{ token: string; apiKey: string } | null>(null)
+  const [registration, setRegistration] = useState<{ apiKey: string } | null>(null)
 
   // URL query parameter support: ?invite=... or ?mode=register defaults to registration
   const [inviteParam] = useState(() => {
@@ -147,15 +137,16 @@ function AuthForm({ mode, onAuthed, start = 'login' }: { mode: 'setup' | 'login'
           return
         }
 
-        const res = await apiFetch<{ token: string; email: string; role: string; apiKey?: string }>('/api/auth/register', {
+        const res = await apiFetch<{ email: string; role: string; apiKey?: string }>('/api/auth/register', {
           method: 'POST',
           body: JSON.stringify({ email: email.trim(), password, inviteCode: inviteCode.trim() }),
         })
         if (res.apiKey) {
-          setRegistration({ token: res.token, apiKey: res.apiKey })
+          setRegistration({ apiKey: res.apiKey })
           return
         }
-        setToken(res.token)
+        // The session arrives as the httpOnly cookie the server just set;
+        // the token is never returned in JSON (Phase 2 of the cookie move).
         toast.success(t('auth.accountCreated'))
         onAuthed()
         return
@@ -165,11 +156,10 @@ function AuthForm({ mode, onAuthed, start = 'login' }: { mode: 'setup' | 'login'
       // Only the setup flow carries a code, and only once the server has asked
       // for it. The server ignores it for local (loopback) setup.
       if (isSetup && setupCode) payload.setupCode = setupCode.trim()
-      const res = await apiFetch<{ token: string }>(isSetup ? '/api/auth/setup' : '/api/auth/login', {
+      await apiFetch(isSetup ? '/api/auth/setup' : '/api/auth/login', {
         method: 'POST',
         body: JSON.stringify(payload),
       })
-      setToken(res.token)
       onAuthed()
     } catch (err) {
       // The server gates remote first-run setup behind a one-time code; reveal
@@ -231,7 +221,6 @@ function AuthForm({ mode, onAuthed, start = 'login' }: { mode: 'setup' | 'login'
 
   if (registration) {
     return <Centered><RegistrationKeyNotice apiKey={registration.apiKey} onContinue={() => {
-      setToken(registration.token)
       setRegistration(null)
       onAuthed()
     }} /></Centered>
@@ -435,7 +424,7 @@ function AuthForm({ mode, onAuthed, start = 'login' }: { mode: 'setup' | 'login'
 
 // Forgot / Reset password flow
 
-type ForgotStep = 'request' | 'reset' | 'done'
+type ForgotStep = 'request' | 'reset'
 
 function ForgotPasswordForm({ onBack, onAuthed }: { onBack: () => void; onAuthed: () => void }) {
   const { t } = useI18n()
@@ -475,18 +464,16 @@ function ForgotPasswordForm({ onBack, onAuthed }: { onBack: () => void; onAuthed
     setBusy(true)
     setError('')
     try {
-      const res = await apiFetch<{ token?: string }>('/api/auth/reset-password', {
+      await apiFetch('/api/auth/reset-password', {
         method: 'POST',
         body: JSON.stringify({ resetCode: resetCode.trim(), newPassword }),
       })
       // The server signs the operator in after a reset, so nobody has to
-      // remember which email the account uses (#1477).
-      if (res.token) {
-        setToken(res.token)
-        onAuthed()
-        return
-      }
-      setStep('done')
+      // remember which email the account uses (#1477). The session arrives
+      // as the httpOnly cookie the server just set — the token is never
+      // returned in JSON (Phase 2 of the cookie move).
+      onAuthed()
+      return
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -547,10 +534,6 @@ function ForgotPasswordForm({ onBack, onAuthed }: { onBack: () => void; onAuthed
               {busy ? t('auth.resettingPassword') : t('auth.resetPassword')}
             </Button>
           </form>
-        )}
-
-        {step === 'done' && (
-          <p className="text-xs text-muted-foreground mt-1 mb-4">{t('auth.passwordReset')}</p>
         )}
 
         <button
@@ -726,10 +709,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, handler)
   }, [refetch])
 
-  // Desktop self-repair: one attempt at a time, and none after the shell has
-  // handed back a session the server still rejects — a broken install shows a
+  // Desktop self-repair: one attempt at a time, and none after the server
+  // has rejected a freshly minted session — a broken install shows a
   // message instead of looping.
-  const desktopSession = desktopSessionBridge() ?? (data?.desktop ? browserDesktopSession : null)
+  const desktopSession = data?.desktop ? browserDesktopSession : null
   const desktopNeedsSession = !!desktopSession && !!data && (data.needsSetup || !data.authenticated)
   const repairing = useRef(false)
   const [repairFailed, setRepairFailed] = useState(false)
@@ -738,9 +721,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
     repairing.current = true
     ;(async () => {
       try {
-        const token = await desktopSession()
-        if (!token) throw new Error('empty session token')
-        setToken(token)
+        // The session arrives as the httpOnly cookie the server sets; no
+        // token ever reaches JS (Phase 2 of the cookie move).
+        await desktopSession()
         queryClient.invalidateQueries()
         const next = await refetch()
         if (!next.data?.authenticated) setRepairFailed(true)

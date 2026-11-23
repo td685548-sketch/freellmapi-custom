@@ -19,7 +19,8 @@ import {
   SESSION_TTL_MS,
   DESKTOP_SESSION_TTL_MS,
 } from '../services/auth.js';
-import { setSessionCookie, clearSessionCookie } from '../services/session-cookie.js';
+import { setSessionCookie, clearSessionCookie, sessionTokenFromRequest } from '../services/session-cookie.js';
+import { setCsrfCookie, clearCsrfCookie, getCsrfCookie, mintCsrfToken, assertCsrfForCookieMutation } from '../services/csrf.js';
 import { setupCodeMatches, clearSetupCode } from '../lib/setup-code.js';
 import { isLoopbackRequest } from '../lib/loopback.js';
 import { generateResetCode, resetCodeMatches, clearResetCode } from '../lib/reset-code.js';
@@ -100,9 +101,11 @@ function clearFailures(email: string): void {
   attempts.delete(throttleKey(email));
 }
 
-function bearer(req: Request): string | undefined {
-  return req.headers.authorization?.replace(/^Bearer\s+/i, '')
-    ?? (req.headers['x-dashboard-token'] as string | undefined);
+// The caller's session token: the Authorization header when a non-browser
+// caller presents one, else the httpOnly cookie (Phase 2 of the cookie move
+// — the browser dashboard no longer sends the header at all).
+function sessionToken(req: Request): string | undefined {
+  return sessionTokenFromRequest(req);
 }
 
 // Is the caller connecting from the local machine? The socket peer address is
@@ -175,7 +178,12 @@ export function desktopSignInAllowed(req: Request): boolean {
 // `desktop` tells the dashboard it can fetch a session instead of showing the
 // sign-in form.
 authRouter.get('/status', (req: Request, res: Response) => {
-  const session = validateSession(bearer(req));
+  const session = validateSession(sessionToken(req));
+  // A session created before Phase 2 has a session cookie but no CSRF
+  // cookie. Mint one here: the AuthGate calls /status before any
+  // mutation-capable UI renders, so the CSRF cookie is always in place
+  // by the time a mutation needs it (services/csrf.ts).
+  if (session && !getCsrfCookie(req)) setCsrfCookie(res, req, mintCsrfToken(), SESSION_TTL_MS);
   res.json({
     needsSetup: userCount() === 0,
     authenticated: !!session,
@@ -191,7 +199,12 @@ authRouter.post('/desktop-session', (req: Request, res: Response) => {
   }
   const token = desktopSessionToken();
   setSessionCookie(res, req, token, DESKTOP_SESSION_TTL_MS);
-  res.json({ token });
+  setCsrfCookie(res, req, mintCsrfToken(), DESKTOP_SESSION_TTL_MS);
+  // Phase 2: the token is NOT returned in JSON. The desktop renderer never
+  // sees it — it authenticates with the httpOnly cookie the server just set
+  // (the old JSON token is what let an XSS in the desktop window mint a
+  // session for itself through this no-credentials endpoint).
+  res.json({ success: true });
 });
 
 // First-run account creation. Only allowed while there are zero users, so it
@@ -227,7 +240,10 @@ authRouter.post('/setup', (req: Request, res: Response) => {
   clearSetupCode(); // one-time: the dashboard is now claimed
   const token = createSession(user.userId);
   setSessionCookie(res, req, token, SESSION_TTL_MS);
-  res.status(201).json({ token, email: user.email });
+  setCsrfCookie(res, req, mintCsrfToken(), SESSION_TTL_MS);
+  // Phase 2: the token is NOT returned in JSON — the httpOnly cookie set
+  // above is the only carrier the browser gets.
+  res.status(201).json({ email: user.email });
 });
 
 authRouter.post('/login', (req: Request, res: Response) => {
@@ -258,24 +274,35 @@ authRouter.post('/login', (req: Request, res: Response) => {
   clearFailures(email);
   const token = createSession(user.userId);
   setSessionCookie(res, req, token, SESSION_TTL_MS);
-  res.json({ token, email: user.email });
+  setCsrfCookie(res, req, mintCsrfToken(), SESSION_TTL_MS);
+  // Phase 2: the token is NOT returned in JSON — the httpOnly cookie set
+  // above is the only carrier the browser gets.
+  res.json({ email: user.email });
 });
 
 authRouter.post('/logout', (req: Request, res: Response) => {
-  const token = bearer(req);
-  // Clear the cookie only when a session was actually presented: an
+  const token = sessionToken(req);
+  // A cookie-only logout needs the CSRF token, like any other mutation:
+  // without it a cross-site POST could sign the operator out (and wipe
+  // their cookies) as a nuisance. Header-authed and unauthenticated calls
+  // pass the assert unchanged.
+  if (!assertCsrfForCookieMutation(req, res)) return;
+  // Clear the cookies only when a session was actually presented: an
   // unauthenticated cross-site POST must not be able to wipe the operator's
   // cookie (and the server session is only deleted for a presented token
   // anyway). A stale cookie from a session that already ended server-side
   // simply fails validation on the next request and is overwritten at the
   // next login.
-  if (validateSession(token)) clearSessionCookie(res, req);
+  if (validateSession(token)) {
+    clearSessionCookie(res, req);
+    clearCsrfCookie(res, req);
+  }
   deleteSession(token);
   res.json({ success: true });
 });
 
 authRouter.get('/me', (req: Request, res: Response) => {
-  const session = validateSession(bearer(req));
+  const session = validateSession(sessionToken(req));
   if (!session) {
     res.status(401).json({ error: { message: 'Authentication required', type: 'authentication_error' } });
     return;
@@ -290,11 +317,14 @@ const changeEmailSchema = z.object({
 });
 
 authRouter.post('/change-email', (req: Request, res: Response) => {
-  const session = validateSession(bearer(req));
+  const session = validateSession(sessionToken(req));
   if (!session) {
     res.status(401).json({ error: { message: 'Authentication required', type: 'authentication_error' } });
     return;
   }
+  // This route validates the session itself instead of going through
+  // requireAuth, so the cookie-CSRF gate has to be applied here too.
+  if (!assertCsrfForCookieMutation(req, res)) return;
   const parsed = changeEmailSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: { message: parsed.error.issues.map(e => e.message).join(', ') } });
@@ -303,7 +333,7 @@ authRouter.post('/change-email', (req: Request, res: Response) => {
   try {
     const ok = updateEmail(session.userId, parsed.data.currentPassword, parsed.data.newEmail);
     if (!ok) {
-      if (recordReauthFailure(session.userId, bearer(req))) {
+      if (recordReauthFailure(session.userId, sessionToken(req))) {
         res.status(401).json({ error: { message: 'Too many incorrect attempts. You have been signed out.', type: 'authentication_error' } });
         return;
       }
@@ -328,11 +358,14 @@ const changePasswordSchema = z.object({
 });
 
 authRouter.post('/change-password', (req: Request, res: Response) => {
-  const session = validateSession(bearer(req));
+  const session = validateSession(sessionToken(req));
   if (!session) {
     res.status(401).json({ error: { message: 'Authentication required', type: 'authentication_error' } });
     return;
   }
+  // Same self-validated route as /change-email: apply the cookie-CSRF gate
+  // here instead of relying on requireAuth.
+  if (!assertCsrfForCookieMutation(req, res)) return;
   const parsed = changePasswordSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: { message: parsed.error.issues.map(e => e.message).join(', ') } });
@@ -340,7 +373,7 @@ authRouter.post('/change-password', (req: Request, res: Response) => {
   }
   const ok = updatePassword(session.userId, parsed.data.currentPassword, parsed.data.newPassword);
   if (!ok) {
-    if (recordReauthFailure(session.userId, bearer(req))) {
+    if (recordReauthFailure(session.userId, sessionToken(req))) {
       res.status(401).json({ error: { message: 'Too many incorrect attempts. You have been signed out.', type: 'authentication_error' } });
       return;
     }
@@ -398,5 +431,8 @@ authRouter.post('/reset-password', (req: Request, res: Response) => {
   // may not remember left them locked out after a successful reset (#1477).
   const token = createSession(user.userId);
   setSessionCookie(res, req, token, SESSION_TTL_MS);
-  res.json({ success: true, token, email: user.email });
+  setCsrfCookie(res, req, mintCsrfToken(), SESSION_TTL_MS);
+  // Phase 2: the token is NOT returned in JSON — the httpOnly cookie set
+  // above is the only carrier the browser gets.
+  res.json({ success: true, email: user.email });
 });

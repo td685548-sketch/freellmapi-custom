@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronRight, CircleAlert, FileText, Globe, X } from 'lucide-react'
-import { apiFetch, getToken } from '@/lib/api'
+import { apiFetch } from '@/lib/api'
 import { UNIFIED_KEY_GC_TIME_MS, UNIFIED_KEY_QUERY_KEY } from '@/lib/unified-key-query'
 import { buildModelOptions } from '@/lib/model-groups'
 import type { Chain } from '@/components/chain-manager'
@@ -859,8 +859,12 @@ export default function PlaygroundPage() {
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' }
       if (keyData?.apiKey) headers['Authorization'] = `Bearer ${keyData.apiKey}`
-      // Lets the server count this chat for the signed-in account (custom/playground-attribution.ts).
-      { const session = getToken(); if (session) headers['X-FreeLLM-Session'] = session }
+      // Phase 2 of the cookie move: the dashboard session is no longer sent
+      // as X-FreeLLM-Session — the token lives only in the httpOnly cookie,
+      // which is Path=/api and never rides a /v1 call. Playground chats lose
+      // per-account attribution (server/src/custom/playground-attribution.ts
+      // treats a missing header as unattributed); the unified key still
+      // authenticates the call itself.
       const base = import.meta.env.BASE_URL.replace(/\/$/, '')
 
       // Web search first, when it is on and there is a question to look up. A

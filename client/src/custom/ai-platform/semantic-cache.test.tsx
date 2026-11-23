@@ -12,8 +12,10 @@ import { SemanticCache } from './pages/SemanticCache';
 
 vi.mock('@/lib/api', () => ({
   apiFetch: vi.fn(),
-  getToken: () => 'test-dashboard-token',
-  clearToken: vi.fn(),
+  // Phase 2: the api modules read the CSRF token from here, never a
+  // dashboard token (there is no getToken/clearToken any more).
+  getCsrfToken: () => null,
+  CSRF_HEADER_NAME: 'X-CSRF-Token',
   UNAUTHORIZED_EVENT: 'freellmapi:unauthorized',
 }));
 

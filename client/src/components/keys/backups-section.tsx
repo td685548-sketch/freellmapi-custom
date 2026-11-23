@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { apiFetch, getToken } from '@/lib/api'
+import { apiFetch } from '@/lib/api'
 import { toast } from '@/lib/toast'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -37,11 +37,10 @@ function formatBytes(bytes: number): string {
 // The dump is a file download, not JSON, so it goes through fetch directly
 // rather than apiFetch — with the same bearer token the rest of /api uses.
 async function downloadBackupFile(id: number, filename: string): Promise<void> {
-  const token = getToken()
   const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+  // Phase 2 of the httpOnly-cookie move: the session rides the httpOnly
+  // cookie; no token is read or sent by JS any more.
   const res = await fetch(`${base}/api/backups/${id}/download`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    // Phase 1 of the httpOnly-cookie move: send the session cookie.
     credentials: 'same-origin',
   })
   if (!res.ok) {
