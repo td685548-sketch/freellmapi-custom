@@ -1,6 +1,8 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -76,10 +78,26 @@ function runBootWorker(dbPath: string): Promise<{ ok: boolean; message?: string 
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('./concurrent-boot-worker.ts', import.meta.url), {
       workerData: { dbPath, encryptionKey: TEST_ENCRYPTION_KEY },
+      // A raw worker thread can only load the `.ts` entry file when the
+      // runtime strips types natively (Node >= 22.18 / 24); Node 20 has no
+      // type stripping at all, so the entry fails there with
+      // "Unknown file extension .ts" — and the resolve hook below cannot
+      // help, because it only remaps `.js` -> `.ts` specifiers, it does
+      // not teach node to parse TypeScript. That is why this test passed
+      // on PR CI (Node 22 only) and locally (Node 24) but failed on every
+      // Node 20 main-CI leg. Load tsx (a server devDependency, installed
+      // wherever tests run) first so the worker can import TypeScript on
+      // every supported Node version. Resolved from this file's location,
+      // not the CWD, so it works no matter where vitest was launched from.
       // Raw node cannot resolve the server's `.js` import specifiers to
       // their `.ts` sources; the register module installs the resolve hook
       // before the worker's entry module loads.
-      execArgv: ['--import', new URL('./concurrent-boot-register.mjs', import.meta.url).href],
+      execArgv: [
+        '--import',
+        pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href,
+        '--import',
+        new URL('./concurrent-boot-register.mjs', import.meta.url).href,
+      ],
     });
     let settled = false;
     worker.once('message', (result: { ok: boolean; message?: string }) => {
